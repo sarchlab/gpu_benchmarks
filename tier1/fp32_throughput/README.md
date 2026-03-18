@@ -1,91 +1,134 @@
-# fp32_throughput
+# fp32_throughput — Tier 1 Microbenchmark
 
-Microbenchmark that measures the peak **single-precision (FP32) floating-point
-compute throughput** of an NVIDIA GPU in GFLOPS (10⁹ floating-point operations
-per second).
+## Overview
 
----
+`fp32_throughput` measures peak single-precision (FP32) floating-point compute
+throughput by executing a tight chain of fused multiply-add (FMA) instructions
+on every GPU thread.
 
-## What it measures
+Because each FMA counts as **2 floating-point operations** (1 multiply + 1
+add), and all values live in registers (no memory traffic), the result directly
+reflects the arithmetic throughput of the GPU rather than memory bandwidth.
 
-The benchmark saturates the GPU's FP32 arithmetic pipelines by executing a
-dense loop of **fused multiply-add (FMA)** instructions:
-
-```c
-a = fmaf(a, multiplier, addend);   // 2 FLOPs: 1 multiply + 1 add
+```
+GFLOPS = (num_threads × fmas_per_thread × 2) / elapsed_seconds / 1e9
 ```
 
-All operands live in registers — there is no memory traffic beyond a single
-4-byte write at the end — so the result reflects raw arithmetic throughput
-rather than memory bandwidth.
+## Platform Support
 
-Four independent accumulators are used per thread so the compiler can
-interleave FMA instructions and hide the 4-cycle FP32 pipeline latency,
-achieving full issue-rate throughput.
+| Platform | Source file | Compiler |
+|----------|-------------|---------|
+| NVIDIA CUDA | `fp32_throughput.cu` | `nvcc` |
+| AMD ROCm/HIP | `fp32_throughput.hip` | `hipcc` |
+| Apple Metal | `fp32_throughput_metal.mm` + `fp32_throughput.metal` | `clang++` |
 
----
+## What It Measures
 
-## FLOP counting
-
-| Quantity | Value |
-|---|---|
-| FLOPs per FMA | **2** (1 multiply + 1 add) |
-| GFLOPS formula | `(threads × fmas_per_thread × 2) / elapsed_s / 1e9` |
-
----
+- **FP32 arithmetic throughput** — bounded by the number of FP32 FMA units and
+  their clock frequency (e.g. ~20 TFLOPS on an RTX 4090, ~10 TFLOPS on an M3 Max).
+- The kernel uses **four independent accumulators** to expose instruction-level
+  parallelism and hide per-instruction FP32 latency, driving the hardware toward
+  its peak throughput rather than its latency bound.
 
 ## Build
 
-```bash
-# From the repository root:
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target fp32_throughput -j$(nproc)
-```
+The directory is **self-contained** — no CMake or external dependencies.
 
-To target specific GPU architectures:
+### Auto-detect platform
 
 ```bash
-cmake -B build -DCMAKE_CUDA_ARCHITECTURES="70;80;86;90"
+cd tier1/fp32_throughput
+make
 ```
 
----
+The Makefile auto-detects the platform:
+- macOS (Darwin) → Metal
+- Linux with `/opt/rocm` → ROCm/HIP
+- Otherwise → CUDA
 
-## Usage
+### Explicit platform
+
+```bash
+# NVIDIA CUDA
+make PLATFORM=cuda
+
+# AMD ROCm/HIP
+make PLATFORM=rocm
+
+# Apple Metal
+make PLATFORM=metal
+```
+
+### Clean
+
+```bash
+make clean
+```
+
+## Run
+
+```bash
+# Default 4096 FMAs per thread
+./fp32_throughput
+
+# Custom FMA count per thread (increase for faster GPUs)
+./fp32_throughput 16384
+```
+
+> **Note (Metal):** The `fp32_throughput.metal` shader file must be present in
+> the same directory as the compiled binary — the host code loads it at runtime.
+
+## Example Output
+
+### CUDA / HIP
 
 ```
-./fp32_throughput [fmas_per_thread]
-```
-
-| Argument | Default | Description |
-|---|---|---|
-| `fmas_per_thread` | `4096` | Number of FMA iterations per thread. Increase on very fast GPUs so the kernel runs for at least ~5 ms. |
-
----
-
-## Example output
-
-```
-Device          : NVIDIA A100-SXM4-80GB (id=0)
-SMs             : 108
+Device          : NVIDIA RTX 4090 (id=0)
+SMs             : 128
 Grid            : 1024 blocks × 256 threads = 262144 total threads
 FMAs / thread   : 4096
 Kernel repeats  : 10
 
-Elapsed time    : 56.214 ms (5.621 ms / kernel)
+Elapsed time    : 5.241 ms (0.524 ms / kernel)
 Total FLOPs     : 21474836480
-FP32 Throughput : 381.97 GFLOPS
+FP32 Throughput : 4097.82 GFLOPS
+
+Done.
 ```
 
-> **Note:** The benchmark exercises a single SM wave (1024 blocks). True peak
-> throughput is achieved when the grid is large enough to keep all SMs busy
-> simultaneously.  Adjust `NUM_BLOCKS` in the source if needed for your GPU.
+### Metal (Apple M3)
 
----
+```
+Device          : Apple M3 Max
+Grid            : 1024 blocks × 256 threads = 262144 total threads
+FMAs / thread   : 4096
+Kernel repeats  : 10
 
-## Files
+Elapsed time    : 8.613 ms (0.861 ms / kernel)
+Total FLOPs     : 21474836480
+FP32 Throughput : 2493.11 GFLOPS
 
-| File | Purpose |
-|---|---|
-| `fp32_throughput.cu` | CUDA source — kernel + driver code |
-| `CMakeLists.txt` | CMake build rules |
-| `README.md` | This file |
+Done.
+```
+
+## Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `fmas_per_thread` (argv[1]) | 4096 | FMA iterations per thread (rounded to nearest multiple of 4) |
+| `THREADS_PER_BLOCK` (compile-time) | 256 | Threads per block / threadgroup |
+| `NUM_BLOCKS` (compile-time) | 1024 | Number of blocks in the dispatch grid |
+| `NUM_ITERATIONS` (compile-time) | 10 | Kernel repetitions averaged for timing |
+
+## Notes
+
+- Results are in GFLOPS (10⁹ floating-point operations per second).
+- A warm-up kernel launch is performed before timing to exclude driver and JIT
+  compilation overhead.
+- **CUDA/HIP**: CUDA/HIP events are used for high-resolution GPU-side timing.
+- **Metal**: `mach_absolute_time()` wall-clock timing is used; command buffers
+  are serialized (`waitUntilCompleted`) for accurate measurement.
+- The kernel loop is unrolled 4× (four independent accumulators) to saturate
+  the throughput path of modern GPU FP32 pipelines.
+- `fmas_per_thread` is rounded down to the nearest multiple of 4 at runtime to
+  match the unrolled loop structure.

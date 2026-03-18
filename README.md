@@ -26,10 +26,10 @@ This suite is organized into five tiers of increasing complexity and scope, allo
 
 ```
 gpu_benchmarks/
-├── CMakeLists.txt          # Root build file
+├── Makefile                # Root build file
 ├── README.md               # This file
-├── tier1/                  # Microbenchmarks (CUDA)
-│   ├── CMakeLists.txt
+├── tier1/                  # Microbenchmarks
+│   ├── Makefile
 │   ├── memory_bandwidth/
 │   ├── fp32_throughput/
 │   ├── fp64_throughput/
@@ -62,9 +62,22 @@ gpu_benchmarks/
 
 ### Prerequisites
 
-- CMake ≥ 3.18
-- CUDA Toolkit ≥ 11.0 (with `nvcc`)
-- A C++17-capable host compiler (GCC ≥ 9, Clang ≥ 10, or MSVC ≥ 2019)
+- GNU Make ≥ 3.81
+- **NVIDIA (CUDA):** CUDA Toolkit ≥ 11.0 (with `nvcc`) and a C++17-capable host compiler
+- **AMD (ROCm):** ROCm ≥ 5.0 (with `hipcc`) installed at `/opt/rocm`
+- **Apple (Metal):** Xcode ≥ 14 with Metal and MetalPerformanceShaders frameworks
+
+### Platform Detection
+
+The build system auto-detects the platform at build time:
+
+| Condition | Platform selected |
+|-----------|------------------|
+| Running on macOS (`uname == Darwin`) | `metal` |
+| `/opt/rocm/bin/hipcc` exists | `rocm` |
+| Otherwise | `cuda` |
+
+You can override detection by passing `PLATFORM` explicitly.
 
 ### Build Steps
 
@@ -73,23 +86,28 @@ gpu_benchmarks/
 git clone https://github.com/sarchlab/gpu_benchmarks.git
 cd gpu_benchmarks
 
-# Configure
-cmake -B build -DCMAKE_BUILD_TYPE=Release
+# Build everything (auto-detect platform)
+make
 
-# Build all benchmarks
-cmake --build build --parallel
+# Build with explicit platform
+make PLATFORM=cuda    # NVIDIA GPU
+make PLATFORM=rocm    # AMD GPU
+make PLATFORM=metal   # Apple GPU
 
-# (Optional) Build only Tier 1
-cmake --build build --target tier1 --parallel
+# Build only Tier 1 microbenchmarks
+make tier1
+
+# Clean all build artifacts
+make clean
 ```
 
 ### Run a Benchmark
 
-Each benchmark produces a standalone executable in the corresponding build subdirectory:
+Each benchmark produces a standalone executable in its own subdirectory:
 
 ```bash
-./build/tier1/memory_bandwidth/memory_bandwidth
-./build/tier1/fp32_throughput/fp32_throughput
+./tier1/memory_bandwidth/memory_bandwidth
+./tier1/fp32_throughput/fp32_throughput
 # etc.
 ```
 

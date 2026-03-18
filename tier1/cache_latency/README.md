@@ -27,7 +27,7 @@ arr[perm[N-1]] = perm[0]
 
 A single GPU thread (one warp, one block) then walks the chain:
 
-```cuda
+```c
 for (uint32_t i = 0; i < num_accesses; ++i) {
     idx = arr[idx];   // dependent load
 }
@@ -45,35 +45,69 @@ pattern that hardware stream-prefetchers could exploit.
 
 ### Timing
 
-CUDA events time `NUM_ITERS` consecutive kernel launches after one warm-up
-launch.  The reported latency is:
+| Platform | Timing method |
+|----------|---------------|
+| CUDA     | `cudaEvent_t` — GPU-side hardware timer |
+| ROCm/HIP | `hipEvent_t`  — GPU-side hardware timer |
+| Metal    | `mach_absolute_time()` — wall-clock timer on Apple Silicon |
+
+`NUM_ITERS` consecutive kernel launches are timed after one warm-up launch.
+The reported latency is:
 
 ```
-latency_ns = total_elapsed_ms × 10^6 / (num_accesses × num_iters)
+latency_ns = total_elapsed_ns / (num_accesses × num_iters)
 ```
 
 ### Cache Level Targeting
 
-| Level   | Array size | Why it hits that level                                  |
-|---------|------------|---------------------------------------------------------|
-| L1      | 16 KB      | Fits inside the per-SM L1 cache (≥ 16 KB on all supported GPUs) |
-| L2      | 2 MB       | Larger than L1 but fits inside L2 (typically 4–16 MB)  |
-| Global  | 64 MB      | Exceeds L2; every access goes to DRAM                  |
+| Level   | Array size | Why it hits that level                                              |
+|---------|------------|---------------------------------------------------------------------|
+| L1      | 16 KB      | Fits inside the per-SM/CU L1 cache (≥ 16 KB on all supported GPUs) |
+| L2      | 2 MB       | Larger than L1 but fits inside L2 (typically 4–16 MB)              |
+| Global  | 64 MB      | Exceeds L2; every access goes to DRAM                              |
+
+## Files
+
+| File                      | Description                                      |
+|---------------------------|--------------------------------------------------|
+| `cache_latency.cu`        | NVIDIA CUDA implementation                       |
+| `cache_latency.hip`       | HIP implementation (AMD ROCm + NVIDIA HIP-on-CUDA) |
+| `cache_latency_metal.mm`  | Apple Metal host code (Objective-C++)            |
+| `cache_latency.metal`     | Apple Metal shader (Metal Shading Language)      |
+| `Makefile`                | Build system with platform auto-detection        |
 
 ## Building
 
+The Makefile auto-detects the platform:
+- **Darwin** → Metal
+- **Linux with `/opt/rocm`** → ROCm/HIP
+- **Linux (default)** → CUDA
+
 ```bash
-cmake -S . -B build
-cmake --build build --target cache_latency
+# Auto-detect
+make
+
+# Explicit platform
+make PLATFORM=cuda
+make PLATFORM=rocm
+make PLATFORM=metal
+
+# Clean
+make clean
 ```
 
 ## Running
 
 ```bash
-./build/tier1/cache_latency/cache_latency
+./cache_latency
 ```
 
+For the Metal build, `cache_latency.metal` must be in the same directory as
+the `cache_latency` binary (the host code loads it at runtime).
+
 ## Example Output
+
+### CUDA / ROCm
 
 ```
 === cache_latency microbenchmark ===
@@ -95,6 +129,28 @@ Global mem     65536 KB       482.37 ns
 Done.
 ```
 
+### Metal (Apple Silicon)
+
+```
+=== cache_latency microbenchmark ===
+Device : Apple M3 Pro
+Method : single-thread pointer chasing (random permutation)
+Each test: one warm-up + 5 timed kernel launch(es)
+
+Running tests...
+  [L1 cache  ] array = 16 KB, accesses = 10000000, iters = 5
+  [L2 cache  ] array = 2048 KB, accesses = 2000000, iters = 5
+  [Global mem] array = 65536 KB, accesses = 300000, iters = 5
+
+Cache level     Array size    Latency
+──────────      ──────────    ──────────
+L1 cache          16 KB        XX.XX ns
+L2 cache        2048 KB       XXX.XX ns
+Global mem     65536 KB       XXX.XX ns
+
+Done.
+```
+
 *(Actual values depend on GPU model, clock frequency, and cache configuration.)*
 
 ## Notes
@@ -103,4 +159,5 @@ Done.
   could hide latency.
 - The output value (`result`) is written to device memory to prevent the
   compiler from eliminating the loop as dead code.
-- No external dependencies beyond the CUDA Toolkit.
+- No external dependencies beyond the GPU runtime (CUDA Toolkit / ROCm / Metal).
+- The benchmark is self-contained — no CMake or shared build system required.

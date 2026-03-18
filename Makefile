@@ -1,0 +1,40 @@
+# GPU Benchmarks — Top-Level Makefile
+#
+# Usage:
+#   make                        # Build everything (auto-detect platform)
+#   make all                    # Same as above
+#   make tier1                  # Build all Tier 1 microbenchmarks
+#   make clean                  # Clean all build artifacts
+#   make PLATFORM=cuda          # Force CUDA/NVIDIA build
+#   make PLATFORM=rocm          # Force ROCm/AMD build
+#   make PLATFORM=metal         # Force Metal/Apple build
+#
+# Platform Detection:
+#   PLATFORM=auto (default) — detects the platform at build time:
+#     - Darwin   → metal
+#     - /opt/rocm present → rocm
+#     - Otherwise → cuda
+
+PLATFORM ?= auto
+
+ifeq ($(PLATFORM), auto)
+  ifeq ($(shell uname), Darwin)
+    PLATFORM = metal
+  else ifneq ($(wildcard /opt/rocm/bin/hipcc),)
+    PLATFORM = rocm
+  else
+    PLATFORM = cuda
+  endif
+endif
+
+export PLATFORM
+
+.PHONY: all tier1 clean
+
+all: tier1
+
+tier1:
+	$(MAKE) -C tier1 PLATFORM=$(PLATFORM)
+
+clean:
+	$(MAKE) -C tier1 clean PLATFORM=$(PLATFORM)

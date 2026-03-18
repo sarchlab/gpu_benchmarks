@@ -1,8 +1,11 @@
 # fp64_throughput
 
 Microbenchmark that measures the peak **double-precision (FP64) floating-point
-compute throughput** of an NVIDIA GPU in GFLOPS (10⁹ floating-point operations
-per second).
+compute throughput** of a GPU in GFLOPS (10⁹ floating-point operations per
+second).
+
+Supported platforms: **NVIDIA CUDA**, **AMD ROCm/HIP**, and **Apple Metal**
+(FP32 proxy — see [Apple GPU limitation](#apple-gpu-limitation) below).
 
 ---
 
@@ -16,8 +19,8 @@ a = fma(a, multiplier, addend);   // 2 FLOPs: 1 multiply + 1 add
 ```
 
 All operands live in registers — there is no memory traffic beyond a single
-8-byte write at the end — so the result reflects raw arithmetic throughput
-rather than memory bandwidth.
+write at the end — so the result reflects raw arithmetic throughput rather than
+memory bandwidth.
 
 Four independent accumulators are used per thread so the compiler can
 interleave FMA instructions and hide the FP64 pipeline latency, achieving
@@ -25,7 +28,25 @@ full issue-rate throughput.
 
 ---
 
-## FP64 vs FP32 throughput
+## Apple GPU limitation
+
+> **Apple GPUs do not have native FP64 (double-precision) hardware.**
+
+The Metal Shading Language does not expose a `double` type on Apple Silicon.
+When built with `PLATFORM=metal` this benchmark runs **FP32 FMA operations**
+instead and clearly labels the output as an FP32 proxy measurement:
+
+```
+FP32 Throughput : 2845.67 GFLOPS  (FP64 proxy — Apple GPUs lack native FP64)
+```
+
+This result **cannot** be directly compared to FP64 GFLOPS from CUDA or HIP
+builds.  For true FP64 throughput, use an NVIDIA or AMD GPU with
+`PLATFORM=cuda` or `PLATFORM=rocm`.
+
+---
+
+## FP64 vs FP32 throughput (CUDA/HIP platforms)
 
 FP64 throughput varies significantly by GPU class:
 
@@ -33,10 +54,8 @@ FP64 throughput varies significantly by GPU class:
 |---|---|
 | Consumer (GeForce RTX) | 1:32 or 1:64 |
 | Professional (Quadro / RTX A-series) | 1:16 or 1:32 |
-| Datacenter / HPC (V100, A100, H100) | ~1:2 |
-
-Results from this benchmark will reflect the actual FP64 capability of the
-device under test.
+| Datacenter / HPC (V100, A100, H100, MI250X) | ~1:2 |
+| Apple Silicon (M-series) | N/A — no native FP64 |
 
 ---
 
@@ -52,16 +71,24 @@ device under test.
 ## Build
 
 ```bash
-# From the repository root:
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target fp64_throughput -j$(nproc)
+# Auto-detect platform (Darwin → metal, /opt/rocm present → rocm, else cuda)
+make
+
+# Explicit platform selection
+make PLATFORM=cuda
+make PLATFORM=rocm
+make PLATFORM=metal
+
+make clean
 ```
 
-To target specific GPU architectures:
+Requirements by platform:
 
-```bash
-cmake -B build -DCMAKE_CUDA_ARCHITECTURES="70;80;86;90"
-```
+| Platform | Requirement |
+|---|---|
+| `cuda` | NVIDIA CUDA Toolkit (`nvcc`) |
+| `rocm` | AMD ROCm/HIP (`hipcc` at `/opt/rocm/bin/hipcc`) |
+| `metal` | macOS with Xcode Command Line Tools (`clang++`) |
 
 ---
 
@@ -73,17 +100,17 @@ cmake -B build -DCMAKE_CUDA_ARCHITECTURES="70;80;86;90"
 
 | Argument | Default | Description |
 |---|---|---|
-| `fmas_per_thread` | `4096` | Number of FMA iterations per thread. Increase on HPC GPUs where FP64 is fast; the kernel should run for at least ~5 ms for a stable measurement. |
+| `fmas_per_thread` | `4096` | Number of FMA iterations per thread. Increase on HPC GPUs where FP64 is fast (kernel should run ≥5 ms for a stable measurement). Decrease on consumer GPUs where FP64 is rate-limited. |
 
 ---
 
 ## Example output
 
-### Datacenter GPU (e.g. NVIDIA A100-SXM4-80GB)
+### Datacenter GPU — NVIDIA A100-SXM4-80GB (CUDA/HIP)
 
 ```
 Device          : NVIDIA A100-SXM4-80GB (id=0)
-SMs             : 108
+CUs             : 108
 Grid            : 1024 blocks × 256 threads = 262144 total threads
 FMAs / thread   : 4096
 Kernel repeats  : 10
@@ -93,11 +120,11 @@ Total FLOPs     : 21474836480
 FP64 Throughput : 179.16 GFLOPS
 ```
 
-### Consumer GPU (e.g. NVIDIA GeForce RTX 3080)
+### Consumer GPU — NVIDIA GeForce RTX 3080 (CUDA/HIP)
 
 ```
 Device          : NVIDIA GeForce RTX 3080 (id=0)
-SMs             : 68
+CUs             : 68
 Grid            : 1024 blocks × 256 threads = 262144 total threads
 FMAs / thread   : 4096
 Kernel repeats  : 10
@@ -111,6 +138,22 @@ FP64 Throughput : 6.63 GFLOPS
 > Consider reducing `fmas_per_thread` (e.g. to 256 or 512) to keep the
 > benchmark runtime reasonable.
 
+### Apple M-series GPU (Metal — FP32 proxy)
+
+```
+Device          : Apple M3 Pro
+NOTE            : Apple GPUs lack native FP64 hardware.
+                  Measuring FP32 throughput as proxy.
+
+Grid            : 1024 blocks × 256 threads = 262144 total threads
+FMAs / thread   : 4096
+Kernel repeats  : 10
+
+Elapsed time    : 9.231 ms (0.923 ms / kernel)
+Total FLOPs     : 21474836480
+FP32 Throughput : 2328.45 GFLOPS  (FP64 proxy — Apple GPUs lack native FP64)
+```
+
 ---
 
 ## Files
@@ -118,5 +161,8 @@ FP64 Throughput : 6.63 GFLOPS
 | File | Purpose |
 |---|---|
 | `fp64_throughput.cu` | CUDA source — kernel + driver code |
-| `CMakeLists.txt` | CMake build rules |
+| `fp64_throughput.hip` | HIP source — AMD ROCm + NVIDIA HIP-on-CUDA |
+| `fp64_throughput_metal.mm` | Apple Metal host code (Objective-C++) |
+| `fp64_throughput.metal` | Metal compute kernel (FP32 FMA — Apple FP64 proxy) |
+| `Makefile` | Build rules for all three platforms |
 | `README.md` | This file |

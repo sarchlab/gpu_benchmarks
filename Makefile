@@ -29,9 +29,9 @@ endif
 
 export PLATFORM
 
-.PHONY: all tier1 tier2 tier3 clean
+.PHONY: all tier1 tier2 tier3 tier4 clean
 
-all: tier1 tier2 tier3
+all: tier1 tier2 tier3 tier4
 
 tier1:
 	$(MAKE) -C tier1 PLATFORM=$(PLATFORM)
@@ -42,7 +42,11 @@ tier2:
 tier3:
 	$(MAKE) -C tier3 PLATFORM=$(PLATFORM)
 
+tier4:
+	$(MAKE) -C tier4 PLATFORM=$(PLATFORM)
+
 clean:
 	$(MAKE) -C tier1 clean PLATFORM=$(PLATFORM)
 	$(MAKE) -C tier2 clean PLATFORM=$(PLATFORM)
 	$(MAKE) -C tier3 clean PLATFORM=$(PLATFORM)
+	$(MAKE) -C tier4 clean PLATFORM=$(PLATFORM)

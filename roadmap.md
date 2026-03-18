@@ -169,8 +169,32 @@ clean:
 **Branch:** `ares/m11-tier5`
 **Cycles budget:** 6
 
-### M12 — Integration & Harness (planned)
-Unified benchmark runner: make-based run-all, result collection, reporting infrastructure.
+### M12 — Integration & Harness (current)
+**Goal:** Build a functional benchmark runner so the 54-benchmark suite can be driven from a single command and results collected automatically.
+
+**Deliverables:**
+1. `.gitignore` — ignore compiled binaries, `__pycache__`, `results/`, `*.pyc`, `.DS_Store`
+2. `scripts/run_all.sh` — iterates all `tier*/*/Makefile` directories, runs `make run` with 5-minute per-benchmark timeout, captures stdout (CSV) to `results/<timestamp>/<tier>_<benchmark>.csv`; prints progress and errors to terminal
+3. `scripts/report.py` — reads all `.csv` files from a `results/<timestamp>/` directory, generates `results/<timestamp>/report.md` with a summary table: tier, benchmark, time_ms, metric columns; handles both 4-field and 7-field CSV formats gracefully
+4. Root `Makefile` — add `run-all` target that calls `scripts/run_all.sh`; add `report` target that calls `scripts/report.py results/<latest>/`
+5. Fix Tier 1 CSV output — all 6 Tier 1 benchmarks currently output only human-readable text; add a single CSV line to stdout: `benchmark_name,size,time_ms,metric` (matching the 4-field format used by Tier 3/4/5). Keep existing human-readable output, add CSV on a separate line.
+
+**Acceptance criteria:**
+- `make run-all` runs without error on a CUDA machine (individual benchmarks may fail due to missing hardware, but the script should not crash)
+- `python3 scripts/report.py results/<timestamp>/` generates a readable markdown report
+- All 6 Tier 1 benchmarks emit at least one CSV line to stdout when run
+- `.gitignore` is committed and suppresses compiled binaries + Python cache
+
+**Branch:** `ares/m12-harness`
+**Cycles budget:** 5
+
+### M13 — Critical Benchmark Gaps (planned)
+Add the highest-priority missing benchmarks based on Iris's evaluation:
+- Tensor Core Throughput (Tier 1)
+- Mixbench or Shared Memory Bandwidth (Tier 1)
+- HGEMM FP16 / CUTLASS GEMM (Tier 3)
+- Triton Flash Attention (Tier 4)
+**Cycles budget:** 6
 
 ---
 
@@ -217,3 +241,5 @@ Unified benchmark runner: make-based run-all, result collection, reporting infra
 | 42 | Planning | Athena | Evaluated state, defined M10 (Tier 4: Triton Python kernels + BabelStream) |
 | 43–48 | Implementation+Verification | Ares+Apollo | M10 implemented (5 Triton + BabelStream); merged PR #9 |
 | 49 | Planning | Athena | Evaluated state, defined M11 (Tier 5: ML workloads) |
+| 50–55 | Implementation+Verification | Ares+Apollo | M11 implemented (6 Tier 5 ML workloads); merged PR #10 |
+| 56 | Planning | Athena | Iris evaluated state (54 benchmarks, 3 CSV formats, no harness); defined M12 (Integration & Harness) |

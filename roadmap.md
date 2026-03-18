@@ -181,13 +181,51 @@ clean:
 
 **Branch:** `ares/m12-harness` (merged to main)
 
-### M13 — Critical Benchmark Gaps (planned)
-Add the highest-priority missing benchmarks based on Iris's evaluation:
-- Tensor Core Throughput (Tier 1)
-- Mixbench or Shared Memory Bandwidth (Tier 1)
-- HGEMM FP16 / CUTLASS GEMM (Tier 3)
-- Triton Flash Attention (Tier 4)
-**Cycles budget:** 6
+### M13 — Critical Benchmark Gaps (current)
+**Goal:** Fill the 6 highest-priority gaps identified by Iris's evaluation. These are all HIGH-priority items from `benchmark_report.md` that are missing from the suite.
+
+**Deliverables:**
+
+**Tier 1 (3 new microbenchmarks):**
+- `tier1/tensor_core_throughput/` — Tensor Core TOPS measurement using WMMA API (HIP). FP16 and TF32 data types. Metal: simdgroup_matrix_multiply_accumulate. Reports TOPS.
+  - `.hip` file with `#ifdef` for CUDA WMMA vs HIP WMMA
+  - `_metal.mm` + `.metal` using simdgroup matrix ops
+  - CSV: `tensor_core_throughput,<dtype>,<time_ms>,<TOPS>`
+- `tier1/mixbench/` — Parametric roofline benchmark varying compute-to-memory ratio. Multiple data points from pure memory-bound to pure compute-bound. Reference: ekondis/mixbench on GitHub.
+  - `.hip` kernel with configurable arithmetic intensity (FLOPs per byte)
+  - `_metal.mm` + `.metal` equivalent
+  - CSV: `mixbench,<flops_per_byte>,<time_ms>,<achieved_gflops>` (one line per intensity level)
+- `tier1/shared_mem_bandwidth/` — Shared memory throughput with bank-conflict-free and conflicted access patterns.
+  - `.hip` kernel with stride-1 (no conflict) and stride-32 (max conflict) patterns
+  - `_metal.mm` + `.metal` using threadgroup memory
+  - CSV: `shared_mem_bw,<pattern>,<time_ms>,<GBs>`
+
+**Tier 3 (2 new library benchmarks):**
+- `tier3/cublas_hgemm/` — FP16 GEMM: cublasHgemm (NVIDIA) / rocblas_hgemm (AMD) / MPSMatrixMultiplication float16 (Apple). M=N=K=4096. Leverages Tensor Cores when available.
+  - `.hip` file with `#ifdef USE_CUBLAS / USE_ROCBLAS`
+  - `_metal.mm` using MPS float16 matrices
+  - CSV: `cublas_hgemm,<M>,<time_ms>,<TFLOPS>`
+- `tier3/cublas_batched_gemm/` — Batched FP32 GEMM: cublasGemmBatched / rocblas_gemm_batched / loop-of-MPS. batch_count=64, M=N=K=512.
+  - `.hip` file with `#ifdef USE_CUBLAS / USE_ROCBLAS`
+  - `_metal.mm` using MPS with loop over batch
+  - CSV: `cublas_batched_gemm,<batch>x<M>,<time_ms>,<GFLOPS>`
+
+**Tier 4 (1 new alternative-language benchmark):**
+- `tier4/triton_flash_attention/` — Flash Attention kernel in Triton (CUDA/ROCm). Apple fallback: PyTorch F.scaled_dot_product_attention on MPS.
+  - `bench.py` with Triton flash attention kernel (reference: Triton tutorials)
+  - `bench_mps.py` with PyTorch SDPA on MPS
+  - CSV: `triton_flash_attention,<B>x<H>x<S>x<D>,<time_ms>,<TFLOPS>`
+
+**Per-benchmark conventions (same as existing):**
+- Makefile with PLATFORM auto-detect (Darwin→metal, /opt/rocm→rocm, else→cuda)
+- README.md with algorithm, build/run for all 3 platforms, output format
+- 5 warmup + 5 timed iterations, report average
+- CSV to stdout, human-readable to stderr
+- Self-contained, no shared dependencies
+- Update tier1/Makefile, tier3/Makefile, tier4/Makefile to include new subdirectories
+
+**Branch:** `ares/m13-gaps`
+**Cycles budget:** 5
 
 ---
 
@@ -237,3 +275,4 @@ Add the highest-priority missing benchmarks based on Iris's evaluation:
 | 50–55 | Implementation+Verification | Ares+Apollo | M11 implemented (6 Tier 5 ML workloads); merged PR #10 |
 | 56 | Planning | Athena | Iris evaluated state (54 benchmarks, 3 CSV formats, no harness); defined M12 (Integration & Harness) |
 | 57–59 | Implementation+Verification | Ares+Apollo | M12 implemented (harness scripts, .gitignore, Tier 1 CSV); merged to main |
+| 60 | Planning | Athena | Evaluated state (54 benchmarks, all tiers covered, harness complete); defined M13 (6 critical benchmark gaps) |

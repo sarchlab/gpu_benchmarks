@@ -1,0 +1,41 @@
+# Compiled binaries (executables with no extension in benchmark dirs)
+tier1/*/bench
+tier1/*/bench_*
+tier2/*/*
+!tier2/*/Makefile
+!tier2/*/README.md
+!tier2/*/*.hip
+!tier2/*/bench.cu
+!tier2/*/bench.hip
+!tier2/*/*.cu
+!tier2/*/*.h
+!tier2/*/*.metal
+!tier2/*/*.mm
+tier3/*/*
+!tier3/*/Makefile
+!tier3/*/README.md
+!tier3/*/bench.cu
+!tier3/*/bench.hip
+!tier3/*/*.hip
+!tier3/*/*.cu
+!tier3/*/*.h
+!tier3/*/*.metal
+!tier3/*/*.mm
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Build artifacts
+*.o
+*.a
+*.so
+*.d
+
+# Results directory
+results/
+
+# macOS
+.DS_Store

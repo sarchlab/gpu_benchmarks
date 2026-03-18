@@ -99,104 +99,75 @@ Deliver a comprehensive, well-organized benchmark suite that researchers and eng
 **Branch:** `ares/m9-tier3`
 **Cycles budget:** 5
 
-### M10 — Tier 4: Triton Python Kernels + BabelStream (current)
+### M10 — Tier 4: Triton Python Kernels + BabelStream ✅ COMPLETE
 **Goal:** Implement 6 Tier 4 alternative-language benchmarks. Triton benchmarks use Python DSL targeting NVIDIA/AMD GPUs; Apple uses equivalent PyTorch MPS operations. BabelStream is a STREAM-style C++ bandwidth benchmark with CUDA/HIP/Metal backends.
+**Deliverables (completed):** triton_vector_add, triton_gemm, triton_softmax, triton_layer_norm, triton_dropout (all Triton/PyTorch MPS) + babelstream (CUDA/HIP/Metal C++). Merged via PR #9.
+
+---
+
+### M11 — Tier 5: ML Workloads (current)
+**Goal:** Implement 6 Tier 5 ML workload benchmarks using Python + PyTorch. All benchmarks use synthetic data (no dataset downloads). Platform: `cuda` for NVIDIA/AMD, `mps` for Apple Silicon.
 
 **Deliverables:**
-- `tier4/triton_vector_add/` — Simplest Triton kernel: element-wise vector add. NVIDIA/AMD: Triton JIT. Apple: PyTorch MPS.
-- `tier4/triton_gemm/` — Matrix multiplication in Triton with auto-tuning tile sizes. Apple: PyTorch MPS matmul.
-- `tier4/triton_softmax/` — Fused online softmax in Triton. Apple: PyTorch MPS softmax.
-- `tier4/triton_layer_norm/` — Fused layer normalization in Triton. Apple: PyTorch MPS layer_norm.
-- `tier4/triton_dropout/` — Element-wise dropout kernel in Triton (uses `tl.rand`). Apple: PyTorch MPS dropout.
-- `tier4/babelstream/` — STREAM benchmark (copy/scale/add/triad/dot) in CUDA/HIP/Metal. C++ implementation.
+- `tier5/resnet50_train/` — ResNet-50 training step (forward+backward), synthetic ImageNet-like input, torchvision. Reports images/sec.
+- `tier5/resnet50_infer/` — ResNet-50 inference only (model.eval(), torch.no_grad()), synthetic input, torchvision. Reports images/sec.
+- `tier5/bert_inference/` — BERT-base-uncased inference (HuggingFace transformers), synthetic token IDs, seq_len=128, batch=16. Reports sequences/sec.
+- `tier5/nanogpt_train/` — GPT-2 style transformer training step (pure PyTorch, model defined inline — no external model deps). Reports tokens/sec.
+- `tier5/vit_inference/` — ViT-B/16 inference (torchvision.models.vit_b_16), synthetic ImageNet input. Reports images/sec.
+- `tier5/sdpa_bench/` — Scaled Dot Product Attention benchmark (pure PyTorch F.scaled_dot_product_attention). Reports TFLOPS.
 
-**Per-benchmark structure (Triton benchmarks):**
-- `bench.py` — Python Triton kernel (NVIDIA/AMD). Imports: triton, torch. Output: CSV `benchmark_name,size,time_ms,GBs` or `benchmark_name,size,time_ms,TFLOPS`
-- `bench_mps.py` — Apple-specific: PyTorch MPS equivalent (same computation). Same CSV output format.
-- `Makefile` — Platform auto-detect; CUDA/ROCm → `python3 bench.py`; metal → `python3 bench_mps.py`. Includes `setup` target for `pip3 install`.
-- `README.md` — Usage, requirements, output format.
-
-**BabelStream structure:**
-- `babelstream.hip` — C++ with `#ifdef USE_CUDA` (nvcc) / `#elif defined(USE_HIP)` (hipcc). Implements 5 STREAM kernels on arrays of N=32M floats. 5 warmup + 5 timed iterations. Reports GB/s per kernel.
-- `babelstream_metal.mm` — Apple Metal compute shader for STREAM kernels. Same output.
-- `Makefile` — Same platform auto-detect pattern as Tier 3.
+**Per-benchmark file structure:**
+- `bench.py` — CUDA/ROCm: uses `torch.device('cuda')`, 5 warmup + 10 timed iterations, timing via `torch.cuda.Event`, CSV output
+- `bench_mps.py` — Apple: uses `torch.device('mps')`, same logic, timing via `time.perf_counter` + `.item()` for sync, CSV output
+- `Makefile` — Same auto-detect pattern (Darwin→metal→`python3 bench_mps.py`, else→`python3 bench.py`); `setup` target installs deps
 - `README.md`
 
-**Triton bench.py structure:**
-```python
-import torch, triton, triton.language as tl, time, sys
+Plus:
+- `tier5/Makefile` — wraps all 6 sub-benchmarks (same pattern as tier4/Makefile)
+- Root `Makefile` update to include `tier5`
 
-@triton.jit
-def kernel(...):
-    ...
+**Technical specs per benchmark:**
+- **resnet50_train**: batch=32, input shape [32,3,224,224], random labels (1000 classes), SGD optimizer, 5 warmup + 10 timed forward+backward passes. Metric: `images/sec = batch_size * 10 / total_time_s`
+- **resnet50_infer**: batch=64, model.eval(), no_grad, [64,3,224,224] random input, 5 warmup + 10 timed passes. Metric: `images/sec`
+- **bert_inference**: batch=16, seq_len=128, random input_ids in [0,30522), model.eval(), no_grad, 5 warmup + 10 timed passes. Metric: `sequences/sec`
+- **nanogpt_train**: GPT-2 config: n_layer=6, n_head=6, n_embd=384, block_size=256, vocab_size=50257; batch=4, random token ids; AdamW optimizer; 5 warmup + 10 timed forward+backward. Metric: `tokens/sec = batch * block_size * 10 / total_time_s`
+- **vit_inference**: `torchvision.models.vit_b_16(weights=None)`, batch=32, [32,3,224,224] random input, model.eval(), no_grad, 5 warmup + 10 timed. Metric: `images/sec`
+- **sdpa_bench**: batch=8, n_heads=16, seq_len=1024, head_dim=64; query/key/value = random float16 tensors; 5 warmup + 50 timed calls; `F.scaled_dot_product_attention(q,k,v)`. Metric: `TFLOPS = 2*B*H*S*S*D / time_per_iter_s / 1e12`
 
-def benchmark(n=...):
-    # allocate tensors on cuda/hip device
-    # warmup 5 iterations
-    # timed 5 iterations using torch.cuda.Event
-    # print: "benchmark_name,size,time_ms,metric"
+**CSV output format:** `benchmark_name,size,time_ms,metric_value`
+Examples:
+- `resnet50_train,32,15.234,2099.45` (images/sec)
+- `bert_inference,16,8.123,1971.23` (sequences/sec)
+- `sdpa_bench,8*16*1024*64,0.312,45.67` (TFLOPS)
 
-if __name__ == "__main__":
-    benchmark()
-```
-
-**Triton bench_mps.py structure:**
-```python
-import torch, time
-
-def benchmark(n=...):
-    device = torch.device("mps")
-    # allocate tensors on MPS device
-    # warmup 5 iterations  
-    # timed 5 iterations using time.perf_counter (synchronize with .item())
-    # print same CSV format
-
-if __name__ == "__main__":
-    benchmark()
-```
-
-**Tier 4 Makefile template (Triton benchmarks):**
+**Makefile template (same as tier4):**
 ```makefile
 ifndef PLATFORM
   ifeq ($(shell uname -s),Darwin)
     PLATFORM := metal
-  else ifneq ($(wildcard /opt/rocm),)
-    PLATFORM := rocm
   else
     PLATFORM := cuda
   endif
 endif
 .PHONY: all run setup clean
 ifeq ($(PLATFORM),metal)
-all: run
 run:
 	python3 bench_mps.py
 setup:
-	pip3 install --quiet torch
+	pip3 install torch torchvision transformers
 else
-all: run
 run:
 	python3 bench.py
 setup:
-	pip3 install --quiet torch triton
+	pip3 install torch torchvision transformers
 endif
+all: run
 clean:
-	rm -rf __pycache__ *.pyc
+	find . -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
 ```
 
-**Key technical details:**
-- Triton vector_add: N=2^26 elements (64M floats = 256MB). Measure GB/s.
-- Triton gemm: M=N=K=4096. Measure TFLOPS. Use tile size BLOCK_M=128, BLOCK_N=256, BLOCK_K=64.
-- Triton softmax: N_ROWS=4096, N_COLS=4096. Measure GB/s.
-- Triton layer_norm: N_ROWS=4096, N_COLS=4096, eps=1e-5. Measure GB/s.
-- Triton dropout: N=2^26 elements, p=0.5. Measure GB/s.
-- BabelStream: N=32*1024*1024 floats per array. Measure GB/s for copy, scale, add, triad, dot.
-
-**Branch:** `ares/m10-tier4`
+**Branch:** `ares/m11-tier5`
 **Cycles budget:** 6
-
-### M11 — Tier 5: ML Workloads (planned)
-Representative ML training/inference workloads (ResNet-50, nanoGPT, BERT fine-tuning).
 
 ### M12 — Integration & Harness (planned)
 Unified benchmark runner: make-based run-all, result collection, reporting infrastructure.
@@ -216,6 +187,8 @@ Unified benchmark runner: make-based run-all, result collection, reporting infra
 - Triton does not support Apple Metal — use equivalent PyTorch MPS ops in `bench_mps.py`.
 - BabelStream follows the same C++ pattern as Tier 3 (`.hip` + `_metal.mm`).
 - For Python benchmark timing, use `torch.cuda.Event` for CUDA/ROCm, `time.perf_counter` for MPS.
+- Tier 5 ML benchmarks: use synthetic data (random tensors) to avoid dataset downloads. PyTorch `cuda` device works for both NVIDIA and AMD/ROCm.
+- Tier 5 deps: `pip install torch torchvision transformers` in `setup` target.
 
 ## Cycle History
 | Cycle | Phase | Agent | Action |
@@ -242,3 +215,5 @@ Unified benchmark runner: make-based run-all, result collection, reporting infra
 | 36 | Planning | Athena | Evaluated state, defined M9 (Tier 3: cuBLAS/rocBLAS SGEMM/DGEMM/GEMV + cuFFT/hipFFT 1D/2D + cuSPARSE/rocSPARSE SpMV) |
 | 37–41 | Implementation+Verification | Ares+Apollo | M9 implemented (6 Tier 3 benchmarks) and verified; merged PR #8 |
 | 42 | Planning | Athena | Evaluated state, defined M10 (Tier 4: Triton Python kernels + BabelStream) |
+| 43–48 | Implementation+Verification | Ares+Apollo | M10 implemented (5 Triton + BabelStream); merged PR #9 |
+| 49 | Planning | Athena | Evaluated state, defined M11 (Tier 5: ML workloads) |

@@ -358,11 +358,22 @@ int main(int argc, char *argv[])
     printf("D2H bandwidth : %8.2f GB/s\n", d2h_bw);
 
     // ----- D2D -----
+    double d2d_bw = 0.0;
     if (library) {
-        double d2d_bw = benchmark_d2d(device, library, bytes);
+        d2d_bw = benchmark_d2d(device, library, bytes);
         printf("D2D bandwidth : %8.2f GB/s\n", d2d_bw);
     } else {
         printf("D2D bandwidth : (skipped — .metal source not found)\n");
+    }
+
+    // CSV output (machine-parseable): benchmark_name,size_mb,time_ms,gbs
+    double h2d_time_ms = (static_cast<double>(bytes) / (h2d_bw * 1e9)) * 1e3;
+    double d2h_time_ms = (static_cast<double>(bytes) / (d2h_bw * 1e9)) * 1e3;
+    printf("memory_bandwidth_h2d,%d,%.3f,%.2f\n", buffer_mb, h2d_time_ms, h2d_bw);
+    printf("memory_bandwidth_d2h,%d,%.3f,%.2f\n", buffer_mb, d2h_time_ms, d2h_bw);
+    if (d2d_bw > 0.0) {
+        double d2d_time_ms = (static_cast<double>(bytes) / (d2d_bw * 1e9)) * 1e3;
+        printf("memory_bandwidth_d2d,%d,%.3f,%.2f\n", buffer_mb, d2d_time_ms, d2d_bw);
     }
 
     printf("\nDone.\n");

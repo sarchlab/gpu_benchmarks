@@ -332,6 +332,14 @@ int main(int argc, char *argv[])
     double bidir_bw = benchmark_bidir(device, bytes);
     printf(": %8.2f GB/s  (aggregate)\n", bidir_bw);
 
+    // CSV output (machine-parseable): benchmark_name,size_mb,time_ms,gbs
+    double h2d_time_ms   = ((double)bytes / (h2d_bw   * 1e9)) * 1e3;
+    double d2h_time_ms   = ((double)bytes / (d2h_bw   * 1e9)) * 1e3;
+    double bidir_time_ms = (2.0 * (double)bytes / (bidir_bw * 1e9)) * 1e3;
+    printf("pcie_bandwidth_h2d,%d,%.3f,%.2f\n",   buffer_mb, h2d_time_ms,   h2d_bw);
+    printf("pcie_bandwidth_d2h,%d,%.3f,%.2f\n",   buffer_mb, d2h_time_ms,   d2h_bw);
+    printf("pcie_bandwidth_bidir,%d,%.3f,%.2f\n", buffer_mb, bidir_time_ms, bidir_bw);
+
     printf("\nDone.\n");
 
     } // @autoreleasepool

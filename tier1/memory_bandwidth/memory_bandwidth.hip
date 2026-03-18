@@ -222,6 +222,14 @@ int main(int argc, char *argv[])
     double d2d_bw = benchmark_d2d(d_src, d_dst, bytes);
     printf("D2D bandwidth : %8.2f GB/s\n", d2d_bw);
 
+    // CSV output (machine-parseable): benchmark_name,size_mb,time_ms,gbs
+    double h2d_time_ms = (static_cast<double>(bytes) / (h2d_bw * 1e9)) * 1e3;
+    double d2h_time_ms = (static_cast<double>(bytes) / (d2h_bw * 1e9)) * 1e3;
+    double d2d_time_ms = (static_cast<double>(bytes) / (d2d_bw * 1e9)) * 1e3;
+    printf("memory_bandwidth_h2d,%d,%.3f,%.2f\n", buffer_mb, h2d_time_ms, h2d_bw);
+    printf("memory_bandwidth_d2h,%d,%.3f,%.2f\n", buffer_mb, d2h_time_ms, d2h_bw);
+    printf("memory_bandwidth_d2d,%d,%.3f,%.2f\n", buffer_mb, d2d_time_ms, d2d_bw);
+
     // Clean up
     HIP_CHECK(hipHostFree(h_src));
     HIP_CHECK(hipHostFree(h_dst));

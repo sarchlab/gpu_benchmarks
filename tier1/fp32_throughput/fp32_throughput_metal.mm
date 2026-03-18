@@ -212,6 +212,9 @@ int main(int argc, char *argv[])
     printf("Total FLOPs     : %lld\n", total_flops);
     printf("FP32 Throughput : %.2f GFLOPS\n", gflops);
 
+    // CSV output (machine-parseable): benchmark_name,n_ops,time_ms,gflops
+    printf("fp32_throughput,%lld,%.3f,%.2f\n", total_flops, elapsed_ms, gflops);
+
     printf("\nDone.\n");
 
     } // @autoreleasepool

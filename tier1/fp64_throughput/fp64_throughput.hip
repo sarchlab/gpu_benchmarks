@@ -198,6 +198,9 @@ int main(int argc, char *argv[])
     printf("Total FLOPs     : %lld\n", total_flops);
     printf("FP64 Throughput : %.2f GFLOPS\n", gflops);
 
+    // CSV output (machine-parseable): benchmark_name,n_ops,time_ms,gflops
+    printf("fp64_throughput,%lld,%.3f,%.2f\n", total_flops, (double)elapsed_ms, gflops);
+
     /* Clean up. */
     HIP_CHECK(hipEventDestroy(ev_start));
     HIP_CHECK(hipEventDestroy(ev_stop));

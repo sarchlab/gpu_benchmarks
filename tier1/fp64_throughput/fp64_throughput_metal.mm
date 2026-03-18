@@ -222,6 +222,9 @@ int main(int argc, char *argv[])
     printf("FP32 Throughput : %.2f GFLOPS  (FP64 proxy — Apple GPUs lack native FP64)\n",
            gflops);
 
+    // CSV output (machine-parseable): benchmark_name,n_ops,time_ms,gflops
+    printf("fp64_throughput,%lld,%.3f,%.2f\n", total_flops, elapsed_ms, gflops);
+
     printf("\nDone.\n");
 
     } // @autoreleasepool

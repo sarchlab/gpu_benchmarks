@@ -21,70 +21,73 @@ Deliver a comprehensive, well-organized benchmark suite that researchers and eng
 ## Milestones
 
 ### M1 — Research & Report ✅ COMPLETE (cycles used: 2)
-**Goal:** Produce a comprehensive research report identifying the key benchmarks to include in each tier, justifying selections, and proposing a concrete implementation plan.
-
-**Deliverable:** `benchmark_report.md` committed to repo — 60+ benchmarks across 5 tiers, with complexity/priority ratings, implementation strategy, and references.
+**Goal:** Produce a comprehensive research report identifying the key benchmarks to include in each tier.
+**Deliverable:** `benchmark_report.md` — 60+ benchmarks across 5 tiers.
 
 ---
 
 ### M2 — Project Structure + Tier 1 Microbenchmarks ✅ COMPLETE (cycles used: 2)
-**Goal:** Establish the project's directory layout, build system, and implement the highest-priority Tier 1 microbenchmarks.
-
-**Note:** Completed with CMake/CUDA. M3 will refactor to meet the updated project constraints (Make + multi-GPU).
-
-**Deliverables (completed):**
-- Directory structure: `tier1/`, `tier2/`, `tier3/`, `tier4/`, `tier5/`, `scripts/`
-- Root `CMakeLists.txt` (to be replaced in M3)
-- 6 Tier 1 microbenchmarks: memory BW, FP32/FP64/FP16 throughput, L1/L2 cache latency, PCIe BW
-- Each benchmark: CUDA source, `README.md`
+**Goal:** Establish project directory layout and implement Tier 1 microbenchmarks (originally CMake/CUDA).
 
 ---
 
-### M3 — Refactor Tier 1: Make + Multi-GPU Support (current)
-**Goal:** Rework all 6 Tier 1 benchmarks to comply with the project-wide constraints. Replace CMake with per-benchmark Makefiles, add AMD ROCm and Apple Metal support.
+### M3 — Refactor Tier 1: Make + Multi-GPU Support ✅ COMPLETE (cycles used: 2)
+**Goal:** Rework all 6 Tier 1 benchmarks to use Make + HIP + Metal (no CMake).
+**Deliverables (completed):**
+- Per-benchmark Makefiles (PLATFORM=cuda|rocm|metal auto-detect)
+- HIP source (.hip) for NVIDIA+AMD, Metal source (.metal + .mm) for Apple
+- Top-level Makefile, tier1/Makefile
+- Updated README files
+
+---
+
+### M4 — Tier 2 Application Benchmarks: SHOC Core + Rodinia HotSpot (current)
+**Goal:** Implement 6 high-priority Tier 2 application benchmarks from SHOC and Rodinia, following the same project conventions as Tier 1.
+
+**Reference implementations:** `/Users/yifan/.thebotcompany/dev/src/github.com/sarchlab/mgpusim-dev/repo/workloads/` has CUDA and HIP variants for most benchmarks. Use them as starting points.
 
 **Deliverables:**
-- Remove all `CMakeLists.txt` files from `tier1/` and the root (replace root CMakeLists.txt with a top-level Makefile or remove it)
-- Each of the 6 Tier 1 benchmarks gets a **self-contained `Makefile`** supporting:
-  - `PLATFORM=cuda` (nvcc) — default on Linux with CUDA
-  - `PLATFORM=rocm` (hipcc) — AMD ROCm
-  - `PLATFORM=metal` (xcrun metal) — Apple GPU
-- Source code refactored to use HIP portability layer for NVIDIA+AMD (single `.hip`/`.cu` source), and Metal compute shader (`.metal` + `.mm` host) for Apple
-- Updated `README.md` in each benchmark documenting multi-GPU build/run instructions
-- Top-level `Makefile` at the repo root with `make all`, `make clean`, `make tier1`
+- `tier2/shoc_triad/` — Stream Triad (STREAM-style memory bandwidth)
+- `tier2/shoc_reduction/` — Parallel sum reduction
+- `tier2/shoc_scan/` — Prefix scan (exclusive)
+- `tier2/shoc_gemm/` — Dense matrix multiply (naive + tiled)
+- `tier2/shoc_devicememory/` — Device memory global bandwidth (read/write/readwrite)
+- `tier2/rodinia_hotspot/` — 2D thermal simulation stencil
+- `tier2/Makefile` — iterates over all tier2 subdirectories
+- Root `Makefile` updated to include `tier2` target
 
-**Benchmarks to refactor:**
-1. `tier1/memory_bandwidth` (Ben)
-2. `tier1/fp32_throughput` (Cara)
-3. `tier1/fp64_throughput` (Dan)
-4. `tier1/fp16_throughput` (Eva)
-5. `tier1/cache_latency` (Finn)
-6. `tier1/pcie_bandwidth` (Gina)
-7. Root structure + top-level Makefile (Felix)
+**Per-benchmark requirements (same as Tier 1):**
+- `<name>.hip` — HIP source (NVIDIA + AMD via hipcc; single source, hip/hip_runtime.h)
+- `<name>.metal` + `<name>_metal.mm` — Apple Metal (compute shader + ObjC++ host)
+- `Makefile` — platform auto-detect (Darwin→metal, /opt/rocm→rocm, else→cuda)
+- `README.md` — documents build/run for all platforms
+- **Self-contained**: copy any needed common utilities inline; NO imports from shared directories
 
-**Cycles budget:** 5
+**Branch:** `ares/m4-tier2`
+**Cycles budget:** 6
 
 ---
 
-### M4 — Tier 2 Application Benchmarks (planned)
-Implement/integrate selected Tier 2 benchmarks using Make + multi-GPU support. Priority: SHOC core kernels, top-5 Rodinia, top-5 PolyBench.
+### M5 — Tier 2: Top Rodinia + PolyBench (planned)
+Implement top Rodinia benchmarks (BFS, NW, SRAD) and PolyBench GPU (GEMM, 2DConv, atax).
 
-### M5 — Tier 3 Library Benchmarks (planned)
-Implement cuBLAS GEMM, CUTLASS GEMM, cuFFT, cuSPARSE benchmark wrappers with Make + multi-GPU support.
+### M6 — Tier 3 Library Benchmarks (planned)
+cuBLAS GEMM, CUTLASS GEMM, cuFFT, cuSPARSE benchmark wrappers.
 
-### M6 — Tier 4 & 5: Triton + ML Workloads (planned)
-Implement Triton-based benchmarks and representative ML training/inference workloads.
+### M7 — Tier 4 & 5: Triton + ML Workloads (planned)
+Triton-based benchmarks and representative ML training/inference workloads.
 
-### M7 — Integration & Harness (planned)
+### M8 — Integration & Harness (planned)
 Unified benchmark runner: make-based run-all, result collection, reporting infrastructure.
 
 ---
 
 ## Lessons Learned
-- Research phase produced excellent coverage (60+ benchmarks, all tiers). One cycle was sufficient.
-- The benchmark_report.md is the definitive guide for implementation order and scope.
-- Human constraints (Make, multi-GPU, self-contained) established after M2. Apply retroactively to M3, and proactively to all future milestones.
-- Each benchmark should be treated as fully independent from the start — don't build shared infrastructure that needs to be undone later.
+- Research phase produced excellent coverage (60+ benchmarks). One cycle sufficient.
+- Human constraints (Make, multi-GPU, self-contained) established after M2 — apply to all future work proactively.
+- Each benchmark is fully independent from the start — don't build shared infrastructure.
+- mgpusim-dev repo has mature CUDA+HIP implementations for Tier 2; use as reference, adapt to our format (inline common headers, add Metal, unify Makefile).
+- Parallel worker assignment (1 benchmark per worker) works well — 6 benchmarks finished in ~1 cycle.
 
 ## Cycle History
 | Cycle | Phase | Agent | Action |
@@ -95,3 +98,6 @@ Unified benchmark runner: make-based run-all, result collection, reporting infra
 | 4–5 | Implementation | Ares+workers | Built project structure + 6 Tier 1 benchmarks |
 | 6 | Verification | Apollo | Verified M2, merged PR #1 |
 | 7 | Planning | Athena | Updated spec with human constraints (issue #10), defined M3 |
+| 8–9 | Implementation | Ares+workers | Refactored Tier 1: Makefile + HIP + Metal for all 6 benchmarks |
+| 10 | Verification | Apollo | Verified M3, merged PR #2 |
+| 11 | Planning | Athena | Evaluated state, defined M4 (Tier 2: SHOC + Rodinia) |

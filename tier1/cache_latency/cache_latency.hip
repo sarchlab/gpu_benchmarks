@@ -285,6 +285,18 @@ int main(void)
                tests[t].name, sz, unit, results[t]);
     }
 
+    // CSV output (machine-parseable): benchmark_name,array_bytes,time_ns,ns_per_access
+    static const char *csv_names[] = {
+        "cache_latency_l1", "cache_latency_l2", "cache_latency_global_mem"
+    };
+    for (int t = 0; t < NUM_TESTS; ++t) {
+        double total_ns_csv = results[t]
+                              * static_cast<double>(tests[t].num_accesses)
+                              * tests[t].num_iters;
+        printf("%s,%zu,%.0f,%.2f\n",
+               csv_names[t], tests[t].array_bytes, total_ns_csv, results[t]);
+    }
+
     printf("\nDone.\n");
     return EXIT_SUCCESS;
 }

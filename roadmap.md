@@ -41,43 +41,45 @@ Deliver a comprehensive, well-organized benchmark suite that researchers and eng
 
 ---
 
-### M4 — Tier 2 Application Benchmarks: SHOC Core + Rodinia HotSpot (current)
-**Goal:** Implement 6 high-priority Tier 2 application benchmarks from SHOC and Rodinia, following the same project conventions as Tier 1.
+### M4 — Tier 2 Application Benchmarks: SHOC Core + Rodinia HotSpot ✅ COMPLETE (cycles used: 3)
+**Goal:** Implement 6 high-priority Tier 2 application benchmarks from SHOC and Rodinia.
+**Deliverables (completed):** shoc_triad, shoc_reduction, shoc_scan, shoc_gemm, shoc_devicememory, rodinia_hotspot — all with HIP + Metal + Makefile + README.
 
-**Reference implementations:** `/Users/yifan/.thebotcompany/dev/src/github.com/sarchlab/mgpusim-dev/repo/workloads/` has CUDA and HIP variants for most benchmarks. Use them as starting points.
+---
+
+### M5 — Tier 2: Rodinia BFS/NW/SRAD + PolyBench GEMM/2DConv/FDTD2D (current)
+**Goal:** Implement 6 more Tier 2 benchmarks — 3 Rodinia + 3 PolyBench — following the same project conventions.
+
+**Reference implementations:** `/Users/yifan/.thebotcompany/dev/src/github.com/sarchlab/mgpusim-dev/repo/workloads/` — all 6 have CUDA + HIP variants.
 
 **Deliverables:**
-- `tier2/shoc_triad/` — Stream Triad (STREAM-style memory bandwidth)
-- `tier2/shoc_reduction/` — Parallel sum reduction
-- `tier2/shoc_scan/` — Prefix scan (exclusive)
-- `tier2/shoc_gemm/` — Dense matrix multiply (naive + tiled)
-- `tier2/shoc_devicememory/` — Device memory global bandwidth (read/write/readwrite)
-- `tier2/rodinia_hotspot/` — 2D thermal simulation stencil
-- `tier2/Makefile` — iterates over all tier2 subdirectories
-- Root `Makefile` updated to include `tier2` target
+- `tier2/rodinia_bfs/` — Breadth-first search on a random CSR graph
+- `tier2/rodinia_nw/` — Needleman-Wunsch sequence alignment (DP)
+- `tier2/rodinia_srad/` — Speckle-Reducing Anisotropic Diffusion (image processing)
+- `tier2/polybench_gemm/` — PolyBench GEMM (C = α·A·B + β·C)
+- `tier2/polybench_2dconv/` — PolyBench 2D convolution
+- `tier2/polybench_fdtd2d/` — PolyBench FDTD 2D (finite-difference time-domain)
 
-**Per-benchmark requirements (same as Tier 1):**
+**Per-benchmark requirements (same as Tier 1 & M4):**
 - `<name>.hip` — HIP source (NVIDIA + AMD via hipcc; single source, hip/hip_runtime.h)
 - `<name>.metal` + `<name>_metal.mm` — Apple Metal (compute shader + ObjC++ host)
 - `Makefile` — platform auto-detect (Darwin→metal, /opt/rocm→rocm, else→cuda)
 - `README.md` — documents build/run for all platforms
-- **Self-contained**: copy any needed common utilities inline; NO imports from shared directories
+- **Self-contained**: inline any needed utility functions; NO imports from shared directories
 
-**Branch:** `ares/m4-tier2`
-**Cycles budget:** 6
+**Branch:** `ares/m5-tier2b`
+**Cycles budget:** 5
 
----
+### M6 — Tier 2 SHOC FFT/Sort/SpMV + Parboil (planned)
+Remaining high-priority Tier 2: SHOC FFT, Sort, SpMV, Stencil2D; Parboil SGEMM, SpMV, Stencil.
 
-### M5 — Tier 2: Top Rodinia + PolyBench (planned)
-Implement top Rodinia benchmarks (BFS, NW, SRAD) and PolyBench GPU (GEMM, 2DConv, atax).
-
-### M6 — Tier 3 Library Benchmarks (planned)
+### M7 — Tier 3 Library Benchmarks (planned)
 cuBLAS GEMM, CUTLASS GEMM, cuFFT, cuSPARSE benchmark wrappers.
 
-### M7 — Tier 4 & 5: Triton + ML Workloads (planned)
+### M8 — Tier 4 & 5: Triton + ML Workloads (planned)
 Triton-based benchmarks and representative ML training/inference workloads.
 
-### M8 — Integration & Harness (planned)
+### M9 — Integration & Harness (planned)
 Unified benchmark runner: make-based run-all, result collection, reporting infrastructure.
 
 ---
@@ -88,6 +90,9 @@ Unified benchmark runner: make-based run-all, result collection, reporting infra
 - Each benchmark is fully independent from the start — don't build shared infrastructure.
 - mgpusim-dev repo has mature CUDA+HIP implementations for Tier 2; use as reference, adapt to our format (inline common headers, add Metal, unify Makefile).
 - Parallel worker assignment (1 benchmark per worker) works well — 6 benchmarks finished in ~1 cycle.
+- M4 took 3 implementation cycles (some workers timed out on first try, Ares completed remainder directly).
+- mgpusim-dev has mature CUDA+HIP refs for all Tier 2 benchmarks — always use them as starting points.
+- bench_common_hip.h must be inlined into each .hip file (no shared dependencies).
 
 ## Cycle History
 | Cycle | Phase | Agent | Action |
@@ -101,3 +106,6 @@ Unified benchmark runner: make-based run-all, result collection, reporting infra
 | 8–9 | Implementation | Ares+workers | Refactored Tier 1: Makefile + HIP + Metal for all 6 benchmarks |
 | 10 | Verification | Apollo | Verified M3, merged PR #2 |
 | 11 | Planning | Athena | Evaluated state, defined M4 (Tier 2: SHOC + Rodinia) |
+| 12–14 | Implementation | Ares+workers | Implemented 6 Tier 2 benchmarks (SHOC core + rodinia_hotspot) |
+| 15 | Verification | Apollo | Verified M4, merged PR #3 |
+| 16 | Planning | Athena | Evaluated state, defined M5 (Rodinia BFS/NW/SRAD + PolyBench GEMM/2DConv/FDTD2D) |

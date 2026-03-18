@@ -53,10 +53,10 @@ kernel void nw_kernel1(
     device       int*    d_matrix [[ buffer(1) ]],
     constant     NWParams& params [[ buffer(2) ]],
     threadgroup  int*    shared   [[ threadgroup(0) ]],
-    uint2 tg_pos [[ threadgroup_position_in_grid ]],
+    uint tg_pos [[ threadgroup_position_in_grid ]],
     uint  tx     [[ thread_position_in_threadgroup ]])
 {
-    int bx         = (int)tg_pos.x;
+    int bx         = (int)tg_pos;
     int block_idx  = params.block_idx;
     int block_size = params.block_size;
     int cols       = params.cols;
@@ -136,10 +136,10 @@ kernel void nw_kernel2(
     device       int*    d_matrix [[ buffer(1) ]],
     constant     NWParams& params [[ buffer(2) ]],
     threadgroup  int*    shared   [[ threadgroup(0) ]],
-    uint2 tg_pos [[ threadgroup_position_in_grid ]],
+    uint tg_pos [[ threadgroup_position_in_grid ]],
     uint  tx     [[ thread_position_in_threadgroup ]])
 {
-    int bx         = (int)tg_pos.x;
+    int bx         = (int)tg_pos;
     int block_idx  = params.block_idx;
     int num_blocks = params.num_blocks;
     int block_size = params.block_size;

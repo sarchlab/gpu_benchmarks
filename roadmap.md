@@ -59,35 +59,44 @@ Deliver a comprehensive, well-organized benchmark suite that researchers and eng
 
 ---
 
-### M7 — Tier 2: Rodinia Gaussian/LUD/PathFinder/K-Means + PolyBench BICG/MVT (current)
+### M7 — Tier 2: Rodinia Gaussian/LUD/PathFinder/K-Means + PolyBench BICG/MVT ✅ COMPLETE (cycles used: ~3)
 **Goal:** Implement 6 more Tier 2 benchmarks — 4 Rodinia + 2 PolyBench — following the same project conventions.
+**Deliverables (completed):** rodinia_gaussian, rodinia_lud, rodinia_pathfinder, rodinia_kmeans, polybench_bicg, polybench_mvt — all with HIP + Metal + Makefile + README. Merged via PR #6.
+
+---
+
+### M8 — Tier 2 Continued: SHOC SpMV/Stencil2D + PolyBench GRAMSCHMIDT/JACOBI2D + Rodinia BackProp + Parboil Histogram (current)
+**Goal:** Implement 6 more Tier 2 benchmarks, covering remaining high-priority SHOC, PolyBench, Rodinia, and Parboil kernels.
 
 **Deliverables:**
-- `tier2/rodinia_gaussian/` — Gaussian elimination with back-substitution (dense linear system solver)
-- `tier2/rodinia_lud/` — LU decomposition for dense matrices
-- `tier2/rodinia_pathfinder/` — Dynamic programming on a 2D grid
-- `tier2/rodinia_kmeans/` — K-means clustering algorithm
-- `tier2/polybench_bicg/` — BiCG sub-kernel of BiCGStab (two matrix-vector ops)
-- `tier2/polybench_mvt/` — Matrix-vector product and matrix-vector transpose
+- `tier2/shoc_spmv/` — SHOC SpMV: sparse matrix–vector multiply (CSR format, varying sparsity)
+- `tier2/shoc_stencil2d/` — SHOC 2D Stencil: 9-point stencil on 2D grid
+- `tier2/polybench_gramschmidt/` — Gram-Schmidt orthogonalization (PolyBench)
+- `tier2/polybench_jacobi2d/` — 2D Jacobi stencil iteration (PolyBench)
+- `tier2/rodinia_backprop/` — Rodinia Back Propagation: two-layer neural network training
+- `tier2/parboil_histogram/` — Parboil Histogramming: parallel histogram computation
 
-**Per-benchmark requirements (same as M4/M5/M6):**
+**Per-benchmark requirements (same as M4–M7):**
 - `<name>.hip` — HIP source (NVIDIA + AMD via hipcc)
 - `<name>.metal` + `<name>_metal.mm` — Apple Metal (compute shader + ObjC++ host)
 - `Makefile` — platform auto-detect (Darwin→metal, /opt/rocm→rocm, else→cuda)
 - `README.md` — documents build/run for all platforms
 - **Self-contained**: inline any needed utility functions; NO imports from shared directories
 
-**Branch:** `ares/m7-tier2d`
-**Cycles budget:** 5
-
-### M8 — Tier 2 Wrap-up + Tier 3 Start (planned)
-Remaining Tier 2 high-priority benchmarks (Rodinia CFD, BackProp, etc.) + begin Tier 3 library benchmarks (cuBLAS, CUTLASS wrappers).
+**Branch:** `ares/m8-tier2e`
+**Cycles budget:** 4
 
 ### M9 — Tier 3 Library Benchmarks (planned)
 cuBLAS GEMM (FP32/FP16/FP64), CUTLASS GEMM, cuFFT (1D/2D), cuSPARSE SpMV benchmark wrappers.
 
-### M10 — Tier 4 & 5: Triton + ML Workloads (planned)
-Triton-based benchmarks and representative ML training/inference workloads.
+### M9 — Tier 3 Library Benchmarks (planned)
+cuBLAS GEMM (FP32/FP16/FP64), CUTLASS GEMM, cuFFT (1D/2D), cuSPARSE SpMV benchmark wrappers.
+
+### M10 — Tier 4: Triton + BabelStream (planned)
+Triton-based benchmarks (GEMM, Softmax, LayerNorm, Flash Attention) and BabelStream cross-platform bandwidth.
+
+### M11 — Tier 5: ML Workloads (planned)
+Representative ML training/inference workloads (ResNet-50, nanoGPT, BERT fine-tuning).
 
 ### M11 — Integration & Harness (planned)
 Unified benchmark runner: make-based run-all, result collection, reporting infrastructure.
@@ -123,3 +132,5 @@ Unified benchmark runner: make-based run-all, result collection, reporting infra
 | 24 | Planning | Athena | Evaluated state, defined M6 (SHOC Sort + Parboil 3 + PolyBench 2) |
 | 25–26 | Implementation+Verification | Ares+Apollo | M6 implemented and verified; merged PR #5 |
 | 27 | Planning | Athena | Evaluated state, defined M7 (Rodinia Gaussian/LUD/PathFinder/K-Means + PolyBench BICG/MVT) |
+| 28–30 | Implementation+Verification | Ares+Apollo | M7 implemented and verified; merged PR #6 |
+| 31 | Planning | Athena | Evaluated state, defined M8 (SHOC SpMV/Stencil2D + PolyBench GRAMSCHMIDT/JACOBI2D + Rodinia BackProp + Parboil Histogram) |

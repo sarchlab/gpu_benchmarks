@@ -53,39 +53,43 @@ Deliver a comprehensive, well-organized benchmark suite that researchers and eng
 
 ---
 
-### M6 — Tier 2: SHOC Sort + Parboil SGEMM/SpMV/Stencil + PolyBench 3mm/ATAX (current)
+### M6 — Tier 2: SHOC Sort + Parboil SGEMM/SpMV/Stencil + PolyBench 3mm/ATAX ✅ COMPLETE (cycles used: ~3)
 **Goal:** Implement 6 more high-priority Tier 2 benchmarks covering SHOC, Parboil, and PolyBench suites.
+**Deliverables (completed):** shoc_sort, parboil_sgemm, parboil_spmv, parboil_stencil, polybench_3mm, polybench_atax — all with HIP + Metal + Makefile + README. Merged via PR #5.
 
-**Reference implementations:** `mgpusim-dev/repo/workloads/` — all 6 have CUDA + HIP variants.
+---
+
+### M7 — Tier 2: Rodinia Gaussian/LUD/PathFinder/K-Means + PolyBench BICG/MVT (current)
+**Goal:** Implement 6 more Tier 2 benchmarks — 4 Rodinia + 2 PolyBench — following the same project conventions.
 
 **Deliverables:**
-- `tier2/shoc_sort/` — Bitonic/radix sort on GPU (SHOC Sort)
-- `tier2/parboil_sgemm/` — Single-precision tiled GEMM (Parboil SGEMM)
-- `tier2/parboil_spmv/` — CSR sparse matrix-vector product (Parboil SpMV)
-- `tier2/parboil_stencil/` — 3D stencil computation (Parboil Stencil)
-- `tier2/polybench_3mm/` — 3 chained matrix multiplications (PolyBench 3mm)
-- `tier2/polybench_atax/` — Matrix-transpose times vector (PolyBench ATAX)
+- `tier2/rodinia_gaussian/` — Gaussian elimination with back-substitution (dense linear system solver)
+- `tier2/rodinia_lud/` — LU decomposition for dense matrices
+- `tier2/rodinia_pathfinder/` — Dynamic programming on a 2D grid
+- `tier2/rodinia_kmeans/` — K-means clustering algorithm
+- `tier2/polybench_bicg/` — BiCG sub-kernel of BiCGStab (two matrix-vector ops)
+- `tier2/polybench_mvt/` — Matrix-vector product and matrix-vector transpose
 
-**Per-benchmark requirements (same as M4/M5):**
+**Per-benchmark requirements (same as M4/M5/M6):**
 - `<name>.hip` — HIP source (NVIDIA + AMD via hipcc)
 - `<name>.metal` + `<name>_metal.mm` — Apple Metal (compute shader + ObjC++ host)
 - `Makefile` — platform auto-detect (Darwin→metal, /opt/rocm→rocm, else→cuda)
 - `README.md` — documents build/run for all platforms
 - **Self-contained**: inline any needed utility functions; NO imports from shared directories
 
-**Branch:** `ares/m6-tier2c`
+**Branch:** `ares/m7-tier2d`
 **Cycles budget:** 5
 
-### M7 — Tier 2 Remaining: Rodinia CFD/KMeans/Gaussian + PolyBench more (planned)
-Remaining Rodinia and PolyBench benchmarks; wrap up Tier 2 coverage.
+### M8 — Tier 2 Wrap-up + Tier 3 Start (planned)
+Remaining Tier 2 high-priority benchmarks (Rodinia CFD, BackProp, etc.) + begin Tier 3 library benchmarks (cuBLAS, CUTLASS wrappers).
 
-### M8 — Tier 3 Library Benchmarks (planned)
-cuBLAS GEMM, CUTLASS GEMM, cuFFT, cuSPARSE benchmark wrappers.
+### M9 — Tier 3 Library Benchmarks (planned)
+cuBLAS GEMM (FP32/FP16/FP64), CUTLASS GEMM, cuFFT (1D/2D), cuSPARSE SpMV benchmark wrappers.
 
-### M9 — Tier 4 & 5: Triton + ML Workloads (planned)
+### M10 — Tier 4 & 5: Triton + ML Workloads (planned)
 Triton-based benchmarks and representative ML training/inference workloads.
 
-### M10 — Integration & Harness (planned)
+### M11 — Integration & Harness (planned)
 Unified benchmark runner: make-based run-all, result collection, reporting infrastructure.
 
 ---
@@ -117,3 +121,5 @@ Unified benchmark runner: make-based run-all, result collection, reporting infra
 | 16 | Planning | Athena | Evaluated state, defined M5 (Rodinia BFS/NW/SRAD + PolyBench GEMM/2DConv/FDTD2D) |
 | 17–23 | Implementation+Verification | Ares+Apollo | M5 implemented and verified; merged PR #4 |
 | 24 | Planning | Athena | Evaluated state, defined M6 (SHOC Sort + Parboil 3 + PolyBench 2) |
+| 25–26 | Implementation+Verification | Ares+Apollo | M6 implemented and verified; merged PR #5 |
+| 27 | Planning | Athena | Evaluated state, defined M7 (Rodinia Gaussian/LUD/PathFinder/K-Means + PolyBench BICG/MVT) |

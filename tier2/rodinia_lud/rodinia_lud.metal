@@ -9,11 +9,11 @@
  *
  * Buffer layout for all kernels:
  *   buffer(0): float*   — NxN matrix (row-major, in-place LU result)
- *   buffer(1): LudParams — { n, offset, half }
+ *   buffer(1): LudParams — { n, offset, nhalf }
  *
- * lud_perimeter_kernel uses p.half to split threadgroups:
- *   threadgroup index < half  → row panel (right of diagonal)
- *   threadgroup index >= half → column panel (below diagonal)
+ * lud_perimeter_kernel uses p.nhalf to split threadgroups:
+ *   threadgroup index < nhalf  → row panel (right of diagonal)
+ *   threadgroup index >= nhalf → column panel (below diagonal)
  */
 
 #include <metal_stdlib>
@@ -24,7 +24,7 @@ using namespace metal;
 struct LudParams {
     int n;       // matrix dimension
     int offset;  // current diagonal block index
-    int half;    // num_blocks - offset - 1  (used by perimeter kernel)
+    int nhalf;   // num_blocks - offset - 1  (used by perimeter kernel)
 };
 
 // ---------------------------------------------------------------------------
@@ -57,7 +57,7 @@ kernel void lud_diagonal_kernel(
 
 // ---------------------------------------------------------------------------
 // Perimeter kernel
-// Dispatch: threadgroups=(2*half,1,1), threadsPerThreadgroup=(BSIZE,BSIZE,1)
+// Dispatch: threadgroups=(2*nhalf,1,1), threadsPerThreadgroup=(BSIZE,BSIZE,1)
 // ---------------------------------------------------------------------------
 kernel void lud_perimeter_kernel(
     device float*         a    [[ buffer(0) ]],
@@ -69,11 +69,11 @@ kernel void lud_perimeter_kernel(
     threadgroup float peri[BSIZE][BSIZE];
 
     int tx = (int)tid.x, ty = (int)tid.y;
-    int n = p.n, off = p.offset, half = p.half;
+    int n = p.n, off = p.offset, nhalf = p.nhalf;
 
     // is_row is uniform across the entire threadgroup (determined by tgid.x)
-    bool is_row = ((int)tgid.x < half);
-    int  idx    = is_row ? (int)tgid.x : (int)tgid.x - half;
+    bool is_row = ((int)tgid.x < nhalf);
+    int  idx    = is_row ? (int)tgid.x : (int)tgid.x - nhalf;
     int  blk    = off + idx + 1;
 
     dia[ty][tx] = a[(off * BSIZE + ty) * n + (off * BSIZE + tx)];

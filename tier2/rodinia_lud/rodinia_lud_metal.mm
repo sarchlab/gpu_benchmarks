@@ -61,7 +61,7 @@ static int parseIntParam(int argc, char **argv, const char *name, int defaultVal
 struct LudParams {
     int n;
     int offset;
-    int half;
+    int nhalf;
 };
 
 // ---------------------------------------------------------------------------

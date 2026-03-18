@@ -1,8 +1,17 @@
 # Tier 3 — Vendor Library Benchmarks
 # Invokes make in each benchmark subdirectory that has a Makefile.
 
-# Pass PLATFORM down to sub-makes
+# Platform auto-detection (mirrors root Makefile and individual benchmark Makefiles)
 PLATFORM ?= auto
+ifeq ($(PLATFORM),auto)
+  ifeq ($(shell uname -s),Darwin)
+    PLATFORM := metal
+  else ifneq ($(wildcard /opt/rocm),)
+    PLATFORM := rocm
+  else
+    PLATFORM := cuda
+  endif
+endif
 
 SUBDIRS := $(patsubst %/Makefile,%,$(wildcard */Makefile))
 

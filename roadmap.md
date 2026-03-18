@@ -65,32 +65,39 @@ Deliver a comprehensive, well-organized benchmark suite that researchers and eng
 
 ---
 
-### M8 — Tier 2 Continued: SHOC SpMV/Stencil2D + PolyBench GRAMSCHMIDT/JACOBI2D + Rodinia BackProp + Parboil Histogram (current)
+### M8 — Tier 2 Continued: SHOC SpMV/Stencil2D + PolyBench GRAMSCHMIDT/JACOBI2D + Rodinia BackProp + Parboil Histogram ✅ COMPLETE (cycles used: ~4)
 **Goal:** Implement 6 more Tier 2 benchmarks, covering remaining high-priority SHOC, PolyBench, Rodinia, and Parboil kernels.
+**Deliverables (completed):** shoc_spmv, shoc_stencil2d, polybench_gramschmidt, polybench_jacobi2d, rodinia_backprop, parboil_histogram — all with HIP + Metal + Makefile + README. Merged via PR #7.
+
+---
+
+### M9 — Tier 3: GPU Library Benchmarks (cuBLAS/rocBLAS SGEMM/DGEMM/GEMV + cuFFT/hipFFT 1D/2D + cuSPARSE/rocSPARSE SpMV) (current)
+**Goal:** Implement 6 Tier 3 library benchmarks that wrap vendor GPU math libraries. Each benchmark tests a different library category (BLAS, FFT, Sparse).
 
 **Deliverables:**
-- `tier2/shoc_spmv/` — SHOC SpMV: sparse matrix–vector multiply (CSR format, varying sparsity)
-- `tier2/shoc_stencil2d/` — SHOC 2D Stencil: 9-point stencil on 2D grid
-- `tier2/polybench_gramschmidt/` — Gram-Schmidt orthogonalization (PolyBench)
-- `tier2/polybench_jacobi2d/` — 2D Jacobi stencil iteration (PolyBench)
-- `tier2/rodinia_backprop/` — Rodinia Back Propagation: two-layer neural network training
-- `tier2/parboil_histogram/` — Parboil Histogramming: parallel histogram computation
+- `tier3/cublas_sgemm/` — FP32 GEMM: cuBLAS (NVIDIA) / rocBLAS (AMD) / MPSMatrixMultiplication (Apple)
+- `tier3/cublas_dgemm/` — FP64 GEMM: cuBLAS (NVIDIA) / rocBLAS (AMD) / cblas_dgemm Accelerate (Apple CPU — Metal has no FP64)
+- `tier3/cublas_gemv/` — FP32 GEMV: cuBLAS (NVIDIA) / rocBLAS (AMD) / MPSMatrixVectorMultiplication (Apple)
+- `tier3/cufft_1d/` — 1D complex FFT: cuFFT (NVIDIA) / hipFFT (AMD) / vDSP Accelerate (Apple)
+- `tier3/cufft_2d/` — 2D complex FFT: cuFFT (NVIDIA) / hipFFT (AMD) / vDSP Accelerate (Apple)
+- `tier3/cusparse_spmv/` — CSR SpMV: cuSPARSE (NVIDIA) / rocSPARSE (AMD) / custom Metal shader (Apple)
 
-**Per-benchmark requirements (same as M4–M7):**
-- `<name>.hip` — HIP source (NVIDIA + AMD via hipcc)
-- `<name>.metal` + `<name>_metal.mm` — Apple Metal (compute shader + ObjC++ host)
-- `Makefile` — platform auto-detect (Darwin→metal, /opt/rocm→rocm, else→cuda)
-- `README.md` — documents build/run for all platforms
-- **Self-contained**: inline any needed utility functions; NO imports from shared directories
+**Per-benchmark file structure:**
+- `<name>.hip` — HIP source with `#ifdef USE_CUBLAS / USE_ROCBLAS / USE_HIPFFT / USE_CUFFT / USE_CUSPARSE / USE_ROCSPARSE` for platform-specific library calls; compiles with `nvcc -x cu -DUSE_CUBLAS` (CUDA) or `hipcc -DUSE_ROCBLAS` (ROCm)
+- `<name>_metal.mm` — Apple ObjC++ host using MPS/Accelerate/custom Metal
+- `Makefile` — platform auto-detect (Darwin→metal, /opt/rocm→rocm, else→cuda); add correct `-D` flags and `-l` link flags per platform
+- `README.md` — build/run for all 3 platforms, output format, metric formulas
 
-**Branch:** `ares/m8-tier2e`
-**Cycles budget:** 4
+**Key technical details per benchmark:**
+- SGEMM/DGEMM/GEMV: matrix size N=4096 (MxN=4096×4096); verify first 64 elements vs CPU; report GFLOPS + GB/s
+- FFT: N=1<<22 points (4M) for 1D; N=2048×2048 for 2D; verify output vs reference; report GB/s + GFLOPS
+- SpMV: reuse shoc_spmv parameters (NUM_ROWS=16384, NNZ_PER_ROW=32); verify vs CPU; report GB/s + GFLOPS
+- Run 5 warmup + 5 timed iterations; report average; CSV output: `benchmark_name,size,time_ms,GBs,GFLOPS`
 
-### M9 — Tier 3 Library Benchmarks (planned)
-cuBLAS GEMM (FP32/FP16/FP64), CUTLASS GEMM, cuFFT (1D/2D), cuSPARSE SpMV benchmark wrappers.
+**Self-contained**: each benchmark has all code inline, no shared dependencies.
 
-### M9 — Tier 3 Library Benchmarks (planned)
-cuBLAS GEMM (FP32/FP16/FP64), CUTLASS GEMM, cuFFT (1D/2D), cuSPARSE SpMV benchmark wrappers.
+**Branch:** `ares/m9-tier3`
+**Cycles budget:** 5
 
 ### M10 — Tier 4: Triton + BabelStream (planned)
 Triton-based benchmarks (GEMM, Softmax, LayerNorm, Flash Attention) and BabelStream cross-platform bandwidth.
@@ -98,7 +105,7 @@ Triton-based benchmarks (GEMM, Softmax, LayerNorm, Flash Attention) and BabelStr
 ### M11 — Tier 5: ML Workloads (planned)
 Representative ML training/inference workloads (ResNet-50, nanoGPT, BERT fine-tuning).
 
-### M11 — Integration & Harness (planned)
+### M12 — Integration & Harness (planned)
 Unified benchmark runner: make-based run-all, result collection, reporting infrastructure.
 
 ---
@@ -134,3 +141,5 @@ Unified benchmark runner: make-based run-all, result collection, reporting infra
 | 27 | Planning | Athena | Evaluated state, defined M7 (Rodinia Gaussian/LUD/PathFinder/K-Means + PolyBench BICG/MVT) |
 | 28–30 | Implementation+Verification | Ares+Apollo | M7 implemented and verified; merged PR #6 |
 | 31 | Planning | Athena | Evaluated state, defined M8 (SHOC SpMV/Stencil2D + PolyBench GRAMSCHMIDT/JACOBI2D + Rodinia BackProp + Parboil Histogram) |
+| 32–35 | Implementation+Verification | Ares+Apollo | M8 implemented and verified; merged PR #7 |
+| 36 | Planning | Athena | Evaluated state, defined M9 (Tier 3: cuBLAS/rocBLAS SGEMM/DGEMM/GEMV + cuFFT/hipFFT 1D/2D + cuSPARSE/rocSPARSE SpMV) |

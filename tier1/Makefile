@@ -1,7 +1,7 @@
 # Tier 1 — Microbenchmarks
 # Invokes make in each benchmark subdirectory.
 
-BENCHMARKS := memory_bandwidth fp32_throughput fp64_throughput fp16_throughput cache_latency pcie_bandwidth
+BENCHMARKS := memory_bandwidth fp32_throughput fp64_throughput fp16_throughput cache_latency pcie_bandwidth tensor_core_throughput mixbench shared_mem_bandwidth
 
 # Pass PLATFORM down to sub-makes
 PLATFORM ?= auto

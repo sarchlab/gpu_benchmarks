@@ -71,7 +71,7 @@ Deliver a comprehensive, well-organized benchmark suite that researchers and eng
 
 ---
 
-### M9 — Tier 3: GPU Library Benchmarks (cuBLAS/rocBLAS SGEMM/DGEMM/GEMV + cuFFT/hipFFT 1D/2D + cuSPARSE/rocSPARSE SpMV) (current)
+### M9 — Tier 3: GPU Library Benchmarks (cuBLAS/rocBLAS SGEMM/DGEMM/GEMV + cuFFT/hipFFT 1D/2D + cuSPARSE/rocSPARSE SpMV) ✅ COMPLETE
 **Goal:** Implement 6 Tier 3 library benchmarks that wrap vendor GPU math libraries. Each benchmark tests a different library category (BLAS, FFT, Sparse).
 
 **Deliverables:**
@@ -99,8 +99,101 @@ Deliver a comprehensive, well-organized benchmark suite that researchers and eng
 **Branch:** `ares/m9-tier3`
 **Cycles budget:** 5
 
-### M10 — Tier 4: Triton + BabelStream (planned)
-Triton-based benchmarks (GEMM, Softmax, LayerNorm, Flash Attention) and BabelStream cross-platform bandwidth.
+### M10 — Tier 4: Triton Python Kernels + BabelStream (current)
+**Goal:** Implement 6 Tier 4 alternative-language benchmarks. Triton benchmarks use Python DSL targeting NVIDIA/AMD GPUs; Apple uses equivalent PyTorch MPS operations. BabelStream is a STREAM-style C++ bandwidth benchmark with CUDA/HIP/Metal backends.
+
+**Deliverables:**
+- `tier4/triton_vector_add/` — Simplest Triton kernel: element-wise vector add. NVIDIA/AMD: Triton JIT. Apple: PyTorch MPS.
+- `tier4/triton_gemm/` — Matrix multiplication in Triton with auto-tuning tile sizes. Apple: PyTorch MPS matmul.
+- `tier4/triton_softmax/` — Fused online softmax in Triton. Apple: PyTorch MPS softmax.
+- `tier4/triton_layer_norm/` — Fused layer normalization in Triton. Apple: PyTorch MPS layer_norm.
+- `tier4/triton_dropout/` — Element-wise dropout kernel in Triton (uses `tl.rand`). Apple: PyTorch MPS dropout.
+- `tier4/babelstream/` — STREAM benchmark (copy/scale/add/triad/dot) in CUDA/HIP/Metal. C++ implementation.
+
+**Per-benchmark structure (Triton benchmarks):**
+- `bench.py` — Python Triton kernel (NVIDIA/AMD). Imports: triton, torch. Output: CSV `benchmark_name,size,time_ms,GBs` or `benchmark_name,size,time_ms,TFLOPS`
+- `bench_mps.py` — Apple-specific: PyTorch MPS equivalent (same computation). Same CSV output format.
+- `Makefile` — Platform auto-detect; CUDA/ROCm → `python3 bench.py`; metal → `python3 bench_mps.py`. Includes `setup` target for `pip3 install`.
+- `README.md` — Usage, requirements, output format.
+
+**BabelStream structure:**
+- `babelstream.hip` — C++ with `#ifdef USE_CUDA` (nvcc) / `#elif defined(USE_HIP)` (hipcc). Implements 5 STREAM kernels on arrays of N=32M floats. 5 warmup + 5 timed iterations. Reports GB/s per kernel.
+- `babelstream_metal.mm` — Apple Metal compute shader for STREAM kernels. Same output.
+- `Makefile` — Same platform auto-detect pattern as Tier 3.
+- `README.md`
+
+**Triton bench.py structure:**
+```python
+import torch, triton, triton.language as tl, time, sys
+
+@triton.jit
+def kernel(...):
+    ...
+
+def benchmark(n=...):
+    # allocate tensors on cuda/hip device
+    # warmup 5 iterations
+    # timed 5 iterations using torch.cuda.Event
+    # print: "benchmark_name,size,time_ms,metric"
+
+if __name__ == "__main__":
+    benchmark()
+```
+
+**Triton bench_mps.py structure:**
+```python
+import torch, time
+
+def benchmark(n=...):
+    device = torch.device("mps")
+    # allocate tensors on MPS device
+    # warmup 5 iterations  
+    # timed 5 iterations using time.perf_counter (synchronize with .item())
+    # print same CSV format
+
+if __name__ == "__main__":
+    benchmark()
+```
+
+**Tier 4 Makefile template (Triton benchmarks):**
+```makefile
+ifndef PLATFORM
+  ifeq ($(shell uname -s),Darwin)
+    PLATFORM := metal
+  else ifneq ($(wildcard /opt/rocm),)
+    PLATFORM := rocm
+  else
+    PLATFORM := cuda
+  endif
+endif
+.PHONY: all run setup clean
+ifeq ($(PLATFORM),metal)
+all: run
+run:
+	python3 bench_mps.py
+setup:
+	pip3 install --quiet torch
+else
+all: run
+run:
+	python3 bench.py
+setup:
+	pip3 install --quiet torch triton
+endif
+clean:
+	rm -rf __pycache__ *.pyc
+```
+
+**Key technical details:**
+- Triton vector_add: N=2^26 elements (64M floats = 256MB). Measure GB/s.
+- Triton gemm: M=N=K=4096. Measure TFLOPS. Use tile size BLOCK_M=128, BLOCK_N=256, BLOCK_K=64.
+- Triton softmax: N_ROWS=4096, N_COLS=4096. Measure GB/s.
+- Triton layer_norm: N_ROWS=4096, N_COLS=4096, eps=1e-5. Measure GB/s.
+- Triton dropout: N=2^26 elements, p=0.5. Measure GB/s.
+- BabelStream: N=32*1024*1024 floats per array. Measure GB/s for copy, scale, add, triad, dot.
+
+**Branch:** `ares/m10-tier4`
+**Cycles budget:** 6
 
 ### M11 — Tier 5: ML Workloads (planned)
 Representative ML training/inference workloads (ResNet-50, nanoGPT, BERT fine-tuning).
@@ -119,6 +212,10 @@ Unified benchmark runner: make-based run-all, result collection, reporting infra
 - M4 took 3 implementation cycles (some workers timed out on first try, Ares completed remainder directly).
 - mgpusim-dev has mature CUDA+HIP refs for all Tier 2 benchmarks — always use them as starting points.
 - bench_common_hip.h must be inlined into each .hip file (no shared dependencies).
+- Tier 4 introduces Python-based benchmarks (Triton): Makefile wraps `python3 bench.py`. Apple uses PyTorch MPS fallback.
+- Triton does not support Apple Metal — use equivalent PyTorch MPS ops in `bench_mps.py`.
+- BabelStream follows the same C++ pattern as Tier 3 (`.hip` + `_metal.mm`).
+- For Python benchmark timing, use `torch.cuda.Event` for CUDA/ROCm, `time.perf_counter` for MPS.
 
 ## Cycle History
 | Cycle | Phase | Agent | Action |
@@ -143,3 +240,5 @@ Unified benchmark runner: make-based run-all, result collection, reporting infra
 | 31 | Planning | Athena | Evaluated state, defined M8 (SHOC SpMV/Stencil2D + PolyBench GRAMSCHMIDT/JACOBI2D + Rodinia BackProp + Parboil Histogram) |
 | 32–35 | Implementation+Verification | Ares+Apollo | M8 implemented and verified; merged PR #7 |
 | 36 | Planning | Athena | Evaluated state, defined M9 (Tier 3: cuBLAS/rocBLAS SGEMM/DGEMM/GEMV + cuFFT/hipFFT 1D/2D + cuSPARSE/rocSPARSE SpMV) |
+| 37–41 | Implementation+Verification | Ares+Apollo | M9 implemented (6 Tier 3 benchmarks) and verified; merged PR #8 |
+| 42 | Planning | Athena | Evaluated state, defined M10 (Tier 4: Triton Python kernels + BabelStream) |

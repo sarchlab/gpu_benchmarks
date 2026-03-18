@@ -47,39 +47,45 @@ Deliver a comprehensive, well-organized benchmark suite that researchers and eng
 
 ---
 
-### M5 — Tier 2: Rodinia BFS/NW/SRAD + PolyBench GEMM/2DConv/FDTD2D (current)
+### M5 — Tier 2: Rodinia BFS/NW/SRAD + PolyBench GEMM/2DConv/FDTD2D ✅ COMPLETE (cycles used: ~8)
 **Goal:** Implement 6 more Tier 2 benchmarks — 3 Rodinia + 3 PolyBench — following the same project conventions.
+**Deliverables (completed):** rodinia_bfs, rodinia_nw, rodinia_srad, polybench_gemm, polybench_2dconv, polybench_fdtd2d — all with HIP + Metal + Makefile + README. Merged via PR #4.
 
-**Reference implementations:** `/Users/yifan/.thebotcompany/dev/src/github.com/sarchlab/mgpusim-dev/repo/workloads/` — all 6 have CUDA + HIP variants.
+---
+
+### M6 — Tier 2: SHOC Sort + Parboil SGEMM/SpMV/Stencil + PolyBench 3mm/ATAX (current)
+**Goal:** Implement 6 more high-priority Tier 2 benchmarks covering SHOC, Parboil, and PolyBench suites.
+
+**Reference implementations:** `mgpusim-dev/repo/workloads/` — all 6 have CUDA + HIP variants.
 
 **Deliverables:**
-- `tier2/rodinia_bfs/` — Breadth-first search on a random CSR graph
-- `tier2/rodinia_nw/` — Needleman-Wunsch sequence alignment (DP)
-- `tier2/rodinia_srad/` — Speckle-Reducing Anisotropic Diffusion (image processing)
-- `tier2/polybench_gemm/` — PolyBench GEMM (C = α·A·B + β·C)
-- `tier2/polybench_2dconv/` — PolyBench 2D convolution
-- `tier2/polybench_fdtd2d/` — PolyBench FDTD 2D (finite-difference time-domain)
+- `tier2/shoc_sort/` — Bitonic/radix sort on GPU (SHOC Sort)
+- `tier2/parboil_sgemm/` — Single-precision tiled GEMM (Parboil SGEMM)
+- `tier2/parboil_spmv/` — CSR sparse matrix-vector product (Parboil SpMV)
+- `tier2/parboil_stencil/` — 3D stencil computation (Parboil Stencil)
+- `tier2/polybench_3mm/` — 3 chained matrix multiplications (PolyBench 3mm)
+- `tier2/polybench_atax/` — Matrix-transpose times vector (PolyBench ATAX)
 
-**Per-benchmark requirements (same as Tier 1 & M4):**
-- `<name>.hip` — HIP source (NVIDIA + AMD via hipcc; single source, hip/hip_runtime.h)
+**Per-benchmark requirements (same as M4/M5):**
+- `<name>.hip` — HIP source (NVIDIA + AMD via hipcc)
 - `<name>.metal` + `<name>_metal.mm` — Apple Metal (compute shader + ObjC++ host)
 - `Makefile` — platform auto-detect (Darwin→metal, /opt/rocm→rocm, else→cuda)
 - `README.md` — documents build/run for all platforms
 - **Self-contained**: inline any needed utility functions; NO imports from shared directories
 
-**Branch:** `ares/m5-tier2b`
+**Branch:** `ares/m6-tier2c`
 **Cycles budget:** 5
 
-### M6 — Tier 2 SHOC FFT/Sort/SpMV + Parboil (planned)
-Remaining high-priority Tier 2: SHOC FFT, Sort, SpMV, Stencil2D; Parboil SGEMM, SpMV, Stencil.
+### M7 — Tier 2 Remaining: Rodinia CFD/KMeans/Gaussian + PolyBench more (planned)
+Remaining Rodinia and PolyBench benchmarks; wrap up Tier 2 coverage.
 
-### M7 — Tier 3 Library Benchmarks (planned)
+### M8 — Tier 3 Library Benchmarks (planned)
 cuBLAS GEMM, CUTLASS GEMM, cuFFT, cuSPARSE benchmark wrappers.
 
-### M8 — Tier 4 & 5: Triton + ML Workloads (planned)
+### M9 — Tier 4 & 5: Triton + ML Workloads (planned)
 Triton-based benchmarks and representative ML training/inference workloads.
 
-### M9 — Integration & Harness (planned)
+### M10 — Integration & Harness (planned)
 Unified benchmark runner: make-based run-all, result collection, reporting infrastructure.
 
 ---
@@ -109,3 +115,5 @@ Unified benchmark runner: make-based run-all, result collection, reporting infra
 | 12–14 | Implementation | Ares+workers | Implemented 6 Tier 2 benchmarks (SHOC core + rodinia_hotspot) |
 | 15 | Verification | Apollo | Verified M4, merged PR #3 |
 | 16 | Planning | Athena | Evaluated state, defined M5 (Rodinia BFS/NW/SRAD + PolyBench GEMM/2DConv/FDTD2D) |
+| 17–23 | Implementation+Verification | Ares+Apollo | M5 implemented and verified; merged PR #4 |
+| 24 | Planning | Athena | Evaluated state, defined M6 (SHOC Sort + Parboil 3 + PolyBench 2) |

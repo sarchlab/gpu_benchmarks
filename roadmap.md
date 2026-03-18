@@ -169,24 +169,17 @@ clean:
 **Branch:** `ares/m11-tier5`
 **Cycles budget:** 6
 
-### M12 — Integration & Harness (current)
+### M12 — Integration & Harness ✅ COMPLETE (cycles used: 3)
 **Goal:** Build a functional benchmark runner so the 54-benchmark suite can be driven from a single command and results collected automatically.
 
-**Deliverables:**
-1. `.gitignore` — ignore compiled binaries, `__pycache__`, `results/`, `*.pyc`, `.DS_Store`
-2. `scripts/run_all.sh` — iterates all `tier*/*/Makefile` directories, runs `make run` with 5-minute per-benchmark timeout, captures stdout (CSV) to `results/<timestamp>/<tier>_<benchmark>.csv`; prints progress and errors to terminal
-3. `scripts/report.py` — reads all `.csv` files from a `results/<timestamp>/` directory, generates `results/<timestamp>/report.md` with a summary table: tier, benchmark, time_ms, metric columns; handles both 4-field and 7-field CSV formats gracefully
-4. Root `Makefile` — add `run-all` target that calls `scripts/run_all.sh`; add `report` target that calls `scripts/report.py results/<latest>/`
-5. Fix Tier 1 CSV output — all 6 Tier 1 benchmarks currently output only human-readable text; add a single CSV line to stdout: `benchmark_name,size,time_ms,metric` (matching the 4-field format used by Tier 3/4/5). Keep existing human-readable output, add CSV on a separate line.
+**Deliverables (completed):**
+1. `.gitignore` — ignores compiled binaries, `__pycache__`, `results/`, `*.pyc`, `.DS_Store`
+2. `scripts/run_all.sh` — iterates all `tier*/*/Makefile` directories, runs `make run` with 5-minute timeout, captures CSV to `results/<timestamp>/<tier>_<benchmark>.csv`
+3. `scripts/report.py` — reads CSV files, handles 4-field and 7-field formats, generates `report.md` with summary table
+4. Root `Makefile` — `run-all` and `report` targets added
+5. All 6 Tier 1 benchmarks — CSV output added to .hip and _metal.mm files
 
-**Acceptance criteria:**
-- `make run-all` runs without error on a CUDA machine (individual benchmarks may fail due to missing hardware, but the script should not crash)
-- `python3 scripts/report.py results/<timestamp>/` generates a readable markdown report
-- All 6 Tier 1 benchmarks emit at least one CSV line to stdout when run
-- `.gitignore` is committed and suppresses compiled binaries + Python cache
-
-**Branch:** `ares/m12-harness`
-**Cycles budget:** 5
+**Branch:** `ares/m12-harness` (merged to main)
 
 ### M13 — Critical Benchmark Gaps (planned)
 Add the highest-priority missing benchmarks based on Iris's evaluation:
@@ -243,3 +236,4 @@ Add the highest-priority missing benchmarks based on Iris's evaluation:
 | 49 | Planning | Athena | Evaluated state, defined M11 (Tier 5: ML workloads) |
 | 50–55 | Implementation+Verification | Ares+Apollo | M11 implemented (6 Tier 5 ML workloads); merged PR #10 |
 | 56 | Planning | Athena | Iris evaluated state (54 benchmarks, 3 CSV formats, no harness); defined M12 (Integration & Harness) |
+| 57–59 | Implementation+Verification | Ares+Apollo | M12 implemented (harness scripts, .gitignore, Tier 1 CSV); merged to main |

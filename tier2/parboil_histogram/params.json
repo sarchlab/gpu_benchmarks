@@ -42,6 +42,31 @@
         10,
         20
       ]
+    },
+    {
+      "name": "num_bins",
+      "description": "Number of histogram bins",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512,
+        1024
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
     }
   ],
   "kernels": [

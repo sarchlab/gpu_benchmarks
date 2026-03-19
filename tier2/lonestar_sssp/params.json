@@ -54,6 +54,18 @@
         5,
         10
       ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
     }
   ],
   "kernels": [

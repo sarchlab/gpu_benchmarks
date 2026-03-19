@@ -7,7 +7,30 @@
     "name": "size",
     "description": "Matrix dimension N (NxN single-precision matrix)",
     "type": "int",
-    "values": [64, 128, 256, 384, 512, 640, 768, 1024, 1280, 1536, 2048, 2560, 3072, 3584, 4096, 5120, 6144, 7168, 8192, 10240, 12288, 16384]
+    "values": [
+      64,
+      128,
+      256,
+      384,
+      512,
+      640,
+      768,
+      1024,
+      1280,
+      1536,
+      2048,
+      2560,
+      3072,
+      3584,
+      4096,
+      5120,
+      6144,
+      7168,
+      8192,
+      10240,
+      12288,
+      16384
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,8 +38,39 @@
       "description": "Timed benchmark iterations",
       "type": "int",
       "default": 5,
-      "values": [3, 5, 10, 20]
+      "values": [
+        3,
+        5,
+        10,
+        20
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
+    },
+    {
+      "name": "tile_dim",
+      "description": "Tile dimension for shared memory transpose",
+      "type": "int",
+      "default": 32,
+      "values": [
+        8,
+        16,
+        32
+      ]
     }
   ],
-  "kernels": ["transpose_naive", "transpose_optimized"]
+  "kernels": [
+    "transpose_naive",
+    "transpose_optimized"
+  ]
 }

@@ -7,7 +7,28 @@
     "name": "bodies",
     "description": "Number of bodies in the simulation",
     "type": "int",
-    "values": [256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728]
+    "values": [
+      256,
+      512,
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768,
+      65536,
+      131072,
+      262144,
+      524288,
+      1048576,
+      2097152,
+      4194304,
+      8388608,
+      16777216,
+      33554432,
+      67108864,
+      134217728
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,15 +36,39 @@
       "description": "Number of simulation timesteps per run",
       "type": "int",
       "default": 10,
-      "values": [1, 5, 10, 20, 50]
+      "values": [
+        1,
+        5,
+        10,
+        20,
+        50
+      ]
     },
     {
       "name": "iterations",
       "description": "Timed benchmark iterations",
       "type": "int",
       "default": 5,
-      "values": [3, 5, 10]
+      "values": [
+        3,
+        5,
+        10
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
     }
   ],
-  "kernels": ["nbody_kernel"]
+  "kernels": [
+    "nbody_kernel"
+  ]
 }

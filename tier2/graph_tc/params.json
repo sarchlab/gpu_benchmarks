@@ -43,6 +43,29 @@
         64,
         128
       ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
+    },
+    {
+      "name": "verify",
+      "description": "Enable CPU verification of results",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false",
+        "skip"
+      ]
     }
   ],
   "kernels": [

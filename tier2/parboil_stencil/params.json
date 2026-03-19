@@ -7,7 +7,28 @@
     "name": "grid_dim",
     "description": "Grid dimension N (NxNxN 3D grid)",
     "type": "int",
-    "values": [16, 24, 32, 40, 48, 56, 64, 72, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384, 448, 512]
+    "values": [
+      16,
+      24,
+      32,
+      40,
+      48,
+      56,
+      64,
+      72,
+      80,
+      96,
+      112,
+      128,
+      160,
+      192,
+      224,
+      256,
+      320,
+      384,
+      448,
+      512
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,15 +36,40 @@
       "description": "Stencil time-steps per timed launch",
       "type": "int",
       "default": 10,
-      "values": [5, 10, 20, 50, 100]
+      "values": [
+        5,
+        10,
+        20,
+        50,
+        100
+      ]
     },
     {
       "name": "iterations",
       "description": "Timed benchmark iterations",
       "type": "int",
       "default": 5,
-      "values": [3, 5, 10, 20]
+      "values": [
+        3,
+        5,
+        10,
+        20
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
     }
   ],
-  "kernels": ["stencil3d"]
+  "kernels": [
+    "stencil3d"
+  ]
 }

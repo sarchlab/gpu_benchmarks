@@ -434,6 +434,9 @@ clean:
 | 88 | Planning | Athena | M19 branch exists but not merged. Define combined M19+M20 milestone. |
 | 89–91 | Implementation+Verification | Ares+Apollo | M19 merged (PR #17) + M20 implemented and merged (PR #18). 19 new Tier 2 benchmarks from 8 new suites. |
 | 92 | Planning | Athena | All milestones complete. 107 benchmarks across 5 tiers. All human requests fulfilled. Project complete. |
+| 93 | Planning | Athena | New human requests: Issue #142 (complete benchmarks), #143 (parameterize), #144 (CLI tool). Reopen project. Define M21. |
+| 94–103 | Implementation+Verification | Ares+Apollo | M21 implemented: 107 params.json files + 4 design docs. Multiple fix rounds. Merged PR #19. |
+| 104 | Planning | Athena | M21 complete. Define M22 (CLI tool + Tier 1 refactoring). |
 
 ---
 
@@ -441,23 +444,29 @@ clean:
 
 New human requirements: parameterize all benchmarks, build a CLI tool for compilation/execution, record results in SQLite with kernel-level timing.
 
-### M21 — Parameter Definitions for All 107 Benchmarks + Output Protocol Design
+### M21 — Parameter Definitions for All 107 Benchmarks + Output Protocol Design ✅ COMPLETE (cycles used: ~10)
 **Goal:** Define scaling and non-scaling parameters for every benchmark; design the standardized output protocol for kernel-level timing; design the SQLite schema; design the CLI architecture.
 
-**Deliverables:**
-1. `params.json` in each of the 107 benchmark directories, specifying:
-   - `scaling_param`: {name, description, type, values: [20-30 values]}
-   - `non_scaling_params`: [{name, description, type, default, values: [3-5 values]}]
-   - `kernels`: [list of kernel names that will be individually timed]
-2. `docs/output_protocol.md` — standardized JSON-lines output format for benchmark results (kernel-level timing)
-3. `docs/cli_design.md` — CLI tool specification (commands, flags, workflow)
-4. `docs/schema.sql` — SQLite schema for results database
+**Deliverables (completed):**
+1. `params.json` in each of the 107 benchmark directories
+2. `docs/output_protocol.md` — JSON-lines output format
+3. `docs/cli_design.md` — CLI specification
+4. `docs/schema.sql` — SQLite schema
+5. `docs/params_format.md` — params.json format spec
 
-**Budget:** 5 cycles
+**Branch:** `ares/m21-milestone` (merged to main via PR #19)
 
 ### M22 — CLI Tool Implementation + Tier 1 Benchmark Refactoring (Prototype)
-**Goal:** Build the CLI tool and refactor Tier 1 (12 benchmarks) to produce kernel-level JSON output, accept parameters from CLI. End-to-end prototype.
-**Budget:** 6 cycles (estimated)
+**Goal:** Build the `gpubench` CLI tool (scripts/gpubench) and refactor all 12 Tier 1 benchmarks to:
+- Read parameters from `BENCH_PARAM_*` environment variables
+- Output JSON-lines protocol (kernel events + summary) to stdout
+- Send human-readable messages to stderr only
+- Support the full parameter sweep driven by the CLI
+
+The CLI must implement: `list`, `compile`, `run`, `info`, `validate` commands per `docs/cli_design.md`.
+End-to-end: `gpubench run --tier 1 --reps 1` should work.
+
+**Budget:** 6 cycles
 
 ### M23 — Tier 2 Benchmark Refactoring (51 benchmarks)
 **Goal:** Refactor all Tier 2 benchmarks for parameterized execution and kernel-level timing.

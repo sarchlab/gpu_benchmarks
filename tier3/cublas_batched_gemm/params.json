@@ -15,7 +15,7 @@
       "description": "Number of independent GEMM operations in the batch",
       "type": "int",
       "default": 64,
-      "values": [8, 16, 32, 64, 128, 256]
+      "values": [8, 32, 64, 128, 256]
     },
     {
       "name": "warmup",

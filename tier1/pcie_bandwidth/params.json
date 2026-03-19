@@ -23,6 +23,13 @@
       "type": "enum",
       "default": "all",
       "values": ["h2d", "d2h", "bidir", "all"]
+    },
+    {
+      "name": "use_pinned_memory",
+      "description": "Whether to use pinned (page-locked) host memory for transfers",
+      "type": "enum",
+      "default": "true",
+      "values": ["true", "false", "both"]
     }
   ],
   "kernels": []

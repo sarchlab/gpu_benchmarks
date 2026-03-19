@@ -227,7 +227,7 @@ clean:
 **Branch:** `ares/m13-gaps` (merged to main via PR #11)
 **Cycles budget:** 5
 
-### M14 — DNN Library Benchmarks + More Coverage (current)
+### M14 — DNN Library Benchmarks + More Coverage ✅ COMPLETE (cycles used: ~2)
 **Goal:** Add 6 more benchmarks covering critical DNN library primitives (cuDNN/MIOpen/MPS convolution & batch normalization), classic GPU kernel patterns (FFT, transpose), and modern ML inference workloads (LLM generation, torch.compile).
 
 **Deliverables:**
@@ -285,8 +285,49 @@ clean:
 - Self-contained, no shared dependencies
 - Update tier2/Makefile, tier3/Makefile, tier5/Makefile to include new subdirectories
 
-**Branch:** `ares/m14-dnn-expand`
+**Branch:** `ares/m14-benchmarks` (merged to main via PR #12)
 **Cycles budget:** 5
+
+### M15 — Final Polish: README + Coverage Gaps (current)
+**Goal:** Update README.md to comprehensively list all 66 benchmarks, and add 4 remaining high-value microbenchmarks/library benchmarks to reach ~70 total benchmarks.
+
+**Deliverables:**
+
+**Documentation (1 update):**
+- **README.md** — Complete rewrite to list all 66+ benchmarks organized by tier with descriptions, metrics, and build/run instructions. Update directory layout to reflect current state. Add benchmark harness usage (`make run-all`, `make report`).
+
+**Tier 1 (3 new microbenchmarks):**
+- `tier1/atomic_operations/` — Atomic throughput: `atomicAdd`, `atomicCAS`, `atomicMin` on global and shared memory. Measures throughput (ops/sec) and contention effects across varying thread counts. HIP + Metal.
+  - `.hip` file: test atomicAdd/CAS/Min on global/shared with 1024 to 1M threads
+  - `_metal.mm` + `.metal`: Metal atomic_fetch_add_explicit / atomic_compare_exchange
+  - CSV: `atomic_ops,<operation>_<memory>,<time_ms>,<Gops>`
+  
+- `tier1/warp_shuffle/` — Warp shuffle (butterfly) throughput: `__shfl_xor_sync`, `__shfl_sync`, `__shfl_up_sync`, `__shfl_down_sync`. Measures warp-level communication bandwidth.
+  - `.hip` file: repeated shuffle operations within warp
+  - `_metal.mm` + `.metal`: simd_shuffle / simd_shuffle_xor
+  - CSV: `warp_shuffle,<variant>,<time_ms>,<GBs>`
+
+- `tier1/int32_throughput/` — Integer compute throughput: INT32 multiply-add kernels maximizing integer ALU utilization.
+  - `.hip` file: MAD-heavy INT32 kernel
+  - `_metal.mm` + `.metal`: equivalent
+  - CSV: `int32_throughput,<N>,<time_ms>,<GIOPS>`
+
+**Tier 3 (1 new library benchmark):**
+- `tier3/cutlass_gemm/` — CUTLASS-style tiled GEMM implementation. Custom tiled FP32 GEMM with shared-memory staging, register tiling, and double-buffering. NOT using CUTLASS library — implements the technique inline. M=N=K=4096. Reports GFLOPS.
+  - `.hip` file: custom tiled GEMM kernel (BLOCK_M=128, BLOCK_N=128, BLOCK_K=8, thread tile 8x8)
+  - `_metal.mm` + `.metal`: equivalent Metal compute shader with threadgroup memory tiling
+  - CSV: `cutlass_gemm,<M>,<time_ms>,<GFLOPS>`
+
+**Per-benchmark conventions (same as existing):**
+- Makefile with PLATFORM auto-detect
+- README.md with build/run instructions for all 3 platforms
+- 5 warmup + 5 timed iterations, report average
+- CSV to stdout, human-readable to stderr
+- Self-contained, no shared dependencies
+- Update tier1/Makefile, tier3/Makefile for new subdirectories
+
+**Branch:** `ares/m15-polish`
+**Cycles budget:** 4
 
 ---
 
@@ -339,3 +380,5 @@ clean:
 | 60 | Planning | Athena | Evaluated state (54 benchmarks, all tiers covered, harness complete); defined M13 (6 critical benchmark gaps) |
 | 61–63 | Implementation+Verification | Ares+Apollo | M13 implemented (6 gap-fill benchmarks); merged PR #11 |
 | 64 | Planning | Athena | Evaluated state (60 benchmarks); defined M14 (DNN library + FFT/Transpose + ML inference) |
+| 65 | Implementation+Verification | Ares+Apollo | M14 implemented (6 benchmarks: shoc_fft, cuda_transpose, cudnn_conv, cudnn_batchnorm, gpt2_generate, torch_compile_bench); merged PR #12 |
+| 66 | Planning | Athena | Evaluated state (66 benchmarks); defined M15 (README update + 4 more benchmarks) |

@@ -333,10 +333,9 @@ clean:
 **Goal:** Add 6 LLM inference benchmarks covering the major inference frameworks and popular open-source models.
 **Deliverables (completed):** vllm_offline, llamacpp_bench, ollama_bench, llama_inference, deepseek_inference, qwen_inference — all with bench.py + bench_mps.py + Makefile + README. Merged via PR #14.
 
-### M17 — Tier 5: More LLM Models + Training Workloads + Diffusion
-**Goal:** Add 6 more ML benchmarks: GLM (ChatGLM), Phi/Mistral model inference, BERT fine-tuning, Whisper inference, Stable Diffusion inference, GPT-NeoX training. Covers remaining popular models from Issue #100 and adds diffusion.
-**Status:** PLANNED
-**Cycles budget:** 5
+### M17 — Tier 5: More LLM Models + Training Workloads + Diffusion ✅ COMPLETE (cycles used: ~3)
+**Goal:** Add 6 more ML benchmarks: GLM (ChatGLM), Phi/Mistral model inference, BERT fine-tuning, Whisper inference, Stable Diffusion inference. Covers remaining popular models from Issue #100 and adds diffusion.
+**Deliverables (completed):** glm_inference, phi_inference, mistral_inference, bert_finetune, whisper_inference, stable_diffusion_bench — all with bench.py + bench_mps.py + Makefile + README. Merged via PR #15.
 
 ### M18 — Tier 5: Advanced ML Patterns (MoE, RAG, CoT, Multi-Agent, SDXL)
 **Goal:** Add 6 benchmarks covering advanced ML patterns: Mixture-of-Experts inference, RAG pipeline, Chain-of-Thought reasoning, multi-agent execution, SDXL diffusion, plus one more training workload.
@@ -411,3 +410,5 @@ clean:
 | 71 | Planning | Athena | New human requests: Issue #100 (modern ML workloads) + Issue #101 (8+ more Tier 2 suites). Reopen project. |
 | 72–74 | Implementation+Verification | Ares+Apollo | M16 implemented (6 LLM benchmarks: vllm_offline, llamacpp_bench, ollama_bench, llama_inference, deepseek_inference, qwen_inference); merged PR #14 |
 | 75 | Planning | Athena | Evaluated state (76 benchmarks). M16 complete. Define M17. |
+| 76–78 | Implementation+Verification | Ares+Apollo | M17 implemented (6 benchmarks: glm_inference, phi_inference, mistral_inference, bert_finetune, whisper_inference, stable_diffusion_bench); merged PR #15 |
+| 79 | Planning | Athena | Evaluated state (82 benchmarks). M17 complete. Define M18. |

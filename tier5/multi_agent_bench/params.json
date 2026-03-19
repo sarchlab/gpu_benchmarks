@@ -1,0 +1,48 @@
+{
+  "benchmark": "multi_agent_bench",
+  "tier": 5,
+  "suite": "llm_application",
+  "description": "Multi-agent LLM pipeline benchmark. Three independent GPT-2-style agent models communicate sequentially: Agent A generates from a prompt, Agent B processes A's output, Agent C combines outputs from A and B. Measures end-to-end latency and tokens/sec for multi-agent coordination.",
+  "language": "python",
+  "scaling_param": {
+    "name": "tokens_per_agent",
+    "description": "Number of tokens each agent generates (total = 3 x tokens_per_agent)",
+    "type": "int",
+    "values": [
+      8, 12, 16, 24, 32, 48, 64, 80, 96, 112,
+      128, 160, 192, 224, 256, 320, 384, 448, 512, 640,
+      768, 896, 1024
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "prompt_len",
+      "description": "Length of the initial prompt in tokens",
+      "type": "int",
+      "default": 32,
+      "values": [8, 16, 32, 64, 128]
+    },
+    {
+      "name": "num_layers",
+      "description": "Number of transformer blocks per agent model",
+      "type": "int",
+      "default": 4,
+      "values": [2, 4, 6, 8]
+    },
+    {
+      "name": "hidden_size",
+      "description": "Hidden dimension of each agent model",
+      "type": "int",
+      "default": 256,
+      "values": [128, 256, 384, 512]
+    },
+    {
+      "name": "num_heads",
+      "description": "Number of attention heads per agent model",
+      "type": "int",
+      "default": 4,
+      "values": [4, 8, 12]
+    }
+  ],
+  "kernels": ["forward", "generate", "agent_step"]
+}

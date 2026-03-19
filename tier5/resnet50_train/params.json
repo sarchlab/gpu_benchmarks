@@ -1,0 +1,41 @@
+{
+  "benchmark": "resnet50_train",
+  "tier": 5,
+  "suite": "ml_training",
+  "description": "ResNet-50 training benchmark using SGD with momentum. Measures forward pass, loss computation, backward pass, and optimizer step per batch. Reports images/sec throughput.",
+  "language": "python",
+  "scaling_param": {
+    "name": "batch_size",
+    "description": "Number of images per training batch",
+    "type": "int",
+    "values": [
+      1, 2, 4, 6, 8, 12, 16, 24, 32, 48,
+      64, 80, 96, 112, 128, 160, 192, 224, 256, 320,
+      384, 448, 512, 640, 768, 896, 1024
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "image_size",
+      "description": "Spatial resolution of input images (height and width)",
+      "type": "int",
+      "default": 224,
+      "values": [128, 224, 256, 384]
+    },
+    {
+      "name": "num_classes",
+      "description": "Number of output classification classes",
+      "type": "int",
+      "default": 1000,
+      "values": [100, 1000, 10000]
+    },
+    {
+      "name": "learning_rate",
+      "description": "SGD learning rate",
+      "type": "float",
+      "default": 0.01,
+      "values": [0.001, 0.01, 0.1]
+    }
+  ],
+  "kernels": ["forward", "backward", "optimizer_step"]
+}

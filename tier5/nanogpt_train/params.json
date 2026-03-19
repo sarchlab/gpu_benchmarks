@@ -1,0 +1,48 @@
+{
+  "benchmark": "nanogpt_train",
+  "tier": 5,
+  "suite": "ml_training",
+  "description": "NanoGPT training benchmark with a GPT-2-style transformer. Runs forward pass, cross-entropy loss, backward pass, and AdamW optimizer step. Reports tokens/sec throughput.",
+  "language": "python",
+  "scaling_param": {
+    "name": "batch_size",
+    "description": "Number of sequences per training batch",
+    "type": "int",
+    "values": [
+      1, 2, 4, 6, 8, 12, 16, 24, 32, 48,
+      64, 80, 96, 128, 160, 192, 256, 320, 384, 448,
+      512, 640, 768, 1024
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Maximum sequence length (context window)",
+      "type": "int",
+      "default": 256,
+      "values": [64, 128, 256, 512, 1024]
+    },
+    {
+      "name": "n_layer",
+      "description": "Number of transformer blocks",
+      "type": "int",
+      "default": 6,
+      "values": [2, 4, 6, 12]
+    },
+    {
+      "name": "n_embd",
+      "description": "Embedding dimension (model width)",
+      "type": "int",
+      "default": 384,
+      "values": [128, 256, 384, 768]
+    },
+    {
+      "name": "n_head",
+      "description": "Number of attention heads",
+      "type": "int",
+      "default": 6,
+      "values": [2, 4, 6, 12]
+    }
+  ],
+  "kernels": ["forward", "backward", "optimizer_step"]
+}

@@ -1,0 +1,48 @@
+{
+  "benchmark": "cot_reasoning",
+  "tier": 5,
+  "suite": "llm_application",
+  "description": "Chain-of-Thought reasoning benchmark. A GPT-2-style model performs multi-step reasoning: 3 CoT steps (each generating tokens) followed by a final answer generation. Measures end-to-end latency and tokens/sec for multi-step inference.",
+  "language": "python",
+  "scaling_param": {
+    "name": "total_generated",
+    "description": "Total number of tokens generated across all CoT steps plus the answer (3 x cot_step_tokens + answer_tokens)",
+    "type": "int",
+    "values": [
+      32, 48, 64, 96, 128, 160, 192, 224, 256, 320,
+      384, 448, 512, 640, 768, 896, 1024, 1280, 1536,
+      1792, 2048, 2560, 3072
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "prompt_len",
+      "description": "Length of the initial prompt in tokens",
+      "type": "int",
+      "default": 32,
+      "values": [8, 16, 32, 64, 128]
+    },
+    {
+      "name": "num_layers",
+      "description": "Number of transformer blocks",
+      "type": "int",
+      "default": 6,
+      "values": [2, 4, 6, 12]
+    },
+    {
+      "name": "hidden_size",
+      "description": "Hidden dimension of the model",
+      "type": "int",
+      "default": 384,
+      "values": [256, 384, 512, 768]
+    },
+    {
+      "name": "num_heads",
+      "description": "Number of attention heads",
+      "type": "int",
+      "default": 6,
+      "values": [4, 6, 8, 12]
+    }
+  ],
+  "kernels": ["forward", "generate", "reason"]
+}

@@ -1,0 +1,376 @@
+/**
+ * cutlass_gemm.hip — CUTLASS-style tiled FP32 GEMM benchmark.
+ *
+ * Custom tiled GEMM kernel with shared-memory staging and register tiling.
+ * Self-contained — no external library dependencies.
+ *
+ * Computes: C = A * B
+ *   where A is M×K, B is K×N, C is M×N (row-major, FP32)
+ *   M = N = K = 4096
+ *
+ * Tile parameters:
+ *   Block tile:  BM×BN = 64×64
+ *   K-tile:      BK = 8
+ *   Thread tile: TM×TN = 8×8
+ *   Threads/block: (BM/TM)*(BN/TN) = 8*8 = 64
+ *
+ * Algorithm:
+ *   Each thread block computes a BM×BN tile of C.
+ *   For each K-tile:
+ *     1. Cooperatively load BM×BK of A and BK×BN of B into shared memory
+ *     2. Each thread computes a TM×TN sub-tile using register tiling
+ *        (outer-product accumulation over the BK dimension)
+ *     3. Synchronize before the next K-tile
+ *   Finally, each thread writes its TM×TN results to global memory.
+ *
+ * Warmup: 5 iterations (not timed)
+ * Timed:  5 iterations, report average
+ *
+ * Verification: compare first 8×8 corner against CPU GEMM
+ * GFLOPS = 2 * M * N * K / time_s / 1e9
+ *
+ * Output:
+ *   cutlass_gemm,<M>,<time_ms>,<GFLOPS>
+ *
+ * Build:
+ *   CUDA: nvcc -O3 -std=c++14 -x cu -DUSE_CUDA  cutlass_gemm.hip -o cutlass_gemm
+ *   ROCm: hipcc -O3 -std=c++14      -DUSE_HIP   cutlass_gemm.hip -o cutlass_gemm
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <string.h>
+
+/* -------------------------------------------------------------------------
+ * Platform abstraction
+ * ---------------------------------------------------------------------- */
+#ifdef USE_CUDA
+#  include <cuda_runtime.h>
+
+#  define GPU_CHECK(x) do {                                                  \
+       cudaError_t _e = (x);                                                 \
+       if (_e != cudaSuccess) {                                               \
+           fprintf(stderr, "CUDA error %s:%d: %s\n",                         \
+                   __FILE__, __LINE__, cudaGetErrorString(_e));               \
+           exit(1);                                                           \
+       }                                                                      \
+   } while (0)
+
+typedef cudaEvent_t gpu_event_t;
+#  define GPU_EVENT_CREATE(e)        GPU_CHECK(cudaEventCreate(&(e)))
+#  define GPU_EVENT_RECORD(e)        GPU_CHECK(cudaEventRecord(e))
+#  define GPU_EVENT_SYNC(e)          GPU_CHECK(cudaEventSynchronize(e))
+#  define GPU_EVENT_ELAPSED(a,b,ms)  GPU_CHECK(cudaEventElapsedTime(&(ms),(a),(b)))
+#  define GPU_DEVICE_SYNC()          GPU_CHECK(cudaDeviceSynchronize())
+
+#elif defined(USE_HIP)
+#  include <hip/hip_runtime.h>
+
+#  define GPU_CHECK(x) do {                                                  \
+       hipError_t _e = (x);                                                  \
+       if (_e != hipSuccess) {                                                \
+           fprintf(stderr, "HIP error %s:%d: %s\n",                          \
+                   __FILE__, __LINE__, hipGetErrorString(_e));                \
+           exit(1);                                                           \
+       }                                                                      \
+   } while (0)
+
+typedef hipEvent_t gpu_event_t;
+#  define GPU_EVENT_CREATE(e)        GPU_CHECK(hipEventCreate(&(e)))
+#  define GPU_EVENT_RECORD(e)        GPU_CHECK(hipEventRecord((e), 0))
+#  define GPU_EVENT_SYNC(e)          GPU_CHECK(hipEventSynchronize(e))
+#  define GPU_EVENT_ELAPSED(a,b,ms)  GPU_CHECK(hipEventElapsedTime(&(ms),(a),(b)))
+#  define GPU_DEVICE_SYNC()          GPU_CHECK(hipDeviceSynchronize())
+
+#else
+#  error "Define USE_CUDA or USE_HIP"
+#endif
+
+/* -------------------------------------------------------------------------
+ * Benchmark parameters
+ * ---------------------------------------------------------------------- */
+#define GEMM_M    4096
+#define GEMM_N    4096
+#define GEMM_K    4096
+#define WARMUP    5
+#define ITERS     5
+
+/* -------------------------------------------------------------------------
+ * Tile parameters
+ * ---------------------------------------------------------------------- */
+#define BM   64    /* Block tile rows */
+#define BN   64    /* Block tile cols */
+#define BK   8     /* K-tile size */
+#define TM   8     /* Thread tile rows */
+#define TN   8     /* Thread tile cols */
+
+/* Number of threads per block: (BM/TM) * (BN/TN) = 8 * 8 = 64 */
+#define NUM_THREADS  ((BM / TM) * (BN / TN))
+
+/* -------------------------------------------------------------------------
+ * Tiled GEMM kernel
+ *
+ * Each block computes a BM×BN tile of C.
+ * Threads are arranged in an (BN/TN) × (BM/TM) = 8×8 grid.
+ * Each thread computes a TM×TN = 8×8 sub-tile in registers.
+ * ---------------------------------------------------------------------- */
+__global__ void tiled_gemm_kernel(const float* __restrict__ A,
+                                  const float* __restrict__ B,
+                                  float*       __restrict__ C,
+                                  int M, int N, int K)
+{
+    /* Shared memory for A and B tiles */
+    __shared__ float smA[BM][BK];
+    __shared__ float smB[BK][BN];
+
+    /* Block position in the output grid */
+    int bx = blockIdx.x;   /* column block index */
+    int by = blockIdx.y;   /* row block index */
+
+    /* Thread position within the 8×8 thread tile grid */
+    int tx = threadIdx.x % (BN / TN);   /* 0..7 */
+    int ty = threadIdx.x / (BN / TN);   /* 0..7 */
+
+    /* Accumulator registers — each thread computes TM×TN outputs */
+    float regC[TM][TN];
+    #pragma unroll
+    for (int i = 0; i < TM; i++)
+        #pragma unroll
+        for (int j = 0; j < TN; j++)
+            regC[i][j] = 0.0f;
+
+    /* Loop over K dimension in tiles of BK */
+    for (int bk = 0; bk < K; bk += BK) {
+
+        /* ---- Load A tile [BM × BK] into shared memory ---- */
+        /* 512 elements / 64 threads = 8 elements per thread */
+        #pragma unroll
+        for (int load = 0; load < (BM * BK) / NUM_THREADS; load++) {
+            int idx   = load * NUM_THREADS + threadIdx.x;
+            int smRow = idx / BK;
+            int smCol = idx % BK;
+            int gRow  = by * BM + smRow;
+            int gCol  = bk + smCol;
+            smA[smRow][smCol] = (gRow < M && gCol < K)
+                                ? A[(size_t)gRow * K + gCol]
+                                : 0.0f;
+        }
+
+        /* ---- Load B tile [BK × BN] into shared memory ---- */
+        /* 512 elements / 64 threads = 8 elements per thread */
+        #pragma unroll
+        for (int load = 0; load < (BK * BN) / NUM_THREADS; load++) {
+            int idx   = load * NUM_THREADS + threadIdx.x;
+            int smRow = idx / BN;
+            int smCol = idx % BN;
+            int gRow  = bk + smRow;
+            int gCol  = bx * BN + smCol;
+            smB[smRow][smCol] = (gRow < K && gCol < N)
+                                ? B[(size_t)gRow * N + gCol]
+                                : 0.0f;
+        }
+
+        __syncthreads();
+
+        /* ---- Compute thread tile via outer-product accumulation ---- */
+        #pragma unroll
+        for (int kk = 0; kk < BK; kk++) {
+            /* Load A column and B row into registers */
+            float regA[TM], regB[TN];
+            #pragma unroll
+            for (int i = 0; i < TM; i++)
+                regA[i] = smA[ty * TM + i][kk];
+            #pragma unroll
+            for (int j = 0; j < TN; j++)
+                regB[j] = smB[kk][tx * TN + j];
+
+            /* Outer product */
+            #pragma unroll
+            for (int i = 0; i < TM; i++)
+                #pragma unroll
+                for (int j = 0; j < TN; j++)
+                    regC[i][j] += regA[i] * regB[j];
+        }
+
+        __syncthreads();
+    }
+
+    /* ---- Write results to global memory ---- */
+    #pragma unroll
+    for (int i = 0; i < TM; i++) {
+        int gRow = by * BM + ty * TM + i;
+        if (gRow < M) {
+            #pragma unroll
+            for (int j = 0; j < TN; j++) {
+                int gCol = bx * BN + tx * TN + j;
+                if (gCol < N)
+                    C[(size_t)gRow * N + gCol] = regC[i][j];
+            }
+        }
+    }
+}
+
+/* -------------------------------------------------------------------------
+ * CPU reference GEMM — only for the small verification corner
+ *
+ * A: vm×vk (row-major, full-width stride K)
+ * B: vk×vn (row-major, full-width stride N)
+ * C: vm×vn (row-major, stride vn)
+ * ---------------------------------------------------------------------- */
+static void cpu_gemm(int vm, int vn, int vk,
+                     const float * __restrict__ A,
+                     const float * __restrict__ B,
+                     float       * __restrict__ C)
+{
+    for (int i = 0; i < vm; i++) {
+        for (int j = 0; j < vn; j++) {
+            float s = 0.0f;
+            for (int p = 0; p < vk; p++)
+                s += A[(size_t)i * GEMM_K + p] * B[(size_t)p * GEMM_N + j];
+            C[i * vn + j] = s;
+        }
+    }
+}
+
+/* -------------------------------------------------------------------------
+ * main
+ * ---------------------------------------------------------------------- */
+int main(void)
+{
+    const int M = GEMM_M;
+    const int N = GEMM_N;
+    const int K = GEMM_K;
+
+    /* ------------------------------------------------------------------ */
+    /* Allocate and initialize host matrices                               */
+    /* ------------------------------------------------------------------ */
+    float *hA = (float *)malloc((size_t)M * K * sizeof(float));
+    float *hB = (float *)malloc((size_t)K * N * sizeof(float));
+    float *hC = (float *)malloc((size_t)M * N * sizeof(float));
+
+    if (!hA || !hB || !hC) {
+        fprintf(stderr, "Host malloc failed\n");
+        return 1;
+    }
+
+    srand(42);
+    for (size_t i = 0; i < (size_t)M * K; i++)
+        hA[i] = (float)rand() / (float)RAND_MAX;
+    for (size_t i = 0; i < (size_t)K * N; i++)
+        hB[i] = (float)rand() / (float)RAND_MAX;
+    memset(hC, 0, (size_t)M * N * sizeof(float));
+
+    fprintf(stderr, "cutlass_gemm: M=%d N=%d K=%d  BM=%d BN=%d BK=%d TM=%d TN=%d\n",
+            M, N, K, BM, BN, BK, TM, TN);
+    fprintf(stderr, "  threads/block=%d  grid=(%d, %d)\n\n",
+            NUM_THREADS, N / BN, M / BM);
+
+    /* ------------------------------------------------------------------ */
+    /* Device memory                                                       */
+    /* ------------------------------------------------------------------ */
+    float *dA, *dB, *dC;
+
+#ifdef USE_CUDA
+    GPU_CHECK(cudaMalloc(&dA, (size_t)M * K * sizeof(float)));
+    GPU_CHECK(cudaMalloc(&dB, (size_t)K * N * sizeof(float)));
+    GPU_CHECK(cudaMalloc(&dC, (size_t)M * N * sizeof(float)));
+    GPU_CHECK(cudaMemcpy(dA, hA, (size_t)M * K * sizeof(float),
+                         cudaMemcpyHostToDevice));
+    GPU_CHECK(cudaMemcpy(dB, hB, (size_t)K * N * sizeof(float),
+                         cudaMemcpyHostToDevice));
+    GPU_CHECK(cudaMemset(dC, 0, (size_t)M * N * sizeof(float)));
+#elif defined(USE_HIP)
+    GPU_CHECK(hipMalloc(&dA, (size_t)M * K * sizeof(float)));
+    GPU_CHECK(hipMalloc(&dB, (size_t)K * N * sizeof(float)));
+    GPU_CHECK(hipMalloc(&dC, (size_t)M * N * sizeof(float)));
+    GPU_CHECK(hipMemcpy(dA, hA, (size_t)M * K * sizeof(float),
+                        hipMemcpyHostToDevice));
+    GPU_CHECK(hipMemcpy(dB, hB, (size_t)K * N * sizeof(float),
+                        hipMemcpyHostToDevice));
+    GPU_CHECK(hipMemset(dC, 0, (size_t)M * N * sizeof(float)));
+#endif
+
+    /* ------------------------------------------------------------------ */
+    /* Kernel launch configuration                                         */
+    /* ------------------------------------------------------------------ */
+    dim3 block(NUM_THREADS);              /* 64 threads */
+    dim3 grid(N / BN, M / BM);           /* (64, 64)   */
+
+    /* ------------------------------------------------------------------ */
+    /* Warmup                                                              */
+    /* ------------------------------------------------------------------ */
+    for (int i = 0; i < WARMUP; i++) {
+        tiled_gemm_kernel<<<grid, block>>>(dA, dB, dC, M, N, K);
+    }
+    GPU_DEVICE_SYNC();
+
+    /* ------------------------------------------------------------------ */
+    /* Timed iterations                                                    */
+    /* ------------------------------------------------------------------ */
+    gpu_event_t ev_start, ev_stop;
+    GPU_EVENT_CREATE(ev_start);
+    GPU_EVENT_CREATE(ev_stop);
+
+    GPU_EVENT_RECORD(ev_start);
+    for (int i = 0; i < ITERS; i++) {
+        tiled_gemm_kernel<<<grid, block>>>(dA, dB, dC, M, N, K);
+    }
+    GPU_EVENT_RECORD(ev_stop);
+    GPU_EVENT_SYNC(ev_stop);
+
+    float total_ms = 0.0f;
+    GPU_EVENT_ELAPSED(ev_start, ev_stop, total_ms);
+    float avg_ms = total_ms / (float)ITERS;
+
+    /* ------------------------------------------------------------------ */
+    /* Copy result back                                                    */
+    /* ------------------------------------------------------------------ */
+#ifdef USE_CUDA
+    GPU_CHECK(cudaMemcpy(hC, dC, (size_t)M * N * sizeof(float),
+                         cudaMemcpyDeviceToHost));
+    cudaFree(dA); cudaFree(dB); cudaFree(dC);
+#elif defined(USE_HIP)
+    GPU_CHECK(hipMemcpy(hC, dC, (size_t)M * N * sizeof(float),
+                        hipMemcpyDeviceToHost));
+    hipFree(dA); hipFree(dB); hipFree(dC);
+#endif
+
+    /* ------------------------------------------------------------------ */
+    /* Verify first 8×8 corner vs CPU GEMM                                */
+    /* ------------------------------------------------------------------ */
+    const int VN = 8;
+    float *cpuC = (float *)calloc((size_t)VN * VN, sizeof(float));
+    cpu_gemm(VN, VN, K, hA, hB, cpuC);
+
+    int pass = 1;
+    for (int i = 0; i < VN && pass; i++) {
+        for (int j = 0; j < VN && pass; j++) {
+            float ref = cpuC[i * VN + j];
+            float got = hC[(size_t)i * N + j];
+            float err = fabsf(ref - got) / (fabsf(ref) + 1e-6f);
+            if (err > 1e-3f) {
+                fprintf(stderr, "MISMATCH at [%d,%d]: ref=%.6f got=%.6f rel=%.4e\n",
+                        i, j, ref, got, err);
+                pass = 0;
+            }
+        }
+    }
+    free(cpuC);
+    fprintf(stderr, "Verification (first %d×%d corner): %s\n", VN, VN,
+            pass ? "PASS" : "FAIL");
+
+    /* ------------------------------------------------------------------ */
+    /* Report                                                              */
+    /* ------------------------------------------------------------------ */
+    double gflops = 2.0 * M * N * K / (avg_ms / 1000.0) / 1e9;
+
+    /* CSV line */
+    printf("cutlass_gemm,%d,%.3f,%.2f\n", M, avg_ms, gflops);
+    /* Human-readable */
+    fprintf(stderr, "cutlass_gemm  M=%d N=%d K=%d  time_ms=%.3f  GFLOPS=%.2f\n",
+            M, N, K, avg_ms, gflops);
+
+    free(hA); free(hB); free(hC);
+    return pass ? 0 : 1;
+}

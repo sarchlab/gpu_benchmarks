@@ -1,0 +1,242 @@
+// chai_hsto.hip — Histogram benchmark (Chai collaborative computing pattern)
+//
+// Computes a 256-bin histogram of N random bytes using shared memory
+// privatization and global reduction.
+//
+// Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
+//
+// Usage:
+//   ./chai_hsto [--size N] [--iterations I]
+//
+//   --size N         Number of input bytes (default: 16777216 = 16M)
+//   --iterations I   Timed iterations (default: 5)
+//
+// Output (stdout): CSV — chai_hsto,<N>,<time_ms>,<GBs>
+// Output (stderr): human-readable results
+
+#include <hip/hip_runtime.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <cmath>
+#include <vector>
+
+// ---------------------------------------------------------------------------
+// Error-checking macro
+// ---------------------------------------------------------------------------
+
+#define HIP_CHECK(cmd)                                                         \
+    do {                                                                       \
+        hipError_t _e = (cmd);                                                 \
+        if (_e != hipSuccess) {                                                \
+            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
+                    hipGetErrorString(_e), __FILE__, __LINE__);                \
+            exit(1);                                                           \
+        }                                                                      \
+    } while (0)
+
+// ---------------------------------------------------------------------------
+// Argument parsing
+// ---------------------------------------------------------------------------
+
+static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
+    for (int i = 1; i < argc - 1; ++i) {
+        if (strcmp(argv[i], name) == 0) {
+            int v = atoi(argv[i + 1]);
+            if (v > 0) return v;
+            break;
+        }
+    }
+    return defaultVal;
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+#define NUM_BINS 256
+#define BLOCK_SIZE 256
+
+// ---------------------------------------------------------------------------
+// Kernel: histogram with shared memory privatization
+//
+// Each block builds a private histogram in shared memory, then atomically
+// adds it to the global histogram.
+// ---------------------------------------------------------------------------
+
+__global__ void histogram_kernel(
+    const unsigned char* __restrict__ data,
+    unsigned int* __restrict__ histo,
+    int N)
+{
+    // Shared memory histogram for this block
+    __shared__ unsigned int s_histo[NUM_BINS];
+
+    int tid = threadIdx.x;
+
+    // Initialize shared histogram to zero
+    if (tid < NUM_BINS) {
+        s_histo[tid] = 0;
+    }
+    __syncthreads();
+
+    // Each thread processes multiple elements (grid-stride loop)
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+
+    for (int i = idx; i < N; i += stride) {
+        atomicAdd(&s_histo[data[i]], 1u);
+    }
+    __syncthreads();
+
+    // Reduce shared histogram to global histogram
+    if (tid < NUM_BINS) {
+        if (s_histo[tid] > 0) {
+            atomicAdd(&histo[tid], s_histo[tid]);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CPU reference: histogram
+// ---------------------------------------------------------------------------
+
+static void histogram_cpu(const unsigned char* data, unsigned int* histo, int N) {
+    memset(histo, 0, NUM_BINS * sizeof(unsigned int));
+    for (int i = 0; i < N; ++i) {
+        histo[data[i]]++;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+int main(int argc, char** argv) {
+    int N     = parseIntParam(argc, argv, "--size", 16777216);  // 16M
+    int iters = parseIntParam(argc, argv, "--iterations", 5);
+
+    size_t data_bytes  = (size_t)N * sizeof(unsigned char);
+    size_t histo_bytes = NUM_BINS * sizeof(unsigned int);
+
+    // Print device info
+    int device_id = 0;
+    HIP_CHECK(hipGetDevice(&device_id));
+    hipDeviceProp_t prop;
+    HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
+    fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
+    fprintf(stderr, "Histogram  |  N: %d (%.2f MB)  |  Bins: %d  |  "
+            "Iterations: 5 warmup + %d timed\n\n",
+            N, (double)data_bytes / (1024.0 * 1024.0), NUM_BINS, iters);
+
+    // Generate random input data (deterministic seed)
+    unsigned char* h_data = (unsigned char*)malloc(data_bytes);
+    unsigned int seed = 12345;
+    for (int i = 0; i < N; ++i) {
+        seed = seed * 1103515245u + 12345u;
+        h_data[i] = (unsigned char)((seed >> 16) & 0xFF);
+    }
+
+    // Host histogram
+    unsigned int* h_histo = (unsigned int*)malloc(histo_bytes);
+
+    // Device allocation
+    unsigned char* d_data;
+    unsigned int* d_histo;
+    HIP_CHECK(hipMalloc(&d_data, data_bytes));
+    HIP_CHECK(hipMalloc(&d_histo, histo_bytes));
+
+    // Copy input data to device
+    HIP_CHECK(hipMemcpy(d_data, h_data, data_bytes, hipMemcpyHostToDevice));
+
+    // Kernel launch config
+    int blockSize = BLOCK_SIZE;
+    int gridSize  = (N + blockSize - 1) / blockSize;
+    // Cap grid size to avoid too many blocks
+    if (gridSize > 1024) gridSize = 1024;
+
+    auto run_histo = [&]() {
+        HIP_CHECK(hipMemset(d_histo, 0, histo_bytes));
+        hipLaunchKernelGGL(histogram_kernel, dim3(gridSize), dim3(blockSize),
+                           0, 0, d_data, d_histo, N);
+    };
+
+    // -------------------------------------------------------------------
+    // Warmup (5 iterations)
+    // -------------------------------------------------------------------
+    for (int w = 0; w < 5; ++w) {
+        run_histo();
+        HIP_CHECK(hipDeviceSynchronize());
+    }
+
+    // -------------------------------------------------------------------
+    // Timed iterations
+    // -------------------------------------------------------------------
+    hipEvent_t evStart, evStop;
+    HIP_CHECK(hipEventCreate(&evStart));
+    HIP_CHECK(hipEventCreate(&evStop));
+
+    std::vector<double> times((size_t)iters);
+    for (int i = 0; i < iters; ++i) {
+        HIP_CHECK(hipEventRecord(evStart, 0));
+        run_histo();
+        HIP_CHECK(hipEventRecord(evStop, 0));
+        HIP_CHECK(hipEventSynchronize(evStop));
+
+        float ms = 0.0f;
+        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
+        times[i] = (double)ms;
+    }
+
+    HIP_CHECK(hipEventDestroy(evStart));
+    HIP_CHECK(hipEventDestroy(evStop));
+
+    // Compute average time
+    double sum = 0.0;
+    for (int i = 0; i < iters; ++i) sum += times[i];
+    double avg_ms = sum / iters;
+
+    // GB/s = N * sizeof(uint8_t) / time_s / 1e9
+    double gbs = (double)N * 1.0 / (avg_ms * 1e-3) / 1e9;
+
+    // CSV output to stdout
+    printf("chai_hsto,%d,%.4f,%.4f\n", N, avg_ms, gbs);
+
+    // Human-readable output to stderr
+    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
+    fprintf(stderr, "Throughput:   %.4f GB/s\n", gbs);
+
+    // -------------------------------------------------------------------
+    // Verification (compare GPU histogram against CPU reference)
+    // -------------------------------------------------------------------
+    {
+        HIP_CHECK(hipMemcpy(h_histo, d_histo, histo_bytes, hipMemcpyDeviceToHost));
+
+        unsigned int cpu_histo[NUM_BINS];
+        histogram_cpu(h_data, cpu_histo, N);
+
+        int errors = 0;
+        for (int b = 0; b < NUM_BINS; ++b) {
+            if (h_histo[b] != cpu_histo[b]) {
+                if (errors < 10) {
+                    fprintf(stderr, "Mismatch at bin %d: GPU=%u CPU=%u\n",
+                            b, h_histo[b], cpu_histo[b]);
+                }
+                errors++;
+            }
+        }
+
+        if (errors > 0)
+            fprintf(stderr, "FAIL: %d bin errors out of %d bins\n",
+                    errors, NUM_BINS);
+        else
+            fprintf(stderr, "PASS\n");
+    }
+
+    HIP_CHECK(hipFree(d_data));
+    HIP_CHECK(hipFree(d_histo));
+    free(h_data);
+    free(h_histo);
+
+    return 0;
+}

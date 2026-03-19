@@ -15,7 +15,7 @@ This suite is organized into five tiers of increasing complexity and scope, allo
 | Tier | Name | Description |
 |------|------|-------------|
 | **Tier 1** | Microbenchmarks | Low-level hardware characterization: memory bandwidth, compute throughput (FP32/FP64/FP16/INT32), cache latency, PCIe transfer rates, atomic ops, warp shuffles |
-| **Tier 2** | Application Benchmarks | Classic GPU benchmark suites: SHOC, PolyBench-GPU, Rodinia, Parboil, HeteroMark, CUDA SDK Extended, Tango, NPB-GPU |
+| **Tier 2** | Application Benchmarks | Classic GPU benchmark suites: SHOC, PolyBench-GPU, Rodinia, Parboil, HeteroMark, CUDA SDK Extended, Tango, NPB-GPU, Altis, Lonestar GPU, Graph Analytics, Chai |
 | **Tier 3** | Library Benchmarks | Vendor and third-party library kernels: cuBLAS, CUTLASS, cuFFT, cuSPARSE, cuDNN |
 | **Tier 4** | Alternative Languages | Non-CUDA implementations: Triton, BabelStream |
 | **Tier 5** | ML Workloads | End-to-end machine learning training/inference and LLM benchmarks: ResNet-50, BERT, GPT-2, ViT, NanoGPT, SDPA, torch.compile, vLLM, llama.cpp, Ollama, LLaMA, DeepSeek, Qwen, GLM, Phi, Mistral, BERT fine-tune, Whisper, Stable Diffusion, MoE, RAG, CoT, Multi-Agent, SDXL, GPT-NeoX |
@@ -42,7 +42,7 @@ gpu_benchmarks/
 │   ├── shared_mem_bandwidth/
 │   ├── atomic_operations/
 │   └── warp_shuffle/
-├── tier2/                          # Application benchmarks (42)
+├── tier2/                          # Application benchmarks (51)
 │   ├── Makefile
 │   ├── shoc_devicememory/
 │   ├── shoc_fft/
@@ -85,7 +85,16 @@ gpu_benchmarks/
 │   ├── tango_blackscholes/
 │   ├── tango_binomial_options/
 │   ├── npb_ep/
-│   └── npb_is/
+│   ├── npb_is/
+│   ├── altis_cfd/
+│   ├── altis_particlefilter/
+│   ├── altis_raytracing/
+│   ├── lonestar_sssp/
+│   ├── lonestar_bh/
+│   ├── graph_pr/
+│   ├── graph_tc/
+│   ├── chai_hsto/
+│   └── chai_cedd/
 ├── tier3/                          # Library benchmarks (11)
 │   ├── Makefile
 │   ├── cublas_sgemm/
@@ -208,6 +217,15 @@ gpu_benchmarks/
 | Tango | `tango_binomial_options` | Binomial option pricing |
 | NPB-GPU | `npb_ep` | Embarrassingly Parallel (EP) |
 | NPB-GPU | `npb_is` | Integer Sort (IS) |
+| Altis | `altis_cfd` | Computational Fluid Dynamics (Euler solver) |
+| Altis | `altis_particlefilter` | Particle Filter (SIR Monte Carlo localization) |
+| Altis | `altis_raytracing` | Simple ray tracing (Phong shading) |
+| Lonestar GPU | `lonestar_sssp` | Single-Source Shortest Path (Bellman-Ford) |
+| Lonestar GPU | `lonestar_bh` | Barnes-Hut N-body (2D quadtree approximation) |
+| Graph Analytics | `graph_pr` | PageRank (pull-based iterative) |
+| Graph Analytics | `graph_tc` | Triangle Counting (sorted adjacency intersection) |
+| Chai | `chai_hsto` | Histogram (shared memory privatization) |
+| Chai | `chai_cedd` | Canny Edge Detection (5-stage pipeline) |
 
 ---
 

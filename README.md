@@ -14,11 +14,11 @@ This suite is organized into five tiers of increasing complexity and scope, allo
 
 | Tier | Name | Description |
 |------|------|-------------|
-| **Tier 1** | Microbenchmarks | Low-level hardware characterization: memory bandwidth, compute throughput (FP32/FP64/FP16), cache latency, PCIe transfer rates |
+| **Tier 1** | Microbenchmarks | Low-level hardware characterization: memory bandwidth, compute throughput (FP32/FP64/FP16/INT32), cache latency, PCIe transfer rates, atomic ops, warp shuffles |
 | **Tier 2** | Application Benchmarks | Classic GPU benchmark suites: SHOC, PolyBench-GPU, Rodinia, Parboil |
 | **Tier 3** | Library Benchmarks | Vendor and third-party library kernels: cuBLAS, CUTLASS, cuFFT, cuSPARSE, cuDNN |
-| **Tier 4** | Alternative Languages | Non-CUDA implementations: Triton, OpenCL, HIP, SYCL |
-| **Tier 5** | ML Workloads | End-to-end machine learning training/inference: MLPerf, torchbenchmark, model-specific workloads |
+| **Tier 4** | Alternative Languages | Non-CUDA implementations: Triton, BabelStream |
+| **Tier 5** | ML Workloads | End-to-end machine learning training/inference: ResNet-50, BERT, GPT-2, ViT, NanoGPT, SDPA, torch.compile |
 
 ---
 
@@ -26,35 +26,197 @@ This suite is organized into five tiers of increasing complexity and scope, allo
 
 ```
 gpu_benchmarks/
-├── Makefile                # Root build file
-├── README.md               # This file
-├── tier1/                  # Microbenchmarks
+├── Makefile                        # Root build file
+├── README.md                       # This file
+├── tier1/                          # Microbenchmarks (12)
 │   ├── Makefile
 │   ├── memory_bandwidth/
 │   ├── fp32_throughput/
 │   ├── fp64_throughput/
 │   ├── fp16_throughput/
+│   ├── int32_throughput/
 │   ├── cache_latency/
-│   └── pcie_bandwidth/
-├── tier2/                  # Application benchmarks
-├── tier3/                  # Library benchmarks
-├── tier4/                  # Alternative language benchmarks
-├── tier5/                  # ML workloads
-└── scripts/                # Helper scripts (run-all, report generation, etc.)
+│   ├── pcie_bandwidth/
+│   ├── tensor_core_throughput/
+│   ├── mixbench/
+│   ├── shared_mem_bandwidth/
+│   ├── atomic_operations/
+│   └── warp_shuffle/
+├── tier2/                          # Application benchmarks (32)
+│   ├── Makefile
+│   ├── shoc_devicememory/
+│   ├── shoc_fft/
+│   ├── shoc_gemm/
+│   ├── shoc_reduction/
+│   ├── shoc_scan/
+│   ├── shoc_sort/
+│   ├── shoc_spmv/
+│   ├── shoc_stencil2d/
+│   ├── shoc_triad/
+│   ├── polybench_2dconv/
+│   ├── polybench_3mm/
+│   ├── polybench_atax/
+│   ├── polybench_bicg/
+│   ├── polybench_fdtd2d/
+│   ├── polybench_gemm/
+│   ├── polybench_gramschmidt/
+│   ├── polybench_jacobi2d/
+│   ├── polybench_mvt/
+│   ├── rodinia_backprop/
+│   ├── rodinia_bfs/
+│   ├── rodinia_gaussian/
+│   ├── rodinia_hotspot/
+│   ├── rodinia_kmeans/
+│   ├── rodinia_lud/
+│   ├── rodinia_nw/
+│   ├── rodinia_pathfinder/
+│   ├── rodinia_srad/
+│   ├── parboil_histogram/
+│   ├── parboil_sgemm/
+│   ├── parboil_spmv/
+│   ├── parboil_stencil/
+│   └── cuda_transpose/
+├── tier3/                          # Library benchmarks (11)
+│   ├── Makefile
+│   ├── cublas_sgemm/
+│   ├── cublas_dgemm/
+│   ├── cublas_hgemm/
+│   ├── cublas_gemv/
+│   ├── cublas_batched_gemm/
+│   ├── cudnn_conv/
+│   ├── cudnn_batchnorm/
+│   ├── cufft_1d/
+│   ├── cufft_2d/
+│   ├── cusparse_spmv/
+│   └── cutlass_gemm/
+├── tier4/                          # Alternative language benchmarks (7)
+│   ├── Makefile
+│   ├── babelstream/
+│   ├── triton_vector_add/
+│   ├── triton_gemm/
+│   ├── triton_softmax/
+│   ├── triton_layer_norm/
+│   ├── triton_dropout/
+│   └── triton_flash_attention/
+├── tier5/                          # ML workloads (8)
+│   ├── Makefile
+│   ├── resnet50_train/
+│   ├── resnet50_infer/
+│   ├── bert_inference/
+│   ├── nanogpt_train/
+│   ├── gpt2_generate/
+│   ├── vit_inference/
+│   ├── sdpa_bench/
+│   └── torch_compile_bench/
+└── scripts/                        # Helper scripts
+    ├── run_all.sh
+    └── report.py
 ```
 
 ---
 
-## Tier 1 Microbenchmarks
+## Tier 1 — Microbenchmarks
 
 | Benchmark | Metric | Description |
 |-----------|--------|-------------|
-| `memory_bandwidth` | GB/s | Global memory bandwidth (H2D, D2H, device-to-device) |
-| `fp32_throughput` | GFLOPS | Single-precision floating-point throughput |
-| `fp64_throughput` | GFLOPS | Double-precision floating-point throughput |
-| `fp16_throughput` | GFLOPS | Half-precision (FP16/BF16) floating-point throughput |
-| `cache_latency` | ns / cycles | L1/L2 cache latency via pointer-chasing |
-| `pcie_bandwidth` | GB/s | PCIe transfer bandwidth between host and device |
+| `memory_bandwidth` | GB/s | Global memory bandwidth (H2D, D2H, D2D) |
+| `fp32_throughput` | GFLOPS | Single-precision FP32 FMA throughput |
+| `fp64_throughput` | GFLOPS | Double-precision FP64 FMA throughput |
+| `fp16_throughput` | GFLOPS | Half-precision FP16 FMA throughput |
+| `int32_throughput` | GIOPS | Integer INT32 multiply-add throughput |
+| `cache_latency` | ns | L1/L2/global cache latency via pointer-chasing |
+| `pcie_bandwidth` | GB/s | PCIe/Thunderbolt host-device transfer bandwidth |
+| `tensor_core_throughput` | TFLOPS | Tensor core / matrix FMA throughput |
+| `mixbench` | GFLOPS/GB/s | Compute-memory roofline sweep |
+| `shared_mem_bandwidth` | GB/s | Shared/threadgroup memory bandwidth |
+| `atomic_operations` | Gops/s | Atomic operation throughput (Add/CAS/Min) |
+| `warp_shuffle` | GB/s | Warp/SIMD shuffle throughput |
+
+---
+
+## Tier 2 — Application Benchmarks
+
+| Suite | Benchmark | Description |
+|-------|-----------|-------------|
+| SHOC | `shoc_devicememory` | Device memory read/write bandwidth |
+| SHOC | `shoc_fft` | Fast Fourier Transform |
+| SHOC | `shoc_gemm` | Dense matrix multiplication |
+| SHOC | `shoc_reduction` | Parallel reduction |
+| SHOC | `shoc_scan` | Parallel prefix sum (scan) |
+| SHOC | `shoc_sort` | Parallel sort |
+| SHOC | `shoc_spmv` | Sparse matrix-vector multiply |
+| SHOC | `shoc_stencil2d` | 2D stencil computation |
+| SHOC | `shoc_triad` | Stream triad (a = b + α·c) |
+| PolyBench | `polybench_2dconv` | 2D convolution |
+| PolyBench | `polybench_3mm` | Three matrix multiplications |
+| PolyBench | `polybench_atax` | Matrix transpose and vector multiply |
+| PolyBench | `polybench_bicg` | BiCG sub-kernel of BiCGStab solver |
+| PolyBench | `polybench_fdtd2d` | 2D Finite-Difference Time-Domain |
+| PolyBench | `polybench_gemm` | General matrix multiplication |
+| PolyBench | `polybench_gramschmidt` | Gram-Schmidt decomposition |
+| PolyBench | `polybench_jacobi2d` | 2D Jacobi stencil |
+| PolyBench | `polybench_mvt` | Matrix-vector product and transpose |
+| Rodinia | `rodinia_backprop` | Back-propagation training |
+| Rodinia | `rodinia_bfs` | Breadth-first search |
+| Rodinia | `rodinia_gaussian` | Gaussian elimination |
+| Rodinia | `rodinia_hotspot` | Thermal simulation |
+| Rodinia | `rodinia_kmeans` | K-means clustering |
+| Rodinia | `rodinia_lud` | LU decomposition |
+| Rodinia | `rodinia_nw` | Needleman-Wunsch sequence alignment |
+| Rodinia | `rodinia_pathfinder` | Dynamic programming pathfinder |
+| Rodinia | `rodinia_srad` | Speckle Reducing Anisotropic Diffusion |
+| Parboil | `parboil_histogram` | Histogram computation |
+| Parboil | `parboil_sgemm` | Single-precision GEMM |
+| Parboil | `parboil_spmv` | Sparse matrix-vector multiply |
+| Parboil | `parboil_stencil` | 3D stencil computation |
+| Other | `cuda_transpose` | Optimized matrix transpose |
+
+---
+
+## Tier 3 — Library Benchmarks
+
+| Benchmark | Library | Description |
+|-----------|---------|-------------|
+| `cublas_sgemm` | cuBLAS | Single-precision GEMM |
+| `cublas_dgemm` | cuBLAS | Double-precision GEMM |
+| `cublas_hgemm` | cuBLAS | Half-precision GEMM |
+| `cublas_gemv` | cuBLAS | Matrix-vector multiplication |
+| `cublas_batched_gemm` | cuBLAS | Batched GEMM |
+| `cudnn_conv` | cuDNN | Convolution (forward + backward) |
+| `cudnn_batchnorm` | cuDNN | Batch normalization |
+| `cufft_1d` | cuFFT | 1D Fast Fourier Transform |
+| `cufft_2d` | cuFFT | 2D Fast Fourier Transform |
+| `cusparse_spmv` | cuSPARSE | Sparse matrix-vector multiply |
+| `cutlass_gemm` | CUTLASS | Template-based GEMM |
+
+---
+
+## Tier 4 — Alternative Languages
+
+| Benchmark | Language/Framework | Description |
+|-----------|-------------------|-------------|
+| `babelstream` | OpenCL/HIP/SYCL | BabelStream memory bandwidth (multi-backend) |
+| `triton_vector_add` | Triton | Vector addition kernel |
+| `triton_gemm` | Triton | Matrix multiplication kernel |
+| `triton_softmax` | Triton | Fused softmax kernel |
+| `triton_layer_norm` | Triton | Fused layer normalization kernel |
+| `triton_dropout` | Triton | Fused dropout kernel |
+| `triton_flash_attention` | Triton | Flash attention kernel |
+
+---
+
+## Tier 5 — ML Workloads
+
+| Benchmark | Framework | Description |
+|-----------|-----------|-------------|
+| `resnet50_train` | PyTorch | ResNet-50 training throughput |
+| `resnet50_infer` | PyTorch | ResNet-50 inference latency and throughput |
+| `bert_inference` | PyTorch | BERT inference latency |
+| `nanogpt_train` | PyTorch | NanoGPT training throughput |
+| `gpt2_generate` | PyTorch | GPT-2 text generation throughput |
+| `vit_inference` | PyTorch | Vision Transformer inference |
+| `sdpa_bench` | PyTorch | Scaled dot-product attention benchmark |
+| `torch_compile_bench` | PyTorch | torch.compile vs eager mode comparison |
 
 ---
 
@@ -94,21 +256,48 @@ make PLATFORM=cuda    # NVIDIA GPU
 make PLATFORM=rocm    # AMD GPU
 make PLATFORM=metal   # Apple GPU
 
-# Build only Tier 1 microbenchmarks
+# Build only a specific tier
 make tier1
+make tier2
 
 # Clean all build artifacts
 make clean
 ```
 
-### Run a Benchmark
+---
+
+## Benchmark Harness Usage
+
+### Run All Benchmarks
+
+```bash
+# Run the full suite with auto-detected platform
+make run-all
+
+# Run with a specific platform
+make run-all PLATFORM=cuda
+
+# Generate a summary report from the latest results
+make report
+```
+
+### Run Individual Benchmarks
 
 Each benchmark produces a standalone executable in its own subdirectory:
 
 ```bash
-./tier1/memory_bandwidth/memory_bandwidth
-./tier1/fp32_throughput/fp32_throughput
-# etc.
+cd tier1/fp32_throughput
+make
+./fp32_throughput
+```
+
+### CSV Output Format
+
+All benchmarks emit results in CSV format to stdout, making it easy to collect and aggregate data:
+
+```
+benchmark,metric,value,unit
+fp32_throughput,throughput,12345.6,GFLOPS
 ```
 
 ---

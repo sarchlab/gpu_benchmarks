@@ -1,48 +1,91 @@
 {
-  "benchmark": "triton_gemm",
-  "tier": 4,
-  "suite": "triton",
-  "description": "Dense matrix multiplication (C = A @ B) using a tiled Triton kernel with grouped ordering. Measures throughput in TFLOPS for square matrices.",
-  "language": "python",
-  "scaling_param": {
-    "name": "M",
-    "description": "Matrix dimension (MxM square matrices, M=N=K)",
-    "type": "int",
-    "values": [
-      64, 96, 128, 192, 256, 384, 512, 640, 768, 1024,
-      1280, 1536, 2048, 2560, 3072, 3584, 4096, 5120,
-      6144, 7168, 8192, 10240, 12288, 16384
+    "benchmark": "triton_gemm",
+    "tier": 4,
+    "suite": "triton",
+    "description": "Dense matrix multiplication (C = A @ B) using a tiled Triton kernel with grouped ordering. Measures throughput in TFLOPS for square matrices.",
+    "language": "python",
+    "scaling_param": {
+        "name": "m",
+        "description": "Matrix dimension (MxM square matrices, M=N=K)",
+        "type": "int",
+        "values": [
+            64,
+            96,
+            128,
+            192,
+            256,
+            384,
+            512,
+            640,
+            768,
+            1024,
+            1280,
+            1536,
+            2048,
+            2560,
+            3072,
+            3584,
+            4096,
+            5120,
+            6144,
+            7168,
+            8192,
+            10240,
+            12288,
+            16384
+        ]
+    },
+    "non_scaling_params": [
+        {
+            "name": "block_m",
+            "description": "Tile size along the M dimension",
+            "type": "int",
+            "default": 128,
+            "values": [
+                32,
+                64,
+                128,
+                256
+            ]
+        },
+        {
+            "name": "block_n",
+            "description": "Tile size along the N dimension",
+            "type": "int",
+            "default": 256,
+            "values": [
+                32,
+                64,
+                128,
+                256
+            ]
+        },
+        {
+            "name": "block_k",
+            "description": "Tile size along the reduction (K) dimension",
+            "type": "int",
+            "default": 64,
+            "values": [
+                16,
+                32,
+                64,
+                128
+            ]
+        },
+        {
+            "name": "group_size_m",
+            "description": "Number of rows grouped for L2 cache locality",
+            "type": "int",
+            "default": 8,
+            "values": [
+                1,
+                4,
+                8,
+                16
+            ]
+        }
+    ],
+    "kernels": [
+        "matmul_kernel"
     ]
-  },
-  "non_scaling_params": [
-    {
-      "name": "BLOCK_M",
-      "description": "Tile size along the M dimension",
-      "type": "int",
-      "default": 128,
-      "values": [32, 64, 128, 256]
-    },
-    {
-      "name": "BLOCK_N",
-      "description": "Tile size along the N dimension",
-      "type": "int",
-      "default": 256,
-      "values": [32, 64, 128, 256]
-    },
-    {
-      "name": "BLOCK_K",
-      "description": "Tile size along the reduction (K) dimension",
-      "type": "int",
-      "default": 64,
-      "values": [16, 32, 64, 128]
-    },
-    {
-      "name": "GROUP_SIZE_M",
-      "description": "Number of rows grouped for L2 cache locality",
-      "type": "int",
-      "default": 8,
-      "values": [1, 4, 8, 16]
-    }
-  ],
-  "kernels": ["matmul_kernel"]
 }

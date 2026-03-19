@@ -1,55 +1,98 @@
 {
-  "benchmark": "triton_flash_attention",
-  "tier": 4,
-  "suite": "triton",
-  "description": "Flash Attention forward pass using online softmax in Triton. Computes scaled dot-product attention (Q @ K^T / sqrt(D), softmax, @ V) with tiled I/O to avoid materializing the full attention matrix. Measures throughput in TFLOPS.",
-  "language": "python",
-  "scaling_param": {
-    "name": "S",
-    "description": "Sequence length (number of tokens); attention is O(S^2) in computation",
-    "type": "int",
-    "values": [
-      64, 96, 128, 192, 256, 384, 512, 640, 768, 1024,
-      1280, 1536, 2048, 2560, 3072, 4096, 5120, 6144,
-      8192, 10240, 12288, 16384
+    "benchmark": "triton_flash_attention",
+    "tier": 4,
+    "suite": "triton",
+    "description": "Flash Attention forward pass using online softmax in Triton. Computes scaled dot-product attention (Q @ K^T / sqrt(D), softmax, @ V) with tiled I/O to avoid materializing the full attention matrix. Measures throughput in TFLOPS.",
+    "language": "python",
+    "scaling_param": {
+        "name": "s",
+        "description": "Sequence length (number of tokens); attention is O(S^2) in computation",
+        "type": "int",
+        "values": [
+            64,
+            96,
+            128,
+            192,
+            256,
+            384,
+            512,
+            640,
+            768,
+            1024,
+            1280,
+            1536,
+            2048,
+            2560,
+            3072,
+            4096,
+            5120,
+            6144,
+            8192,
+            10240,
+            12288,
+            16384
+        ]
+    },
+    "non_scaling_params": [
+        {
+            "name": "b",
+            "description": "Batch size",
+            "type": "int",
+            "default": 2,
+            "values": [
+                1,
+                2,
+                4,
+                8
+            ]
+        },
+        {
+            "name": "h",
+            "description": "Number of attention heads",
+            "type": "int",
+            "default": 16,
+            "values": [
+                4,
+                8,
+                16,
+                32
+            ]
+        },
+        {
+            "name": "d",
+            "description": "Head dimension (embedding size per head)",
+            "type": "int",
+            "default": 64,
+            "values": [
+                32,
+                64,
+                128
+            ]
+        },
+        {
+            "name": "block_m",
+            "description": "Tile size along the query sequence dimension",
+            "type": "int",
+            "default": 128,
+            "values": [
+                64,
+                128,
+                256
+            ]
+        },
+        {
+            "name": "block_n",
+            "description": "Tile size along the key/value sequence dimension",
+            "type": "int",
+            "default": 64,
+            "values": [
+                32,
+                64,
+                128
+            ]
+        }
+    ],
+    "kernels": [
+        "flash_attention_fwd"
     ]
-  },
-  "non_scaling_params": [
-    {
-      "name": "B",
-      "description": "Batch size",
-      "type": "int",
-      "default": 2,
-      "values": [1, 2, 4, 8]
-    },
-    {
-      "name": "H",
-      "description": "Number of attention heads",
-      "type": "int",
-      "default": 16,
-      "values": [4, 8, 16, 32]
-    },
-    {
-      "name": "D",
-      "description": "Head dimension (embedding size per head)",
-      "type": "int",
-      "default": 64,
-      "values": [32, 64, 128]
-    },
-    {
-      "name": "BLOCK_M",
-      "description": "Tile size along the query sequence dimension",
-      "type": "int",
-      "default": 128,
-      "values": [64, 128, 256]
-    },
-    {
-      "name": "BLOCK_N",
-      "description": "Tile size along the key/value sequence dimension",
-      "type": "int",
-      "default": 64,
-      "values": [32, 64, 128]
-    }
-  ],
-  "kernels": ["flash_attention_fwd"]
 }

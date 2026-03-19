@@ -1,42 +1,75 @@
 {
-  "benchmark": "triton_dropout",
-  "tier": 4,
-  "suite": "triton",
-  "description": "Element-wise dropout with inverted scaling using Triton's built-in PRNG. Each element is randomly zeroed with probability p and surviving elements are scaled by 1/(1-p). Measures memory bandwidth (GB/s).",
-  "language": "python",
-  "scaling_param": {
-    "name": "N",
-    "description": "Number of elements in the input/output tensor",
-    "type": "int",
-    "values": [
-      1024, 2048, 4096, 8192, 16384, 32768, 65536,
-      131072, 262144, 524288, 1048576, 2097152, 4194304,
-      8388608, 16777216, 33554432, 67108864, 134217728,
-      268435456, 536870912
+    "benchmark": "triton_dropout",
+    "tier": 4,
+    "suite": "triton",
+    "description": "Element-wise dropout with inverted scaling using Triton's built-in PRNG. Each element is randomly zeroed with probability p and surviving elements are scaled by 1/(1-p). Measures memory bandwidth (GB/s).",
+    "language": "python",
+    "scaling_param": {
+        "name": "n",
+        "description": "Number of elements in the input/output tensor",
+        "type": "int",
+        "values": [
+            1024,
+            2048,
+            4096,
+            8192,
+            16384,
+            32768,
+            65536,
+            131072,
+            262144,
+            524288,
+            1048576,
+            2097152,
+            4194304,
+            8388608,
+            16777216,
+            33554432,
+            67108864,
+            134217728,
+            268435456,
+            536870912
+        ]
+    },
+    "non_scaling_params": [
+        {
+            "name": "block_size",
+            "description": "Number of elements processed per Triton program instance",
+            "type": "int",
+            "default": 1024,
+            "values": [
+                256,
+                512,
+                1024,
+                2048,
+                4096
+            ]
+        },
+        {
+            "name": "p",
+            "description": "Dropout probability (fraction of elements zeroed)",
+            "type": "float",
+            "default": 0.5,
+            "values": [
+                0.1,
+                0.2,
+                0.5,
+                0.8
+            ]
+        },
+        {
+            "name": "dtype",
+            "description": "Data type of input and output tensors",
+            "type": "enum",
+            "default": "float32",
+            "values": [
+                "float16",
+                "float32",
+                "float64"
+            ]
+        }
+    ],
+    "kernels": [
+        "dropout_kernel"
     ]
-  },
-  "non_scaling_params": [
-    {
-      "name": "BLOCK_SIZE",
-      "description": "Number of elements processed per Triton program instance",
-      "type": "int",
-      "default": 1024,
-      "values": [256, 512, 1024, 2048, 4096]
-    },
-    {
-      "name": "p",
-      "description": "Dropout probability (fraction of elements zeroed)",
-      "type": "float",
-      "default": 0.5,
-      "values": [0.1, 0.2, 0.5, 0.8]
-    },
-    {
-      "name": "dtype",
-      "description": "Data type of input and output tensors",
-      "type": "enum",
-      "default": "float32",
-      "values": ["float16", "float32", "float64"]
-    }
-  ],
-  "kernels": ["dropout_kernel"]
 }

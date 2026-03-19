@@ -329,28 +329,27 @@ clean:
 **Branch:** `ares/m15-polish`
 **Cycles budget:** 4
 
-### M16 — Tier 5: LLM Inference Frameworks (vLLM, llama.cpp, Ollama) + Popular Model Inference
+### M16 — Tier 5: LLM Inference Frameworks + Popular Model Inference ✅ COMPLETE (cycles used: ~3)
 **Goal:** Add 6 LLM inference benchmarks covering the major inference frameworks and popular open-source models.
+**Deliverables (completed):** vllm_offline, llamacpp_bench, ollama_bench, llama_inference, deepseek_inference, qwen_inference — all with bench.py + bench_mps.py + Makefile + README. Merged via PR #14.
+
+### M17 — Tier 5: More LLM Models + Training Workloads + Diffusion
+**Goal:** Add 6 more ML benchmarks: GLM (ChatGLM), Phi/Mistral model inference, BERT fine-tuning, Whisper inference, Stable Diffusion inference. Covers remaining popular models from Issue #100 and adds diffusion.
 **Status:** PLANNED
 **Cycles budget:** 5
 
-### M17 — Tier 5: More LLM Models + Training Workloads
-**Goal:** Add 6 more ML benchmarks covering additional LLM models (Qwen, GLM, DeepSeek MoE, GPT-NeoX) and training workloads.
+### M18 — Tier 5: Advanced ML Patterns (MoE, RAG, CoT, Multi-Agent, SDXL)
+**Goal:** Add 6 benchmarks covering advanced ML patterns: Mixture-of-Experts inference, RAG pipeline, Chain-of-Thought reasoning, multi-agent execution, SDXL diffusion, GPT-NeoX training.
 **Status:** PLANNED
 **Cycles budget:** 5
 
-### M18 — Tier 5: Diffusion Models + Advanced ML Patterns (MoE, RAG, CoT, Multi-Agent)
-**Goal:** Add 6 benchmarks covering non-LLM models (Stable Diffusion, SDXL) and advanced ML patterns (MoE, RAG, CoT, multi-agent).
-**Status:** PLANNED
-**Cycles budget:** 5
-
-### M19 — Tier 2: New Benchmark Suites Batch 1 (4 suites)
-**Goal:** Add 4 new Tier 2 benchmark suites not currently represented (e.g., Lonestar GPU, HeteroMark, NPB-GPU, Altis).
+### M19 — Tier 2: New Benchmark Suites Batch 1 (4 suites, ~10 benchmarks)
+**Goal:** Add benchmarks from 4 new Tier 2 suites: BabelStream (dot, nstream), HeteroMark (aes, fir, pagerank), CUDA SDK Extended (nbody, separable_conv, scan_large), Altis (cfd, particlefilter, raytracing). ~10 benchmarks total.
 **Status:** PLANNED
 **Cycles budget:** 6
 
-### M20 — Tier 2: New Benchmark Suites Batch 2 (4+ suites)
-**Goal:** Add 4+ more new Tier 2 benchmark suites to reach 8+ new suites total.
+### M20 — Tier 2: New Benchmark Suites Batch 2 (4+ suites, ~10 benchmarks)
+**Goal:** Add benchmarks from 4+ more Tier 2 suites: NPB-GPU (cg, ep, is), Lonestar GPU (sssp, bh), Graph Analytics (pagerank, triangle_count), Chai (cedd, histo). ~10 benchmarks total. Reaches 8+ new suites.
 **Status:** PLANNED
 **Cycles budget:** 6
 
@@ -410,3 +409,5 @@ clean:
 | 67–69 | Implementation+Verification | Ares+Apollo | M15 implemented (README rewrite + 4 new benchmarks: atomic_operations, warp_shuffle, int32_throughput, cutlass_gemm); merged PR #13 |
 | 70 | Planning | Athena | All milestones complete. 70 benchmarks across 5 tiers. Project complete. |
 | 71 | Planning | Athena | New human requests: Issue #100 (modern ML workloads) + Issue #101 (8+ more Tier 2 suites). Reopen project. |
+| 72–74 | Implementation+Verification | Ares+Apollo | M16 implemented (6 LLM benchmarks: vllm_offline, llamacpp_bench, ollama_bench, llama_inference, deepseek_inference, qwen_inference); merged PR #14 |
+| 75 | Planning | Athena | Evaluated state (76 benchmarks). M16 complete. Define M17 (more ML models + diffusion). |

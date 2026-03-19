@@ -18,7 +18,7 @@ This suite is organized into five tiers of increasing complexity and scope, allo
 | **Tier 2** | Application Benchmarks | Classic GPU benchmark suites: SHOC, PolyBench-GPU, Rodinia, Parboil |
 | **Tier 3** | Library Benchmarks | Vendor and third-party library kernels: cuBLAS, CUTLASS, cuFFT, cuSPARSE, cuDNN |
 | **Tier 4** | Alternative Languages | Non-CUDA implementations: Triton, BabelStream |
-| **Tier 5** | ML Workloads | End-to-end machine learning training/inference: ResNet-50, BERT, GPT-2, ViT, NanoGPT, SDPA, torch.compile |
+| **Tier 5** | ML Workloads | End-to-end machine learning training/inference and LLM benchmarks: ResNet-50, BERT, GPT-2, ViT, NanoGPT, SDPA, torch.compile, vLLM, llama.cpp, Ollama, LLaMA, DeepSeek, Qwen |
 
 ---
 
@@ -98,7 +98,7 @@ gpu_benchmarks/
 │   ├── triton_layer_norm/
 │   ├── triton_dropout/
 │   └── triton_flash_attention/
-├── tier5/                          # ML workloads (8)
+├── tier5/                          # ML workloads (14)
 │   ├── Makefile
 │   ├── resnet50_train/
 │   ├── resnet50_infer/
@@ -107,7 +107,13 @@ gpu_benchmarks/
 │   ├── gpt2_generate/
 │   ├── vit_inference/
 │   ├── sdpa_bench/
-│   └── torch_compile_bench/
+│   ├── torch_compile_bench/
+│   ├── vllm_offline/
+│   ├── llamacpp_bench/
+│   ├── ollama_bench/
+│   ├── llama_inference/
+│   ├── deepseek_inference/
+│   └── qwen_inference/
 └── scripts/                        # Helper scripts
     ├── run_all.sh
     └── report.py
@@ -217,6 +223,12 @@ gpu_benchmarks/
 | `vit_inference` | PyTorch | Vision Transformer inference |
 | `sdpa_bench` | PyTorch | Scaled dot-product attention benchmark |
 | `torch_compile_bench` | PyTorch | torch.compile vs eager mode comparison |
+| `vllm_offline` | vLLM | Offline batch inference with PagedAttention |
+| `llamacpp_bench` | llama.cpp | llama.cpp subprocess inference throughput |
+| `ollama_bench` | Ollama | Ollama HTTP API inference throughput |
+| `llama_inference` | PyTorch | LLaMA architecture autoregressive generation |
+| `deepseek_inference` | PyTorch | DeepSeek-style model inference (GQA) |
+| `qwen_inference` | PyTorch | Qwen2 model autoregressive generation |
 
 ---
 

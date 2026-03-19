@@ -1,0 +1,48 @@
+{
+  "benchmark": "bert_finetune",
+  "tier": 5,
+  "suite": "ml_training",
+  "description": "BERT fine-tuning benchmark using HuggingFace BertForSequenceClassification. Runs forward pass, loss computation, backward pass, and AdamW optimizer step. Reports samples/sec throughput.",
+  "language": "python",
+  "scaling_param": {
+    "name": "batch_size",
+    "description": "Number of samples per training step",
+    "type": "int",
+    "values": [
+      1, 2, 4, 6, 8, 12, 16, 24, 32, 48,
+      64, 80, 96, 112, 128, 160, 192, 224, 256, 320,
+      384, 448, 512
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "seq_len",
+      "description": "Sequence length (number of tokens per sample)",
+      "type": "int",
+      "default": 128,
+      "values": [32, 64, 128, 256, 512]
+    },
+    {
+      "name": "num_hidden_layers",
+      "description": "Number of transformer encoder layers",
+      "type": "int",
+      "default": 6,
+      "values": [2, 4, 6, 12, 24]
+    },
+    {
+      "name": "hidden_size",
+      "description": "Hidden dimension of the model",
+      "type": "int",
+      "default": 384,
+      "values": [256, 384, 512, 768]
+    },
+    {
+      "name": "num_labels",
+      "description": "Number of classification labels",
+      "type": "int",
+      "default": 2,
+      "values": [2, 5, 10]
+    }
+  ],
+  "kernels": ["forward", "backward", "optimizer_step"]
+}

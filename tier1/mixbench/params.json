@@ -15,7 +15,7 @@
       "description": "Target FLOP/byte ratio; controls the number of FMA operations per thread relative to memory traffic",
       "type": "float",
       "default": 4.0,
-      "values": [0.5, 2.0, 8.0, 32.0, 64.0]
+      "values": [0.5, 2.0, 4.0, 8.0, 32.0, 64.0]
     },
     {
       "name": "threads_per_block",

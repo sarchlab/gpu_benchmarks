@@ -59,8 +59,8 @@
       ]
     },
     {
-      "name": "max_tokens",
-      "description": "Maximum number of output tokens per prompt",
+      "name": "max_output_tokens",
+      "description": "Maximum number of output tokens to generate per request",
       "type": "int",
       "default": 128,
       "values": [

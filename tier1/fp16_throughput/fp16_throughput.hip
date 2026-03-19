@@ -28,9 +28,11 @@
  * Usage:
  *   ./fp16_throughput [fmas_per_thread]
  *
- *   fmas_per_thread  – optional number of __hfma2 iterations per thread
- *                      (default 4096).  Increase if the kernel finishes in
- *                      under ~5 ms on a fast GPU.
+ * Environment variables (override argv):
+ *   BENCH_PARAM_fmas_per_thread
+ *   BENCH_PARAM_num_blocks
+ *   BENCH_PARAM_threads_per_block
+ *   BENCH_PARAM_num_iterations
  */
 
 #include <cstdio>
@@ -54,64 +56,29 @@
     } while (0)
 
 // ---------------------------------------------------------------------------
-// Tuning constants
+// Tuning constants (defaults)
 // ---------------------------------------------------------------------------
 
-/** Default number of __hfma2 operations per thread per kernel invocation. */
 static const int DEFAULT_FMAS_PER_THREAD = 4096;
-
-/** Number of threads per block (multiple of 64 for AMD wavefront size). */
-static const int THREADS_PER_BLOCK = 256;
-
-/**
- * Number of thread blocks.
- * 1024 blocks × 256 threads = 262 144 concurrent threads — enough to
- * saturate high-end GPUs with many compute units.
- */
-static const int NUM_BLOCKS = 1024;
-
-/** How many times to repeat the kernel for a stable average. */
-static const int NUM_ITERATIONS = 10;
+static const int DEFAULT_THREADS_PER_BLOCK = 256;
+static const int DEFAULT_NUM_BLOCKS = 1024;
+static const int DEFAULT_NUM_ITERATIONS = 10;
 
 // ---------------------------------------------------------------------------
 // FP16 FMA kernel
 // ---------------------------------------------------------------------------
 
-/**
- * Each thread performs `fmas_per_thread` packed half-precision fused
- * multiply-add operations on register-resident __half2 values.
- *
- * __hfma2(a, b, c) computes  { a.x*b.x + c.x,  a.y*b.y + c.y }  using the
- * hardware FP16 FMA unit.  Because both lanes execute simultaneously, each
- * call delivers 4 FLOPs.
- *
- * A dependency chain (each __hfma2 uses the previous result) prevents the
- * compiler from eliminating the work as dead code.  Four independent
- * accumulators (UNROLL=4) allow the compiler to interleave instructions and
- * hide the FP16 pipeline latency, achieving full issue-rate throughput.
- *
- * @param out              Device pointer to a single __half2 — the kernel
- *                         writes a final checksum here to prevent dead-code
- *                         elimination.
- * @param fmas_per_thread  Number of __hfma2 iterations per thread.
- */
 __global__ void fp16_fma_kernel(__half2 *out, int fmas_per_thread)
 {
-    /* Initialise four independent __half2 accumulators from the thread index
-       so the compiler cannot constant-fold the loop. */
     const float base = 1.0f + static_cast<float>(threadIdx.x) * 0.001f;
     __half2 a0 = __float2half2_rn(base);
     __half2 a1 = __float2half2_rn(base + 0.1f);
     __half2 a2 = __float2half2_rn(base + 0.2f);
     __half2 a3 = __float2half2_rn(base + 0.3f);
 
-    /* Multiplier and addend — values close to 1/0 prevent saturation while
-       staying far enough from zero that the compiler cannot fold the loop. */
     const __half2 mul = __float2half2_rn(1.0000001f);
     const __half2 add = __float2half2_rn(0.0000001f);
 
-    /* Main compute loop.  Unrolled by 4 so the scheduler sees four independent
-       FP16 FMA instructions per cycle, hiding the FP16 pipeline latency. */
     for (int i = 0; i < fmas_per_thread; i += 4) {
         a0 = __hfma2(a0, mul, add);
         a1 = __hfma2(a1, mul, add);
@@ -119,9 +86,6 @@ __global__ void fp16_fma_kernel(__half2 *out, int fmas_per_thread)
         a3 = __hfma2(a3, mul, add);
     }
 
-    /* Write a reduction of all accumulators to global memory so the compiler
-       cannot elide the computation.  Only thread 0 of block 0 writes, so the
-       memory traffic is negligible. */
     if (blockIdx.x == 0 && threadIdx.x == 0) {
         *out = __hadd2(__hadd2(a0, a1), __hadd2(a2, a3));
     }
@@ -133,52 +97,64 @@ __global__ void fp16_fma_kernel(__half2 *out, int fmas_per_thread)
 
 int main(int argc, char *argv[])
 {
-    /* Parse optional argument. */
-    int fmas_per_thread = DEFAULT_FMAS_PER_THREAD;
-    if (argc >= 2) {
-        fmas_per_thread = atoi(argv[1]);
-        if (fmas_per_thread <= 0) {
-            fprintf(stderr, "Invalid fmas_per_thread: %s\n", argv[1]);
-            return EXIT_FAILURE;
-        }
-        /* Round down to nearest multiple of 4 to match the loop unroll. */
-        fmas_per_thread = (fmas_per_thread / 4) * 4;
-        if (fmas_per_thread == 0) fmas_per_thread = 4;
-    }
+    setvbuf(stdout, NULL, _IOLBF, 0);
 
-    /* Print device information. */
+    const char* env_val;
+
+    int fmas_per_thread = DEFAULT_FMAS_PER_THREAD;
+    env_val = getenv("BENCH_PARAM_fmas_per_thread");
+    if (env_val) {
+        fmas_per_thread = atoi(env_val);
+    } else if (argc >= 2) {
+        fmas_per_thread = atoi(argv[1]);
+    }
+    if (fmas_per_thread <= 0) {
+        fprintf(stderr, "Invalid fmas_per_thread\n");
+        return EXIT_FAILURE;
+    }
+    fmas_per_thread = (fmas_per_thread / 4) * 4;
+    if (fmas_per_thread == 0) fmas_per_thread = 4;
+
+    int num_blocks = DEFAULT_NUM_BLOCKS;
+    env_val = getenv("BENCH_PARAM_num_blocks");
+    if (env_val) num_blocks = atoi(env_val);
+
+    int threads_per_block = DEFAULT_THREADS_PER_BLOCK;
+    env_val = getenv("BENCH_PARAM_threads_per_block");
+    if (env_val) threads_per_block = atoi(env_val);
+
+    int num_iterations = DEFAULT_NUM_ITERATIONS;
+    env_val = getenv("BENCH_PARAM_num_iterations");
+    if (env_val) num_iterations = atoi(env_val);
+
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
 
-    printf("Device          : %s (id=%d)\n", prop.name, device_id);
-    printf("Grid            : %d blocks × %d threads = %d total threads\n",
-           NUM_BLOCKS, THREADS_PER_BLOCK,
-           NUM_BLOCKS * THREADS_PER_BLOCK);
-    printf("FMAs / thread   : %d  (__hfma2, 4 FLOPs each)\n", fmas_per_thread);
-    printf("Kernel repeats  : %d\n\n", NUM_ITERATIONS);
+    fprintf(stderr, "Device          : %s (id=%d)\n", prop.name, device_id);
+    fprintf(stderr, "Grid            : %d blocks × %d threads = %d total threads\n",
+           num_blocks, threads_per_block,
+           num_blocks * threads_per_block);
+    fprintf(stderr, "FMAs / thread   : %d  (__hfma2, 4 FLOPs each)\n", fmas_per_thread);
+    fprintf(stderr, "Kernel repeats  : %d\n\n", num_iterations);
 
-    /* Allocate a single __half2 on the device to receive the checksum. */
     __half2 *d_out = nullptr;
     HIP_CHECK(hipMalloc(&d_out, sizeof(__half2)));
 
-    /* Create HIP timing events. */
     hipEvent_t ev_start, ev_stop;
     HIP_CHECK(hipEventCreate(&ev_start));
     HIP_CHECK(hipEventCreate(&ev_stop));
 
-    /* Warm-up launch — not timed. */
     hipLaunchKernelGGL(fp16_fma_kernel,
-                       dim3(NUM_BLOCKS), dim3(THREADS_PER_BLOCK), 0, 0,
+                       dim3(num_blocks), dim3(threads_per_block), 0, 0,
                        d_out, fmas_per_thread);
     HIP_CHECK(hipDeviceSynchronize());
 
-    /* Timed benchmark loop. */
     HIP_CHECK(hipEventRecord(ev_start, 0));
-    for (int iter = 0; iter < NUM_ITERATIONS; ++iter) {
+    for (int iter = 0; iter < num_iterations; ++iter) {
         hipLaunchKernelGGL(fp16_fma_kernel,
-                           dim3(NUM_BLOCKS), dim3(THREADS_PER_BLOCK), 0, 0,
+                           dim3(num_blocks), dim3(threads_per_block), 0, 0,
                            d_out, fmas_per_thread);
     }
     HIP_CHECK(hipEventRecord(ev_stop, 0));
@@ -187,35 +163,35 @@ int main(int argc, char *argv[])
     float elapsed_ms = 0.0f;
     HIP_CHECK(hipEventElapsedTime(&elapsed_ms, ev_start, ev_stop));
 
-    /* Compute GFLOPS.
-     *   Each __hfma2 call performs 2 packed FP16 FMAs.
-     *   Each FMA = 2 FLOPs (multiply + add).
-     *   => 4 FLOPs per __hfma2 call.
-     *
-     *   total_flops = iterations × num_threads × fmas_per_thread × 4
-     */
-    long long num_threads = static_cast<long long>(NUM_BLOCKS)
-                            * THREADS_PER_BLOCK;
-    long long total_flops = static_cast<long long>(NUM_ITERATIONS)
+    long long num_threads = static_cast<long long>(num_blocks) * threads_per_block;
+    long long total_flops = static_cast<long long>(num_iterations)
                             * num_threads
                             * static_cast<long long>(fmas_per_thread)
                             * 4LL;
     double elapsed_s      = static_cast<double>(elapsed_ms) * 1e-3;
     double gflops         = static_cast<double>(total_flops) / elapsed_s / 1e9;
+    double avg_time_ms    = static_cast<double>(elapsed_ms) / num_iterations;
 
-    printf("Elapsed time    : %.3f ms (%.3f ms / kernel)\n",
-           elapsed_ms, elapsed_ms / NUM_ITERATIONS);
-    printf("Total FLOPs     : %lld\n", total_flops);
-    printf("FP16 Throughput : %.2f GFLOPS\n", gflops);
+    fprintf(stderr, "Elapsed time    : %.3f ms (%.3f ms / kernel)\n",
+           elapsed_ms, avg_time_ms);
+    fprintf(stderr, "Total FLOPs     : %lld\n", total_flops);
+    fprintf(stderr, "FP16 Throughput : %.2f GFLOPS\n", gflops);
 
-    // CSV output (machine-parseable): benchmark_name,n_ops,time_ms,gflops
-    printf("fp16_throughput,%lld,%.3f,%.2f\n", total_flops, (double)elapsed_ms, gflops);
+    /* JSON-lines output to stdout. */
+    printf("{\"type\":\"kernel\",\"name\":\"fp16_fma_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"fmas_per_thread\":%d,\"num_blocks\":%d,"
+           "\"threads_per_block\":%d,\"num_iterations\":%d}}\n",
+           avg_time_ms, fmas_per_thread, num_blocks, threads_per_block,
+           num_iterations);
 
-    /* Clean up. */
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
+           (double)elapsed_ms, gflops);
+
     HIP_CHECK(hipEventDestroy(ev_start));
     HIP_CHECK(hipEventDestroy(ev_stop));
     HIP_CHECK(hipFree(d_out));
 
-    printf("\nDone.\n");
+    fprintf(stderr, "\nDone.\n");
     return EXIT_SUCCESS;
 }

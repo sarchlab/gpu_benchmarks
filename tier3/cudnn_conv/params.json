@@ -7,7 +7,7 @@
     "name": "input_hw",
     "description": "Spatial dimension of the input tensor (H=W); output size scales accordingly via stride/padding",
     "type": "int",
-    "values": [28, 32, 56, 64, 96, 112, 128, 160, 192, 224, 256, 320, 384, 448, 512, 640, 768, 896, 1024]
+    "values": [28, 32, 56, 64, 96, 112, 128, 160, 192, 224, 256, 320, 384, 448, 512, 640, 768, 896, 1024, 1152]
   },
   "non_scaling_params": [
     {

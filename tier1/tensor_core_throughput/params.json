@@ -15,7 +15,7 @@
       "description": "Data type for WMMA fragments",
       "type": "enum",
       "default": "fp16",
-      "values": ["fp16", "tf32"]
+      "values": ["fp16", "tf32", "bf16"]
     },
     {
       "name": "warmup_iterations",

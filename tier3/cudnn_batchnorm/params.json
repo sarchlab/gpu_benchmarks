@@ -7,7 +7,7 @@
     "name": "spatial_dim",
     "description": "Spatial dimension of the input tensor (H=W); controls total element count N*C*H*W",
     "type": "int",
-    "values": [7, 14, 16, 28, 32, 48, 56, 64, 96, 112, 128, 160, 192, 224, 256, 320, 384, 448, 512]
+    "values": [7, 14, 16, 28, 32, 48, 56, 64, 96, 112, 128, 160, 192, 224, 256, 320, 384, 448, 512, 576]
   },
   "non_scaling_params": [
     {

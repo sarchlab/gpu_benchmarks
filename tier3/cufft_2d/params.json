@@ -7,7 +7,7 @@
     "name": "grid_dim",
     "description": "Square grid dimension NX=NY for the 2D FFT; should be a power of 2 for optimal performance",
     "type": "int",
-    "values": [32, 64, 128, 192, 256, 384, 512, 640, 768, 1024, 1280, 1536, 2048, 2560, 3072, 4096, 5120, 6144, 8192]
+    "values": [32, 64, 128, 192, 256, 384, 512, 640, 768, 1024, 1280, 1536, 2048, 2560, 3072, 4096, 5120, 6144, 8192, 10240]
   },
   "non_scaling_params": [
     {
@@ -29,7 +29,7 @@
       "description": "FFT direction",
       "type": "enum",
       "default": "forward",
-      "values": ["forward", "inverse"]
+      "values": ["forward", "inverse", "roundtrip"]
     }
   ],
   "kernels": ["cufftExecC2C", "hipfftExecC2C"]

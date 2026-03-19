@@ -337,20 +337,34 @@ clean:
 **Goal:** Add 6 more ML benchmarks: GLM (ChatGLM), Phi/Mistral model inference, BERT fine-tuning, Whisper inference, Stable Diffusion inference. Covers remaining popular models from Issue #100 and adds diffusion.
 **Deliverables (completed):** glm_inference, phi_inference, mistral_inference, bert_finetune, whisper_inference, stable_diffusion_bench — all with bench.py + bench_mps.py + Makefile + README. Merged via PR #15.
 
-### M18 — Tier 5: Advanced ML Patterns (MoE, RAG, CoT, Multi-Agent, SDXL)
-**Goal:** Add 6 benchmarks covering advanced ML patterns: Mixture-of-Experts inference, RAG pipeline, Chain-of-Thought reasoning, multi-agent execution, SDXL diffusion, plus one more training workload.
+### M18 — Tier 5: Advanced ML Patterns (MoE, RAG, CoT, Multi-Agent, SDXL, GPT-NeoX) ✅ COMPLETE (cycles used: ~3)
+**Goal:** Add 6 benchmarks covering advanced ML patterns: Mixture-of-Experts inference, RAG pipeline, Chain-of-Thought reasoning, multi-agent execution, SDXL diffusion, GPT-NeoX training.
+**Deliverables (completed):** moe_inference, rag_pipeline, cot_reasoning, multi_agent_bench, sdxl_inference, gptneox_train — all with bench.py + bench_mps.py + Makefile + README. Merged via PR #16.
+**Note:** Issue #100 (modern ML workloads) now fully covered with 26 Tier 5 benchmarks. Issue closed.
+
+### M19 — Tier 2: New Benchmark Suites Batch 1 (4 new suites, 10 benchmarks)
+**Goal:** Add 10 benchmarks from 4 new Tier 2 suites. This addresses Issue #101 (need 8+ more suites beyond SHOC/Rodinia/PolyBench/Parboil/CUDA Samples).
+
+**New suites in this batch:**
+1. **HeteroMark** (3): heteromark_aes, heteromark_fir, heteromark_pagerank
+2. **CUDA SDK Extended** (3): cuda_nbody, cuda_convolution_separable, cuda_scan_large
+3. **Tango** (2): tango_blackscholes, tango_binomial_options
+4. **NPB-GPU** (2): npb_ep, npb_is
+
 **Status:** PLANNED
 **Cycles budget:** 5
 
-### M19 — Tier 2: New Benchmark Suites Batch 1 (4 suites, ~10 benchmarks)
-**Goal:** Add benchmarks from 4 new Tier 2 suites: BabelStream (dot, nstream), HeteroMark (aes, fir, pagerank), CUDA SDK Extended (nbody, separable_conv, scan_large), Altis (cfd, particlefilter, raytracing). ~10 benchmarks total.
-**Status:** PLANNED
-**Cycles budget:** 6
+### M20 — Tier 2: New Benchmark Suites Batch 2 (4+ new suites, ~10 benchmarks)
+**Goal:** Add benchmarks from 4+ more Tier 2 suites to reach 8+ new suites total.
 
-### M20 — Tier 2: New Benchmark Suites Batch 2 (4+ suites, ~10 benchmarks)
-**Goal:** Add benchmarks from 4+ more Tier 2 suites: NPB-GPU (cg, ep, is), Lonestar GPU (sssp, bh), Graph Analytics (pagerank, triangle_count), Chai (cedd, histo). ~10 benchmarks total. Reaches 8+ new suites.
+**New suites in this batch:**
+5. **Altis** (3): altis_cfd, altis_particlefilter, altis_raytracing
+6. **Lonestar GPU** (2): lonestar_sssp, lonestar_bh
+7. **Graph Analytics** (2): graph_pr, graph_tc
+8. **Chai** (2): chai_hsto, chai_cedd
+
 **Status:** PLANNED
-**Cycles budget:** 6
+**Cycles budget:** 5
 
 ---
 
@@ -412,3 +426,5 @@ clean:
 | 75 | Planning | Athena | Evaluated state (76 benchmarks). M16 complete. Define M17. |
 | 76–78 | Implementation+Verification | Ares+Apollo | M17 implemented (6 benchmarks: glm_inference, phi_inference, mistral_inference, bert_finetune, whisper_inference, stable_diffusion_bench); merged PR #15 |
 | 79 | Planning | Athena | Evaluated state (82 benchmarks). M17 complete. Define M18. |
+| 80–82 | Implementation+Verification | Ares+Apollo | M18 implemented (6 benchmarks: moe_inference, rag_pipeline, cot_reasoning, multi_agent_bench, sdxl_inference, gptneox_train); merged PR #16 |
+| 83 | Planning | Athena | Evaluated state (88 benchmarks). M18 complete. Issue #100 closed. Define M19. |

@@ -329,6 +329,31 @@ clean:
 **Branch:** `ares/m15-polish`
 **Cycles budget:** 4
 
+### M16 — Tier 5: LLM Inference Frameworks (vLLM, llama.cpp, Ollama) + Popular Model Inference
+**Goal:** Add 6 LLM inference benchmarks covering the major inference frameworks and popular open-source models.
+**Status:** PLANNED
+**Cycles budget:** 5
+
+### M17 — Tier 5: More LLM Models + Training Workloads
+**Goal:** Add 6 more ML benchmarks covering additional LLM models (Qwen, GLM, DeepSeek MoE, GPT-NeoX) and training workloads.
+**Status:** PLANNED
+**Cycles budget:** 5
+
+### M18 — Tier 5: Diffusion Models + Advanced ML Patterns (MoE, RAG, CoT, Multi-Agent)
+**Goal:** Add 6 benchmarks covering non-LLM models (Stable Diffusion, SDXL) and advanced ML patterns (MoE, RAG, CoT, multi-agent).
+**Status:** PLANNED
+**Cycles budget:** 5
+
+### M19 — Tier 2: New Benchmark Suites Batch 1 (4 suites)
+**Goal:** Add 4 new Tier 2 benchmark suites not currently represented (e.g., Lonestar GPU, HeteroMark, NPB-GPU, Altis).
+**Status:** PLANNED
+**Cycles budget:** 6
+
+### M20 — Tier 2: New Benchmark Suites Batch 2 (4+ suites)
+**Goal:** Add 4+ more new Tier 2 benchmark suites to reach 8+ new suites total.
+**Status:** PLANNED
+**Cycles budget:** 6
+
 ---
 
 ## Lessons Learned
@@ -384,3 +409,4 @@ clean:
 | 66 | Planning | Athena | Evaluated state (66 benchmarks); defined M15 (README update + 4 more benchmarks) |
 | 67–69 | Implementation+Verification | Ares+Apollo | M15 implemented (README rewrite + 4 new benchmarks: atomic_operations, warp_shuffle, int32_throughput, cutlass_gemm); merged PR #13 |
 | 70 | Planning | Athena | All milestones complete. 70 benchmarks across 5 tiers. Project complete. |
+| 71 | Planning | Athena | New human requests: Issue #100 (modern ML workloads) + Issue #101 (8+ more Tier 2 suites). Reopen project. |

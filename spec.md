@@ -13,7 +13,7 @@ We want to be as extensive as possible. We should include popular benchmark suit
 
 ## How do you consider the project is success?
 
-(Not yet defined by human.)
+A comprehensive, well-organized benchmark suite covering all 5 tiers with extensive coverage. Must include modern ML/LLM workloads and broad Tier 2 application benchmark coverage (8+ distinct suites beyond the initial set).
 
 ## Constraints
 
@@ -29,7 +29,25 @@ The following constraints apply to all benchmarks across all tiers:
 
 3. **Self-contained benchmarks.** Each benchmark lives in its own directory and has **no shared or common dependencies** with other benchmarks. All required code is within the benchmark's own directory. The only exception is Tier 5 (ML workloads), which may depend on ML frameworks (PyTorch, JAX, etc.).
 
+## Tier 5 — Modern ML Workloads (from human, Issue #100)
+
+The suite needs comprehensive modern ML workloads including:
+
+1. **LLM Inference Frameworks**: vLLM, ollama, llama.cpp inference workloads
+2. **Popular Open-Source LLM Models**: LLaMA, OpenAI OSS models, Qwen, GLM (ChatGLM), DeepSeek
+3. **Both large and small LLM workloads**
+4. **PyTorch training workloads** with popular models
+5. **Non-LLM models**: Diffusion models (Stable Diffusion, SDXL)
+6. **Advanced patterns**: Chain of thought (CoT), Mixture of Experts (MoE), RAG (Retrieval-Augmented Generation), multi-agent execution
+7. It is OK if benchmarks cannot execute on the local development environment (e.g., require specific GPU hardware or large models)
+
+## Tier 2 — More Benchmark Suites (from human, Issue #101)
+
+Add at least 8 more distinct benchmark suites beyond the existing ones (SHOC, Rodinia, PolyBench, Parboil, CUDA Samples). Each suite should include representative benchmarks.
+
 ## Notes
 
 - The `benchmark_report.md` at the repo root is the reference document for which benchmarks to include in each tier.
 - Tier 1 microbenchmarks have already been implemented (M2) with CMake/CUDA. They must be refactored to meet the constraints above.
+- Tier 5 Python benchmarks may depend on ML frameworks (PyTorch, transformers, vllm, diffusers, etc.)
+- Benchmarks that require large models or specific hardware should still be included with correct code — they don't need to run on the development machine.

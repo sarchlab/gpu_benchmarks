@@ -18,7 +18,7 @@ This suite is organized into five tiers of increasing complexity and scope, allo
 | **Tier 2** | Application Benchmarks | Classic GPU benchmark suites: SHOC, PolyBench-GPU, Rodinia, Parboil |
 | **Tier 3** | Library Benchmarks | Vendor and third-party library kernels: cuBLAS, CUTLASS, cuFFT, cuSPARSE, cuDNN |
 | **Tier 4** | Alternative Languages | Non-CUDA implementations: Triton, BabelStream |
-| **Tier 5** | ML Workloads | End-to-end machine learning training/inference and LLM benchmarks: ResNet-50, BERT, GPT-2, ViT, NanoGPT, SDPA, torch.compile, vLLM, llama.cpp, Ollama, LLaMA, DeepSeek, Qwen, GLM, Phi, Mistral, BERT fine-tune, Whisper, Stable Diffusion |
+| **Tier 5** | ML Workloads | End-to-end machine learning training/inference and LLM benchmarks: ResNet-50, BERT, GPT-2, ViT, NanoGPT, SDPA, torch.compile, vLLM, llama.cpp, Ollama, LLaMA, DeepSeek, Qwen, GLM, Phi, Mistral, BERT fine-tune, Whisper, Stable Diffusion, MoE, RAG, CoT, Multi-Agent, SDXL, GPT-NeoX |
 
 ---
 
@@ -98,7 +98,7 @@ gpu_benchmarks/
 │   ├── triton_layer_norm/
 │   ├── triton_dropout/
 │   └── triton_flash_attention/
-├── tier5/                          # ML workloads (20)
+├── tier5/                          # ML workloads (26)
 │   ├── Makefile
 │   ├── resnet50_train/
 │   ├── resnet50_infer/
@@ -119,7 +119,13 @@ gpu_benchmarks/
 │   ├── phi_inference/
 │   ├── mistral_inference/
 │   ├── whisper_inference/
-│   └── stable_diffusion_bench/
+│   ├── stable_diffusion_bench/
+│   ├── moe_inference/
+│   ├── rag_pipeline/
+│   ├── cot_reasoning/
+│   ├── multi_agent_bench/
+│   ├── sdxl_inference/
+│   └── gptneox_train/
 └── scripts/                        # Helper scripts
     ├── run_all.sh
     └── report.py
@@ -241,6 +247,12 @@ gpu_benchmarks/
 | `bert_finetune` | PyTorch | BERT fine-tuning (forward + backward + optimizer) |
 | `whisper_inference` | PyTorch | OpenAI Whisper audio model inference |
 | `stable_diffusion_bench` | PyTorch/Diffusers | Stable Diffusion UNet denoising loop |
+| `moe_inference` | PyTorch | Mixture-of-Experts transformer inference (4 experts, top-2 gating) |
+| `rag_pipeline` | PyTorch | RAG pipeline: encoder + retriever + generator (1000 docs) |
+| `cot_reasoning` | PyTorch | Chain-of-Thought multi-step reasoning generation |
+| `multi_agent_bench` | PyTorch | Multi-agent LLM pipeline (3 agents, sequential) |
+| `sdxl_inference` | PyTorch/Diffusers | SDXL-style UNet denoising loop (20 steps) |
+| `gptneox_train` | PyTorch/Transformers | GPT-NeoX training (forward + backward + optimizer) |
 
 ---
 

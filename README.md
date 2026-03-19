@@ -15,7 +15,7 @@ This suite is organized into five tiers of increasing complexity and scope, allo
 | Tier | Name | Description |
 |------|------|-------------|
 | **Tier 1** | Microbenchmarks | Low-level hardware characterization: memory bandwidth, compute throughput (FP32/FP64/FP16/INT32), cache latency, PCIe transfer rates, atomic ops, warp shuffles |
-| **Tier 2** | Application Benchmarks | Classic GPU benchmark suites: SHOC, PolyBench-GPU, Rodinia, Parboil |
+| **Tier 2** | Application Benchmarks | Classic GPU benchmark suites: SHOC, PolyBench-GPU, Rodinia, Parboil, HeteroMark, CUDA SDK Extended, Tango, NPB-GPU |
 | **Tier 3** | Library Benchmarks | Vendor and third-party library kernels: cuBLAS, CUTLASS, cuFFT, cuSPARSE, cuDNN |
 | **Tier 4** | Alternative Languages | Non-CUDA implementations: Triton, BabelStream |
 | **Tier 5** | ML Workloads | End-to-end machine learning training/inference and LLM benchmarks: ResNet-50, BERT, GPT-2, ViT, NanoGPT, SDPA, torch.compile, vLLM, llama.cpp, Ollama, LLaMA, DeepSeek, Qwen, GLM, Phi, Mistral, BERT fine-tune, Whisper, Stable Diffusion, MoE, RAG, CoT, Multi-Agent, SDXL, GPT-NeoX |
@@ -42,7 +42,7 @@ gpu_benchmarks/
 │   ├── shared_mem_bandwidth/
 │   ├── atomic_operations/
 │   └── warp_shuffle/
-├── tier2/                          # Application benchmarks (32)
+├── tier2/                          # Application benchmarks (42)
 │   ├── Makefile
 │   ├── shoc_devicememory/
 │   ├── shoc_fft/
@@ -75,7 +75,17 @@ gpu_benchmarks/
 │   ├── parboil_sgemm/
 │   ├── parboil_spmv/
 │   ├── parboil_stencil/
-│   └── cuda_transpose/
+│   ├── cuda_transpose/
+│   ├── heteromark_aes/
+│   ├── heteromark_fir/
+│   ├── heteromark_pagerank/
+│   ├── cuda_nbody/
+│   ├── cuda_convolution_separable/
+│   ├── cuda_scan_large/
+│   ├── tango_blackscholes/
+│   ├── tango_binomial_options/
+│   ├── npb_ep/
+│   └── npb_is/
 ├── tier3/                          # Library benchmarks (11)
 │   ├── Makefile
 │   ├── cublas_sgemm/
@@ -188,6 +198,16 @@ gpu_benchmarks/
 | Parboil | `parboil_spmv` | Sparse matrix-vector multiply |
 | Parboil | `parboil_stencil` | 3D stencil computation |
 | Other | `cuda_transpose` | Optimized matrix transpose |
+| HeteroMark | `heteromark_aes` | AES-256 encryption |
+| HeteroMark | `heteromark_fir` | FIR (Finite Impulse Response) filter |
+| HeteroMark | `heteromark_pagerank` | PageRank on synthetic graph |
+| CUDA SDK Extended | `cuda_nbody` | N-body gravitational simulation |
+| CUDA SDK Extended | `cuda_convolution_separable` | Separable 2D convolution |
+| CUDA SDK Extended | `cuda_scan_large` | Work-efficient parallel prefix sum |
+| Tango | `tango_blackscholes` | Black-Scholes option pricing |
+| Tango | `tango_binomial_options` | Binomial option pricing |
+| NPB-GPU | `npb_ep` | Embarrassingly Parallel (EP) |
+| NPB-GPU | `npb_is` | Integer Sort (IS) |
 
 ---
 

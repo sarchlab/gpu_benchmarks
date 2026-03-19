@@ -32,5 +32,5 @@
       "values": ["true", "false", "both"]
     }
   ],
-  "kernels": []
+  "kernels": ["memcpy_h2d", "memcpy_d2h", "memcpy_d2d"]
 }

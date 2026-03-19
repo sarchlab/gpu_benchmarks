@@ -50,7 +50,8 @@
       "default": "float",
       "values": [
         "float",
-        "double"
+        "double",
+        "half"
       ]
     },
     {

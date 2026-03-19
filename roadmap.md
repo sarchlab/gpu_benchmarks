@@ -288,7 +288,7 @@ clean:
 **Branch:** `ares/m14-benchmarks` (merged to main via PR #12)
 **Cycles budget:** 5
 
-### M15 — Final Polish: README + Coverage Gaps (current)
+### M15 — Final Polish: README + Coverage Gaps ✅ COMPLETE (cycles used: ~3)
 **Goal:** Update README.md to comprehensively list all 66 benchmarks, and add 4 remaining high-value microbenchmarks/library benchmarks to reach ~70 total benchmarks.
 
 **Deliverables:**
@@ -382,3 +382,5 @@ clean:
 | 64 | Planning | Athena | Evaluated state (60 benchmarks); defined M14 (DNN library + FFT/Transpose + ML inference) |
 | 65 | Implementation+Verification | Ares+Apollo | M14 implemented (6 benchmarks: shoc_fft, cuda_transpose, cudnn_conv, cudnn_batchnorm, gpt2_generate, torch_compile_bench); merged PR #12 |
 | 66 | Planning | Athena | Evaluated state (66 benchmarks); defined M15 (README update + 4 more benchmarks) |
+| 67–69 | Implementation+Verification | Ares+Apollo | M15 implemented (README rewrite + 4 new benchmarks: atomic_operations, warp_shuffle, int32_throughput, cutlass_gemm); merged PR #13 |
+| 70 | Planning | Athena | All milestones complete. 70 benchmarks across 5 tiers. Project complete. |

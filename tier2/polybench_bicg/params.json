@@ -7,7 +7,29 @@
     "name": "m",
     "description": "Number of rows of matrix A (also sets N if square)",
     "type": "int",
-    "values": [64, 128, 256, 512, 768, 1024, 1536, 2048, 2560, 3072, 4096, 5120, 6144, 7168, 8192, 10240, 12288, 16384, 20480, 24576, 32768]
+    "values": [
+      64,
+      128,
+      256,
+      512,
+      768,
+      1024,
+      1536,
+      2048,
+      2560,
+      3072,
+      4096,
+      5120,
+      6144,
+      7168,
+      8192,
+      10240,
+      12288,
+      16384,
+      20480,
+      24576,
+      32768
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,15 +37,40 @@
       "description": "Number of columns of matrix A",
       "type": "int",
       "default": 4096,
-      "values": [1024, 2048, 4096, 8192]
+      "values": [
+        1024,
+        2048,
+        4096,
+        8192
+      ]
     },
     {
       "name": "iterations",
       "description": "Number of timed iterations",
       "type": "int",
       "default": 5,
-      "values": [3, 5, 10, 20]
+      "values": [
+        3,
+        5,
+        10,
+        20
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
     }
   ],
-  "kernels": ["bicg_kernel1", "bicg_kernel2"]
+  "kernels": [
+    "bicg_kernel1",
+    "bicg_kernel2"
+  ]
 }

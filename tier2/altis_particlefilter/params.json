@@ -42,6 +42,30 @@
         10,
         20
       ]
+    },
+    {
+      "name": "num_particles_ratio",
+      "description": "Ratio of effective particles to total for resampling threshold",
+      "type": "enum",
+      "default": "0.5",
+      "values": [
+        "0.25",
+        "0.5",
+        "0.75",
+        "1.0"
+      ]
+    },
+    {
+      "name": "seed",
+      "description": "Random number generator seed for reproducibility",
+      "type": "int",
+      "default": 42,
+      "values": [
+        0,
+        42,
+        123,
+        999
+      ]
     }
   ],
   "kernels": [

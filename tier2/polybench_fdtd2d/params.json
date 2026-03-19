@@ -7,7 +7,28 @@
     "name": "size",
     "description": "Grid dimension N (NxN grid for each field array)",
     "type": "int",
-    "values": [64, 128, 192, 256, 384, 512, 640, 768, 1024, 1280, 1536, 2048, 2560, 3072, 3584, 4096, 5120, 6144, 7168, 8192]
+    "values": [
+      64,
+      128,
+      192,
+      256,
+      384,
+      512,
+      640,
+      768,
+      1024,
+      1280,
+      1536,
+      2048,
+      2560,
+      3072,
+      3584,
+      4096,
+      5120,
+      6144,
+      7168,
+      8192
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,15 +36,42 @@
       "description": "Number of time steps per benchmark iteration",
       "type": "int",
       "default": 50,
-      "values": [10, 25, 50, 100, 200]
+      "values": [
+        10,
+        25,
+        50,
+        100,
+        200
+      ]
     },
     {
       "name": "iterations",
       "description": "Number of timed benchmark iterations",
       "type": "int",
       "default": 3,
-      "values": [1, 3, 5, 10]
+      "values": [
+        1,
+        3,
+        5,
+        10
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
     }
   ],
-  "kernels": ["fdtd_update_ex", "fdtd_update_ey", "fdtd_update_hz"]
+  "kernels": [
+    "fdtd_update_ex",
+    "fdtd_update_ey",
+    "fdtd_update_hz"
+  ]
 }

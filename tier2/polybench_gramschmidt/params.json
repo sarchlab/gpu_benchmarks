@@ -7,7 +7,28 @@
     "name": "m",
     "description": "Number of rows of matrix A",
     "type": "int",
-    "values": [64, 128, 192, 256, 384, 512, 640, 768, 896, 1024, 1280, 1536, 1792, 2048, 2560, 3072, 3584, 4096, 5120, 6144]
+    "values": [
+      64,
+      128,
+      192,
+      256,
+      384,
+      512,
+      640,
+      768,
+      896,
+      1024,
+      1280,
+      1536,
+      1792,
+      2048,
+      2560,
+      3072,
+      3584,
+      4096,
+      5120,
+      6144
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,15 +36,42 @@
       "description": "Number of columns of matrix A",
       "type": "int",
       "default": 512,
-      "values": [128, 256, 512, 1024]
+      "values": [
+        128,
+        256,
+        512,
+        1024
+      ]
     },
     {
       "name": "passes",
       "description": "Number of timed passes",
       "type": "int",
       "default": 3,
-      "values": [1, 3, 5, 10]
+      "values": [
+        1,
+        3,
+        5,
+        10
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
     }
   ],
-  "kernels": ["gram_norm", "gram_norm_finish", "gram_normalize", "gram_project"]
+  "kernels": [
+    "gram_norm",
+    "gram_norm_finish",
+    "gram_normalize",
+    "gram_project"
+  ]
 }

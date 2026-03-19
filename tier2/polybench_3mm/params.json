@@ -7,7 +7,30 @@
     "name": "size",
     "description": "Square matrix dimension N (all matrices are NxN)",
     "type": "int",
-    "values": [64, 96, 128, 192, 256, 384, 512, 640, 768, 896, 1024, 1280, 1536, 1792, 2048, 2560, 3072, 3584, 4096, 5120, 6144, 8192]
+    "values": [
+      64,
+      96,
+      128,
+      192,
+      256,
+      384,
+      512,
+      640,
+      768,
+      896,
+      1024,
+      1280,
+      1536,
+      1792,
+      2048,
+      2560,
+      3072,
+      3584,
+      4096,
+      5120,
+      6144,
+      8192
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,8 +38,40 @@
       "description": "Number of timed iterations for averaging",
       "type": "int",
       "default": 5,
-      "values": [3, 5, 10, 20]
+      "values": [
+        3,
+        5,
+        10,
+        20
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
+    },
+    {
+      "name": "precision",
+      "description": "Floating-point precision for computation",
+      "type": "enum",
+      "default": "float",
+      "values": [
+        "half",
+        "float",
+        "double"
+      ]
     }
   ],
-  "kernels": ["mm3_kernel1", "mm3_kernel2", "mm3_kernel3"]
+  "kernels": [
+    "mm3_kernel1",
+    "mm3_kernel2",
+    "mm3_kernel3"
+  ]
 }

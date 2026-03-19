@@ -7,7 +7,29 @@
     "name": "n",
     "description": "Matrix dimension N (NxN matrix A)",
     "type": "int",
-    "values": [64, 128, 256, 512, 768, 1024, 1536, 2048, 2560, 3072, 4096, 5120, 6144, 7168, 8192, 10240, 12288, 16384, 20480, 24576, 32768]
+    "values": [
+      64,
+      128,
+      256,
+      512,
+      768,
+      1024,
+      1536,
+      2048,
+      2560,
+      3072,
+      4096,
+      5120,
+      6144,
+      7168,
+      8192,
+      10240,
+      12288,
+      16384,
+      20480,
+      24576,
+      32768
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,8 +37,39 @@
       "description": "Number of timed iterations",
       "type": "int",
       "default": 5,
-      "values": [3, 5, 10, 20]
+      "values": [
+        3,
+        5,
+        10,
+        20
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
+    },
+    {
+      "name": "precision",
+      "description": "Floating-point precision for computation",
+      "type": "enum",
+      "default": "float",
+      "values": [
+        "half",
+        "float",
+        "double"
+      ]
     }
   ],
-  "kernels": ["mvt_kernel1", "mvt_kernel2"]
+  "kernels": [
+    "mvt_kernel1",
+    "mvt_kernel2"
+  ]
 }

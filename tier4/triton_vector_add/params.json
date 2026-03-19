@@ -9,10 +9,26 @@
     "description": "Number of elements in each input/output vector",
     "type": "int",
     "values": [
-      1024, 2048, 4096, 8192, 16384, 32768, 65536,
-      131072, 262144, 524288, 1048576, 2097152, 4194304,
-      8388608, 16777216, 33554432, 67108864, 134217728,
-      268435456, 536870912
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768,
+      65536,
+      131072,
+      262144,
+      524288,
+      1048576,
+      2097152,
+      4194304,
+      8388608,
+      16777216,
+      33554432,
+      67108864,
+      134217728,
+      268435456,
+      536870912
     ]
   },
   "non_scaling_params": [
@@ -21,15 +37,39 @@
       "description": "Number of elements processed per Triton program instance",
       "type": "int",
       "default": 1024,
-      "values": [256, 512, 1024, 2048, 4096]
+      "values": [
+        256,
+        512,
+        1024,
+        2048,
+        4096
+      ]
     },
     {
       "name": "dtype",
       "description": "Data type of input and output tensors",
       "type": "enum",
       "default": "float32",
-      "values": ["float16", "float32", "float64"]
+      "values": [
+        "float16",
+        "float32",
+        "float64"
+      ]
+    },
+    {
+      "name": "num_warps",
+      "description": "Number of warps per Triton program instance",
+      "type": "int",
+      "default": 4,
+      "values": [
+        1,
+        2,
+        4,
+        8
+      ]
     }
   ],
-  "kernels": ["vector_add_kernel"]
+  "kernels": [
+    "vector_add_kernel"
+  ]
 }

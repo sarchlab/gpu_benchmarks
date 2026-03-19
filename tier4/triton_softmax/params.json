@@ -9,9 +9,29 @@
     "description": "Number of columns per row (row width); total elements = M x N",
     "type": "int",
     "values": [
-      64, 128, 256, 512, 768, 1024, 1536, 2048, 3072, 4096,
-      5120, 6144, 7168, 8192, 10240, 12288, 16384, 20480,
-      24576, 32768, 40960, 49152, 65536
+      64,
+      128,
+      256,
+      512,
+      768,
+      1024,
+      1536,
+      2048,
+      3072,
+      4096,
+      5120,
+      6144,
+      7168,
+      8192,
+      10240,
+      12288,
+      16384,
+      20480,
+      24576,
+      32768,
+      40960,
+      49152,
+      65536
     ]
   },
   "non_scaling_params": [
@@ -20,15 +40,38 @@
       "description": "Number of rows in the input matrix",
       "type": "int",
       "default": 4096,
-      "values": [1024, 2048, 4096, 8192, 16384]
+      "values": [
+        1024,
+        2048,
+        4096,
+        8192,
+        16384
+      ]
     },
     {
       "name": "dtype",
       "description": "Data type of input and output tensors",
       "type": "enum",
       "default": "float32",
-      "values": ["float16", "float32", "float64"]
+      "values": [
+        "float16",
+        "float32",
+        "float64"
+      ]
+    },
+    {
+      "name": "num_warps",
+      "description": "Number of warps per Triton program instance",
+      "type": "int",
+      "default": 4,
+      "values": [
+        2,
+        4,
+        8
+      ]
     }
   ],
-  "kernels": ["softmax_kernel"]
+  "kernels": [
+    "softmax_kernel"
+  ]
 }

@@ -9,9 +9,30 @@
     "description": "Number of new tokens to generate autoregressively",
     "type": "int",
     "values": [
-      4, 8, 12, 16, 24, 32, 48, 64, 80, 96,
-      112, 128, 160, 192, 224, 256, 320, 384, 448, 512,
-      640, 768, 896, 1024
+      4,
+      8,
+      12,
+      16,
+      24,
+      32,
+      48,
+      64,
+      80,
+      96,
+      112,
+      128,
+      160,
+      192,
+      224,
+      256,
+      320,
+      384,
+      448,
+      512,
+      640,
+      768,
+      896,
+      1024
     ]
   },
   "non_scaling_params": [
@@ -20,43 +41,63 @@
       "description": "Length of the input prompt in tokens",
       "type": "int",
       "default": 256,
-      "values": [64, 128, 256, 512]
-    },
-    {
-      "name": "batch_size",
-      "description": "Number of sequences in a batch",
-      "type": "int",
-      "default": 4,
-      "values": [1, 2, 4, 8]
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
     },
     {
       "name": "num_experts",
       "description": "Number of expert FFN sub-networks",
       "type": "int",
       "default": 4,
-      "values": [4, 8, 16]
+      "values": [
+        4,
+        8,
+        16
+      ]
     },
     {
       "name": "top_k",
       "description": "Number of experts activated per token",
       "type": "int",
       "default": 2,
-      "values": [1, 2, 4]
+      "values": [
+        1,
+        2,
+        4
+      ]
     },
     {
       "name": "num_layers",
       "description": "Number of MoE transformer blocks",
       "type": "int",
       "default": 4,
-      "values": [2, 4, 6, 8]
+      "values": [
+        2,
+        4,
+        6,
+        8
+      ]
     },
     {
       "name": "hidden_size",
       "description": "Hidden dimension of the model",
       "type": "int",
       "default": 512,
-      "values": [256, 512, 1024]
+      "values": [
+        256,
+        512,
+        1024
+      ]
     }
   ],
-  "kernels": ["forward", "gating", "expert_forward", "generate"]
+  "kernels": [
+    "forward",
+    "gating",
+    "expert_forward",
+    "generate"
+  ]
 }

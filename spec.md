@@ -2,18 +2,23 @@
 
 ## What do you want to build?
 
-We want to create an extensive GPGPU benchmark suite. We need to include 4 tiers of benchmarks. 
+We want to create an extensive GPGPU benchmark suite. We need to include 5 tiers of benchmarks: 
 * Tier 1, microbenchmarks
 * Tier 2, benchmarks (shoc, polybench, rodinia, parboil style)
 * Tier 3, libraries (cuBLAS, cutlass, etc.)
-* Tier 4, other languages like Triton, 
-* Tier 5, ML workloads. 
+* Tier 4, other languages like Triton
+* Tier 5, ML workloads
 
-We want to be as extensive as possible. We should include popular benchmark suites.  As the first stage, please research which benchmarks to include. Generate a report for me, and I will give you more instructions for the next step.
+We want to be as extensive as possible. We should include popular benchmark suites.
+
+Every benchmark must be **parameterized** with well-defined scaling and non-scaling parameters. A CLI tool must be able to compile, run, and collect results into an SQLite database with platform info, parameter values, and kernel-level timing.
 
 ## How do you consider the project is success?
 
-A comprehensive, well-organized benchmark suite covering all 5 tiers with extensive coverage. Must include modern ML/LLM workloads and broad Tier 2 application benchmark coverage (8+ distinct suites beyond the initial set).
+A comprehensive, well-organized benchmark suite covering all 5 tiers with extensive coverage. Must include modern ML/LLM workloads and broad Tier 2 application benchmark coverage (8+ distinct suites beyond the initial set). Every benchmark must have:
+1. Full parameterization (scaling + non-scaling parameters with documented values)
+2. Kernel-level execution timing
+3. A CLI that can compile, run, and collect results into SQLite
 
 ## Constraints
 
@@ -28,6 +33,27 @@ The following constraints apply to all benchmarks across all tiers:
    The `Makefile` must auto-detect the platform (or accept `PLATFORM=cuda|rocm|metal`) and invoke the correct compiler.
 
 3. **Self-contained benchmarks.** Each benchmark lives in its own directory and has **no shared or common dependencies** with other benchmarks. All required code is within the benchmark's own directory. The only exception is Tier 5 (ML workloads), which may depend on ML frameworks (PyTorch, JAX, etc.).
+
+4. **Complete benchmarks.** If we skip some workloads, we need to have a clear reason. (from human, Issue #142)
+
+## Parameterization Requirements (from human, Issue #143)
+
+For every benchmark:
+1. **Identify a single scaling parameter.** The overall performance should be predictable with linear regression (or polynomial/exponential) if other factors don't change.
+2. **Identify all non-scaling parameters.**
+3. **Identify parameter values.** For non-scaling factors, select 3–5 values per parameter. For scaling factors, select 20–30 values.
+4. **Document the parameter selection.**
+
+## CLI Requirements (from human, Issue #144)
+
+Build a CLI tool that:
+1. **Compiles everything** — or a specific suite/benchmark.
+2. **Runs benchmarks with repetitions** — default 7 repetitions per configuration.
+3. **Supports filtering** — run one suite or one benchmark.
+4. **Generates SQLite output** containing:
+   - Platform information (as detailed as possible: GPU model, driver version, OS, etc.)
+   - Execution results: tier, suite, benchmark, scaling parameter value, non-scaling parameter values, execution time
+   - Kernel-level execution times (one kernel per entry)
 
 ## Tier 5 — Modern ML Workloads (from human, Issue #100)
 

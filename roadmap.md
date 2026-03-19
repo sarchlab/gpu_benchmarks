@@ -12,9 +12,12 @@ Create an extensive GPGPU benchmark suite covering 5 tiers:
 1. **Make only** — no CMake or other build systems
 2. **Multi-GPU**: NVIDIA (nvcc/CUDA), AMD (hipcc/ROCm), Apple (Metal)
 3. **Self-contained**: each benchmark is one directory, no shared dependencies (except Tier 5 may use ML frameworks)
+4. **Complete benchmarks** — if we skip some workloads, we need a clear reason (Issue #142)
+5. **Parameterized** — every benchmark has a scaling parameter (20-30 values) and non-scaling parameters (3-5 values each) (Issue #143)
+6. **CLI tool** — compile, run with repetitions, SQLite results with platform info + kernel-level timing (Issue #144)
 
 ## Success Criteria
-Deliver a comprehensive, well-organized benchmark suite that researchers and engineers can use to evaluate GPGPU hardware and software stacks.
+Deliver a comprehensive, well-organized benchmark suite that researchers and engineers can use to evaluate GPGPU hardware and software stacks. Every benchmark must be parameterized, and a CLI tool must support automated compilation, execution with configurable repetitions, and result storage in SQLite with kernel-level timing.
 
 ---
 
@@ -434,9 +437,49 @@ clean:
 
 ---
 
-## Final Summary
+## Phase 2: Parameterization & CLI (Issues #142, #143, #144)
 
-**Project complete.** 107 benchmarks across 5 tiers:
+New human requirements: parameterize all benchmarks, build a CLI tool for compilation/execution, record results in SQLite with kernel-level timing.
+
+### M21 — Parameter Definitions for All 107 Benchmarks + Output Protocol Design
+**Goal:** Define scaling and non-scaling parameters for every benchmark; design the standardized output protocol for kernel-level timing; design the SQLite schema; design the CLI architecture.
+
+**Deliverables:**
+1. `params.json` in each of the 107 benchmark directories, specifying:
+   - `scaling_param`: {name, description, type, values: [20-30 values]}
+   - `non_scaling_params`: [{name, description, type, default, values: [3-5 values]}]
+   - `kernels`: [list of kernel names that will be individually timed]
+2. `docs/output_protocol.md` — standardized JSON-lines output format for benchmark results (kernel-level timing)
+3. `docs/cli_design.md` — CLI tool specification (commands, flags, workflow)
+4. `docs/schema.sql` — SQLite schema for results database
+
+**Budget:** 5 cycles
+
+### M22 — CLI Tool Implementation + Tier 1 Benchmark Refactoring (Prototype)
+**Goal:** Build the CLI tool and refactor Tier 1 (12 benchmarks) to produce kernel-level JSON output, accept parameters from CLI. End-to-end prototype.
+**Budget:** 6 cycles (estimated)
+
+### M23 — Tier 2 Benchmark Refactoring (51 benchmarks)
+**Goal:** Refactor all Tier 2 benchmarks for parameterized execution and kernel-level timing.
+**Budget:** 8 cycles (estimated)
+
+### M24 — Tier 3 + Tier 4 Benchmark Refactoring (18 benchmarks)
+**Goal:** Refactor Tier 3 (11) and Tier 4 (7) benchmarks.
+**Budget:** 4 cycles (estimated)
+
+### M25 — Tier 5 Benchmark Refactoring (26 benchmarks)
+**Goal:** Refactor all Tier 5 Python benchmarks for parameterized execution and kernel-level timing.
+**Budget:** 5 cycles (estimated)
+
+### M26 — Integration, Testing & Final Polish
+**Goal:** End-to-end testing of CLI across all tiers, fix issues, update README.
+**Budget:** 3 cycles (estimated)
+
+---
+
+## Previous Phase Summary
+
+**Phase 1 complete (M1–M20).** 107 benchmarks across 5 tiers:
 - **Tier 1:** 12 microbenchmarks (memory bandwidth, FP32/FP64/FP16/INT32 throughput, cache latency, PCIe, tensor cores, mixbench, shared mem, atomics, warp shuffle)
 - **Tier 2:** 51 application benchmarks from 13 suites (SHOC, PolyBench, Rodinia, Parboil, CUDA SDK, HeteroMark, CUDA SDK Extended, Tango, NPB-GPU, Altis, Lonestar GPU, Graph Analytics, Chai)
 - **Tier 3:** 11 library benchmarks (cuBLAS SGEMM/DGEMM/GEMV/HGEMM/Batched, cuFFT 1D/2D, cuSPARSE SpMV, cuDNN Conv/BatchNorm, CUTLASS GEMM)

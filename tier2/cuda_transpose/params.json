@@ -1,0 +1,22 @@
+{
+  "benchmark": "cuda_transpose",
+  "tier": 2,
+  "suite": "cuda_sdk",
+  "description": "Shared-memory tiled matrix transpose with two variants: naive (strided writes) and optimized (bank-conflict-free with +1 padding). Measures bandwidth in GB/s.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Matrix dimension N (NxN single-precision matrix)",
+    "type": "int",
+    "values": [64, 128, 256, 384, 512, 640, 768, 1024, 1280, 1536, 2048, 2560, 3072, 3584, 4096, 5120, 6144, 7168, 8192, 10240, 12288, 16384]
+  },
+  "non_scaling_params": [
+    {
+      "name": "iterations",
+      "description": "Timed benchmark iterations",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10, 20]
+    }
+  ],
+  "kernels": ["transpose_naive", "transpose_optimized"]
+}

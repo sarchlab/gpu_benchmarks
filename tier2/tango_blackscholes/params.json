@@ -1,0 +1,22 @@
+{
+  "benchmark": "tango_blackscholes",
+  "tier": 2,
+  "suite": "tango",
+  "description": "Black-Scholes European option pricing with polynomial approximation of cumulative normal distribution. Measures throughput in Moptions/sec.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Number of options to price",
+    "type": "int",
+    "values": [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728]
+  },
+  "non_scaling_params": [
+    {
+      "name": "iterations",
+      "description": "Timed benchmark iterations",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10, 20]
+    }
+  ],
+  "kernels": ["blackscholes_kernel"]
+}

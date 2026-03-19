@@ -1,0 +1,29 @@
+{
+  "benchmark": "shoc_scan",
+  "tier": 2,
+  "suite": "shoc",
+  "description": "Work-efficient exclusive prefix scan (Blelloch) with multi-block support via recursive block-sum propagation. Measures throughput in GB/s.",
+  "scaling_param": {
+    "name": "array_size",
+    "description": "Number of float elements to scan",
+    "type": "int",
+    "values": [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Threads per block (half the elements processed per block)",
+      "type": "int",
+      "default": 256,
+      "values": [64, 128, 256, 512]
+    },
+    {
+      "name": "iterations",
+      "description": "Number of timed iterations for averaging",
+      "type": "int",
+      "default": 20,
+      "values": [5, 10, 20, 50]
+    }
+  ],
+  "kernels": ["scan_block_kernel", "add_block_sums_kernel"]
+}

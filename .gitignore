@@ -11,6 +11,7 @@ tier2/*/*
 !tier2/*/*.h
 !tier2/*/*.metal
 !tier2/*/*.mm
+!tier2/*/params.json
 tier3/*/*
 !tier3/*/Makefile
 !tier3/*/README.md

@@ -1,0 +1,29 @@
+{
+  "benchmark": "shoc_gemm",
+  "tier": 2,
+  "suite": "shoc",
+  "description": "Dense matrix multiply C = alpha*A*B + beta*C for NxN square float matrices. Measures peak compute throughput in GFLOPS.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Square matrix dimension N (NxN matrices)",
+    "type": "int",
+    "values": [64, 128, 192, 256, 384, 512, 640, 768, 896, 1024, 1280, 1536, 1792, 2048, 2560, 3072, 3584, 4096, 5120, 6144, 7168, 8192]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Thread-block tile dimension (TILE_SIZE x TILE_SIZE)",
+      "type": "int",
+      "default": 16,
+      "values": [8, 16, 32]
+    },
+    {
+      "name": "iterations",
+      "description": "Number of timed iterations for averaging",
+      "type": "int",
+      "default": 20,
+      "values": [5, 10, 20]
+    }
+  ],
+  "kernels": ["gemm_kernel"]
+}

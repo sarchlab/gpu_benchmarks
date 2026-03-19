@@ -1,0 +1,22 @@
+{
+  "benchmark": "polybench_gemm",
+  "tier": 2,
+  "suite": "polybench",
+  "description": "Dense matrix multiply C = alpha*A*B + beta*C for NxN square matrices (alpha=1.5, beta=1.2). Measures compute throughput in GFLOPS.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Square matrix dimension N (NxN matrices)",
+    "type": "int",
+    "values": [64, 128, 192, 256, 384, 512, 640, 768, 896, 1024, 1280, 1536, 1792, 2048, 2560, 3072, 3584, 4096, 5120, 6144, 7168, 8192]
+  },
+  "non_scaling_params": [
+    {
+      "name": "iterations",
+      "description": "Number of timed iterations for averaging",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10, 20]
+    }
+  ],
+  "kernels": ["polybench_gemm_kernel"]
+}

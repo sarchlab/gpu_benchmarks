@@ -1,0 +1,80 @@
+{
+  "benchmark": "torch_compile_bench",
+  "tier": 5,
+  "suite": "ml_framework",
+  "description": "Compares eager vs torch.compile execution of ResNet-50 inference. Measures latency and images/sec for both variants and reports speedup.",
+  "language": "python",
+  "scaling_param": {
+    "name": "batch_size",
+    "description": "Number of images per inference batch",
+    "type": "int",
+    "values": [
+      1,
+      2,
+      4,
+      8,
+      12,
+      16,
+      24,
+      32,
+      48,
+      64,
+      96,
+      128,
+      160,
+      192,
+      256,
+      320,
+      384,
+      512,
+      640,
+      768,
+      896,
+      1024,
+      1280,
+      1536,
+      2048
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "image_size",
+      "description": "Spatial resolution of input images (height and width)",
+      "type": "int",
+      "default": 224,
+      "values": [
+        128,
+        224,
+        256,
+        384
+      ]
+    },
+    {
+      "name": "compile_mode",
+      "description": "torch.compile optimization mode",
+      "type": "enum",
+      "default": "default",
+      "values": [
+        "default",
+        "reduce-overhead",
+        "max-autotune"
+      ]
+    },
+    {
+      "name": "num_warmup",
+      "description": "Number of warmup iterations before timing",
+      "type": "int",
+      "default": 5,
+      "values": [
+        3,
+        5,
+        10,
+        20
+      ]
+    }
+  ],
+  "kernels": [
+    "forward_eager",
+    "forward_compiled"
+  ]
+}

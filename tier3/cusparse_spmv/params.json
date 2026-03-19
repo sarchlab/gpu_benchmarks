@@ -1,0 +1,36 @@
+{
+  "benchmark": "cusparse_spmv",
+  "tier": 3,
+  "suite": "vendor_library",
+  "description": "CSR Sparse Matrix-Vector Multiply (SpMV) benchmark using cuSPARSE (NVIDIA) or rocSPARSE (AMD). Computes y = A * x where A is a synthetic CSR sparse matrix with a fixed number of non-zeros per row. Reports both GB/s and GFLOPS.",
+  "scaling_param": {
+    "name": "num_rows",
+    "description": "Number of rows (and columns) in the square sparse matrix",
+    "type": "int",
+    "values": [256, 512, 1024, 2048, 4096, 8192, 12288, 16384, 24576, 32768, 49152, 65536, 98304, 131072, 196608, 262144, 393216, 524288, 786432, 1048576]
+  },
+  "non_scaling_params": [
+    {
+      "name": "nnz_per_row",
+      "description": "Number of non-zero elements per row; controls sparsity pattern",
+      "type": "int",
+      "default": 32,
+      "values": [4, 16, 32, 64, 128]
+    },
+    {
+      "name": "warmup",
+      "description": "Number of warmup iterations before timing",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10]
+    },
+    {
+      "name": "iters",
+      "description": "Number of timed iterations for averaging",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10, 20]
+    }
+  ],
+  "kernels": ["cusparseSpMV", "rocsparse_scsrmv"]
+}

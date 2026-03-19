@@ -1,0 +1,36 @@
+{
+  "benchmark": "cublas_batched_gemm",
+  "tier": 3,
+  "suite": "vendor_library",
+  "description": "Batched FP32 GEMM using cuBLAS (NVIDIA) or rocBLAS (AMD). Computes C[i] = alpha * A[i] * B[i] + beta * C[i] for i in [0, batch_count). Each matrix is M×K * K×N (row-major, FP32). Reports aggregate GFLOPS.",
+  "scaling_param": {
+    "name": "matrix_dim",
+    "description": "Square matrix dimension M=N=K for each batch element",
+    "type": "int",
+    "values": [32, 64, 96, 128, 160, 192, 256, 320, 384, 512, 640, 768, 1024, 1280, 1536, 2048, 2560, 3072, 3584, 4096]
+  },
+  "non_scaling_params": [
+    {
+      "name": "batch_count",
+      "description": "Number of independent GEMM operations in the batch",
+      "type": "int",
+      "default": 64,
+      "values": [8, 32, 64, 128, 256]
+    },
+    {
+      "name": "warmup",
+      "description": "Number of warmup iterations before timing",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10]
+    },
+    {
+      "name": "iters",
+      "description": "Number of timed iterations for averaging",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10, 20]
+    }
+  ],
+  "kernels": ["cublasSgemmBatched", "rocblas_sgemm_batched"]
+}

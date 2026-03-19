@@ -1,0 +1,43 @@
+{
+  "benchmark": "cudnn_conv",
+  "tier": 3,
+  "suite": "vendor_library",
+  "description": "Forward 2D convolution benchmark using cuDNN (NVIDIA) or MIOpen (AMD). Default: Input N=32, C=3, H=W=224; Filter K=64, R=S=7, stride=2, pad=3; Output N=32, K=64, 112×112. Algorithm auto-tuned. Reports GFLOPS.",
+  "scaling_param": {
+    "name": "input_hw",
+    "description": "Spatial dimension of the input tensor (H=W); output size scales accordingly via stride/padding",
+    "type": "int",
+    "values": [28, 32, 56, 64, 96, 112, 128, 160, 192, 224, 256, 320, 384, 448, 512, 640, 768, 896, 1024, 1152]
+  },
+  "non_scaling_params": [
+    {
+      "name": "batch_n",
+      "description": "Batch size (number of images)",
+      "type": "int",
+      "default": 32,
+      "values": [1, 8, 16, 32, 64]
+    },
+    {
+      "name": "in_channels",
+      "description": "Number of input channels",
+      "type": "int",
+      "default": 3,
+      "values": [3, 16, 32, 64]
+    },
+    {
+      "name": "out_channels",
+      "description": "Number of output channels (filters)",
+      "type": "int",
+      "default": 64,
+      "values": [16, 32, 64, 128, 256]
+    },
+    {
+      "name": "filter_size",
+      "description": "Convolution filter spatial dimension (R=S)",
+      "type": "int",
+      "default": 7,
+      "values": [1, 3, 5, 7]
+    }
+  ],
+  "kernels": ["cudnnConvolutionForward", "miopenConvolutionForward"]
+}

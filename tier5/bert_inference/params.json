@@ -1,0 +1,48 @@
+{
+  "benchmark": "bert_inference",
+  "tier": 5,
+  "suite": "ml_inference",
+  "description": "BERT-base inference benchmark using HuggingFace transformers. Runs encoder forward pass in eval mode with no_grad. Reports sequences/sec throughput.",
+  "language": "python",
+  "scaling_param": {
+    "name": "batch_size",
+    "description": "Number of sequences per inference batch",
+    "type": "int",
+    "values": [
+      1, 2, 4, 8, 12, 16, 24, 32, 48, 64,
+      96, 128, 160, 192, 256, 320, 384, 512, 640, 768,
+      896, 1024, 1280, 1536, 2048
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "seq_len",
+      "description": "Length of each input sequence in tokens",
+      "type": "int",
+      "default": 128,
+      "values": [32, 64, 128, 256, 512]
+    },
+    {
+      "name": "hidden_size",
+      "description": "Hidden dimension of the BERT model",
+      "type": "int",
+      "default": 768,
+      "values": [256, 512, 768, 1024]
+    },
+    {
+      "name": "num_hidden_layers",
+      "description": "Number of transformer encoder layers",
+      "type": "int",
+      "default": 12,
+      "values": [4, 6, 12, 24]
+    },
+    {
+      "name": "num_attention_heads",
+      "description": "Number of attention heads per layer",
+      "type": "int",
+      "default": 12,
+      "values": [4, 8, 12, 16]
+    }
+  ],
+  "kernels": ["forward", "attention", "feed_forward"]
+}

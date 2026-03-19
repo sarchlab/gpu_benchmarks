@@ -1,0 +1,77 @@
+{
+  "benchmark": "shoc_devicememory",
+  "tier": 2,
+  "suite": "shoc",
+  "description": "Device global memory bandwidth benchmark with read-only, write-only, and read-write access patterns. Measures bandwidth in GB/s.",
+  "scaling_param": {
+    "name": "array_size_mb",
+    "description": "Array size in megabytes",
+    "type": "int",
+    "values": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      24,
+      32,
+      48,
+      64,
+      96,
+      128,
+      192,
+      256,
+      384,
+      512,
+      768,
+      1024,
+      1536,
+      2048,
+      3072,
+      4096
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "GPU thread-block size",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512,
+        1024
+      ]
+    },
+    {
+      "name": "iterations",
+      "description": "Number of timed iterations for averaging",
+      "type": "int",
+      "default": 20,
+      "values": [
+        5,
+        10,
+        20,
+        50
+      ]
+    },
+    {
+      "name": "transfer_mode",
+      "description": "Memory access pattern to benchmark",
+      "type": "enum",
+      "default": "readwrite",
+      "values": [
+        "read",
+        "write",
+        "readwrite"
+      ]
+    }
+  ],
+  "kernels": [
+    "readOnly_kernel",
+    "writeOnly_kernel",
+    "readWrite_kernel"
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "benchmark": "mixbench",
+  "tier": 1,
+  "suite": "microbench",
+  "description": "Parametric roofline benchmark that sweeps compute-to-memory ratio. Each thread loads one float from global memory, performs a variable-length FMA chain, and stores the result. By varying the FLOP/byte ratio, traces out the roofline curve from memory-bound to compute-bound regimes.",
+  "scaling_param": {
+    "name": "buffer_size_mb",
+    "description": "Array size in MiB; determines total number of elements processed",
+    "type": "int",
+    "values": [1, 2, 4, 8, 16, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096]
+  },
+  "non_scaling_params": [
+    {
+      "name": "flops_per_byte",
+      "description": "Target FLOP/byte ratio; controls the number of FMA operations per thread relative to memory traffic",
+      "type": "float",
+      "default": 4.0,
+      "values": [0.5, 2.0, 4.0, 8.0, 32.0]
+    },
+    {
+      "name": "threads_per_block",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [64, 128, 256, 512]
+    },
+    {
+      "name": "timed_iterations",
+      "description": "Number of timed kernel launches for averaging",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10]
+    }
+  ],
+  "kernels": ["mixbench_kernel"]
+}

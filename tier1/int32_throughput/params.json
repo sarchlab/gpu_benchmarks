@@ -1,0 +1,36 @@
+{
+  "benchmark": "int32_throughput",
+  "tier": 1,
+  "suite": "microbench",
+  "description": "Measures peak 32-bit integer (INT32) compute throughput using a long chain of integer multiply-add (MAD) instructions. All values live in registers; reports GIOPS.",
+  "scaling_param": {
+    "name": "mads_per_thread",
+    "description": "Number of integer MAD operations per thread per kernel invocation; controls total compute work",
+    "type": "int",
+    "values": [4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152]
+  },
+  "non_scaling_params": [
+    {
+      "name": "num_blocks",
+      "description": "Number of thread blocks in the grid",
+      "type": "int",
+      "default": 1024,
+      "values": [256, 512, 1024, 2048, 4096]
+    },
+    {
+      "name": "threads_per_block",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [64, 128, 256, 512]
+    },
+    {
+      "name": "num_iterations",
+      "description": "Number of timed kernel launches for averaging",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10, 20]
+    }
+  ],
+  "kernels": ["int32_mad_kernel"]
+}

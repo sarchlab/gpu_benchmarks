@@ -1,0 +1,73 @@
+{
+  "benchmark": "npb_ep",
+  "tier": 2,
+  "suite": "npb",
+  "description": "NAS Parallel Benchmarks Embarrassingly Parallel: generates N pairs of Gaussian random deviates using Box-Muller transform with per-thread LCG RNG, counts results into 10 annular bins. Purely compute-bound.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Number of Gaussian pairs to generate",
+    "type": "int",
+    "values": [
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768,
+      65536,
+      131072,
+      262144,
+      1048576,
+      2097152,
+      4194304,
+      8388608,
+      16777216,
+      33554432,
+      67108864,
+      134217728,
+      268435456,
+      536870912,
+      1073741824
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "iterations",
+      "description": "Timed benchmark iterations",
+      "type": "int",
+      "default": 5,
+      "values": [
+        3,
+        5,
+        10,
+        20
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
+    },
+    {
+      "name": "seed",
+      "description": "RNG seed for reproducibility",
+      "type": "int",
+      "default": 271828183,
+      "values": [
+        271828183,
+        314159265,
+        123456789
+      ]
+    }
+  ],
+  "kernels": [
+    "ep_kernel"
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "benchmark": "lonestar_bh",
+  "tier": 2,
+  "suite": "lonestar",
+  "description": "Barnes-Hut N-body simulation using 2D quadtree. Tree built on CPU, flattened for GPU. GPU computes forces by tree traversal and integrates positions/velocities.",
+  "scaling_param": {
+    "name": "bodies",
+    "description": "Number of bodies in the simulation",
+    "type": "int",
+    "values": [
+      256,
+      512,
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768,
+      65536,
+      131072,
+      262144,
+      524288,
+      1048576,
+      2097152,
+      4194304,
+      8388608,
+      16777216,
+      33554432,
+      67108864,
+      134217728
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "timesteps",
+      "description": "Number of simulation timesteps",
+      "type": "int",
+      "default": 10,
+      "values": [
+        1,
+        5,
+        10,
+        20
+      ]
+    },
+    {
+      "name": "theta",
+      "description": "Barnes-Hut opening angle (controls accuracy vs speed tradeoff)",
+      "type": "float",
+      "default": 0.5,
+      "values": [
+        0.3,
+        0.5,
+        0.7,
+        1.0
+      ]
+    },
+    {
+      "name": "iterations",
+      "description": "Timed benchmark iterations",
+      "type": "int",
+      "default": 5,
+      "values": [
+        3,
+        5,
+        10
+      ]
+    }
+  ],
+  "kernels": [
+    "bh_force_kernel",
+    "integrate_kernel"
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "benchmark": "ollama_bench",
+  "tier": 5,
+  "suite": "llm_serving",
+  "description": "Ollama inference benchmark. Sends generation requests to the Ollama HTTP API and measures tokens/sec from eval timing in the response.",
+  "language": "python",
+  "scaling_param": {
+    "name": "num_predict",
+    "description": "Number of tokens to generate per request",
+    "type": "int",
+    "values": [
+      8,
+      16,
+      32,
+      48,
+      64,
+      96,
+      128,
+      192,
+      256,
+      320,
+      384,
+      512,
+      640,
+      768,
+      1024,
+      1280,
+      1536,
+      2048,
+      2560,
+      3072,
+      3584,
+      4096
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "model",
+      "description": "Ollama model name to use for inference",
+      "type": "enum",
+      "default": "tinyllama",
+      "values": [
+        "tinyllama",
+        "llama2",
+        "mistral",
+        "phi"
+      ]
+    },
+    {
+      "name": "prompt_length",
+      "description": "Approximate length category of the input prompt",
+      "type": "enum",
+      "default": "medium",
+      "values": [
+        "short",
+        "medium",
+        "long"
+      ]
+    },
+    {
+      "name": "temperature",
+      "description": "Sampling temperature for token generation",
+      "type": "float",
+      "default": 0.7,
+      "values": [
+        0.0,
+        0.5,
+        0.7,
+        1.0
+      ]
+    }
+  ],
+  "kernels": [
+    "prompt_eval",
+    "token_eval"
+  ]
+}

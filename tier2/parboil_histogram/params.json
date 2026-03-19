@@ -1,0 +1,75 @@
+{
+  "benchmark": "parboil_histogram",
+  "tier": 2,
+  "suite": "parboil",
+  "description": "256-bin histogram of N random uint32 values using atomic operations. Each element mapped to a bin via lower 8 bits. Measures throughput in GB/s.",
+  "scaling_param": {
+    "name": "n",
+    "description": "Number of input uint32 elements",
+    "type": "int",
+    "values": [
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768,
+      65536,
+      131072,
+      262144,
+      1048576,
+      2097152,
+      4194304,
+      8388608,
+      16777216,
+      33554432,
+      67108864,
+      134217728,
+      268435456,
+      536870912,
+      1073741824
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "iterations",
+      "description": "Timed benchmark iterations",
+      "type": "int",
+      "default": 5,
+      "values": [
+        3,
+        5,
+        10,
+        20
+      ]
+    },
+    {
+      "name": "num_bins",
+      "description": "Number of histogram bins",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512,
+        1024
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
+    }
+  ],
+  "kernels": [
+    "histogram_kernel"
+  ]
+}

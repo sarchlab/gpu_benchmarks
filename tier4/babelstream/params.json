@@ -1,0 +1,79 @@
+{
+    "benchmark": "babelstream",
+    "tier": 4,
+    "suite": "stream",
+    "description": "BabelStream memory bandwidth benchmark implementing five kernels: Copy, Scale, Add, Triad, and Dot. Measures sustained memory bandwidth (GB/s) for each operation pattern.",
+    "language": "cpp",
+    "scaling_param": {
+        "name": "n",
+        "description": "Number of elements in each array",
+        "type": "int",
+        "values": [
+            1024,
+            2048,
+            4096,
+            8192,
+            16384,
+            32768,
+            65536,
+            131072,
+            262144,
+            524288,
+            1048576,
+            2097152,
+            4194304,
+            8388608,
+            16777216,
+            33554432,
+            67108864,
+            134217728,
+            268435456,
+            536870912
+        ]
+    },
+    "non_scaling_params": [
+        {
+            "name": "threads_per_block",
+            "description": "Number of threads per GPU thread block",
+            "type": "int",
+            "default": 256,
+            "values": [
+                64,
+                128,
+                256,
+                512,
+                1024
+            ]
+        },
+        {
+            "name": "scalar",
+            "description": "Scalar multiplier used in Scale and Triad kernels",
+            "type": "float",
+            "default": 2.0,
+            "values": [
+                0.5,
+                2.0,
+                3.0
+            ]
+        },
+        {
+            "name": "num_times",
+            "description": "Number of times each kernel is executed for timing",
+            "type": "int",
+            "default": 100,
+            "values": [
+                10,
+                50,
+                100,
+                500
+            ]
+        }
+    ],
+    "kernels": [
+        "copy_kernel",
+        "scale_kernel",
+        "add_kernel",
+        "triad_kernel",
+        "dot_kernel"
+    ]
+}

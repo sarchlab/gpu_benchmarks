@@ -1,0 +1,36 @@
+{
+  "benchmark": "memory_bandwidth",
+  "tier": 1,
+  "suite": "microbench",
+  "description": "Measures GPU memory bandwidth in three directions: Host-to-Device (H2D), Device-to-Host (D2H), and Device-to-Device (D2D) using hipMemcpy with pinned host memory. Reports bandwidth in GB/s.",
+  "scaling_param": {
+    "name": "buffer_size_mb",
+    "description": "Transfer buffer size in MiB; controls the total data volume per transfer",
+    "type": "int",
+    "values": [1, 2, 4, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096]
+  },
+  "non_scaling_params": [
+    {
+      "name": "num_iterations",
+      "description": "Number of timed transfer repetitions for stable averaging",
+      "type": "int",
+      "default": 20,
+      "values": [5, 10, 20, 50, 100]
+    },
+    {
+      "name": "transfer_type",
+      "description": "Direction of memory transfer",
+      "type": "enum",
+      "default": "all",
+      "values": ["h2d", "d2h", "d2d", "all"]
+    },
+    {
+      "name": "use_pinned_memory",
+      "description": "Whether to use pinned (page-locked) host memory for transfers",
+      "type": "enum",
+      "default": "true",
+      "values": ["true", "false", "both"]
+    }
+  ],
+  "kernels": ["memcpy_h2d", "memcpy_d2h", "memcpy_d2d"]
+}

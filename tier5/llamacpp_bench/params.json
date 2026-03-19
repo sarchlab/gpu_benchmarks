@@ -1,0 +1,80 @@
+{
+  "benchmark": "llamacpp_bench",
+  "tier": 5,
+  "suite": "llm_serving",
+  "description": "llama.cpp inference benchmark. Runs the llama-cli binary with a GGUF model and measures token generation speed (tokens/sec) from eval timing output.",
+  "language": "python",
+  "scaling_param": {
+    "name": "n_predict",
+    "description": "Number of tokens to generate",
+    "type": "int",
+    "values": [
+      8,
+      16,
+      32,
+      48,
+      64,
+      96,
+      128,
+      192,
+      256,
+      320,
+      384,
+      512,
+      640,
+      768,
+      1024,
+      1280,
+      1536,
+      2048,
+      2560,
+      3072,
+      3584,
+      4096
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "n_gpu_layers",
+      "description": "Number of model layers to offload to GPU",
+      "type": "int",
+      "default": 99,
+      "values": [
+        0,
+        16,
+        32,
+        64,
+        99
+      ]
+    },
+    {
+      "name": "quantization",
+      "description": "GGUF model quantization level",
+      "type": "enum",
+      "default": "Q4_0",
+      "values": [
+        "Q4_0",
+        "Q4_K_M",
+        "Q5_K_M",
+        "Q8_0",
+        "F16"
+      ]
+    },
+    {
+      "name": "threads",
+      "description": "Number of CPU threads used for inference",
+      "type": "int",
+      "default": 4,
+      "values": [
+        1,
+        2,
+        4,
+        8
+      ]
+    }
+  ],
+  "kernels": [
+    "prompt_eval",
+    "token_eval"
+  ]
+}

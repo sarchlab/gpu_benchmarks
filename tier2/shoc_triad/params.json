@@ -1,0 +1,74 @@
+{
+  "benchmark": "shoc_triad",
+  "tier": 2,
+  "suite": "shoc",
+  "description": "Stream Triad: a[i] = b[i] + scalar * c[i]. Classic memory bandwidth benchmark measuring sustained GPU memory bandwidth in GB/s.",
+  "scaling_param": {
+    "name": "array_size",
+    "description": "Number of float elements in each array",
+    "type": "int",
+    "values": [
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768,
+      65536,
+      131072,
+      262144,
+      524288,
+      1048576,
+      2097152,
+      4194304,
+      8388608,
+      16777216,
+      33554432,
+      67108864,
+      134217728,
+      268435456,
+      536870912
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "GPU thread-block size",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512,
+        1024
+      ]
+    },
+    {
+      "name": "iterations",
+      "description": "Number of timed kernel launch iterations for averaging",
+      "type": "int",
+      "default": 20,
+      "values": [
+        5,
+        10,
+        20,
+        50
+      ]
+    },
+    {
+      "name": "precision",
+      "description": "Floating-point precision for stream triad arrays",
+      "type": "enum",
+      "default": "float",
+      "values": [
+        "float",
+        "double",
+        "half"
+      ]
+    }
+  ],
+  "kernels": [
+    "triad_kernel"
+  ]
+}

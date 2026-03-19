@@ -1,0 +1,75 @@
+{
+  "benchmark": "rodinia_bfs",
+  "tier": 2,
+  "suite": "rodinia",
+  "description": "Breadth-First Search on a random CSR graph. Two kernels per BFS level: frontier expansion and node update. Measures throughput in edges/s.",
+  "scaling_param": {
+    "name": "num_nodes",
+    "description": "Number of graph nodes",
+    "type": "int",
+    "values": [
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768,
+      65536,
+      131072,
+      262144,
+      524288,
+      1048576,
+      2097152,
+      4194304,
+      8388608,
+      16777216,
+      33554432,
+      67108864,
+      134217728,
+      268435456,
+      536870912
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "edges_per_node",
+      "description": "Average out-degree (edges per node)",
+      "type": "int",
+      "default": 20,
+      "values": [
+        5,
+        10,
+        20,
+        40,
+        80
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "GPU thread-block size",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
+    },
+    {
+      "name": "iterations",
+      "description": "Timed benchmark iterations",
+      "type": "int",
+      "default": 20,
+      "values": [
+        5,
+        10,
+        20
+      ]
+    }
+  ],
+  "kernels": [
+    "bfs_kernel",
+    "bfs_update"
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "benchmark": "vllm_offline",
+  "tier": 5,
+  "suite": "llm_serving",
+  "description": "vLLM offline batch inference benchmark. Sends multiple prompts to vLLM engine and measures aggregate tokens/sec and requests/sec throughput.",
+  "language": "python",
+  "scaling_param": {
+    "name": "max_tokens",
+    "description": "Maximum number of tokens to generate per prompt",
+    "type": "int",
+    "values": [
+      8,
+      16,
+      32,
+      48,
+      64,
+      96,
+      128,
+      192,
+      256,
+      320,
+      384,
+      512,
+      640,
+      768,
+      1024,
+      1280,
+      1536,
+      2048,
+      2560,
+      3072,
+      3584,
+      4096
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "num_prompts",
+      "description": "Number of prompts in the batch",
+      "type": "int",
+      "default": 10,
+      "values": [
+        1,
+        5,
+        10,
+        20,
+        50
+      ]
+    },
+    {
+      "name": "model_name",
+      "description": "HuggingFace model identifier",
+      "type": "enum",
+      "default": "facebook/opt-125m",
+      "values": [
+        "facebook/opt-125m",
+        "facebook/opt-350m",
+        "facebook/opt-1.3b"
+      ]
+    },
+    {
+      "name": "max_output_tokens",
+      "description": "Maximum number of output tokens to generate per request",
+      "type": "int",
+      "default": 128,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
+    }
+  ],
+  "kernels": [
+    "generate",
+    "prefill",
+    "decode"
+  ]
+}

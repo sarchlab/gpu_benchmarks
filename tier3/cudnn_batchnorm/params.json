@@ -1,0 +1,43 @@
+{
+  "benchmark": "cudnn_batchnorm",
+  "tier": 3,
+  "suite": "vendor_library",
+  "description": "Batch Normalization forward + backward benchmark using cuDNN (NVIDIA) or MIOpen (AMD). Spatial mode: per-channel normalization. Default: N=64, C=256, H=W=56 (NCHW, FP32). Reports effective bandwidth in GB/s.",
+  "scaling_param": {
+    "name": "spatial_dim",
+    "description": "Spatial dimension of the input tensor (H=W); controls total element count N*C*H*W",
+    "type": "int",
+    "values": [7, 14, 16, 28, 32, 48, 56, 64, 96, 112, 128, 160, 192, 224, 256, 320, 384, 448, 512, 576]
+  },
+  "non_scaling_params": [
+    {
+      "name": "batch_n",
+      "description": "Batch size (number of samples)",
+      "type": "int",
+      "default": 64,
+      "values": [1, 8, 32, 64, 128]
+    },
+    {
+      "name": "channels",
+      "description": "Number of channels",
+      "type": "int",
+      "default": 256,
+      "values": [64, 128, 256, 512]
+    },
+    {
+      "name": "warmup",
+      "description": "Number of warmup iterations before timing",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10]
+    },
+    {
+      "name": "iters",
+      "description": "Number of timed iterations for averaging",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10, 20]
+    }
+  ],
+  "kernels": ["cudnnBatchNormalizationForwardTraining", "cudnnBatchNormalizationBackward", "miopenBatchNormalizationForwardTraining", "miopenBatchNormalizationBackward"]
+}

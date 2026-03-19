@@ -1,0 +1,47 @@
+{
+  "benchmark": "whisper_inference",
+  "tier": 5,
+  "suite": "ml_inference",
+  "description": "Whisper speech-to-text inference benchmark using HuggingFace WhisperForConditionalGeneration. Encodes mel-spectrogram input and generates text tokens. Reports tokens/sec throughput.",
+  "language": "python",
+  "scaling_param": {
+    "name": "num_new_tokens",
+    "description": "Maximum number of new tokens to generate from audio input",
+    "type": "int",
+    "values": [
+      8, 16, 24, 32, 48, 64, 80, 96, 112, 128,
+      160, 192, 224, 256, 288, 320, 352, 384, 416, 448
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "batch",
+      "description": "Number of audio samples in a batch",
+      "type": "int",
+      "default": 4,
+      "values": [1, 2, 4, 8, 16]
+    },
+    {
+      "name": "time_frames",
+      "description": "Number of mel-spectrogram time frames (audio duration)",
+      "type": "int",
+      "default": 3000,
+      "values": [1500, 3000, 4500, 6000]
+    },
+    {
+      "name": "encoder_layers",
+      "description": "Number of encoder transformer layers",
+      "type": "int",
+      "default": 4,
+      "values": [2, 4, 6, 12]
+    },
+    {
+      "name": "d_model",
+      "description": "Model hidden dimension",
+      "type": "int",
+      "default": 256,
+      "values": [256, 384, 512, 768]
+    }
+  ],
+  "kernels": ["encoder_forward", "decoder_forward", "generate"]
+}

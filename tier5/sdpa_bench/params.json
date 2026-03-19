@@ -1,0 +1,48 @@
+{
+  "benchmark": "sdpa_bench",
+  "tier": 5,
+  "suite": "ml_framework",
+  "description": "PyTorch scaled dot-product attention (F.scaled_dot_product_attention) benchmark. Measures TFLOPS for fused attention on Q/K/V tensors of shape (B, H, S, D).",
+  "language": "python",
+  "scaling_param": {
+    "name": "seq_len",
+    "description": "Sequence length (S dimension of Q, K, V tensors)",
+    "type": "int",
+    "values": [
+      32, 64, 128, 192, 256, 384, 512, 640, 768, 1024,
+      1536, 2048, 3072, 4096, 5120, 6144, 8192, 10240,
+      12288, 16384, 20480, 24576, 32768
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "batch_size",
+      "description": "Batch size (B dimension)",
+      "type": "int",
+      "default": 8,
+      "values": [1, 4, 8, 16, 32]
+    },
+    {
+      "name": "num_heads",
+      "description": "Number of attention heads (H dimension)",
+      "type": "int",
+      "default": 16,
+      "values": [4, 8, 16, 32]
+    },
+    {
+      "name": "head_dim",
+      "description": "Dimension per attention head (D dimension)",
+      "type": "int",
+      "default": 64,
+      "values": [32, 64, 128]
+    },
+    {
+      "name": "dtype",
+      "description": "Data type for Q, K, V tensors",
+      "type": "enum",
+      "default": "float16",
+      "values": ["float16", "bfloat16", "float32"]
+    }
+  ],
+  "kernels": ["scaled_dot_product_attention"]
+}

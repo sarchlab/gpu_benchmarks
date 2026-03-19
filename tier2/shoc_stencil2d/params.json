@@ -1,0 +1,74 @@
+{
+  "benchmark": "shoc_stencil2d",
+  "tier": 2,
+  "suite": "shoc",
+  "description": "9-point 2D star stencil applied iteratively on an NxN grid with ping-pong buffers. Measures effective memory bandwidth in GB/s.",
+  "scaling_param": {
+    "name": "n",
+    "description": "Grid dimension (NxN grid)",
+    "type": "int",
+    "values": [
+      64,
+      128,
+      192,
+      256,
+      384,
+      512,
+      640,
+      768,
+      1024,
+      1280,
+      1536,
+      2048,
+      2560,
+      3072,
+      3584,
+      4096,
+      5120,
+      6144,
+      7168,
+      8192
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "iterations",
+      "description": "Number of stencil time-steps per trial",
+      "type": "int",
+      "default": 5,
+      "values": [
+        1,
+        5,
+        10,
+        20,
+        50
+      ]
+    },
+    {
+      "name": "trials",
+      "description": "Number of timed trials for averaging",
+      "type": "int",
+      "default": 3,
+      "values": [
+        1,
+        3,
+        5,
+        10
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Thread-block dimension for stencil kernel (block_size x block_size threads)",
+      "type": "int",
+      "default": 16,
+      "values": [
+        8,
+        16,
+        32
+      ]
+    }
+  ],
+  "kernels": [
+    "stencil2d_kernel"
+  ]
+}

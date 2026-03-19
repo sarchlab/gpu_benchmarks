@@ -1,0 +1,74 @@
+{
+  "benchmark": "altis_cfd",
+  "tier": 2,
+  "suite": "altis",
+  "description": "Compressible Euler equations solver on synthetic unstructured mesh. Finite-volume method with 2-stage Runge-Kutta time integration. Each thread processes one mesh cell.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Number of mesh cells",
+    "type": "int",
+    "values": [
+      500,
+      1000,
+      2000,
+      3000,
+      5000,
+      10000,
+      20000,
+      50000,
+      97000,
+      200000,
+      500000,
+      1000000,
+      2000000,
+      5000000,
+      10000000,
+      20000000,
+      50000000,
+      100000000,
+      200000000,
+      500000000
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "iterations",
+      "description": "Timed benchmark iterations",
+      "type": "int",
+      "default": 5,
+      "values": [
+        3,
+        5,
+        10,
+        20
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
+    },
+    {
+      "name": "precision",
+      "description": "Floating-point precision for computation",
+      "type": "enum",
+      "default": "float",
+      "values": [
+        "half",
+        "float",
+        "double"
+      ]
+    }
+  ],
+  "kernels": [
+    "compute_flux_kernel",
+    "rk_update_kernel"
+  ]
+}

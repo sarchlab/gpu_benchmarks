@@ -1,0 +1,79 @@
+{
+  "benchmark": "vit_inference",
+  "tier": 5,
+  "suite": "ml_inference",
+  "description": "Vision Transformer (ViT-B/16) inference benchmark. Runs forward pass in eval mode with no_grad. Reports images/sec throughput.",
+  "language": "python",
+  "scaling_param": {
+    "name": "batch_size",
+    "description": "Number of images per inference batch",
+    "type": "int",
+    "values": [
+      1,
+      2,
+      4,
+      8,
+      12,
+      16,
+      24,
+      32,
+      48,
+      64,
+      96,
+      128,
+      160,
+      192,
+      256,
+      320,
+      384,
+      512,
+      640,
+      768,
+      896,
+      1024,
+      1280,
+      1536,
+      2048
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "image_size",
+      "description": "Spatial resolution of input images (height and width)",
+      "type": "int",
+      "default": 224,
+      "values": [
+        224,
+        384,
+        512
+      ]
+    },
+    {
+      "name": "patch_size",
+      "description": "Size of each image patch for tokenization",
+      "type": "int",
+      "default": 16,
+      "values": [
+        8,
+        16,
+        32
+      ]
+    },
+    {
+      "name": "precision",
+      "description": "Floating-point precision mode for inference",
+      "type": "enum",
+      "default": "fp32",
+      "values": [
+        "fp32",
+        "fp16",
+        "amp"
+      ]
+    }
+  ],
+  "kernels": [
+    "forward",
+    "attention",
+    "feed_forward"
+  ]
+}

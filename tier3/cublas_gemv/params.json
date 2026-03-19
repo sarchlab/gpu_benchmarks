@@ -1,0 +1,36 @@
+{
+  "benchmark": "cublas_gemv",
+  "tier": 3,
+  "suite": "vendor_library",
+  "description": "FP32 GEMV benchmark using cuBLAS (NVIDIA) or rocBLAS (AMD). Computes y = A * x where A is M×N (row-major, FP32), x is N-vector, y is M-vector. Memory-bandwidth bound. Reports both GB/s and GFLOPS.",
+  "scaling_param": {
+    "name": "matrix_dim",
+    "description": "Square matrix dimension M=N; controls matrix size and memory traffic",
+    "type": "int",
+    "values": [256, 512, 768, 1024, 1536, 2048, 3072, 4096, 5120, 6144, 7168, 8192, 10240, 12288, 14336, 16384, 20480, 24576, 28672, 32768, 40960, 49152, 57344, 65536]
+  },
+  "non_scaling_params": [
+    {
+      "name": "warmup",
+      "description": "Number of warmup iterations before timing",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10]
+    },
+    {
+      "name": "iters",
+      "description": "Number of timed iterations for averaging",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10, 20]
+    },
+    {
+      "name": "alpha",
+      "description": "Scalar multiplier for A*x",
+      "type": "float",
+      "default": 1.0,
+      "values": [0.5, 1.0, 2.0]
+    }
+  ],
+  "kernels": ["cublasSgemv", "rocblas_sgemv"]
+}

@@ -1,0 +1,36 @@
+{
+  "benchmark": "cufft_2d",
+  "tier": 3,
+  "suite": "vendor_library",
+  "description": "2D complex single-precision FFT benchmark using cuFFT (NVIDIA) or hipFFT (AMD). Performs forward complex-to-complex FFT on an NX×NY grid. Reports effective GB/s based on input+output data movement.",
+  "scaling_param": {
+    "name": "grid_dim",
+    "description": "Square grid dimension NX=NY for the 2D FFT; should be a power of 2 for optimal performance",
+    "type": "int",
+    "values": [32, 64, 128, 192, 256, 384, 512, 640, 768, 1024, 1280, 1536, 2048, 2560, 3072, 4096, 5120, 6144, 8192]
+  },
+  "non_scaling_params": [
+    {
+      "name": "warmup",
+      "description": "Number of warmup FFT executions before timing",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10]
+    },
+    {
+      "name": "iters",
+      "description": "Number of timed FFT executions for averaging",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10, 20]
+    },
+    {
+      "name": "direction",
+      "description": "FFT direction",
+      "type": "enum",
+      "default": "forward",
+      "values": ["forward", "inverse"]
+    }
+  ],
+  "kernels": ["cufftExecC2C", "hipfftExecC2C"]
+}

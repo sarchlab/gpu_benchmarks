@@ -1,0 +1,36 @@
+{
+  "benchmark": "cutlass_gemm",
+  "tier": 3,
+  "suite": "vendor_library",
+  "description": "CUTLASS-style tiled FP32 GEMM using a custom kernel with shared-memory staging and register tiling. Block tile BM×BN=64×64, K-tile BK=8, thread tile TM×TN=8×8, 64 threads/block. Self-contained, no external library. Reports GFLOPS.",
+  "scaling_param": {
+    "name": "matrix_dim",
+    "description": "Square matrix dimension M=N=K; must be a multiple of 64 (block tile size)",
+    "type": "int",
+    "values": [128, 256, 384, 512, 640, 768, 1024, 1280, 1536, 2048, 2560, 3072, 3584, 4096, 4608, 5120, 6144, 7168, 8192, 9216, 10240, 12288, 14336, 16384]
+  },
+  "non_scaling_params": [
+    {
+      "name": "warmup",
+      "description": "Number of warmup iterations before timing",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10]
+    },
+    {
+      "name": "iters",
+      "description": "Number of timed iterations for averaging",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10, 20]
+    },
+    {
+      "name": "block_tile_m",
+      "description": "Block tile size in M dimension",
+      "type": "int",
+      "default": 64,
+      "values": [32, 64, 128]
+    }
+  ],
+  "kernels": ["tiled_gemm_kernel"]
+}

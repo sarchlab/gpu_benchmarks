@@ -1,0 +1,36 @@
+{
+  "benchmark": "warp_shuffle",
+  "tier": 1,
+  "suite": "microbench",
+  "description": "Measures warp/wave shuffle instruction throughput for four variants: __shfl_xor (butterfly), __shfl (indexed), __shfl_up (shift up), and __shfl_down (shift down). Each thread performs a dependency chain of shuffle ops. Reports effective data movement rate in GB/s.",
+  "scaling_param": {
+    "name": "ops_per_thread",
+    "description": "Number of shuffle operations each thread performs per kernel invocation",
+    "type": "int",
+    "values": [4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152]
+  },
+  "non_scaling_params": [
+    {
+      "name": "num_blocks",
+      "description": "Number of thread blocks in the grid",
+      "type": "int",
+      "default": 1024,
+      "values": [256, 512, 1024, 2048, 4096]
+    },
+    {
+      "name": "threads_per_block",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [64, 128, 256, 512]
+    },
+    {
+      "name": "shuffle_variant",
+      "description": "Which shuffle instruction variant to benchmark",
+      "type": "enum",
+      "default": "all",
+      "values": ["shfl_xor", "shfl", "shfl_up", "shfl_down", "all"]
+    }
+  ],
+  "kernels": ["shfl_xor_kernel", "shfl_kernel", "shfl_up_kernel", "shfl_down_kernel"]
+}

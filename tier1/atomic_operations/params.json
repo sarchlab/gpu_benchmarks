@@ -1,0 +1,36 @@
+{
+  "benchmark": "atomic_operations",
+  "tier": 1,
+  "suite": "microbench",
+  "description": "Measures atomic operation throughput on global memory under maximum contention (all threads targeting a single memory location). Tests atomicAdd, atomicCAS, and atomicMin. Reports Giga-Operations/s.",
+  "scaling_param": {
+    "name": "ops_per_thread",
+    "description": "Number of atomic operations each thread performs per kernel invocation",
+    "type": "int",
+    "values": [4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152]
+  },
+  "non_scaling_params": [
+    {
+      "name": "num_blocks",
+      "description": "Number of thread blocks in the grid",
+      "type": "int",
+      "default": 1024,
+      "values": [256, 512, 1024, 2048, 4096]
+    },
+    {
+      "name": "threads_per_block",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [64, 128, 256, 512]
+    },
+    {
+      "name": "atomic_op",
+      "description": "Type of atomic operation to benchmark",
+      "type": "enum",
+      "default": "all",
+      "values": ["atomicAdd", "atomicCAS", "atomicMin", "all"]
+    }
+  ],
+  "kernels": ["atomicAdd_kernel", "atomicCAS_kernel", "atomicMin_kernel"]
+}

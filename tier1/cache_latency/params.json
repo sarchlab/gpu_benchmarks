@@ -1,0 +1,36 @@
+{
+  "benchmark": "cache_latency",
+  "tier": 1,
+  "suite": "microbench",
+  "description": "Measures GPU cache/memory latency using single-thread pointer chasing over a random Hamiltonian cycle. Array size determines the targeted cache level (L1, L2, or global DRAM). Reports latency in nanoseconds per access.",
+  "scaling_param": {
+    "name": "array_bytes",
+    "description": "Size of the pointer-chasing array in bytes; determines which cache level is targeted",
+    "type": "int",
+    "values": [4096, 8192, 16384, 24576, 32768, 49152, 65536, 98304, 131072, 196608, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456]
+  },
+  "non_scaling_params": [
+    {
+      "name": "num_accesses",
+      "description": "Number of pointer-chasing steps per kernel launch",
+      "type": "int",
+      "default": 2000000,
+      "values": [300000, 2000000, 10000000]
+    },
+    {
+      "name": "num_iters",
+      "description": "Number of timed kernel launches for averaging",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10]
+    },
+    {
+      "name": "rng_seed",
+      "description": "Random seed for chain permutation (reproducibility)",
+      "type": "int",
+      "default": 42,
+      "values": [42, 123, 7]
+    }
+  ],
+  "kernels": ["pointer_chase_kernel"]
+}

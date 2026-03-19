@@ -181,7 +181,7 @@ clean:
 
 **Branch:** `ares/m12-harness` (merged to main)
 
-### M13 — Critical Benchmark Gaps (current)
+### M13 — Critical Benchmark Gaps ✅ COMPLETE (cycles used: ~3)
 **Goal:** Fill the 6 highest-priority gaps identified by Iris's evaluation. These are all HIGH-priority items from `benchmark_report.md` that are missing from the suite.
 
 **Deliverables:**
@@ -224,7 +224,68 @@ clean:
 - Self-contained, no shared dependencies
 - Update tier1/Makefile, tier3/Makefile, tier4/Makefile to include new subdirectories
 
-**Branch:** `ares/m13-gaps`
+**Branch:** `ares/m13-gaps` (merged to main via PR #11)
+**Cycles budget:** 5
+
+### M14 — DNN Library Benchmarks + More Coverage (current)
+**Goal:** Add 6 more benchmarks covering critical DNN library primitives (cuDNN/MIOpen/MPS convolution & batch normalization), classic GPU kernel patterns (FFT, transpose), and modern ML inference workloads (LLM generation, torch.compile).
+
+**Deliverables:**
+
+**Tier 2 (2 new application benchmarks):**
+- `tier2/shoc_fft/` — Custom Cooley-Tukey radix-2 FFT kernel. Tests butterfly operations and bit-reversal permutation. N=1M complex elements. HIP + Metal.
+  - `.hip` file: radix-2 FFT with shared memory butterfly stages
+  - `_metal.mm` + `.metal`: equivalent Metal compute shader
+  - CSV: `shoc_fft,<N>,<time_ms>,<GFLOPS>`
+  - Report GFLOPS = 5*N*log2(N) / time_s / 1e9
+
+- `tier2/cuda_transpose/` — Optimized matrix transpose with shared memory tiling and bank-conflict avoidance. N=4096×4096 float matrix.
+  - `.hip` file: naive transpose + shared-memory tiled transpose (TILE=32, +1 padding for bank conflicts)
+  - `_metal.mm` + `.metal`: equivalent Metal compute shader
+  - CSV: `cuda_transpose,<N>,<time_ms>,<GBs>` (one line for naive, one for optimized)
+  - Report effective bandwidth = 2*N*N*sizeof(float) / time_s / 1e9
+
+**Tier 3 (2 new library benchmarks):**
+- `tier3/cudnn_conv/` — Forward 2D convolution using DNN libraries: cuDNN (NVIDIA) / MIOpen (AMD) / MPSCNNConvolution (Apple).
+  - `.hip` file with `#ifdef USE_CUDNN / USE_MIOPEN` for platform-specific library calls
+  - `_metal.mm` using MPSCNNConvolution
+  - Input: N=32, C=3, H=W=224; Filter: K=64, C=3, R=S=7, stride=2, pad=3
+  - Algorithm: auto-tune (cuDNN: CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM or auto; MIOpen: find best)
+  - CSV: `cudnn_conv,<NxCxHxW>,<time_ms>,<GFLOPS>`
+  - GFLOPS = 2*N*K*OH*OW*C*R*S / time_s / 1e9
+  - Link: `-lcudnn` (CUDA), `-lMIOpen` (ROCm), Metal+MPS frameworks (Apple)
+  - Makefile: `PLATFORM=cuda → nvcc -x cu -DUSE_CUDNN -lcudnn`, `PLATFORM=rocm → hipcc -DUSE_MIOPEN -lMIOpen`
+
+- `tier3/cudnn_batchnorm/` — Batch normalization forward + backward: cuDNN / MIOpen / MPSCNNBatchNormalization (Apple).
+  - `.hip` file with `#ifdef USE_CUDNN / USE_MIOPEN`
+  - `_metal.mm` using MPSCNNBatchNormalization
+  - Input: N=64, C=256, H=W=56 (typical ResNet intermediate)
+  - CSV: `cudnn_batchnorm,<NxCxHxW>,<time_ms>,<GBs>`
+  - Forward + backward timing
+  - Link: same as cudnn_conv
+
+**Tier 5 (2 new ML benchmarks):**
+- `tier5/gpt2_generate/` — GPT-2 autoregressive text generation (inference). Uses same inline GPT-2 model as nanogpt_train (n_layer=6, n_head=6, n_embd=384, vocab_size=50257). Generates 128 tokens autoregressively from a random prompt of 32 tokens.
+  - `bench.py` (CUDA/ROCm): torch.cuda.Event timing, KV-cache optional
+  - `bench_mps.py` (Apple): time.perf_counter timing
+  - CSV: `gpt2_generate,<seq_len>,<time_ms>,<tokens_per_sec>`
+  - 5 warmup + 10 timed generation runs
+
+- `tier5/torch_compile_bench/` — Compare PyTorch eager mode vs torch.compile on ResNet-50 inference. Tests torch.compile (Inductor backend) speedup.
+  - `bench.py` (CUDA/ROCm): runs ResNet-50 inference in eager mode and compiled mode, reports both timings and speedup
+  - `bench_mps.py` (Apple): same but uses MPS backend (torch.compile may fallback to eager on MPS)
+  - CSV: `torch_compile_bench,eager,<time_ms>,<images_per_sec>` and `torch_compile_bench,compiled,<time_ms>,<images_per_sec>`
+  - batch=32, input [32,3,224,224], 5 warmup + 10 timed, report speedup ratio
+
+**Per-benchmark conventions (same as existing):**
+- Makefile with PLATFORM auto-detect
+- README.md with build/run instructions for all 3 platforms
+- 5 warmup + 5 timed iterations, report average
+- CSV to stdout, human-readable to stderr
+- Self-contained, no shared dependencies
+- Update tier2/Makefile, tier3/Makefile, tier5/Makefile to include new subdirectories
+
+**Branch:** `ares/m14-dnn-expand`
 **Cycles budget:** 5
 
 ---
@@ -276,3 +337,5 @@ clean:
 | 56 | Planning | Athena | Iris evaluated state (54 benchmarks, 3 CSV formats, no harness); defined M12 (Integration & Harness) |
 | 57–59 | Implementation+Verification | Ares+Apollo | M12 implemented (harness scripts, .gitignore, Tier 1 CSV); merged to main |
 | 60 | Planning | Athena | Evaluated state (54 benchmarks, all tiers covered, harness complete); defined M13 (6 critical benchmark gaps) |
+| 61–63 | Implementation+Verification | Ares+Apollo | M13 implemented (6 gap-fill benchmarks); merged PR #11 |
+| 64 | Planning | Athena | Evaluated state (60 benchmarks); defined M14 (DNN library + FFT/Transpose + ML inference) |

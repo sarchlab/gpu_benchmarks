@@ -18,7 +18,7 @@ This suite is organized into five tiers of increasing complexity and scope, allo
 | **Tier 2** | Application Benchmarks | Classic GPU benchmark suites: SHOC, PolyBench-GPU, Rodinia, Parboil |
 | **Tier 3** | Library Benchmarks | Vendor and third-party library kernels: cuBLAS, CUTLASS, cuFFT, cuSPARSE, cuDNN |
 | **Tier 4** | Alternative Languages | Non-CUDA implementations: Triton, BabelStream |
-| **Tier 5** | ML Workloads | End-to-end machine learning training/inference and LLM benchmarks: ResNet-50, BERT, GPT-2, ViT, NanoGPT, SDPA, torch.compile, vLLM, llama.cpp, Ollama, LLaMA, DeepSeek, Qwen |
+| **Tier 5** | ML Workloads | End-to-end machine learning training/inference and LLM benchmarks: ResNet-50, BERT, GPT-2, ViT, NanoGPT, SDPA, torch.compile, vLLM, llama.cpp, Ollama, LLaMA, DeepSeek, Qwen, GLM, Phi, Mistral, BERT fine-tune, Whisper, Stable Diffusion |
 
 ---
 
@@ -98,11 +98,12 @@ gpu_benchmarks/
 │   ├── triton_layer_norm/
 │   ├── triton_dropout/
 │   └── triton_flash_attention/
-├── tier5/                          # ML workloads (14)
+├── tier5/                          # ML workloads (20)
 │   ├── Makefile
 │   ├── resnet50_train/
 │   ├── resnet50_infer/
 │   ├── bert_inference/
+│   ├── bert_finetune/
 │   ├── nanogpt_train/
 │   ├── gpt2_generate/
 │   ├── vit_inference/
@@ -113,7 +114,12 @@ gpu_benchmarks/
 │   ├── ollama_bench/
 │   ├── llama_inference/
 │   ├── deepseek_inference/
-│   └── qwen_inference/
+│   ├── qwen_inference/
+│   ├── glm_inference/
+│   ├── phi_inference/
+│   ├── mistral_inference/
+│   ├── whisper_inference/
+│   └── stable_diffusion_bench/
 └── scripts/                        # Helper scripts
     ├── run_all.sh
     └── report.py
@@ -229,6 +235,12 @@ gpu_benchmarks/
 | `llama_inference` | PyTorch | LLaMA architecture autoregressive generation |
 | `deepseek_inference` | PyTorch | DeepSeek-style model inference (GQA) |
 | `qwen_inference` | PyTorch | Qwen2 model autoregressive generation |
+| `glm_inference` | PyTorch | ChatGLM-style model autoregressive generation |
+| `phi_inference` | PyTorch | Microsoft Phi model inference (GQA) |
+| `mistral_inference` | PyTorch | Mistral model inference (Grouped Query Attention) |
+| `bert_finetune` | PyTorch | BERT fine-tuning (forward + backward + optimizer) |
+| `whisper_inference` | PyTorch | OpenAI Whisper audio model inference |
+| `stable_diffusion_bench` | PyTorch/Diffusers | Stable Diffusion UNet denoising loop |
 
 ---
 

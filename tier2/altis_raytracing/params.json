@@ -7,7 +7,28 @@
     "name": "width",
     "description": "Image width in pixels (also sets height for square image)",
     "type": "int",
-    "values": [64, 128, 256, 384, 512, 640, 768, 1024, 1280, 1536, 2048, 2560, 3072, 3584, 4096, 5120, 6144, 7168, 8192]
+    "values": [
+      64,
+      128,
+      256,
+      384,
+      512,
+      640,
+      768,
+      1024,
+      1280,
+      1536,
+      1792,
+      2048,
+      2560,
+      3072,
+      3584,
+      4096,
+      5120,
+      6144,
+      7168,
+      8192
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,22 +36,40 @@
       "description": "Image height in pixels",
       "type": "int",
       "default": 1024,
-      "values": [512, 1024, 2048, 4096]
+      "values": [
+        512,
+        1024,
+        2048,
+        4096
+      ]
     },
     {
       "name": "spheres",
       "description": "Number of spheres in the scene",
       "type": "int",
       "default": 64,
-      "values": [8, 32, 64, 128, 256]
+      "values": [
+        8,
+        32,
+        64,
+        128,
+        256
+      ]
     },
     {
       "name": "iterations",
       "description": "Timed benchmark iterations",
       "type": "int",
       "default": 5,
-      "values": [3, 5, 10, 20]
+      "values": [
+        3,
+        5,
+        10,
+        20
+      ]
     }
   ],
-  "kernels": ["raytrace_kernel"]
+  "kernels": [
+    "raytrace_kernel"
+  ]
 }

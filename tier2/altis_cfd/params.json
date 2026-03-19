@@ -7,7 +7,28 @@
     "name": "size",
     "description": "Number of mesh cells",
     "type": "int",
-    "values": [1000, 2000, 5000, 10000, 20000, 50000, 97000, 200000, 500000, 1000000, 2000000, 5000000, 10000000, 20000000, 50000000, 100000000, 200000000]
+    "values": [
+      500,
+      1000,
+      2000,
+      3000,
+      5000,
+      10000,
+      20000,
+      50000,
+      97000,
+      200000,
+      500000,
+      1000000,
+      2000000,
+      5000000,
+      10000000,
+      20000000,
+      50000000,
+      100000000,
+      200000000,
+      500000000
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,8 +36,16 @@
       "description": "Timed benchmark iterations",
       "type": "int",
       "default": 5,
-      "values": [3, 5, 10, 20]
+      "values": [
+        3,
+        5,
+        10,
+        20
+      ]
     }
   ],
-  "kernels": ["compute_flux_kernel", "rk_update_kernel"]
+  "kernels": [
+    "compute_flux_kernel",
+    "rk_update_kernel"
+  ]
 }

@@ -7,7 +7,28 @@
     "name": "vertices",
     "description": "Number of vertices in the graph (N= parameter)",
     "type": "int",
-    "values": [256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432]
+    "values": [
+      256,
+      512,
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768,
+      65536,
+      131072,
+      262144,
+      524288,
+      1048576,
+      2097152,
+      4194304,
+      8388608,
+      16777216,
+      33554432,
+      67108864,
+      134217728
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,8 +36,16 @@
       "description": "Average degree per vertex (D= parameter)",
       "type": "int",
       "default": 32,
-      "values": [8, 16, 32, 64, 128]
+      "values": [
+        8,
+        16,
+        32,
+        64,
+        128
+      ]
     }
   ],
-  "kernels": ["triangle_count_kernel"]
+  "kernels": [
+    "triangle_count_kernel"
+  ]
 }

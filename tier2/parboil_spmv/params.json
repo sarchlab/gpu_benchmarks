@@ -7,7 +7,28 @@
     "name": "num_rows",
     "description": "Number of matrix rows",
     "type": "int",
-    "values": [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728]
+    "values": [
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768,
+      65536,
+      131072,
+      262144,
+      524288,
+      1048576,
+      2097152,
+      4194304,
+      8388608,
+      16777216,
+      33554432,
+      67108864,
+      134217728,
+      268435456,
+      536870912
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,22 +36,39 @@
       "description": "Average number of non-zero elements per row",
       "type": "int",
       "default": 10,
-      "values": [4, 10, 20, 40, 80]
+      "values": [
+        4,
+        10,
+        20,
+        40,
+        80
+      ]
     },
     {
       "name": "block_size",
       "description": "GPU thread-block size",
       "type": "int",
       "default": 256,
-      "values": [64, 128, 256, 512]
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
     },
     {
       "name": "iterations",
       "description": "Timed benchmark iterations",
       "type": "int",
       "default": 10,
-      "values": [5, 10, 20]
+      "values": [
+        5,
+        10,
+        20
+      ]
     }
   ],
-  "kernels": ["spmv_csr"]
+  "kernels": [
+    "spmv_csr"
+  ]
 }

@@ -7,7 +7,28 @@
     "name": "input",
     "description": "Input layer size (number of input neurons)",
     "type": "int",
-    "values": [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728]
+    "values": [
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768,
+      65536,
+      131072,
+      262144,
+      524288,
+      1048576,
+      2097152,
+      4194304,
+      8388608,
+      16777216,
+      33554432,
+      67108864,
+      134217728,
+      268435456,
+      536870912
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,22 +36,44 @@
       "description": "Hidden layer size (number of hidden neurons)",
       "type": "int",
       "default": 1024,
-      "values": [256, 512, 1024, 2048, 4096]
+      "values": [
+        256,
+        512,
+        1024,
+        2048,
+        4096
+      ]
     },
     {
       "name": "output",
       "description": "Output layer size (number of output neurons)",
       "type": "int",
       "default": 1,
-      "values": [1, 4, 16]
+      "values": [
+        1,
+        4,
+        16
+      ]
     },
     {
       "name": "iterations",
       "description": "Timed benchmark iterations",
       "type": "int",
       "default": 5,
-      "values": [3, 5, 10, 20]
+      "values": [
+        3,
+        5,
+        10,
+        20
+      ]
     }
   ],
-  "kernels": ["forward_hidden", "forward_output", "backward_output_delta", "backward_hidden_delta", "update_w1", "update_w2"]
+  "kernels": [
+    "forward_hidden",
+    "forward_output",
+    "backward_output_delta",
+    "backward_hidden_delta",
+    "update_w1",
+    "update_w2"
+  ]
 }

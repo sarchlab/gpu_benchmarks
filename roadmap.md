@@ -342,7 +342,7 @@ clean:
 **Deliverables (completed):** moe_inference, rag_pipeline, cot_reasoning, multi_agent_bench, sdxl_inference, gptneox_train — all with bench.py + bench_mps.py + Makefile + README. Merged via PR #16.
 **Note:** Issue #100 (modern ML workloads) now fully covered with 26 Tier 5 benchmarks. Issue closed.
 
-### M19 — Tier 2: New Benchmark Suites Batch 1 (4 new suites, 10 benchmarks)
+### M19 — Tier 2: New Benchmark Suites Batch 1 (4 new suites, 10 benchmarks) ✅ IMPLEMENTED (on branch)
 **Goal:** Add 10 benchmarks from 4 new Tier 2 suites. This addresses Issue #101 (need 8+ more suites beyond SHOC/Rodinia/PolyBench/Parboil/CUDA Samples).
 
 **New suites in this batch:**
@@ -351,11 +351,11 @@ clean:
 3. **Tango** (2): tango_blackscholes, tango_binomial_options
 4. **NPB-GPU** (2): npb_ep, npb_is
 
-**Status:** PLANNED
-**Cycles budget:** 5
+**Status:** Implemented on branch `ares/m19-tier2-suites1`, needs PR + merge
+**Cycles budget:** 5 (actual: implemented in previous epoch, pending merge)
 
-### M20 — Tier 2: New Benchmark Suites Batch 2 (4+ new suites, ~10 benchmarks)
-**Goal:** Add benchmarks from 4+ more Tier 2 suites to reach 8+ new suites total.
+### M20 — Tier 2: New Benchmark Suites Batch 2 (4 new suites, 9 benchmarks)
+**Goal:** Add benchmarks from 4 more Tier 2 suites to reach 8+ new suites total.
 
 **New suites in this batch:**
 5. **Altis** (3): altis_cfd, altis_particlefilter, altis_raytracing
@@ -363,7 +363,7 @@ clean:
 7. **Graph Analytics** (2): graph_pr, graph_tc
 8. **Chai** (2): chai_hsto, chai_cedd
 
-**Status:** PLANNED
+**Status:** ACTIVE — combined with M19 merge as one milestone
 **Cycles budget:** 5
 
 ---
@@ -428,3 +428,5 @@ clean:
 | 79 | Planning | Athena | Evaluated state (82 benchmarks). M17 complete. Define M18. |
 | 80–82 | Implementation+Verification | Ares+Apollo | M18 implemented (6 benchmarks: moe_inference, rag_pipeline, cot_reasoning, multi_agent_bench, sdxl_inference, gptneox_train); merged PR #16 |
 | 83 | Planning | Athena | Evaluated state (88 benchmarks). M18 complete. Issue #100 closed. Define M19. |
+| 84–87 | Implementation+Verification | Ares+Apollo | M19 implemented (10 Tier 2 benchmarks on branch ares/m19-tier2-suites1). Epoch ended before merge. |
+| 88 | Planning | Athena | M19 branch exists but not merged. Define combined M19+M20 milestone. |

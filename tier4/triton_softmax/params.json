@@ -1,0 +1,34 @@
+{
+  "benchmark": "triton_softmax",
+  "tier": 4,
+  "suite": "triton",
+  "description": "Row-wise softmax on a 2D matrix using a single Triton kernel. Each program instance processes one row: computes max, exponentiates, and normalizes. Measures memory bandwidth (GB/s).",
+  "language": "python",
+  "scaling_param": {
+    "name": "N",
+    "description": "Number of columns per row (row width); total elements = M x N",
+    "type": "int",
+    "values": [
+      64, 128, 256, 512, 768, 1024, 1536, 2048, 3072, 4096,
+      5120, 6144, 7168, 8192, 10240, 12288, 16384, 20480,
+      24576, 32768, 40960, 49152, 65536
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "M",
+      "description": "Number of rows in the input matrix",
+      "type": "int",
+      "default": 4096,
+      "values": [1024, 2048, 4096, 8192, 16384]
+    },
+    {
+      "name": "dtype",
+      "description": "Data type of input and output tensors",
+      "type": "enum",
+      "default": "float32",
+      "values": ["float16", "float32", "float64"]
+    }
+  ],
+  "kernels": ["softmax_kernel"]
+}

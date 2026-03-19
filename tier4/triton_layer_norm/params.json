@@ -1,0 +1,41 @@
+{
+  "benchmark": "triton_layer_norm",
+  "tier": 4,
+  "suite": "triton",
+  "description": "Row-wise layer normalization (mean-center, variance-normalize, affine transform) using a single Triton kernel. Each program instance processes one row. Measures memory bandwidth (GB/s).",
+  "language": "python",
+  "scaling_param": {
+    "name": "N",
+    "description": "Feature dimension (number of columns per row to normalize over)",
+    "type": "int",
+    "values": [
+      64, 128, 256, 512, 768, 1024, 1536, 2048, 3072, 4096,
+      5120, 6144, 7168, 8192, 10240, 12288, 16384, 20480,
+      24576, 32768, 40960, 49152, 65536
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "M",
+      "description": "Number of rows (batch × sequence length) in the input matrix",
+      "type": "int",
+      "default": 4096,
+      "values": [1024, 2048, 4096, 8192, 16384]
+    },
+    {
+      "name": "eps",
+      "description": "Epsilon added to variance for numerical stability",
+      "type": "float",
+      "default": 1e-5,
+      "values": [1e-6, 1e-5, 1e-4]
+    },
+    {
+      "name": "dtype",
+      "description": "Data type of input and output tensors",
+      "type": "enum",
+      "default": "float32",
+      "values": ["float16", "float32", "float64"]
+    }
+  ],
+  "kernels": ["layer_norm_kernel"]
+}

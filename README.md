@@ -42,7 +42,7 @@ gpu_benchmarks/
 │   ├── shared_mem_bandwidth/
 │   ├── atomic_operations/
 │   └── warp_shuffle/
-├── tier2/                          # Application benchmarks (50)
+├── tier2/                          # Application benchmarks (51)
 │   ├── Makefile
 │   ├── shoc_devicememory/
 │   ├── shoc_fft/
@@ -90,6 +90,7 @@ gpu_benchmarks/
 │   ├── altis_particlefilter/
 │   ├── altis_raytracing/
 │   ├── lonestar_sssp/
+│   ├── lonestar_bh/
 │   ├── graph_pr/
 │   ├── graph_tc/
 │   ├── chai_hsto/
@@ -220,6 +221,7 @@ gpu_benchmarks/
 | Altis | `altis_particlefilter` | Particle Filter (SIR Monte Carlo localization) |
 | Altis | `altis_raytracing` | Simple ray tracing (Phong shading) |
 | Lonestar GPU | `lonestar_sssp` | Single-Source Shortest Path (Bellman-Ford) |
+| Lonestar GPU | `lonestar_bh` | Barnes-Hut N-body (2D quadtree approximation) |
 | Graph Analytics | `graph_pr` | PageRank (pull-based iterative) |
 | Graph Analytics | `graph_tc` | Triangle Counting (sorted adjacency intersection) |
 | Chai | `chai_hsto` | Histogram (shared memory privatization) |

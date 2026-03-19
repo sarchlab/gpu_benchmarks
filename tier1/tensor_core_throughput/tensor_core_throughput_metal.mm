@@ -8,13 +8,16 @@
  * peak half-precision matrix multiply performance.
  *
  * Matrix size:  M = N = K = 4096 (default)
- * Timing:       5 warmup + 5 timed iterations, report average
- *
- * CSV output:
- *   tensor_core_throughput,fp16,<time_ms>,<TOPS>
+ * Timing:       warmup + timed iterations, report average
  *
  * Usage:
  *   ./tensor_core_throughput [matrix_dim]
+ *
+ * Environment variables (override argv):
+ *   BENCH_PARAM_matrix_dim
+ *   BENCH_PARAM_precision          ("fp16" or "all")
+ *   BENCH_PARAM_warmup_iterations
+ *   BENCH_PARAM_timed_iterations
  */
 
 #import <Foundation/Foundation.h>
@@ -26,14 +29,14 @@
 #include <vector>
 
 // ---------------------------------------------------------------------------
-// Constants
+// Constants (defaults)
 // ---------------------------------------------------------------------------
 
-static const int DEFAULT_DIM       = 4096;
-static const int SIMD_TILE         = 8;    // 8×8 simdgroup tiles
-static const int SIMDGROUP_SIZE    = 32;   // threads per simdgroup
-static const int WARMUP_ITERATIONS = 5;
-static const int TIMED_ITERATIONS  = 5;
+static const int DEFAULT_DIM               = 4096;
+static const int SIMD_TILE                 = 8;    // 8×8 simdgroup tiles
+static const int SIMDGROUP_SIZE            = 32;   // threads per simdgroup
+static const int DEFAULT_WARMUP_ITERATIONS = 5;
+static const int DEFAULT_TIMED_ITERATIONS  = 5;
 
 // ---------------------------------------------------------------------------
 // Timing helpers
@@ -89,15 +92,36 @@ kernel void simdgroup_gemm(device const half *A          [[ buffer(0) ]],
 
 int main(int argc, char *argv[])
 {
+    /* Line-buffer stdout so JSON lines are flushed promptly. */
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
+    const char* env_val;
+
+    /* Read parameters: env vars take priority, then argv, then defaults. */
     int dim = DEFAULT_DIM;
-    if (argc >= 2) {
+    env_val = getenv("BENCH_PARAM_matrix_dim");
+    if (env_val) {
+        dim = atoi(env_val);
+    } else if (argc >= 2) {
         dim = atoi(argv[1]);
-        if (dim <= 0 || (dim % SIMD_TILE) != 0) {
-            fprintf(stderr, "Matrix dim must be a positive multiple of %d\n",
-                    SIMD_TILE);
-            return EXIT_FAILURE;
-        }
     }
+    if (dim <= 0 || (dim % SIMD_TILE) != 0) {
+        fprintf(stderr, "Matrix dim must be a positive multiple of %d\n",
+                SIMD_TILE);
+        return EXIT_FAILURE;
+    }
+
+    const char* precision = "fp16";
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
+
+    int warmup_iterations = DEFAULT_WARMUP_ITERATIONS;
+    env_val = getenv("BENCH_PARAM_warmup_iterations");
+    if (env_val) warmup_iterations = atoi(env_val);
+
+    int timed_iterations = DEFAULT_TIMED_ITERATIONS;
+    env_val = getenv("BENCH_PARAM_timed_iterations");
+    if (env_val) timed_iterations = atoi(env_val);
 
     int M = dim, N = dim, K = dim;
 
@@ -111,13 +135,13 @@ int main(int argc, char *argv[])
             return EXIT_FAILURE;
         }
 
-        printf("Device           : %s\n",
+        fprintf(stderr, "Device           : %s\n",
                [[device name] UTF8String]);
-        printf("Matrix (M×N×K)   : %d × %d × %d\n", M, N, K);
-        printf("Tile size        : %d × %d (simdgroup)\n", SIMD_TILE, SIMD_TILE);
-        printf("Warmup iters     : %d\n", WARMUP_ITERATIONS);
-        printf("Timed iters      : %d\n", TIMED_ITERATIONS);
-        printf("\n");
+        fprintf(stderr, "Matrix (M×N×K)   : %d × %d × %d\n", M, N, K);
+        fprintf(stderr, "Tile size        : %d × %d (simdgroup)\n", SIMD_TILE, SIMD_TILE);
+        fprintf(stderr, "Precision        : %s\n", precision);
+        fprintf(stderr, "Warmup iters     : %d\n", warmup_iterations);
+        fprintf(stderr, "Timed iters      : %d\n\n", timed_iterations);
 
         /* Compile shader from embedded source. */
         NSError *error = nil;
@@ -164,7 +188,7 @@ int main(int argc, char *argv[])
         id<MTLBuffer> bufC = [device newBufferWithLength:elemC * sizeof(__fp16)
                                                  options:MTLResourceStorageModeShared];
 
-        /* Initialize with small values (1.0h). */
+        /* Initialize with small values (0.01h). */
         __fp16 *pA = (__fp16 *)[bufA contents];
         __fp16 *pB = (__fp16 *)[bufB contents];
         for (size_t i = 0; i < elemA; ++i) pA[i] = (__fp16)0.01f;
@@ -209,7 +233,7 @@ int main(int argc, char *argv[])
         /* ----------------------------------------------------------------- */
         /* Warmup                                                            */
         /* ----------------------------------------------------------------- */
-        for (int i = 0; i < WARMUP_ITERATIONS; ++i) {
+        for (int i = 0; i < warmup_iterations; ++i) {
             run_once();
         }
 
@@ -219,25 +243,33 @@ int main(int argc, char *argv[])
         double ms_factor = ticks_to_ms();
         uint64_t t0 = mach_absolute_time();
 
-        for (int i = 0; i < TIMED_ITERATIONS; ++i) {
+        for (int i = 0; i < timed_iterations; ++i) {
             run_once();
         }
 
         uint64_t t1 = mach_absolute_time();
         double total_ms = (double)(t1 - t0) * ms_factor;
-        double avg_ms   = total_ms / TIMED_ITERATIONS;
+        double avg_ms   = total_ms / timed_iterations;
         double avg_s    = avg_ms * 1e-3;
 
         /* TOPS = 2 * M * N * K / time_s / 1e12 */
         double ops  = 2.0 * (double)M * (double)N * (double)K;
         double tops = ops / avg_s / 1e12;
 
-        printf("%-8s  %10.3f ms  %8.3f TOPS\n", "fp16", avg_ms, tops);
+        fprintf(stderr, "fp16     %.3f ms  %.3f TOPS\n", avg_ms, tops);
 
-        /* CSV: tensor_core_throughput,fp16,<time_ms>,<TOPS> */
-        printf("tensor_core_throughput,fp16,%.3f,%.3f\n", avg_ms, tops);
+        /* JSON-lines output to stdout: kernel event */
+        printf("{\"type\":\"kernel\",\"name\":\"wmma_fp16_gemm\",\"time_ms\":%.6f,"
+               "\"params\":{\"matrix_dim\":%d,\"precision\":\"%s\","
+               "\"warmup_iterations\":%d,\"timed_iterations\":%d}}\n",
+               avg_ms, dim, precision, warmup_iterations, timed_iterations);
 
-        printf("\nDone.\n");
+        /* JSON-lines output to stdout: summary */
+        printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+               "\"metrics\":[{\"name\":\"TFLOPS\",\"value\":%.3f}]}\n",
+               total_ms, tops);
+
+        fprintf(stderr, "\nDone.\n");
     }
 
     return EXIT_SUCCESS;

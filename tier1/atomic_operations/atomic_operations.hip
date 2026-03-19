@@ -21,10 +21,17 @@
  *
  *   ops_per_thread  – optional number of atomic ops per thread
  *                     (default 1024).
+ *
+ * Environment variables (override argv):
+ *   BENCH_PARAM_ops_per_thread
+ *   BENCH_PARAM_num_blocks
+ *   BENCH_PARAM_threads_per_block
+ *   BENCH_PARAM_atomic_op   ("all", "add", "cas", "min")
  */
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #include <hip/hip_runtime.h>
 
@@ -43,32 +50,19 @@
     } while (0)
 
 // ---------------------------------------------------------------------------
-// Tuning constants
+// Tuning constants (defaults)
 // ---------------------------------------------------------------------------
 
-/** Default number of atomic operations per thread per kernel invocation. */
-static const int DEFAULT_OPS_PER_THREAD = 1024;
-
-/** Number of threads per block. */
-static const int THREADS_PER_BLOCK = 256;
-
-/** Number of thread blocks. */
-static const int NUM_BLOCKS = 1024;
-
-/** Number of warm-up iterations. */
-static const int NUM_WARMUP = 5;
-
-/** Number of timed iterations. */
-static const int NUM_ITERATIONS = 5;
+static const int DEFAULT_OPS_PER_THREAD  = 1024;
+static const int DEFAULT_THREADS_PER_BLK = 256;
+static const int DEFAULT_NUM_BLOCKS      = 1024;
+static const int NUM_WARMUP              = 5;
+static const int NUM_ITERATIONS          = 5;
 
 // ---------------------------------------------------------------------------
 // Atomic kernels
 // ---------------------------------------------------------------------------
 
-/**
- * Each thread performs ops_per_thread atomicAdd operations on a single
- * global memory location.
- */
 __global__ void atomicAdd_kernel(unsigned int *counter, int ops_per_thread)
 {
     for (int i = 0; i < ops_per_thread; ++i) {
@@ -76,11 +70,6 @@ __global__ void atomicAdd_kernel(unsigned int *counter, int ops_per_thread)
     }
 }
 
-/**
- * Each thread performs ops_per_thread atomicCAS operations on a single
- * global memory location.  Uses the standard CAS-loop pattern:
- * read current value, attempt to swap to value+1.
- */
 __global__ void atomicCAS_kernel(unsigned int *counter, int ops_per_thread)
 {
     for (int i = 0; i < ops_per_thread; ++i) {
@@ -89,10 +78,6 @@ __global__ void atomicCAS_kernel(unsigned int *counter, int ops_per_thread)
     }
 }
 
-/**
- * Each thread performs ops_per_thread atomicMin operations on a single
- * global memory location.
- */
 __global__ void atomicMin_kernel(unsigned int *counter, int ops_per_thread)
 {
     unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -105,20 +90,17 @@ __global__ void atomicMin_kernel(unsigned int *counter, int ops_per_thread)
 // Benchmark helper
 // ---------------------------------------------------------------------------
 
-/**
- * Run a single atomic benchmark: warmup + timed iterations.
- *
- * @param name          Human-readable name of the operation.
- * @param csv_op        Short name for CSV output (e.g. "atomicAdd").
- * @param kernel        Function pointer to the __global__ kernel.
- * @param d_counter     Device pointer to the shared counter.
- * @param ops_per_thread Number of atomic ops each thread executes.
- */
 typedef void (*KernelFunc)(unsigned int *, int);
 
-static void run_benchmark(const char *name, const char *csv_op,
+/**
+ * Run a single atomic benchmark: warmup + timed iterations.
+ * Returns average kernel time in ms and Gops/s via out parameter.
+ */
+static void run_benchmark(const char *kernel_name,
                           KernelFunc kernel, unsigned int *d_counter,
-                          int ops_per_thread)
+                          int ops_per_thread, int num_blocks,
+                          int threads_per_block, const char *atomic_op,
+                          double *out_avg_ms, double *out_gops)
 {
     /* Reset counter. */
     unsigned int zero = 0;
@@ -127,7 +109,7 @@ static void run_benchmark(const char *name, const char *csv_op,
 
     /* Warm-up launches. */
     for (int w = 0; w < NUM_WARMUP; ++w) {
-        hipLaunchKernelGGL(kernel, dim3(NUM_BLOCKS), dim3(THREADS_PER_BLOCK),
+        hipLaunchKernelGGL(kernel, dim3(num_blocks), dim3(threads_per_block),
                            0, 0, d_counter, ops_per_thread);
     }
     HIP_CHECK(hipDeviceSynchronize());
@@ -144,7 +126,7 @@ static void run_benchmark(const char *name, const char *csv_op,
     /* Timed benchmark loop. */
     HIP_CHECK(hipEventRecord(ev_start, 0));
     for (int iter = 0; iter < NUM_ITERATIONS; ++iter) {
-        hipLaunchKernelGGL(kernel, dim3(NUM_BLOCKS), dim3(THREADS_PER_BLOCK),
+        hipLaunchKernelGGL(kernel, dim3(num_blocks), dim3(threads_per_block),
                            0, 0, d_counter, ops_per_thread);
     }
     HIP_CHECK(hipEventRecord(ev_stop, 0));
@@ -153,11 +135,8 @@ static void run_benchmark(const char *name, const char *csv_op,
     float elapsed_ms = 0.0f;
     HIP_CHECK(hipEventElapsedTime(&elapsed_ms, ev_start, ev_stop));
 
-    /* Compute throughput.
-     *   total_ops = iterations * num_threads * ops_per_thread
-     */
-    long long num_threads = static_cast<long long>(NUM_BLOCKS)
-                            * THREADS_PER_BLOCK;
+    long long num_threads = static_cast<long long>(num_blocks)
+                            * threads_per_block;
     long long total_ops   = static_cast<long long>(NUM_ITERATIONS)
                             * num_threads
                             * static_cast<long long>(ops_per_thread);
@@ -168,10 +147,17 @@ static void run_benchmark(const char *name, const char *csv_op,
 
     /* Human-readable output to stderr. */
     fprintf(stderr, "%-12s : %.3f ms total, %.3f ms/kernel, %.2f Gops/s\n",
-            name, (double)elapsed_ms, avg_ms, gops);
+            kernel_name, (double)elapsed_ms, avg_ms, gops);
 
-    /* CSV output to stdout: atomic_ops,<op>_global,<time_ms>,<Gops> */
-    printf("atomic_ops,%s_global,%.3f,%.2f\n", csv_op, avg_ms, gops);
+    /* JSON-lines output to stdout: kernel event */
+    printf("{\"type\":\"kernel\",\"name\":\"%s\",\"time_ms\":%.6f,"
+           "\"params\":{\"ops_per_thread\":%d,\"num_blocks\":%d,"
+           "\"threads_per_block\":%d,\"atomic_op\":\"%s\"}}\n",
+           kernel_name, avg_ms, ops_per_thread, num_blocks,
+           threads_per_block, atomic_op);
+
+    *out_avg_ms = avg_ms;
+    *out_gops   = gops;
 
     /* Clean up events. */
     HIP_CHECK(hipEventDestroy(ev_start));
@@ -184,15 +170,35 @@ static void run_benchmark(const char *name, const char *csv_op,
 
 int main(int argc, char *argv[])
 {
-    /* Parse optional argument. */
+    /* Line-buffer stdout so JSON lines are flushed promptly. */
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
+    const char* env_val;
+
+    /* Read parameters: env vars take priority, then argv, then defaults. */
     int ops_per_thread = DEFAULT_OPS_PER_THREAD;
-    if (argc >= 2) {
+    env_val = getenv("BENCH_PARAM_ops_per_thread");
+    if (env_val) {
+        ops_per_thread = atoi(env_val);
+    } else if (argc >= 2) {
         ops_per_thread = atoi(argv[1]);
-        if (ops_per_thread <= 0) {
-            fprintf(stderr, "Invalid ops_per_thread: %s\n", argv[1]);
-            return EXIT_FAILURE;
-        }
     }
+    if (ops_per_thread <= 0) {
+        fprintf(stderr, "Invalid ops_per_thread\n");
+        return EXIT_FAILURE;
+    }
+
+    int num_blocks = DEFAULT_NUM_BLOCKS;
+    env_val = getenv("BENCH_PARAM_num_blocks");
+    if (env_val) num_blocks = atoi(env_val);
+
+    int threads_per_block = DEFAULT_THREADS_PER_BLK;
+    env_val = getenv("BENCH_PARAM_threads_per_block");
+    if (env_val) threads_per_block = atoi(env_val);
+
+    const char* atomic_op = "all";
+    env_val = getenv("BENCH_PARAM_atomic_op");
+    if (env_val) atomic_op = env_val;
 
     /* Print device information to stderr. */
     int device_id = 0;
@@ -203,9 +209,10 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Device          : %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "CUs             : %d\n", prop.multiProcessorCount);
     fprintf(stderr, "Grid            : %d blocks × %d threads = %d total threads\n",
-            NUM_BLOCKS, THREADS_PER_BLOCK,
-            NUM_BLOCKS * THREADS_PER_BLOCK);
+            num_blocks, threads_per_block,
+            num_blocks * threads_per_block);
     fprintf(stderr, "Ops / thread    : %d\n", ops_per_thread);
+    fprintf(stderr, "Atomic op       : %s\n", atomic_op);
     fprintf(stderr, "Warmup iters    : %d\n", NUM_WARMUP);
     fprintf(stderr, "Timed iters     : %d\n\n", NUM_ITERATIONS);
 
@@ -213,13 +220,47 @@ int main(int argc, char *argv[])
     unsigned int *d_counter = nullptr;
     HIP_CHECK(hipMalloc(&d_counter, sizeof(unsigned int)));
 
-    /* Run each atomic operation benchmark. */
-    run_benchmark("atomicAdd", "atomicAdd",
-                  (KernelFunc)atomicAdd_kernel, d_counter, ops_per_thread);
-    run_benchmark("atomicCAS", "atomicCAS",
-                  (KernelFunc)atomicCAS_kernel, d_counter, ops_per_thread);
-    run_benchmark("atomicMin", "atomicMin",
-                  (KernelFunc)atomicMin_kernel, d_counter, ops_per_thread);
+    double total_time_ms = 0.0;
+    double max_gops = 0.0;
+
+    bool run_add = (strcmp(atomic_op, "all") == 0 || strcmp(atomic_op, "add") == 0);
+    bool run_cas = (strcmp(atomic_op, "all") == 0 || strcmp(atomic_op, "cas") == 0);
+    bool run_min = (strcmp(atomic_op, "all") == 0 || strcmp(atomic_op, "min") == 0);
+
+    if (run_add) {
+        double avg_ms, gops;
+        run_benchmark("atomicAdd_kernel",
+                      (KernelFunc)atomicAdd_kernel, d_counter,
+                      ops_per_thread, num_blocks, threads_per_block, atomic_op,
+                      &avg_ms, &gops);
+        total_time_ms += avg_ms;
+        if (gops > max_gops) max_gops = gops;
+    }
+
+    if (run_cas) {
+        double avg_ms, gops;
+        run_benchmark("atomicCAS_kernel",
+                      (KernelFunc)atomicCAS_kernel, d_counter,
+                      ops_per_thread, num_blocks, threads_per_block, atomic_op,
+                      &avg_ms, &gops);
+        total_time_ms += avg_ms;
+        if (gops > max_gops) max_gops = gops;
+    }
+
+    if (run_min) {
+        double avg_ms, gops;
+        run_benchmark("atomicMin_kernel",
+                      (KernelFunc)atomicMin_kernel, d_counter,
+                      ops_per_thread, num_blocks, threads_per_block, atomic_op,
+                      &avg_ms, &gops);
+        total_time_ms += avg_ms;
+        if (gops > max_gops) max_gops = gops;
+    }
+
+    /* Summary */
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"giga_ops_per_sec\",\"value\":%.2f}]}\n",
+           total_time_ms, max_gops);
 
     /* Clean up. */
     HIP_CHECK(hipFree(d_counter));

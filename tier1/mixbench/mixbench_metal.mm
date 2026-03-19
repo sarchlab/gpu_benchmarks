@@ -15,8 +15,6 @@
  *     num_fmas = r * 4   (since each FMA = 2 FLOP, total bytes = 8)
  *     achieved_gflops = (num_elements * num_fmas * 2) / time_s / 1e9
  *
- * Ratios tested: 0.5, 1, 2, 4, 8, 16, 32, 64
- *
  * Timing:
  *   Elapsed time is measured using mach_absolute_time() wall-clock timing
  *   around serialised command buffer executions (waitUntilCompleted).
@@ -25,6 +23,12 @@
  *   ./mixbench [buffer_size_mb]
  *
  *   buffer_size_mb  – optional array size in MiB (default 256)
+ *
+ * Environment variables (override argv):
+ *   BENCH_PARAM_buffer_size_mb
+ *   BENCH_PARAM_flops_per_byte
+ *   BENCH_PARAM_threads_per_block
+ *   BENCH_PARAM_timed_iterations
  *
  * Build:
  *   make PLATFORM=metal
@@ -39,16 +43,14 @@
 #include <mach/mach_time.h>
 
 // ---------------------------------------------------------------------------
-// Constants
+// Constants (defaults)
 // ---------------------------------------------------------------------------
 
-static const int    DEFAULT_BUFFER_MB  = 256;
-static const int    WARMUP_ITERATIONS  = 5;
-static const int    TIMED_ITERATIONS   = 5;
-
-/** Flops-per-byte ratios to sweep. */
-static const double RATIOS[] = {0.5, 1, 2, 4, 8, 16, 32, 64};
-static const int    NUM_RATIOS = sizeof(RATIOS) / sizeof(RATIOS[0]);
+static const int    DEFAULT_BUFFER_MB       = 256;
+static const double DEFAULT_FLOPS_PER_BYTE  = 4.0;
+static const int    DEFAULT_THREADS_PER_BLK = 256;
+static const int    DEFAULT_TIMED_ITERS     = 5;
+static const int    WARMUP_ITERATIONS       = 5;
 
 // ---------------------------------------------------------------------------
 // Timing helper
@@ -70,15 +72,6 @@ static double ticks_to_seconds(uint64_t ticks)
 
 /**
  * Run the mixbench kernel at a given flops-per-byte ratio.
- *
- * @param device        MTLDevice to use
- * @param pso           Pre-compiled pipeline state for the kernel
- * @param queue         Command queue
- * @param d_data        Device buffer with float data
- * @param num_elements  Number of floats in the buffer
- * @param ratio         Target flops-per-byte ratio
- * @param[out] time_ms  Average kernel time in milliseconds
- * @param[out] gflops   Achieved GFLOPS
  */
 static void benchmark_ratio(id<MTLDevice> device,
                             id<MTLComputePipelineState> pso,
@@ -86,17 +79,20 @@ static void benchmark_ratio(id<MTLDevice> device,
                             id<MTLBuffer> d_data,
                             uint32_t num_elements,
                             double ratio,
+                            int threads_per_block,
+                            int timed_iters,
                             double *time_ms,
-                            double *gflops)
+                            double *gflops,
+                            double *bw_gbps)
 {
-    /* Compute FMA count for this ratio.
-       flops_per_byte = (num_fmas * 2) / 8  =>  num_fmas = ratio * 4 */
+    /* Compute FMA count for this ratio. */
     uint32_t num_fmas = (uint32_t)(ratio * 4.0);
     if (num_fmas < 1) num_fmas = 1;
 
     /* Thread-group configuration. */
-    NSUInteger tg_size = pso.maxTotalThreadsPerThreadgroup;
-    if (tg_size > 256) tg_size = 256;
+    NSUInteger tg_size = (NSUInteger)threads_per_block;
+    if (tg_size > pso.maxTotalThreadsPerThreadgroup)
+        tg_size = pso.maxTotalThreadsPerThreadgroup;
     NSUInteger grid_size = (NSUInteger)num_elements;
 
     /* Helper block: dispatch one kernel invocation. */
@@ -121,25 +117,29 @@ static void benchmark_ratio(id<MTLDevice> device,
 
     /* Timed iterations. */
     uint64_t t0 = mach_absolute_time();
-    for (int i = 0; i < TIMED_ITERATIONS; ++i) {
+    for (int i = 0; i < timed_iters; ++i) {
         dispatch_once();
     }
     uint64_t t1 = mach_absolute_time();
 
     double elapsed_s = ticks_to_seconds(t1 - t0);
     double elapsed_ms = elapsed_s * 1e3;
-    double avg_ms = elapsed_ms / TIMED_ITERATIONS;
+    double avg_ms = elapsed_ms / timed_iters;
 
-    /* Total FLOPs across all threads and all timed iterations:
-       total_flops = TIMED_ITERATIONS * num_elements * num_fmas * 2 */
-    double total_flops = (double)TIMED_ITERATIONS
+    /* Total FLOPs */
+    double total_flops = (double)timed_iters
                          * (double)num_elements
                          * (double)num_fmas
                          * 2.0;
     double achieved_gflops = total_flops / elapsed_s / 1e9;
 
+    /* Bandwidth: each element = 8 bytes (4 read + 4 write) */
+    double total_bytes = (double)timed_iters * (double)num_elements * 8.0;
+    double achieved_bw = total_bytes / elapsed_s / 1e9;
+
     *time_ms = avg_ms;
     *gflops  = achieved_gflops;
+    *bw_gbps = achieved_bw;
 }
 
 // ---------------------------------------------------------------------------
@@ -150,15 +150,35 @@ int main(int argc, char *argv[])
 {
     @autoreleasepool {
 
-    /* Parse optional buffer size argument. */
+    /* Line-buffer stdout so JSON lines are flushed promptly. */
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
+    const char* env_val;
+
+    /* Read parameters: env vars take priority, then argv, then defaults. */
     int buffer_mb = DEFAULT_BUFFER_MB;
-    if (argc >= 2) {
+    env_val = getenv("BENCH_PARAM_buffer_size_mb");
+    if (env_val) {
+        buffer_mb = atoi(env_val);
+    } else if (argc >= 2) {
         buffer_mb = atoi(argv[1]);
-        if (buffer_mb <= 0) {
-            fprintf(stderr, "Invalid buffer size: %s\n", argv[1]);
-            return EXIT_FAILURE;
-        }
     }
+    if (buffer_mb <= 0) {
+        fprintf(stderr, "Invalid buffer_size_mb\n");
+        return EXIT_FAILURE;
+    }
+
+    double flops_per_byte = DEFAULT_FLOPS_PER_BYTE;
+    env_val = getenv("BENCH_PARAM_flops_per_byte");
+    if (env_val) flops_per_byte = atof(env_val);
+
+    int threads_per_block = DEFAULT_THREADS_PER_BLK;
+    env_val = getenv("BENCH_PARAM_threads_per_block");
+    if (env_val) threads_per_block = atoi(env_val);
+
+    int timed_iterations = DEFAULT_TIMED_ITERS;
+    env_val = getenv("BENCH_PARAM_timed_iterations");
+    if (env_val) timed_iterations = atoi(env_val);
 
     size_t bytes = static_cast<size_t>(buffer_mb) * 1024ULL * 1024ULL;
     uint32_t num_elements = (uint32_t)(bytes / sizeof(float));
@@ -170,19 +190,15 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    printf("Device          : %s\n", device.name.UTF8String);
-    printf("Array size      : %d MiB (%u elements, %zu bytes)\n",
+    fprintf(stderr, "Device          : %s\n", device.name.UTF8String);
+    fprintf(stderr, "Array size      : %d MiB (%u elements, %zu bytes)\n",
            buffer_mb, num_elements, bytes);
-    printf("Warmup iters    : %d\n", WARMUP_ITERATIONS);
-    printf("Timed iters     : %d\n", TIMED_ITERATIONS);
-    printf("Ratios          : ");
-    for (int i = 0; i < NUM_RATIOS; ++i) {
-        printf("%.1f%s", RATIOS[i], (i < NUM_RATIOS - 1) ? ", " : "\n");
-    }
-    printf("\n");
+    fprintf(stderr, "Flops/byte      : %.1f\n", flops_per_byte);
+    fprintf(stderr, "Threads/block   : %d\n", threads_per_block);
+    fprintf(stderr, "Warmup iters    : %d\n", WARMUP_ITERATIONS);
+    fprintf(stderr, "Timed iters     : %d\n\n", timed_iterations);
 
-    /* Load the Metal shader library from source (mixbench.metal must be
-       in the same directory as the executable). */
+    /* Load the Metal shader library from source. */
     NSError *err = nil;
     id<MTLLibrary> library = nil;
 
@@ -252,33 +268,38 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    /* Print header. */
-    printf("%-16s %10s %12s\n", "FLOP/byte", "Time (ms)", "GFLOPS");
-    printf("%-16s %10s %12s\n", "--------", "--------", "--------");
+    /* Copy data to Metal buffer. */
+    memcpy(d_data.contents, h_data, bytes);
 
-    /* Sweep all ratios. */
-    for (int i = 0; i < NUM_RATIOS; ++i) {
-        double ratio = RATIOS[i];
-        double avg_time_ms = 0.0;
-        double achieved_gflops = 0.0;
+    /* Run benchmark at the specified flops_per_byte ratio. */
+    double avg_time_ms = 0.0;
+    double achieved_gflops = 0.0;
+    double achieved_bw = 0.0;
 
-        /* Re-upload data before each ratio. */
-        memcpy(d_data.contents, h_data, bytes);
+    benchmark_ratio(device, pso, queue, d_data, num_elements, flops_per_byte,
+                    threads_per_block, timed_iterations,
+                    &avg_time_ms, &achieved_gflops, &achieved_bw);
 
-        benchmark_ratio(device, pso, queue, d_data, num_elements, ratio,
-                        &avg_time_ms, &achieved_gflops);
+    fprintf(stderr, "FLOP/byte=%.1f  Time=%.3f ms  GFLOPS=%.2f  BW=%.2f GB/s\n",
+            flops_per_byte, avg_time_ms, achieved_gflops, achieved_bw);
 
-        printf("%-16.1f %10.3f %12.2f\n", ratio, avg_time_ms, achieved_gflops);
+    /* JSON-lines output to stdout: kernel event */
+    printf("{\"type\":\"kernel\",\"name\":\"mixbench_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"buffer_size_mb\":%d,\"flops_per_byte\":%.1f,"
+           "\"threads_per_block\":%d,\"timed_iterations\":%d}}\n",
+           avg_time_ms, buffer_mb, flops_per_byte, threads_per_block,
+           timed_iterations);
 
-        /* CSV output (machine-parseable):
-           mixbench,<flops_per_byte>,<time_ms>,<achieved_gflops> */
-        printf("mixbench,%.1f,%.3f,%.2f\n", ratio, avg_time_ms, achieved_gflops);
-    }
+    /* JSON-lines output to stdout: summary */
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GFLOPS\",\"value\":%.2f},"
+           "{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
+           avg_time_ms * timed_iterations, achieved_gflops, achieved_bw);
 
     /* Clean up. */
     free(h_data);
 
-    printf("\nDone.\n");
+    fprintf(stderr, "\nDone.\n");
 
     } // @autoreleasepool
     return EXIT_SUCCESS;

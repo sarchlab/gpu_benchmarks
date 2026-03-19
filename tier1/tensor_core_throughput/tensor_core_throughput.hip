@@ -14,22 +14,16 @@
  *
  *   TOPS = 2 * M * N * K / time_s / 1e12
  *
- *   Tests both FP16 (half) and, on NVIDIA Ampere+, TF32 precision.
- *
- * Matrix sizes:
- *   M = N = K = 4096 (default), yielding ~137.4 GFLOP per GEMM.
- *
- * Timing:
- *   5 warmup + 5 timed iterations; report average.
- *
- * CSV output (to stdout):
- *   tensor_core_throughput,fp16,<time_ms>,<TOPS>
- *   tensor_core_throughput,tf32,<time_ms>,<TOPS>   (CUDA sm_80+ only)
- *
  * Usage:
  *   ./tensor_core_throughput [matrix_dim]
  *
  *   matrix_dim  — M=N=K dimension (default 4096)
+ *
+ * Environment variables (override argv):
+ *   BENCH_PARAM_matrix_dim
+ *   BENCH_PARAM_precision          ("fp16", "tf32", or "all")
+ *   BENCH_PARAM_warmup_iterations
+ *   BENCH_PARAM_timed_iterations
  */
 
 #include <cstdio>
@@ -113,39 +107,24 @@ typedef hipDeviceProp_t  gpuDeviceProp_t;
 #endif
 
 // ---------------------------------------------------------------------------
-// Constants
+// Constants (defaults)
 // ---------------------------------------------------------------------------
 
-static const int DEFAULT_DIM         = 4096;
-static const int WMMA_M              = 16;
-static const int WMMA_N              = 16;
-static const int WMMA_K              = 16;
-static const int WARP_SIZE           = 32;
-static const int WARMUP_ITERATIONS   = 5;
-static const int TIMED_ITERATIONS    = 5;
+static const int DEFAULT_DIM               = 4096;
+static const int WMMA_M                    = 16;
+static const int WMMA_N                    = 16;
+static const int WMMA_K                    = 16;
+static const int WARP_SIZE                 = 32;
+static const int DEFAULT_WARMUP_ITERATIONS = 5;
+static const int DEFAULT_TIMED_ITERATIONS  = 5;
 
 // ---------------------------------------------------------------------------
 // FP16 WMMA GEMM kernel
 // ---------------------------------------------------------------------------
 
-/**
- * Tiled GEMM using WMMA 16×16×16 FP16 fragments.
- *
- * Grid:  (M / WMMA_M, N / WMMA_N) blocks, each block = 1 warp (32 threads).
- * Each warp computes one 16×16 output tile by iterating over K in steps of
- * WMMA_K.
- *
- * @param A   Row-major FP16 matrix [M × K]
- * @param B   Row-major FP16 matrix [K × N]
- * @param C   Row-major FP16 matrix [M × N] (output)
- * @param M   Matrix rows
- * @param N   Matrix columns
- * @param K   Inner dimension
- */
 __global__ void wmma_fp16_gemm(const half *A, const half *B, half *C,
                                int M, int N, int K)
 {
-    /* Each block is one warp responsible for one 16×16 output tile. */
     int warpM = blockIdx.x * WMMA_M;
     int warpN = blockIdx.y * WMMA_N;
 
@@ -201,8 +180,6 @@ __global__ void wmma_tf32_gemm(const float *A, const float *B, float *C,
     int warpM = blockIdx.x * WMMA_M;
     int warpN = blockIdx.y * WMMA_N;
 
-    /* TF32: uses wmma::precision::tf32 on Ampere+.
-       Fragment shapes: 16×16×8 for TF32 on NVIDIA. */
     const int TF32_K = 8;
 
     wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, TF32_K, wmma::precision::tf32,
@@ -230,30 +207,29 @@ __global__ void wmma_tf32_gemm(const float *A, const float *B, float *C,
 
 /**
  * Run a kernel multiple times and measure average time.
- *
- * @param label        Precision label for CSV output ("fp16" or "tf32")
- * @param M            Matrix dimension M
- * @param N            Matrix dimension N
- * @param K            Matrix dimension K
- * @param launch_fn    Lambda that launches the kernel
+ * Returns TOPS via out parameter.
  */
 template <typename LaunchFn>
-static void benchmark_kernel(const char *label, int M, int N, int K,
-                             LaunchFn launch_fn)
+static void benchmark_kernel(const char *kernel_name, const char *precision_str,
+                             int M, int N, int K,
+                             int warmup_iters, int timed_iters,
+                             int matrix_dim,
+                             LaunchFn launch_fn,
+                             double *out_avg_ms, double *out_tops)
 {
     gpuEvent_t ev_start, ev_stop;
     GPU_CHECK(gpuEventCreate(&ev_start));
     GPU_CHECK(gpuEventCreate(&ev_stop));
 
     /* Warmup iterations. */
-    for (int i = 0; i < WARMUP_ITERATIONS; ++i) {
+    for (int i = 0; i < warmup_iters; ++i) {
         launch_fn();
     }
     GPU_CHECK(gpuDeviceSynchronize());
 
     /* Timed iterations. */
     GPU_CHECK(gpuEventRecord(ev_start, 0));
-    for (int i = 0; i < TIMED_ITERATIONS; ++i) {
+    for (int i = 0; i < timed_iters; ++i) {
         launch_fn();
     }
     GPU_CHECK(gpuEventRecord(ev_stop, 0));
@@ -262,17 +238,24 @@ static void benchmark_kernel(const char *label, int M, int N, int K,
     float elapsed_ms = 0.0f;
     GPU_CHECK(gpuEventElapsedTime(&elapsed_ms, ev_start, ev_stop));
 
-    double avg_ms = (double)elapsed_ms / TIMED_ITERATIONS;
+    double avg_ms = (double)elapsed_ms / timed_iters;
     double avg_s  = avg_ms * 1e-3;
 
     /* TOPS = 2 * M * N * K / time_s / 1e12 */
     double ops  = 2.0 * (double)M * (double)N * (double)K;
     double tops = ops / avg_s / 1e12;
 
-    printf("%-8s  %10.3f ms  %8.3f TOPS\n", label, avg_ms, tops);
+    fprintf(stderr, "%-8s  %.3f ms  %.3f TOPS\n", precision_str, avg_ms, tops);
 
-    /* CSV: tensor_core_throughput,<dtype>,<time_ms>,<TOPS> */
-    printf("tensor_core_throughput,%s,%.3f,%.3f\n", label, avg_ms, tops);
+    /* JSON-lines output to stdout: kernel event */
+    printf("{\"type\":\"kernel\",\"name\":\"%s\",\"time_ms\":%.6f,"
+           "\"params\":{\"matrix_dim\":%d,\"precision\":\"%s\","
+           "\"warmup_iterations\":%d,\"timed_iterations\":%d}}\n",
+           kernel_name, avg_ms, matrix_dim, precision_str,
+           warmup_iters, timed_iters);
+
+    *out_avg_ms = avg_ms;
+    *out_tops   = tops;
 
     GPU_CHECK(gpuEventDestroy(ev_start));
     GPU_CHECK(gpuEventDestroy(ev_stop));
@@ -284,35 +267,62 @@ static void benchmark_kernel(const char *label, int M, int N, int K,
 
 int main(int argc, char *argv[])
 {
+    /* Line-buffer stdout so JSON lines are flushed promptly. */
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
+    const char* env_val;
+
+    /* Read parameters: env vars take priority, then argv, then defaults. */
     int dim = DEFAULT_DIM;
-    if (argc >= 2) {
+    env_val = getenv("BENCH_PARAM_matrix_dim");
+    if (env_val) {
+        dim = atoi(env_val);
+    } else if (argc >= 2) {
         dim = atoi(argv[1]);
-        if (dim <= 0 || (dim % WMMA_M) != 0) {
-            fprintf(stderr, "Matrix dim must be a positive multiple of %d\n",
-                    WMMA_M);
-            return EXIT_FAILURE;
-        }
     }
+    if (dim <= 0 || (dim % WMMA_M) != 0) {
+        fprintf(stderr, "Matrix dim must be a positive multiple of %d\n",
+                WMMA_M);
+        return EXIT_FAILURE;
+    }
+
+    const char* precision = "fp16";
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
+
+    int warmup_iterations = DEFAULT_WARMUP_ITERATIONS;
+    env_val = getenv("BENCH_PARAM_warmup_iterations");
+    if (env_val) warmup_iterations = atoi(env_val);
+
+    int timed_iterations = DEFAULT_TIMED_ITERATIONS;
+    env_val = getenv("BENCH_PARAM_timed_iterations");
+    if (env_val) timed_iterations = atoi(env_val);
 
     int M = dim, N = dim, K = dim;
 
-    /* Print device info. */
+    /* Print device info to stderr. */
     int device_id = 0;
     GPU_CHECK(gpuGetDevice(&device_id));
     gpuDeviceProp_t prop;
     GPU_CHECK(gpuGetDeviceProperties(&prop, device_id));
 
-    printf("Device           : %s (id=%d)\n", prop.name, device_id);
-    printf("Matrix (M×N×K)   : %d × %d × %d\n", M, N, K);
-    printf("WMMA tile        : %d × %d × %d\n", WMMA_M, WMMA_N, WMMA_K);
-    printf("Warmup iters     : %d\n", WARMUP_ITERATIONS);
-    printf("Timed iters      : %d\n", TIMED_ITERATIONS);
-    printf("\n");
+    fprintf(stderr, "Device           : %s (id=%d)\n", prop.name, device_id);
+    fprintf(stderr, "Matrix (M×N×K)   : %d × %d × %d\n", M, N, K);
+    fprintf(stderr, "WMMA tile        : %d × %d × %d\n", WMMA_M, WMMA_N, WMMA_K);
+    fprintf(stderr, "Precision        : %s\n", precision);
+    fprintf(stderr, "Warmup iters     : %d\n", warmup_iterations);
+    fprintf(stderr, "Timed iters      : %d\n\n", timed_iterations);
+
+    double total_time_ms = 0.0;
+    double max_tops = 0.0;
+
+    bool run_fp16 = (strcmp(precision, "fp16") == 0 || strcmp(precision, "all") == 0);
+    bool run_tf32 = (strcmp(precision, "tf32") == 0 || strcmp(precision, "all") == 0);
 
     /* --------------------------------------------------------------------- */
     /* FP16 benchmark                                                        */
     /* --------------------------------------------------------------------- */
-    {
+    if (run_fp16) {
         size_t mat_size = (size_t)M * K * sizeof(half);
         size_t out_size = (size_t)M * N * sizeof(half);
 
@@ -321,18 +331,22 @@ int main(int argc, char *argv[])
         GPU_CHECK(gpuMalloc((void **)&d_B, (size_t)K * N * sizeof(half)));
         GPU_CHECK(gpuMalloc((void **)&d_C, out_size));
 
-        /* Initialize to small random-ish values (fill with 1.0h for simplicity). */
         GPU_CHECK(gpuMemset(d_A, 0, mat_size));
         GPU_CHECK(gpuMemset(d_B, 0, (size_t)K * N * sizeof(half)));
         GPU_CHECK(gpuMemset(d_C, 0, out_size));
 
-        /* Grid: one warp per 16×16 output tile. */
         dim3 grid(M / WMMA_M, N / WMMA_N);
         dim3 block(WARP_SIZE);
 
-        benchmark_kernel("fp16", M, N, K, [&]() {
+        double avg_ms, tops;
+        benchmark_kernel("wmma_fp16_gemm", "fp16", M, N, K,
+                         warmup_iterations, timed_iterations, dim,
+                         [&]() {
             wmma_fp16_gemm<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
-        });
+        }, &avg_ms, &tops);
+
+        total_time_ms += avg_ms;
+        if (tops > max_tops) max_tops = tops;
 
         GPU_CHECK(gpuFree(d_A));
         GPU_CHECK(gpuFree(d_B));
@@ -343,8 +357,7 @@ int main(int argc, char *argv[])
     /* TF32 benchmark (CUDA Ampere+ only)                                    */
     /* --------------------------------------------------------------------- */
 #ifdef USE_CUDA
-    {
-        /* Check for sm_80+ (Ampere or later) for TF32 support. */
+    if (run_tf32) {
         int major = prop.major;
         if (major >= 8) {
             size_t mat_size = (size_t)M * K * sizeof(float);
@@ -361,22 +374,35 @@ int main(int argc, char *argv[])
             dim3 grid(M / WMMA_M, N / WMMA_N);
             dim3 block(WARP_SIZE);
 
-            benchmark_kernel("tf32", M, N, K, [&]() {
+            double avg_ms, tops;
+            benchmark_kernel("wmma_tf32_gemm", "tf32", M, N, K,
+                             warmup_iterations, timed_iterations, dim,
+                             [&]() {
                 wmma_tf32_gemm<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
-            });
+            }, &avg_ms, &tops);
+
+            total_time_ms += avg_ms;
+            if (tops > max_tops) max_tops = tops;
 
             GPU_CHECK(gpuFree(d_A));
             GPU_CHECK(gpuFree(d_B));
             GPU_CHECK(gpuFree(d_C));
         } else {
-            printf("TF32 not supported (requires sm_80+, have sm_%d%d)\n",
+            fprintf(stderr, "TF32 not supported (requires sm_80+, have sm_%d%d)\n",
                    prop.major, prop.minor);
         }
     }
 #else
-    printf("TF32 not available on ROCm (FP16 only via rocWMMA)\n");
+    if (run_tf32) {
+        fprintf(stderr, "TF32 not available on ROCm (FP16 only via rocWMMA)\n");
+    }
 #endif
 
-    printf("\nDone.\n");
+    /* Summary */
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"TFLOPS\",\"value\":%.3f}]}\n",
+           total_time_ms, max_tops);
+
+    fprintf(stderr, "\nDone.\n");
     return EXIT_SUCCESS;
 }

@@ -16,10 +16,17 @@
  *
  * Usage:
  *   ./shared_mem_bandwidth
+ *
+ * Environment variables (override defaults):
+ *   BENCH_PARAM_inner_iters
+ *   BENCH_PARAM_block_size
+ *   BENCH_PARAM_num_blocks
+ *   BENCH_PARAM_access_pattern   ("no_conflict", "conflict", or "both")
  */
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #include <hip/hip_runtime.h>
 
@@ -38,16 +45,16 @@
     } while (0)
 
 // ---------------------------------------------------------------------------
-// Constants
+// Constants (defaults)
 // ---------------------------------------------------------------------------
 
-static const int BLOCK_SIZE    = 256;           // threads per block
-static const int NUM_BLOCKS    = 128;           // grid size
-static const int INNER_ITERS   = 1000;          // inner-loop iterations
-static const int WARMUP_ITERS  = 5;             // outer warmup launches
-static const int TIMED_ITERS   = 5;             // outer timed launches
-static const int SMEM_FLOATS   = 12288;         // 48 KB / 4 bytes
-static const double BYTES_PER_GB = 1e9;
+static const int DEFAULT_BLOCK_SIZE   = 256;
+static const int DEFAULT_NUM_BLOCKS   = 128;
+static const int DEFAULT_INNER_ITERS  = 1000;
+static const int WARMUP_ITERS         = 5;
+static const int TIMED_ITERS          = 5;
+static const int SMEM_FLOATS          = 12288;         // 48 KB / 4 bytes
+static const double BYTES_PER_GB      = 1e9;
 
 // ---------------------------------------------------------------------------
 // Kernels
@@ -55,10 +62,6 @@ static const double BYTES_PER_GB = 1e9;
 
 /**
  * No-conflict kernel.
- *
- * Each thread strides through shared memory with stride = blockDim.x.
- * Within a warp, consecutive lanes access consecutive addresses so every
- * memory transaction hits 32 different banks — zero bank conflicts.
  */
 __global__ void smem_bw_no_conflict(float *d_sink, int inner_iters)
 {
@@ -87,15 +90,6 @@ __global__ void smem_bw_no_conflict(float *d_sink, int inner_iters)
 
 /**
  * Conflict kernel.
- *
- * Accesses are remapped so that within every warp all 32 lanes hit the
- * same bank on each memory transaction.  The total number of reads and
- * writes per thread is identical to the no-conflict kernel so the
- * bandwidth numbers are directly comparable.
- *
- * Index mapping:  idx = (lane * 32 + warp_id + j * num_warps) % SMEM_FLOATS
- *   bank = idx % 32 = (warp_id + j * num_warps) % 32
- *   → identical for every lane in the warp → 32-way bank conflict.
  */
 __global__ void smem_bw_conflict(float *d_sink, int inner_iters)
 {
@@ -131,22 +125,19 @@ __global__ void smem_bw_conflict(float *d_sink, int inner_iters)
 // Benchmark helper
 // ---------------------------------------------------------------------------
 
-/**
- * Run a kernel (function pointer), time it, and return average time in ms.
- *
- * @param kernel   Kernel function pointer
- * @param d_sink   Device output buffer (NUM_BLOCKS floats)
- * @param label    Human-readable label for printing
- * @return         Average kernel time in milliseconds
- */
 typedef void (*KernelFn)(float *, int);
 
-static double run_benchmark(KernelFn kernel, float *d_sink, const char *label)
+/**
+ * Run a kernel, time it, return average time in ms and bandwidth.
+ */
+static double run_benchmark(KernelFn kernel, float *d_sink,
+                            int block_size, int num_blocks, int inner_iters,
+                            double *out_bw_GBs)
 {
     // Warmup
     for (int i = 0; i < WARMUP_ITERS; ++i) {
-        hipLaunchKernelGGL(kernel, dim3(NUM_BLOCKS), dim3(BLOCK_SIZE),
-                           0, 0, d_sink, INNER_ITERS);
+        hipLaunchKernelGGL(kernel, dim3(num_blocks), dim3(block_size),
+                           0, 0, d_sink, inner_iters);
         HIP_CHECK(hipGetLastError());
     }
     HIP_CHECK(hipDeviceSynchronize());
@@ -158,8 +149,8 @@ static double run_benchmark(KernelFn kernel, float *d_sink, const char *label)
 
     HIP_CHECK(hipEventRecord(start, 0));
     for (int i = 0; i < TIMED_ITERS; ++i) {
-        hipLaunchKernelGGL(kernel, dim3(NUM_BLOCKS), dim3(BLOCK_SIZE),
-                           0, 0, d_sink, INNER_ITERS);
+        hipLaunchKernelGGL(kernel, dim3(num_blocks), dim3(block_size),
+                           0, 0, d_sink, inner_iters);
         HIP_CHECK(hipGetLastError());
     }
     HIP_CHECK(hipEventRecord(stop, 0));
@@ -173,14 +164,11 @@ static double run_benchmark(KernelFn kernel, float *d_sink, const char *label)
     HIP_CHECK(hipEventDestroy(stop));
 
     // Bandwidth calculation
-    // Per kernel launch: each thread does SMEM_FLOATS/BLOCK_SIZE iterations,
-    // each reading + writing 4 bytes, across INNER_ITERS inner iterations,
-    // across NUM_BLOCKS blocks.
     double bytes_per_launch = 2.0 * SMEM_FLOATS * sizeof(float)
-                              * (double)INNER_ITERS * NUM_BLOCKS;
+                              * (double)inner_iters * num_blocks;
     double bw_GBs = bytes_per_launch / (avg_ms * 1e-3) / BYTES_PER_GB;
 
-    printf("%-14s : %8.3f ms  %8.2f GB/s\n", label, avg_ms, bw_GBs);
+    if (out_bw_GBs) *out_bw_GBs = bw_GBs;
     return avg_ms;
 }
 
@@ -188,44 +176,95 @@ static double run_benchmark(KernelFn kernel, float *d_sink, const char *label)
 // main
 // ---------------------------------------------------------------------------
 
-int main()
+int main(int argc, char *argv[])
 {
-    // Print device info
+    /* Line-buffer stdout so JSON lines are flushed promptly. */
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
+    const char* env_val;
+
+    /* Read parameters from env vars with defaults. */
+    int inner_iters = DEFAULT_INNER_ITERS;
+    env_val = getenv("BENCH_PARAM_inner_iters");
+    if (env_val) inner_iters = atoi(env_val);
+
+    int block_size = DEFAULT_BLOCK_SIZE;
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+
+    int num_blocks = DEFAULT_NUM_BLOCKS;
+    env_val = getenv("BENCH_PARAM_num_blocks");
+    if (env_val) num_blocks = atoi(env_val);
+
+    const char* access_pattern = "both";
+    env_val = getenv("BENCH_PARAM_access_pattern");
+    if (env_val) access_pattern = env_val;
+
+    /* Print device info to stderr. */
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
-    printf("Device        : %s (id=%d)\n", prop.name, device_id);
-    printf("Shared mem/blk: %zu bytes\n",
+
+    fprintf(stderr, "Device        : %s (id=%d)\n", prop.name, device_id);
+    fprintf(stderr, "Shared mem/blk: %zu bytes\n",
            (size_t)prop.sharedMemPerBlock);
-    printf("Block size    : %d threads\n", BLOCK_SIZE);
-    printf("Grid size     : %d blocks\n", NUM_BLOCKS);
-    printf("Inner iters   : %d\n", INNER_ITERS);
-    printf("Warmup iters  : %d\n", WARMUP_ITERS);
-    printf("Timed iters   : %d\n\n", TIMED_ITERS);
+    fprintf(stderr, "Block size    : %d threads\n", block_size);
+    fprintf(stderr, "Grid size     : %d blocks\n", num_blocks);
+    fprintf(stderr, "Inner iters   : %d\n", inner_iters);
+    fprintf(stderr, "Access pattern: %s\n", access_pattern);
+    fprintf(stderr, "Warmup iters  : %d\n", WARMUP_ITERS);
+    fprintf(stderr, "Timed iters   : %d\n\n", TIMED_ITERS);
 
-    // Allocate device sink buffer
+    /* Allocate device sink buffer. */
     float *d_sink = nullptr;
-    HIP_CHECK(hipMalloc(&d_sink, NUM_BLOCKS * sizeof(float)));
+    HIP_CHECK(hipMalloc(&d_sink, num_blocks * sizeof(float)));
 
-    // --- No-conflict ---
-    double nc_ms = run_benchmark(smem_bw_no_conflict, d_sink, "no_conflict");
+    double total_time_ms = 0.0;
+    double max_bw = 0.0;
 
-    // --- Conflict ---
-    double c_ms  = run_benchmark(smem_bw_conflict, d_sink, "conflict");
+    bool run_no_conflict = (strcmp(access_pattern, "no_conflict") == 0 ||
+                            strcmp(access_pattern, "both") == 0);
+    bool run_conflict    = (strcmp(access_pattern, "conflict") == 0 ||
+                            strcmp(access_pattern, "both") == 0);
 
-    // Bandwidth numbers (recomputed for CSV)
-    double bytes_per_launch = 2.0 * SMEM_FLOATS * sizeof(float)
-                              * (double)INNER_ITERS * NUM_BLOCKS;
-    double nc_GBs = bytes_per_launch / (nc_ms * 1e-3) / BYTES_PER_GB;
-    double c_GBs  = bytes_per_launch / (c_ms  * 1e-3) / BYTES_PER_GB;
+    /* --- No-conflict --- */
+    if (run_no_conflict) {
+        double nc_bw = 0.0;
+        double nc_ms = run_benchmark(smem_bw_no_conflict, d_sink,
+                                     block_size, num_blocks, inner_iters, &nc_bw);
+        fprintf(stderr, "no_conflict    : %.3f ms  %.2f GB/s\n", nc_ms, nc_bw);
+        total_time_ms += nc_ms;
+        if (nc_bw > max_bw) max_bw = nc_bw;
 
-    // CSV output
-    printf("shared_mem_bw,no_conflict,%.3f,%.2f\n", nc_ms, nc_GBs);
-    printf("shared_mem_bw,conflict,%.3f,%.2f\n",    c_ms,  c_GBs);
+        printf("{\"type\":\"kernel\",\"name\":\"smem_bw_no_conflict\",\"time_ms\":%.6f,"
+               "\"params\":{\"inner_iters\":%d,\"block_size\":%d,"
+               "\"num_blocks\":%d,\"access_pattern\":\"%s\"}}\n",
+               nc_ms, inner_iters, block_size, num_blocks, access_pattern);
+    }
+
+    /* --- Conflict --- */
+    if (run_conflict) {
+        double c_bw = 0.0;
+        double c_ms = run_benchmark(smem_bw_conflict, d_sink,
+                                    block_size, num_blocks, inner_iters, &c_bw);
+        fprintf(stderr, "conflict       : %.3f ms  %.2f GB/s\n", c_ms, c_bw);
+        total_time_ms += c_ms;
+        if (c_bw > max_bw) max_bw = c_bw;
+
+        printf("{\"type\":\"kernel\",\"name\":\"smem_bw_conflict\",\"time_ms\":%.6f,"
+               "\"params\":{\"inner_iters\":%d,\"block_size\":%d,"
+               "\"num_blocks\":%d,\"access_pattern\":\"%s\"}}\n",
+               c_ms, inner_iters, block_size, num_blocks, access_pattern);
+    }
+
+    /* Summary */
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
+           total_time_ms, max_bw);
 
     HIP_CHECK(hipFree(d_sink));
 
-    printf("\nDone.\n");
+    fprintf(stderr, "\nDone.\n");
     return EXIT_SUCCESS;
 }

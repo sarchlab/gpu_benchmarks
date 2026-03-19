@@ -7,7 +7,30 @@
     "name": "width",
     "description": "Image width in pixels (W= parameter, also sets height for square image)",
     "type": "int",
-    "values": [64, 128, 256, 384, 512, 640, 768, 1024, 1280, 1536, 2048, 2560, 3072, 3584, 4096, 5120, 6144, 7168, 8192, 10240, 12288, 16384]
+    "values": [
+      64,
+      128,
+      256,
+      384,
+      512,
+      640,
+      768,
+      1024,
+      1280,
+      1536,
+      2048,
+      2560,
+      3072,
+      3584,
+      4096,
+      5120,
+      6144,
+      7168,
+      8192,
+      10240,
+      12288,
+      16384
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,8 +38,45 @@
       "description": "Image height in pixels (H= parameter)",
       "type": "int",
       "default": 2048,
-      "values": [512, 1024, 2048, 4096]
+      "values": [
+        512,
+        1024,
+        2048,
+        4096
+      ]
+    },
+    {
+      "name": "threshold_low",
+      "description": "Low threshold for Canny hysteresis (0-255)",
+      "type": "int",
+      "default": 50,
+      "values": [
+        20,
+        30,
+        50,
+        70,
+        100
+      ]
+    },
+    {
+      "name": "threshold_high",
+      "description": "High threshold for Canny hysteresis (0-255)",
+      "type": "int",
+      "default": 150,
+      "values": [
+        100,
+        120,
+        150,
+        180,
+        200
+      ]
     }
   ],
-  "kernels": ["gaussian_blur_kernel", "sobel_kernel", "magnitude_direction_kernel", "nms_kernel", "hysteresis_kernel"]
+  "kernels": [
+    "gaussian_blur_kernel",
+    "sobel_kernel",
+    "magnitude_direction_kernel",
+    "nms_kernel",
+    "hysteresis_kernel"
+  ]
 }

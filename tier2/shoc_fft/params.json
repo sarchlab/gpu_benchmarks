@@ -42,6 +42,28 @@
         10,
         20
       ]
+    },
+    {
+      "name": "precision",
+      "description": "Floating-point precision for FFT computation",
+      "type": "enum",
+      "default": "float",
+      "values": [
+        "float",
+        "double"
+      ]
+    },
+    {
+      "name": "batch_count",
+      "description": "Number of FFT batches to execute",
+      "type": "int",
+      "default": 1,
+      "values": [
+        1,
+        2,
+        4,
+        8
+      ]
     }
   ],
   "kernels": [

@@ -55,6 +55,16 @@
         10,
         20
       ]
+    },
+    {
+      "name": "precision",
+      "description": "Floating-point precision for SpMV values",
+      "type": "enum",
+      "default": "float",
+      "values": [
+        "float",
+        "double"
+      ]
     }
   ],
   "kernels": [

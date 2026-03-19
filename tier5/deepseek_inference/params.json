@@ -1,0 +1,55 @@
+{
+  "benchmark": "deepseek_inference",
+  "tier": 5,
+  "suite": "ml_inference",
+  "description": "DeepSeek-style autoregressive inference benchmark using HuggingFace LlamaForCausalLM with grouped-query attention (GQA). Generates tokens one at a time from a prompt. Reports tokens/sec throughput.",
+  "language": "python",
+  "scaling_param": {
+    "name": "num_new_tokens",
+    "description": "Number of new tokens to generate autoregressively",
+    "type": "int",
+    "values": [
+      8, 16, 24, 32, 48, 64, 96, 128, 160, 192,
+      224, 256, 320, 384, 448, 512, 640, 768, 896, 1024,
+      1280, 1536, 1792, 2048
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "prompt_len",
+      "description": "Length of the input prompt in tokens",
+      "type": "int",
+      "default": 32,
+      "values": [8, 16, 32, 64, 128]
+    },
+    {
+      "name": "num_hidden_layers",
+      "description": "Number of transformer decoder layers",
+      "type": "int",
+      "default": 6,
+      "values": [2, 4, 6, 12, 24]
+    },
+    {
+      "name": "hidden_size",
+      "description": "Hidden dimension of the model",
+      "type": "int",
+      "default": 512,
+      "values": [256, 512, 1024, 2048]
+    },
+    {
+      "name": "num_attention_heads",
+      "description": "Number of attention heads",
+      "type": "int",
+      "default": 8,
+      "values": [4, 8, 16, 32]
+    },
+    {
+      "name": "num_key_value_heads",
+      "description": "Number of key-value heads for grouped-query attention",
+      "type": "int",
+      "default": 4,
+      "values": [1, 2, 4, 8]
+    }
+  ],
+  "kernels": ["forward", "generate"]
+}

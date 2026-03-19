@@ -1,0 +1,29 @@
+{
+  "benchmark": "cuda_nbody",
+  "tier": 2,
+  "suite": "cuda_sdk",
+  "description": "All-pairs N-body gravitational simulation with tile-based shared memory optimization. Each thread computes force on one body from all others. Measures GFLOPS.",
+  "scaling_param": {
+    "name": "bodies",
+    "description": "Number of bodies in the simulation",
+    "type": "int",
+    "values": [256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728]
+  },
+  "non_scaling_params": [
+    {
+      "name": "timesteps",
+      "description": "Number of simulation timesteps per run",
+      "type": "int",
+      "default": 10,
+      "values": [1, 5, 10, 20, 50]
+    },
+    {
+      "name": "iterations",
+      "description": "Timed benchmark iterations",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10]
+    }
+  ],
+  "kernels": ["nbody_kernel"]
+}

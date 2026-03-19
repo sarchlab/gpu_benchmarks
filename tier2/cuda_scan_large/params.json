@@ -1,0 +1,22 @@
+{
+  "benchmark": "cuda_scan_large",
+  "tier": 2,
+  "suite": "cuda_sdk",
+  "description": "Work-efficient parallel prefix sum (exclusive scan) for large arrays. Three-phase hierarchical decomposition: block scan, sum scan, add-back. Measures throughput in GB/s.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Number of uint elements to scan",
+    "type": "int",
+    "values": [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912]
+  },
+  "non_scaling_params": [
+    {
+      "name": "iterations",
+      "description": "Timed benchmark iterations",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10, 20]
+    }
+  ],
+  "kernels": ["scan_block_kernel", "add_block_sums_kernel"]
+}

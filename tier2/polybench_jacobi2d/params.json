@@ -1,0 +1,29 @@
+{
+  "benchmark": "polybench_jacobi2d",
+  "tier": 2,
+  "suite": "polybench",
+  "description": "2D Jacobi 5-point stencil with double buffering. Updates interior NxN grid for TSTEPS iterations. Measures memory bandwidth in GB/s.",
+  "scaling_param": {
+    "name": "n",
+    "description": "Grid dimension (NxN grid)",
+    "type": "int",
+    "values": [64, 128, 192, 256, 384, 512, 640, 768, 1024, 1280, 1536, 2048, 2560, 3072, 3584, 4096, 5120, 6144, 7168, 8192]
+  },
+  "non_scaling_params": [
+    {
+      "name": "tsteps",
+      "description": "Number of Jacobi time steps per trial",
+      "type": "int",
+      "default": 50,
+      "values": [10, 25, 50, 100, 200]
+    },
+    {
+      "name": "trials",
+      "description": "Number of timed trials for averaging",
+      "type": "int",
+      "default": 3,
+      "values": [1, 3, 5, 10]
+    }
+  ],
+  "kernels": ["jacobi2d_kernel"]
+}

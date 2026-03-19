@@ -1,0 +1,22 @@
+{
+  "benchmark": "chai_hsto",
+  "tier": 2,
+  "suite": "chai",
+  "description": "256-bin histogram of N random bytes using shared memory privatization and global reduction. Collaborative computing pattern from Chai suite.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Number of input bytes",
+    "type": "int",
+    "values": [1024, 4096, 16384, 65536, 262144, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824]
+  },
+  "non_scaling_params": [
+    {
+      "name": "iterations",
+      "description": "Timed benchmark iterations",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10, 20]
+    }
+  ],
+  "kernels": ["histogram_kernel"]
+}

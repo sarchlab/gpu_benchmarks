@@ -1,0 +1,22 @@
+{
+  "benchmark": "heteromark_fir",
+  "tier": 2,
+  "suite": "heteromark",
+  "description": "1D FIR (Finite Impulse Response) convolution: output[i] = sum(coeff[k] * input[i-k]). Filter coefficients loaded into shared memory. NUM_TAPS=128.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Number of input samples",
+    "type": "int",
+    "values": [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728]
+  },
+  "non_scaling_params": [
+    {
+      "name": "iterations",
+      "description": "Timed benchmark iterations",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10, 20]
+    }
+  ],
+  "kernels": ["fir_filter_kernel"]
+}

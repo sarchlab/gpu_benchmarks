@@ -1,0 +1,22 @@
+{
+  "benchmark": "rodinia_gaussian",
+  "tier": 2,
+  "suite": "rodinia",
+  "description": "Gaussian elimination with back-substitution to solve Ax=b for an NxN dense matrix. GPU performs forward elimination with fan1 and fan2 kernels.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Matrix dimension N (NxN system)",
+    "type": "int",
+    "values": [64, 128, 192, 256, 384, 512, 640, 768, 896, 1024, 1280, 1536, 1792, 2048, 2560, 3072, 3584, 4096, 5120, 6144, 7168, 8192]
+  },
+  "non_scaling_params": [
+    {
+      "name": "iterations",
+      "description": "Timed benchmark iterations",
+      "type": "int",
+      "default": 3,
+      "values": [1, 3, 5, 10]
+    }
+  ],
+  "kernels": ["fan1", "fan2"]
+}

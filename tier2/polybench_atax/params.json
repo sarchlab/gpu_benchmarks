@@ -1,0 +1,29 @@
+{
+  "benchmark": "polybench_atax",
+  "tier": 2,
+  "suite": "polybench",
+  "description": "Computes y = A^T * (A * x) where A is NxN. Two-phase matrix-vector product benchmark measuring memory bandwidth in GB/s.",
+  "scaling_param": {
+    "name": "nx",
+    "description": "Number of rows (and columns, when ny=nx) of matrix A",
+    "type": "int",
+    "values": [64, 128, 256, 512, 768, 1024, 1536, 2048, 2560, 3072, 4096, 5120, 6144, 7168, 8192, 10240, 12288, 16384, 20480, 24576, 32768]
+  },
+  "non_scaling_params": [
+    {
+      "name": "ny",
+      "description": "Number of columns of matrix A",
+      "type": "int",
+      "default": 4096,
+      "values": [1024, 2048, 4096, 8192]
+    },
+    {
+      "name": "iterations",
+      "description": "Number of timed iterations",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10, 20]
+    }
+  ],
+  "kernels": ["atax_kernel1", "atax_kernel2"]
+}

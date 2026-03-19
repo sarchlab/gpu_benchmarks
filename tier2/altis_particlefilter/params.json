@@ -1,0 +1,22 @@
+{
+  "benchmark": "altis_particlefilter",
+  "tier": 2,
+  "suite": "altis",
+  "description": "Sequential Importance Resampling (SIR) particle filter for Monte Carlo localization on a 2D grid. Three kernel phases: update particles, compute weights, resample.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Number of particles",
+    "type": "int",
+    "values": [1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 5000000, 10000000, 20000000, 50000000, 100000000]
+  },
+  "non_scaling_params": [
+    {
+      "name": "iterations",
+      "description": "Timed benchmark iterations",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10, 20]
+    }
+  ],
+  "kernels": ["update_particles_kernel", "compute_weights_kernel", "prefix_sum_kernel", "add_block_sums_kernel", "resample_kernel"]
+}

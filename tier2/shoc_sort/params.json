@@ -1,0 +1,22 @@
+{
+  "benchmark": "shoc_sort",
+  "tier": 2,
+  "suite": "shoc",
+  "description": "Bitonic sort on a large array of random unsigned integers. O(n log^2 n) compare-and-swap network. Measures throughput in Melements/s.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Number of unsigned int elements to sort (must be power of 2)",
+    "type": "int",
+    "values": [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728]
+  },
+  "non_scaling_params": [
+    {
+      "name": "iterations",
+      "description": "Number of timed iterations for averaging",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10, 20]
+    }
+  ],
+  "kernels": ["bitonic_step"]
+}

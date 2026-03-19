@@ -1,0 +1,29 @@
+{
+  "benchmark": "lonestar_sssp",
+  "tier": 2,
+  "suite": "lonestar",
+  "description": "Single-Source Shortest Path using iterative Bellman-Ford edge relaxation on a random sparse CSR graph. Repeats until convergence.",
+  "scaling_param": {
+    "name": "vertices",
+    "description": "Number of vertices in the graph",
+    "type": "int",
+    "values": [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728]
+  },
+  "non_scaling_params": [
+    {
+      "name": "degree",
+      "description": "Average degree (edges) per vertex",
+      "type": "int",
+      "default": 16,
+      "values": [4, 8, 16, 32, 64]
+    },
+    {
+      "name": "iterations",
+      "description": "Timed benchmark iterations",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10]
+    }
+  ],
+  "kernels": ["bellman_ford_kernel"]
+}

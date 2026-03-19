@@ -69,7 +69,7 @@ struct OptionData {
 // Binomial option pricing kernel
 //   One threadblock per option. Threads collaborate via shared memory to
 //   perform backward induction through the binomial tree.
-//   NUM_STEPS must be <= blockDim.x (threads per block).
+//   Uses stride loops so blockDim.x can be smaller than numSteps+1.
 // ---------------------------------------------------------------------------
 
 extern __shared__ float shared_values[];
@@ -81,6 +81,7 @@ __global__ void binomial_kernel(
 {
     int optIdx = blockIdx.x;
     int tid    = threadIdx.x;
+    int bdim   = blockDim.x;
 
     OptionData opt = options[optIdx];
 
@@ -93,24 +94,25 @@ __global__ void binomial_kernel(
     float p  = (R - d) / (u - d);                  // risk-neutral probability
     float q  = 1.0f - p;
 
-    // Step 1: Compute terminal payoffs (American put: max(K - S * u^j * d^(N-j), 0))
-    // Each thread handles one leaf node
-    if (tid <= numSteps) {
-        float ST = opt.S * powf(u, (float)(2 * tid - numSteps));
+    int numNodes = numSteps + 1;
+
+    // Step 1: Compute terminal payoffs (stride loop)
+    for (int j = tid; j < numNodes; j += bdim) {
+        float ST = opt.S * powf(u, (float)(2 * j - numSteps));
         float payoff = fmaxf(opt.K - ST, 0.0f);
-        shared_values[tid] = payoff;
+        shared_values[j] = payoff;
     }
     __syncthreads();
 
     // Step 2: Backward induction
     for (int step = numSteps; step > 0; --step) {
-        if (tid < step) {
+        for (int j = tid; j < step; j += bdim) {
             // Expected value discounted
-            float cont = Rinv * (p * shared_values[tid + 1] + q * shared_values[tid]);
+            float cont = Rinv * (p * shared_values[j + 1] + q * shared_values[j]);
             // American option: can exercise early
-            float ST = opt.S * powf(u, (float)(2 * tid - (step - 1)));
+            float ST = opt.S * powf(u, (float)(2 * j - (step - 1)));
             float exercise = fmaxf(opt.K - ST, 0.0f);
-            shared_values[tid] = fmaxf(cont, exercise);
+            shared_values[j] = fmaxf(cont, exercise);
         }
         __syncthreads();
     }
@@ -174,10 +176,10 @@ int main(int argc, char** argv) {
     int numSteps   = parseIntParam(argc, argv, "--steps",   1024);
     int iters      = parseIntParam(argc, argv, "--iterations", 5);
 
-    // Clamp numSteps to a reasonable maximum (shared memory limit)
-    if (numSteps > 1024) {
-        fprintf(stderr, "Warning: clamping steps to 1024 (shared memory limit)\n");
-        numSteps = 1024;
+    // Shared memory must hold (numSteps+1) floats; clamp to reasonable limit
+    if (numSteps > 4096) {
+        fprintf(stderr, "Warning: clamping steps to 4096 (shared memory limit)\n");
+        numSteps = 4096;
     }
 
     size_t optBytes   = (size_t)numOptions * sizeof(OptionData);
@@ -212,8 +214,9 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMalloc(&d_prices,  priceBytes));
     HIP_CHECK(hipMemcpy(d_options, h_options, optBytes, hipMemcpyHostToDevice));
 
-    // Kernel launch config: one block per option, numSteps+1 threads per block
-    int blockSize = numSteps + 1;
+    // Kernel launch config: one block per option
+    // Clamp blockSize to 1024 (HIP/CUDA max), kernel uses stride loops
+    int blockSize = (numSteps + 1 > 1024) ? 1024 : (numSteps + 1);
     int gridSize  = numOptions;
     size_t sharedBytes = (size_t)(numSteps + 1) * sizeof(float);
 

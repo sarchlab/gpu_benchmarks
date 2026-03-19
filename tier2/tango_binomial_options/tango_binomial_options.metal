@@ -5,6 +5,9 @@
  * Each threadgroup processes one option using threadgroup shared memory
  * for backward induction through the binomial tree.
  *
+ * Uses stride loops so that numSteps+1 nodes can be handled by a
+ * threadgroup whose size may be smaller than numSteps+1.
+ *
  * Buffer layout:
  *   buffer(0): options    — OptionData[N], input option parameters
  *   buffer(1): prices     — float[N], output option prices
@@ -29,7 +32,7 @@ struct OptionData {
 // ---------------------------------------------------------------------------
 // Binomial option pricing kernel
 //   One threadgroup per option. Threads collaborate via threadgroup memory
-//   to perform backward induction.
+//   to perform backward induction using stride loops.
 // ---------------------------------------------------------------------------
 
 kernel void binomial_kernel(
@@ -38,9 +41,11 @@ kernel void binomial_kernel(
     constant uint2&          params   [[ buffer(2) ]],
     threadgroup float*       shmem    [[ threadgroup(0) ]],
     uint                     groupId  [[ threadgroup_position_in_grid ]],
-    uint                     tid      [[ thread_index_in_threadgroup ]])
+    uint                     tid      [[ thread_index_in_threadgroup ]],
+    uint                     tgSize   [[ threads_per_threadgroup ]])
 {
     uint numSteps = params.y;
+    uint numNodes = numSteps + 1;
 
     OptionData opt = options[groupId];
 
@@ -53,21 +58,21 @@ kernel void binomial_kernel(
     float p    = (R - d) / (u - d);               // risk-neutral probability
     float q    = 1.0f - p;
 
-    // Step 1: Compute terminal payoffs
-    if (tid <= numSteps) {
-        float ST = opt.S * pow(u, float(2 * int(tid) - int(numSteps)));
+    // Step 1: Compute terminal payoffs (stride loop)
+    for (uint j = tid; j < numNodes; j += tgSize) {
+        float ST = opt.S * pow(u, float(2 * int(j) - int(numSteps)));
         float payoff = max(opt.K - ST, 0.0f);
-        shmem[tid] = payoff;
+        shmem[j] = payoff;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     // Step 2: Backward induction
     for (uint step = numSteps; step > 0; --step) {
-        if (tid < step) {
-            float cont = Rinv * (p * shmem[tid + 1] + q * shmem[tid]);
-            float ST = opt.S * pow(u, float(2 * int(tid) - int(step - 1)));
+        for (uint j = tid; j < step; j += tgSize) {
+            float cont = Rinv * (p * shmem[j + 1] + q * shmem[j]);
+            float ST = opt.S * pow(u, float(2 * int(j) - int(step - 1)));
             float exercise = max(opt.K - ST, 0.0f);
-            shmem[tid] = max(cont, exercise);
+            shmem[j] = max(cont, exercise);
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
     }

@@ -122,9 +122,10 @@ int main(int argc, char* argv[]) {
     int numSteps   = parseIntParam(argc, argv, "--steps",   1024);
     int iters      = parseIntParam(argc, argv, "--iterations", 5);
 
-    if (numSteps > 1024) {
-        fprintf(stderr, "Warning: clamping steps to 1024 (shared memory limit)\n");
-        numSteps = 1024;
+    // Shared memory must hold (numSteps+1) floats; clamp to reasonable limit
+    if (numSteps > 4096) {
+        fprintf(stderr, "Warning: clamping steps to 4096 (shared memory limit)\n");
+        numSteps = 4096;
     }
 
     size_t optBytes   = (size_t)numOptions * sizeof(OptionData);
@@ -206,8 +207,11 @@ int main(int argc, char* argv[]) {
         pOptions[i].sigma = randRange(seed, 0.1f, 1.0f);
     }
 
-    // Threadgroup config: one threadgroup per option, (numSteps+1) threads each
-    NSUInteger tgSize     = (NSUInteger)(numSteps + 1);
+    // Threadgroup config: one threadgroup per option
+    // Clamp tgSize to pipeline max (Metal limit is typically 1024)
+    NSUInteger maxTg  = psoBinomial.maxTotalThreadsPerThreadgroup;
+    NSUInteger tgSize = (NSUInteger)(numSteps + 1);
+    if (tgSize > maxTg) tgSize = maxTg;
     NSUInteger numGroups  = (NSUInteger)numOptions;
     NSUInteger sharedSize = (NSUInteger)(numSteps + 1) * sizeof(float);
 

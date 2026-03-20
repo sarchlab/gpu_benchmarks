@@ -19,7 +19,7 @@
  *   BENCH_PARAM_ops_per_thread
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_threads_per_block
- *   BENCH_PARAM_atomic_op   ("all", "add", "cas", "min")
+ *   BENCH_PARAM_atomic_op   ("all", "atomicAdd", "atomicCAS", "atomicMin")
  *
  * Build:
  *   make PLATFORM=metal
@@ -256,9 +256,9 @@ int main(int argc, char *argv[])
     double total_time_ms = 0.0;
     double max_gops = 0.0;
 
-    bool run_add = (strcmp(atomic_op, "all") == 0 || strcmp(atomic_op, "add") == 0);
-    bool run_cas = (strcmp(atomic_op, "all") == 0 || strcmp(atomic_op, "cas") == 0);
-    bool run_min = (strcmp(atomic_op, "all") == 0 || strcmp(atomic_op, "min") == 0);
+    bool run_add = (strcmp(atomic_op, "all") == 0 || strcmp(atomic_op, "atomicAdd") == 0);
+    bool run_cas = (strcmp(atomic_op, "all") == 0 || strcmp(atomic_op, "atomicCAS") == 0);
+    bool run_min = (strcmp(atomic_op, "all") == 0 || strcmp(atomic_op, "atomicMin") == 0);
 
     int rc;
 

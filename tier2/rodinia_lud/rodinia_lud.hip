@@ -194,7 +194,7 @@ int main(int argc, char **argv)
     int N     = 512;
     int iters = 3;
     int block_size_param = 256;
-    const char* verify = "true";
+    const char* verify_mode = "true";
 
     // Command-line fallback
     for (int i = 1; i < argc - 1; i++) {
@@ -211,7 +211,7 @@ int main(int argc, char **argv)
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size_param = atoi(env_val);
     env_val = getenv("BENCH_PARAM_verify");
-    if (env_val) verify = env_val;
+    if (env_val) verify_mode = env_val;
     if (N % BSIZE != 0) {
         fprintf(stderr, "Error: N=%d must be divisible by BSIZE=%d\n", N, BSIZE);
         return 1;
@@ -295,15 +295,15 @@ int main(int argc, char **argv)
     // JSON-lines kernel events
     printf("{\"type\":\"kernel\",\"name\":\"lud_diagonal\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
-           avg_ms, N, iters, block_size_param, verify);
+           avg_ms, N, iters, block_size_param, verify_mode);
 
     printf("{\"type\":\"kernel\",\"name\":\"lud_perimeter\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
-           avg_ms, N, iters, block_size_param, verify);
+           avg_ms, N, iters, block_size_param, verify_mode);
 
     printf("{\"type\":\"kernel\",\"name\":\"lud_internal\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
-           avg_ms, N, iters, block_size_param, verify);
+           avg_ms, N, iters, block_size_param, verify_mode);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

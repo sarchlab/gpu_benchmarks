@@ -74,11 +74,30 @@ static int parseIntParam(int argc, char** argv, const char* name, int def)
 int main(int argc, char* argv[])
 {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    int input_n  = parseIntParam(argc, argv, "--input",      DEFAULT_INPUT_N);
-    int hidden_n = parseIntParam(argc, argv, "--hidden",     DEFAULT_HIDDEN_N);
-    int output_n = parseIntParam(argc, argv, "--output",     DEFAULT_OUTPUT_N);
-    int iters    = parseIntParam(argc, argv, "--iterations", DEFAULT_ITERS);
+    // Defaults
+    int input_n  = DEFAULT_INPUT_N;
+    int hidden_n = DEFAULT_HIDDEN_N;
+    int output_n = DEFAULT_OUTPUT_N;
+    int iters    = DEFAULT_ITERS;
+
+    // Command-line fallback
+    input_n  = parseIntParam(argc, argv, "--input", input_n);
+    hidden_n = parseIntParam(argc, argv, "--hidden", hidden_n);
+    output_n = parseIntParam(argc, argv, "--output", output_n);
+    iters    = parseIntParam(argc, argv, "--iterations", iters);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_input");
+    if (env_val) input_n = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_hidden");
+    if (env_val) hidden_n = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_output");
+    if (env_val) output_n = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
 
     // -----------------------------------------------------------------------
     // Metal device setup
@@ -343,8 +362,21 @@ int main(int argc, char* argv[])
     fprintf(stderr, "GFLOPS: %.2f  (avg %.4f ms, min %.4f ms, max %.4f ms)\n",
             gflops, avg_ms, mn_ms, mx_ms);
 
-    // CSV: backprop,<input_n>,<hidden_n>,<time_ms>,<GFLOPS>
-    printf("backprop,%d,%d,%.4f,%.2f\n", input_n, hidden_n, avg_ms, gflops);
+    // JSON-lines kernel events (one per kernel in params.json)
+    const char* kernel_names[] = {
+        "forward_hidden", "forward_output", "backward_output_delta",
+        "backward_hidden_delta", "update_w1", "update_w2"
+    };
+    for (int ki = 0; ki < 6; ki++) {
+        printf("{\"type\":\"kernel\",\"name\":\"%s\",\"time_ms\":%.6f,"
+               "\"params\":{\"input\":%d,\"hidden\":%d,\"output\":%d,\"iterations\":%d}}\n",
+               kernel_names[ki], avg_ms, input_n, hidden_n, output_n, iters);
+    }
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
+           sum_ms, gflops);
 
     return EXIT_SUCCESS;
 

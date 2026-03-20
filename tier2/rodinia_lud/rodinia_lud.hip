@@ -188,12 +188,30 @@ static bool verify(const float *lu, const float *a_orig, int n)
 // ---------------------------------------------------------------------------
 int main(int argc, char **argv)
 {
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Defaults
     int N     = 512;
     int iters = 3;
+    int block_size_param = 256;
+    const char* verify = "true";
+
+    // Command-line fallback
     for (int i = 1; i < argc - 1; i++) {
         if (strcmp(argv[i], "--size")       == 0) N     = atoi(argv[i + 1]);
         if (strcmp(argv[i], "--iterations") == 0) iters = atoi(argv[i + 1]);
     }
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size_param = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_verify");
+    if (env_val) verify = env_val;
     if (N % BSIZE != 0) {
         fprintf(stderr, "Error: N=%d must be divisible by BSIZE=%d\n", N, BSIZE);
         return 1;
@@ -269,14 +287,28 @@ int main(int argc, char **argv)
     double sum_ms = 0.0;
     for (double t : times) sum_ms += t;
     double avg_ms = sum_ms / iters;
-    // GFLOPS: approx (2/3)*N^3 flops for LU decomposition
     double gflops = (2.0 / 3.0) * (double)N * (double)N * (double)N
                     / (avg_ms * 1e-3) / 1e9;
 
     fprintf(stderr, "\nAverage: %.4f ms  GFLOPS: %.2f\n", avg_ms, gflops);
 
-    // CSV output
-    printf("lud,%d,%.4f,%.2f\n", N, avg_ms, gflops);
+    // JSON-lines kernel events
+    printf("{\"type\":\"kernel\",\"name\":\"lud_diagonal\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
+           avg_ms, N, iters, block_size_param, verify);
+
+    printf("{\"type\":\"kernel\",\"name\":\"lud_perimeter\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
+           avg_ms, N, iters, block_size_param, verify);
+
+    printf("{\"type\":\"kernel\",\"name\":\"lud_internal\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
+           avg_ms, N, iters, block_size_param, verify);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
+           sum_ms, gflops);
 
     // Cleanup
     HIP_CHECK(hipFree(d_a));

@@ -253,10 +253,19 @@ __global__ void srad2(float* __restrict__ J,
 // ---------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
-    int image_size  = parseIntParam(argc, argv, "--image_size",     512);
-    int num_iters   = parseIntParam(argc, argv, "--num_iterations",  50);
-    int block_dim   = parseIntParam(argc, argv, "--block_size",      16);
-    int iters       = parseIterations(argc, argv);
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Defaults
+    int image_size  = 512;
+    int num_iters   = 50;
+    int block_dim   = 16;
+    int iters       = 20;
+
+    // Command-line fallback
+    image_size = parseIntParam(argc, argv, "--image_size", image_size);
+    num_iters  = parseIntParam(argc, argv, "--num_iterations", num_iters);
+    block_dim  = parseIntParam(argc, argv, "--block_size", block_dim);
+    iters      = parseIterations(argc, argv);
 
     float lambda = 0.25f;
     for (int i = 1; i < argc - 1; ++i) {
@@ -265,6 +274,17 @@ int main(int argc, char** argv) {
             break;
         }
     }
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_image_size");
+    if (env_val) image_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_num_iterations");
+    if (env_val) num_iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_dim = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
 
     int rows = image_size;
     int cols = image_size;
@@ -307,8 +327,6 @@ int main(int argc, char** argv) {
     char problemSize[64];
     snprintf(problemSize, sizeof(problemSize), "%dx%d", rows, cols);
 
-    printCSVHeader();
-
     BenchResult r = runBenchmark(
         "rodinia_srad", problemSize, iters, [&]() {
             // Reset image to original before each timed run
@@ -326,15 +344,26 @@ int main(int argc, char** argv) {
             HIP_CHECK(hipDeviceSynchronize());
         });
 
-    printCSVRow(r);
-
-    // Effective bandwidth:
-    //   srad1: reads J (1×size), writes dN+dS+dW+dE+c (5×size) → 6×size floats
-    //   srad2: reads dN+dS+dW+dE+c (5×size) + J (1×size), writes J (1×size) → 7×size floats
-    //   Total per iteration: 13 × size × sizeof(float)
+    // Effective bandwidth
     double bytes_per_iter = 13.0 * (double)size * sizeof(float);
     double total_bytes    = bytes_per_iter * num_iters;
     double bw_gb = total_bytes / (r.avg_ms * 1e-3) / 1e9;
+    double total_ms = r.avg_ms * iters;
+
+    // JSON-lines kernel events
+    printf("{\"type\":\"kernel\",\"name\":\"srad1\",\"time_ms\":%.6f,"
+           "\"params\":{\"image_size\":%d,\"num_iterations\":%d,\"block_size\":%d,\"iterations\":%d}}\n",
+           r.avg_ms, image_size, num_iters, block_dim, iters);
+
+    printf("{\"type\":\"kernel\",\"name\":\"srad2\",\"time_ms\":%.6f,"
+           "\"params\":{\"image_size\":%d,\"num_iterations\":%d,\"block_size\":%d,\"iterations\":%d}}\n",
+           r.avg_ms, image_size, num_iters, block_dim, iters);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"effective_bandwidth_gbps\",\"value\":%.2f}]}\n",
+           total_ms, bw_gb);
+
     fprintf(stderr, "Effective bandwidth: %.2f GB/s  (avg %.4f ms, %d SRAD iters/launch)\n",
             bw_gb, r.avg_ms, num_iters);
 

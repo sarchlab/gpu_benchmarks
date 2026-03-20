@@ -1,7 +1,9 @@
+import json
+import os
+import sys
 import torch
 import torch.nn as nn
 import math
-import sys
 
 
 class CausalSelfAttention(nn.Module):
@@ -86,35 +88,40 @@ class CoTModel(nn.Module):
 
 
 @torch.no_grad()
-def cot_reasoning(model, prompt):
-    """Chain-of-Thought reasoning: 3 CoT steps (64 tokens each) + answer (32 tokens)."""
+def cot_reasoning(model, prompt, cot_step_tokens, answer_tokens):
+    """Chain-of-Thought reasoning: 3 CoT steps + answer generation."""
     seq = prompt.clone()
-    # Step 1: generate 64 tokens
-    seq = model.generate(seq, 64)
-    # Step 2: generate 64 tokens
-    seq = model.generate(seq, 64)
-    # Step 3: generate 64 tokens
-    seq = model.generate(seq, 64)
-    # Answer: generate 32 tokens
-    seq = model.generate(seq, 32)
+    # Step 1
+    seq = model.generate(seq, cot_step_tokens)
+    # Step 2
+    seq = model.generate(seq, cot_step_tokens)
+    # Step 3
+    seq = model.generate(seq, cot_step_tokens)
+    # Answer
+    seq = model.generate(seq, answer_tokens)
     return seq
 
 
 def benchmark():
     device = torch.device('cuda')
-
-    # Config
-    num_layers = 6
-    hidden_size = 384
-    num_heads = 6
     vocab_size = 50257
-    max_seq_len = 1024
-    prompt_len = 32
-    total_generated = 3 * 64 + 32  # 224 tokens
 
-    print(f'Chain-of-Thought reasoning benchmark', file=sys.stderr)
-    print(f'Config: layers={num_layers}, hidden={hidden_size}, heads={num_heads}', file=sys.stderr)
-    print(f'Prompt: {prompt_len} tokens, Generated: {total_generated} tokens', file=sys.stderr)
+    # Read parameters from environment variables
+    total_generated = int(os.environ.get('BENCH_PARAM_total_generated', '224'))
+    prompt_len = int(os.environ.get('BENCH_PARAM_prompt_len', '32'))
+    num_layers = int(os.environ.get('BENCH_PARAM_num_layers', '6'))
+    hidden_size = int(os.environ.get('BENCH_PARAM_hidden_size', '384'))
+    num_heads = int(os.environ.get('BENCH_PARAM_num_heads', '6'))
+
+    # Split total_generated into 3 CoT steps + answer
+    cot_step_tokens = total_generated // 4
+    answer_tokens = total_generated - 3 * cot_step_tokens
+    max_seq_len = prompt_len + total_generated
+
+    print(f"Chain-of-Thought reasoning benchmark", file=sys.stderr)
+    print(f"Config: layers={num_layers}, hidden={hidden_size}, heads={num_heads}", file=sys.stderr)
+    print(f"Prompt: {prompt_len} tokens, Generated: {total_generated} tokens "
+          f"(3x{cot_step_tokens} + {answer_tokens})", file=sys.stderr)
 
     model = CoTModel(vocab_size, num_layers, num_heads, hidden_size, max_seq_len).to(device)
     model.eval()
@@ -122,28 +129,51 @@ def benchmark():
     prompt = torch.randint(0, vocab_size, (1, prompt_len), device=device)
 
     # Warmup
-    print('Warmup...', file=sys.stderr)
+    print("Warmup...", file=sys.stderr)
     for _ in range(5):
-        cot_reasoning(model, prompt)
+        cot_reasoning(model, prompt, cot_step_tokens, answer_tokens)
     torch.cuda.synchronize()
 
     # Timed
-    print('Benchmarking...', file=sys.stderr)
+    print("Benchmarking...", file=sys.stderr)
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)
     total_ms = 0.0
     for _ in range(10):
         start.record()
-        cot_reasoning(model, prompt)
+        cot_reasoning(model, prompt, cot_step_tokens, answer_tokens)
         end.record()
         torch.cuda.synchronize()
         total_ms += start.elapsed_time(end)
 
     avg_ms = total_ms / 10
     tokens_per_sec = total_generated / (avg_ms / 1000)
-    print(f'Average time: {avg_ms:.3f} ms', file=sys.stderr)
-    print(f'Tokens/sec: {tokens_per_sec:.2f}', file=sys.stderr)
-    print(f'cot_reasoning,{total_generated},{avg_ms:.3f},{tokens_per_sec:.2f}')
+
+    print(f"Average time: {avg_ms:.3f} ms", file=sys.stderr)
+    print(f"Tokens/sec: {tokens_per_sec:.2f}", file=sys.stderr)
+
+    params = {
+        "total_generated": total_generated,
+        "prompt_len": prompt_len,
+        "num_layers": num_layers,
+        "hidden_size": hidden_size,
+        "num_heads": num_heads,
+    }
+
+    print(json.dumps({
+        "type": "kernel",
+        "name": "reason",
+        "time_ms": avg_ms,
+        "params": params,
+    }))
+
+    print(json.dumps({
+        "type": "summary",
+        "total_time_ms": avg_ms,
+        "metrics": [
+            {"name": "tokens_per_sec", "value": tokens_per_sec},
+        ],
+    }))
 
 
 if __name__ == '__main__':

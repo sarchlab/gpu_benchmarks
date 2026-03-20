@@ -208,10 +208,35 @@ static void run_pagerank_gpu(int N, int pr_iters, float damping,
 // ---------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
-    int N         = parseIntParam(argc, argv, "--vertices", 131072);
-    int avg_deg   = parseIntParam(argc, argv, "--degree", 16);
-    int iters     = parseIntParam(argc, argv, "--iterations", 5);
-    int pr_iters  = parseIntParam(argc, argv, "--pr-iterations", 20);
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Defaults from params.json
+    int vertices      = 131072;
+    int degree        = 16;
+    int pr_iterations = 20;
+    int iterations    = 5;
+
+    // Command-line fallback
+    vertices      = parseIntParam(argc, argv, "--vertices", vertices);
+    degree        = parseIntParam(argc, argv, "--degree", degree);
+    iterations    = parseIntParam(argc, argv, "--iterations", iterations);
+    pr_iterations = parseIntParam(argc, argv, "--pr-iterations", pr_iterations);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_vertices");
+    if (env_val) vertices = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_degree");
+    if (env_val) degree = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_pr_iterations");
+    if (env_val) pr_iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+
+    int N         = vertices;
+    int avg_deg   = degree;
+    int iters     = iterations;
+    int pr_iters  = pr_iterations;
     float damping = 0.85f;
 
     // Generate CSC graph
@@ -283,8 +308,18 @@ int main(int argc, char** argv) {
     // GTEPS = N_edges * pr_iterations / time_s / 1e9
     double gteps = (double)num_edges * (double)pr_iters / (avg_ms * 1e-3) / 1e9;
 
-    // CSV output to stdout
-    printf("graph_pr,%d,%.4f,%.4f\n", N, avg_ms, gteps);
+    double total_ms = sum;
+
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"pagerank_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"vertices\":%d,\"degree\":%d,\"pr_iterations\":%d,"
+           "\"iterations\":%d}}\n",
+           avg_ms, vertices, degree, pr_iterations, iterations);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gteps\",\"value\":%.2f}]}\n",
+           total_ms, gteps);
 
     // Human-readable output to stderr
     fprintf(stderr, "Average time: %.4f ms\n", avg_ms);

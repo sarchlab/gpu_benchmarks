@@ -199,8 +199,31 @@ static void generate_graph(int N, int avg_degree,
 // ---------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
-    int N = parseIntParam(argc, argv, "N=", 16384);
-    int D = parseIntParam(argc, argv, "D=", 32);
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Defaults from params.json
+    int vertices   = 16384;
+    int avg_degree = 32;
+    int block_size = 256;
+    const char* verify = "true";
+
+    // Command-line fallback
+    vertices   = parseIntParam(argc, argv, "N=", vertices);
+    avg_degree = parseIntParam(argc, argv, "D=", avg_degree);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_vertices");
+    if (env_val) vertices = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_avg_degree");
+    if (env_val) avg_degree = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_verify");
+    if (env_val) verify = env_val;
+
+    int N = vertices;
+    int D = avg_degree;
 
     // Print device info
     int device_id = 0;
@@ -250,7 +273,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(d_edge_src, edge_src.data(), num_edges * sizeof(int), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_edge_dst, edge_dst.data(), num_edges * sizeof(int), hipMemcpyHostToDevice));
 
-    int blockSize = 256;
+    int blockSize = block_size;
     int gridSize = (num_edges + blockSize - 1) / blockSize;
 
     auto run_tc = [&]() {
@@ -318,8 +341,18 @@ int main(int argc, char** argv) {
     // triangles_per_sec = num_triangles / time_s
     double tri_per_sec = (double)num_triangles / (avg_ms * 1e-3);
 
-    // CSV output to stdout
-    printf("graph_tc,%d,%.4f,%.4f\n", N, avg_ms, tri_per_sec);
+    double total_ms = sum;
+
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"triangle_count_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"vertices\":%d,\"avg_degree\":%d,\"block_size\":%d,"
+           "\"verify\":\"%s\"}}\n",
+           avg_ms, vertices, avg_degree, block_size, verify);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"triangles_per_sec\",\"value\":%.2f}]}\n",
+           total_ms, tri_per_sec);
 
     // Human-readable output to stderr
     fprintf(stderr, "Triangles found:  %lld\n", num_triangles);
@@ -329,7 +362,7 @@ int main(int argc, char** argv) {
     // -------------------------------------------------------------------
     // Verification: compare against CPU reference on small subset
     // -------------------------------------------------------------------
-    {
+    if (strcmp(verify, "skip") != 0) {
         fprintf(stderr, "Running CPU verification...\n");
         long long cpu_raw = triangle_count_cpu(row_ptr, col_idx, N);
         long long cpu_triangles = cpu_raw / 3;

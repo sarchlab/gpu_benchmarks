@@ -135,11 +135,35 @@ static int bellman_ford_cpu(int N, const std::vector<int>& row_offsets,
 
 int main(int argc, char* argv[]) {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    int N         = parseIntParam(argc, argv, "--vertices", 65536);
-    int avg_deg   = parseIntParam(argc, argv, "--degree", 16);
-    int iters     = parseIntParam(argc, argv, "--iterations", 5);
-    int source    = 0;
+    // Defaults from params.json
+    int vertices   = 65536;
+    int degree     = 16;
+    int iterations = 5;
+    int block_size = 256;
+
+    // Command-line fallback
+    vertices   = parseIntParam(argc, argv, "--vertices", vertices);
+    degree     = parseIntParam(argc, argv, "--degree", degree);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_vertices");
+    if (env_val) vertices = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_degree");
+    if (env_val) degree = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+
+    int N       = vertices;
+    int avg_deg = degree;
+    int iters   = iterations;
+    int source  = 0;
 
     // Generate CSR graph
     std::vector<int> row_offsets, col_indices, weights;
@@ -218,7 +242,7 @@ int main(int argc, char* argv[]) {
     id<MTLBuffer> bufChanged    = [device newBufferWithLength:sizeof(int)
                                                      options:MTLResourceStorageModeShared];
 
-    NSUInteger tgSize = 256;
+    NSUInteger tgSize = (NSUInteger)block_size;
     NSUInteger gridN  = (NSUInteger)N;
 
     // Lambda: run SSSP
@@ -292,8 +316,18 @@ int main(int argc, char* argv[]) {
     // Medges/sec = N_edges * bf_iterations / time_s / 1e6
     double medges_per_sec = (double)num_edges * avg_bf_iters / (avg_ms * 1e-3) / 1e6;
 
-    // CSV output to stdout
-    printf("lonestar_sssp,%d,%.4f,%.4f\n", N, avg_ms, medges_per_sec);
+    double total_ms = sum;
+
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"bellman_ford_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"vertices\":%d,\"degree\":%d,\"iterations\":%d,"
+           "\"block_size\":%d}}\n",
+           avg_ms, vertices, degree, iterations, block_size);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"medges_per_sec\",\"value\":%.2f}]}\n",
+           total_ms, medges_per_sec);
 
     // Human-readable output to stderr
     fprintf(stderr, "Average time: %.4f ms\n", avg_ms);

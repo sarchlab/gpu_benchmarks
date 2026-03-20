@@ -28,7 +28,7 @@
  *   BENCH_PARAM_ops_per_thread
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_threads_per_block
- *   BENCH_PARAM_shuffle_variant   ("all", "xor", "up", "down", "basic")
+ *   BENCH_PARAM_shuffle_variant   ("all", "shfl_xor", "shfl_up", "shfl_down", "shfl")
  */
 
 #include <cstdio>
@@ -247,10 +247,10 @@ int main(int argc, char *argv[])
     double total_time_ms = 0.0;
     double max_gops = 0.0;
 
-    bool run_xor  = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "xor") == 0);
-    bool run_basic = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "basic") == 0);
-    bool run_up   = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "up") == 0);
-    bool run_down = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "down") == 0);
+    bool run_xor  = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "shfl_xor") == 0);
+    bool run_basic = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "shfl") == 0);
+    bool run_up   = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "shfl_up") == 0);
+    bool run_down = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "shfl_down") == 0);
 
     if (run_xor) {
         double avg_ms, gops;

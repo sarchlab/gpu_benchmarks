@@ -78,15 +78,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     return defaultVal;
 }
 
-static void printCSVHeader() {
-    printf("kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms\n");
-}
-
-static void printCSVRow(const BenchResult& r) {
-    printf("%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n",
-           r.kernel_name, r.problem_size, r.iterations,
-           r.avg_ms, r.min_ms, r.max_ms, r.stddev_ms);
-}
 
 struct BenchmarkTimer {
     hipEvent_t start, stop;
@@ -217,9 +208,22 @@ __global__ void fdtd_update_hz(const float* __restrict__ ex,
 // Main
 // ---------------------------------------------------------------------------
 int main(int argc, char** argv) {
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     int N    = parseIntParam(argc, argv, "--size", 512);
     int TMAX = parseIntParam(argc, argv, "--tmax",  50);
     int iters = parseIterations(argc, argv);
+    int block_size = parseIntParam(argc, argv, "--block_size", 256);
+
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_tmax");
+    if (env_val) TMAX = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
 
     int NX = N, NY = N;
     size_t grid_bytes = (size_t)NX * NY * sizeof(float);
@@ -256,8 +260,6 @@ int main(int argc, char** argv) {
     char problemSize[64];
     snprintf(problemSize, sizeof(problemSize), "%dx%d", NX, NY);
 
-    printCSVHeader();
-
     BenchResult r = runBenchmark(
         "polybench_fdtd2d", problemSize, iters, [&]() {
             // Reset device arrays from host for reproducibility
@@ -276,15 +278,26 @@ int main(int argc, char** argv) {
             HIP_CHECK(hipDeviceSynchronize());
         });
 
-    printCSVRow(r);
-
     // Effective bandwidth: 7*NX*NY*sizeof(float) bytes/step across ex/ey/hz updates
-    // (ex: 1R+1W hz, ey: 1R+1W hz, hz: 2R ex + 2R ey + 1R+1W hz → 7 accesses per element)
     double bytes_per_step = 7.0 * (double)NX * NY * sizeof(float);
     double total_bytes    = bytes_per_step * TMAX;
     double bw_gb = total_bytes / (r.avg_ms * 1e-3) / 1e9;
     fprintf(stderr, "Effective bandwidth: %.2f GB/s  (avg %.4f ms, %d steps/iter)\n",
             bw_gb, r.avg_ms, TMAX);
+
+    // JSON-lines output
+    printf("{\"type\":\"kernel\",\"name\":\"fdtd_update_ex\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"tmax\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
+           r.avg_ms, N, TMAX, iters, block_size);
+    printf("{\"type\":\"kernel\",\"name\":\"fdtd_update_ey\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"tmax\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
+           r.avg_ms, N, TMAX, iters, block_size);
+    printf("{\"type\":\"kernel\",\"name\":\"fdtd_update_hz\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"tmax\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
+           r.avg_ms, N, TMAX, iters, block_size);
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
+           r.avg_ms, bw_gb);
 
     HIP_CHECK(hipFree(d_ex));
     HIP_CHECK(hipFree(d_ey));

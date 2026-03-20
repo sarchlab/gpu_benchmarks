@@ -4,17 +4,11 @@
  * Dense matrix multiply: C = alpha * A * B + beta * C  (N×N, single-precision)
  * Measures peak compute throughput in GFLOPS.
  *
- * Usage:
- *   ./shoc_gemm [--size N] [--iterations I]
+ * Parameters are read from BENCH_PARAM_* environment variables,
+ * with command-line --flags as fallback.
  *
- *   --size N         Matrix dimension (default: 512)
- *   --iterations I   Timed iterations (default: 20)
- *
- * Output (stdout): CSV — kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
- * Output (stderr): GFLOPS = 2*N^3 / time_sec / 1e9
- *
- * Build:
- *   make PLATFORM=metal
+ * Output (stdout): JSON-lines protocol
+ * Output (stderr): Human-readable diagnostics
  */
 
 #import <Foundation/Foundation.h>
@@ -48,18 +42,6 @@ static double ticks_to_ms(uint64_t ticks)
 // Argument parsing
 // ---------------------------------------------------------------------------
 
-static int parseIterations(int argc, char** argv) {
-    int iters = 20;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
-
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], name) == 0) {
@@ -71,28 +53,14 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     return defaultVal;
 }
 
-// ---------------------------------------------------------------------------
-// CSV output
-// ---------------------------------------------------------------------------
-
-struct BenchResult {
-    const char* kernel_name;
-    const char* problem_size;
-    int         iterations;
-    double      avg_ms;
-    double      min_ms;
-    double      max_ms;
-    double      stddev_ms;
-};
-
-static void printCSVHeader() {
-    printf("kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms\n");
-}
-
-static void printCSVRow(const BenchResult& r) {
-    printf("%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n",
-           r.kernel_name, r.problem_size, r.iterations,
-           r.avg_ms, r.min_ms, r.max_ms, r.stddev_ms);
+static const char* parseStrParam(int argc, char** argv, const char* name,
+                                 const char* defaultVal) {
+    for (int i = 1; i < argc - 1; ++i) {
+        if (strcmp(argv[i], name) == 0) {
+            return argv[i + 1];
+        }
+    }
+    return defaultVal;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,9 +71,32 @@ int main(int argc, char* argv[])
 {
     @autoreleasepool {
 
-    int size  = parseIntParam(argc, argv, "--size", 512);
-    int iters = parseIterations(argc, argv);
+    setvbuf(stdout, NULL, _IONBF, 0);
 
+    // Defaults
+    int size       = 512;
+    int block_size = 16;
+    int iterations = 20;
+    const char* precision = "float";
+
+    // Command-line fallback
+    size       = parseIntParam(argc, argv, "--size", size);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+    precision  = parseStrParam(argc, argv, "--precision", precision);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
+
+    int iters = iterations;
     int M = size, N = size, K = size;
     float alpha = 1.0f, beta = 0.0f;
 
@@ -176,7 +167,6 @@ int main(int argc, char* argv[])
     id<MTLBuffer> buf_C = [device newBufferWithLength:bytesC
                                               options:MTLResourceStorageModeShared];
 
-    // Initialize A and B on CPU
     float* h_A = (float*)buf_A.contents;
     float* h_B = (float*)buf_B.contents;
     float* h_C = (float*)buf_C.contents;
@@ -188,19 +178,14 @@ int main(int argc, char* argv[])
     for (int i = 0; i < M * N; ++i)
         h_C[i] = 0.0f;
 
-    // Params: dims = {M, N, K, 0}, alpha_beta = {alpha, beta}
     uint32_t dims_data[4]  = { (uint32_t)M, (uint32_t)N, (uint32_t)K, 0 };
     float    ab_data[2]    = { alpha, beta };
 
-    // Threadgroup (tile) size: 16×16 matches the TILE constant in the Metal shader
     NSUInteger tg_x = 16, tg_y = 16;
-
-    // Dispatch: one thread per output element, organized in 16×16 threadgroups
     NSUInteger grid_x = (NSUInteger)((N + 15) / 16) * 16;
     NSUInteger grid_y = (NSUInteger)((M + 15) / 16) * 16;
 
     auto dispatch_gemm = [&]() {
-        // Reset C before each timed iteration (beta=0, so result doesn't accumulate)
         memset(h_C, 0, bytesC);
 
         id<MTLCommandBuffer>         cb  = [queue commandBuffer];
@@ -234,47 +219,37 @@ int main(int argc, char* argv[])
         times[i] = ticks_to_ms(t1 - t0);
     }
 
-    double sum = 0.0, mn = DBL_MAX, mx = 0.0;
+    double sum_t = 0.0, mn = DBL_MAX, mx = 0.0;
     for (int i = 0; i < iters; ++i) {
-        sum += times[i];
+        sum_t += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg = sum / iters;
-    double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
-        double d = times[i] - avg;
-        variance += d * d;
-    }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
-
-    char size_str[64];
-    snprintf(size_str, sizeof(size_str), "%d", size);
-
-    BenchResult r;
-    r.kernel_name  = "gemm";
-    r.problem_size = size_str;
-    r.iterations   = iters;
-    r.avg_ms       = avg;
-    r.min_ms       = mn;
-    r.max_ms       = mx;
-    r.stddev_ms    = stddev;
-
-    printCSVHeader();
-    printCSVRow(r);
+    double avg_ms = sum_t / iters;
+    double total_ms = sum_t;
 
     double gflops = 2.0 * (double)M * (double)N * (double)K
-                    / (r.avg_ms * 1e-3) / 1e9;
-    fprintf(stderr, "Performance: %.2f GFLOPS  (avg %.4f ms)\n", gflops, r.avg_ms);
+                    / (avg_ms * 1e-3) / 1e9;
+
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"gemm_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,\"iterations\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_ms, size, block_size, iterations, precision);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
+           total_ms, gflops);
+
+    fprintf(stderr, "Performance: %.2f GFLOPS  (avg %.4f ms)\n", gflops, avg_ms);
 
     // -------------------------------------------------------------------
     // Verification (only for small sizes)
     // -------------------------------------------------------------------
     if (size <= 256) {
-        // Read back GPU result
         const float* gpu_C = (const float*)buf_C.contents;
 
-        // Compute CPU reference into ref_C
         std::vector<float> ref_C((size_t)M * N, 0.0f);
         for (int i = 0; i < M; ++i) {
             for (int j = 0; j < N; ++j) {

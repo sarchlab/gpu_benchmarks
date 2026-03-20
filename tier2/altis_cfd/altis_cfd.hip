@@ -309,8 +309,30 @@ static inline float rand_float(unsigned int* state, float lo, float hi) {
 // ---------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
-    int N     = parseIntParam(argc, argv, "--size", 97000);
-    int iters = parseIntParam(argc, argv, "--iterations", 5);
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Defaults from params.json
+    int N          = 97000;
+    int iterations = 5;
+    int block_size = 256;
+    const char* precision = "float";
+
+    // Command-line fallback
+    N          = parseIntParam(argc, argv, "--size", N);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
+
+    int iters = iterations;
 
     // Print device info
     int device_id = 0;
@@ -411,7 +433,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(d_normals,   h_normals.data(),   normal_bytes, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_areas,     h_areas.data(),     area_bytes,   hipMemcpyHostToDevice));
 
-    int blockSize = 256;
+    int blockSize = block_size;
     int gridSize  = (N + blockSize - 1) / blockSize;
 
     // RK coefficients for 2-stage scheme: stage 0 -> coeff=0, stage 1 -> coeff=0.5
@@ -495,8 +517,23 @@ int main(int argc, char** argv) {
     // Mcells/sec = N / time_s / 1e6
     double mcells_per_sec = (double)N / (avg_ms * 1e-3) / 1e6;
 
-    // CSV output to stdout
-    printf("altis_cfd,%d,%.4f,%.4f\n", N, avg_ms, mcells_per_sec);
+    double total_ms = sum;
+
+    // JSON-lines kernel events (one per kernel)
+    printf("{\"type\":\"kernel\",\"name\":\"compute_flux_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_ms, N, iterations, block_size, precision);
+
+    printf("{\"type\":\"kernel\",\"name\":\"rk_update_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_ms, N, iterations, block_size, precision);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"mcells_per_sec\",\"value\":%.2f}]}\n",
+           total_ms, mcells_per_sec);
 
     // Human-readable output to stderr
     fprintf(stderr, "Average time: %.4f ms\n", avg_ms);

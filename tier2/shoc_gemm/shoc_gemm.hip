@@ -3,17 +3,11 @@
 // Dense matrix multiply: C = alpha*A*B + beta*C for NxN square matrices of floats.
 // Measures peak compute throughput in GFLOPS.
 //
-// Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
+// Parameters are read from BENCH_PARAM_* environment variables,
+// with command-line --flags as fallback.
 //
-// Usage:
-//   ./shoc_gemm [--size N] [--block_size B] [--iterations I]
-//
-//   --size N         Matrix dimension N (N×N)  (default: 512)
-//   --block_size B   Thread-block tile size    (default: 16)
-//   --iterations I   Timed iterations          (default: 20)
-//
-// Output (stdout): CSV row — kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-// Output (stderr): GFLOPS (= 2 * N^3 / time_sec / 1e9)
+// Output (stdout): JSON-lines protocol
+// Output (stderr): Human-readable diagnostics
 
 #include <hip/hip_runtime.h>
 #include <cstdio>
@@ -37,28 +31,6 @@
         }                                                                      \
     } while (0)
 
-struct BenchResult {
-    const char* kernel_name;
-    const char* problem_size;
-    int         iterations;
-    double      avg_ms;
-    double      min_ms;
-    double      max_ms;
-    double      stddev_ms;
-};
-
-static int parseIterations(int argc, char** argv) {
-    int iters = 20;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
-
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], name) == 0) {
@@ -70,14 +42,14 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     return defaultVal;
 }
 
-static void printCSVHeader() {
-    printf("kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms\n");
-}
-
-static void printCSVRow(const BenchResult& r) {
-    printf("%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n",
-           r.kernel_name, r.problem_size, r.iterations,
-           r.avg_ms, r.min_ms, r.max_ms, r.stddev_ms);
+static const char* parseStrParam(int argc, char** argv, const char* name,
+                                 const char* defaultVal) {
+    for (int i = 1; i < argc - 1; ++i) {
+        if (strcmp(argv[i], name) == 0) {
+            return argv[i + 1];
+        }
+    }
+    return defaultVal;
 }
 
 struct BenchmarkTimer {
@@ -104,54 +76,8 @@ struct BenchmarkTimer {
     }
 };
 
-template <typename Func>
-static BenchResult runBenchmark(const char* kernel_name,
-                                const char* problem_size,
-                                int         iterations,
-                                Func        func) {
-    BenchmarkTimer timer;
-
-    // Warmup
-    func();
-    HIP_CHECK(hipDeviceSynchronize());
-
-    std::vector<double> times(iterations);
-    for (int i = 0; i < iterations; ++i) {
-        timer.record_start();
-        func();
-        timer.record_stop();
-        times[i] = static_cast<double>(timer.elapsed_ms());
-    }
-
-    double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iterations; ++i) {
-        sum += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg = sum / iterations;
-
-    double variance = 0.0;
-    for (int i = 0; i < iterations; ++i) {
-        double d = times[i] - avg;
-        variance += d * d;
-    }
-    double stddev = (iterations > 1) ? sqrt(variance / (iterations - 1)) : 0.0;
-
-    BenchResult r;
-    r.kernel_name  = kernel_name;
-    r.problem_size = problem_size;
-    r.iterations   = iterations;
-    r.avg_ms       = avg;
-    r.min_ms       = mn;
-    r.max_ms       = mx;
-    r.stddev_ms    = stddev;
-    return r;
-}
-
 // ---------------------------------------------------------------------------
-// GEMM kernel: C[row][col] = alpha * sum_k(A[row][k] * B[k][col]) + beta * C[row][col]
-// Uses shared memory tiling for improved memory access efficiency.
+// GEMM kernel
 // ---------------------------------------------------------------------------
 #define TILE_SIZE 16
 
@@ -191,7 +117,7 @@ __global__ void gemm_kernel(const float* __restrict__ A,
 }
 
 // ---------------------------------------------------------------------------
-// CPU reference for verification (only for small sizes)
+// CPU reference
 // ---------------------------------------------------------------------------
 static void gemm_cpu(const float* A, const float* B, float* C,
                      int M, int N, int K, float alpha, float beta) {
@@ -210,9 +136,32 @@ static void gemm_cpu(const float* A, const float* B, float* C,
 // Main
 // ---------------------------------------------------------------------------
 int main(int argc, char** argv) {
-    int size  = parseIntParam(argc, argv, "--size", 512);
-    int iters = parseIterations(argc, argv);
+    setvbuf(stdout, NULL, _IONBF, 0);
 
+    // Defaults
+    int size       = 512;
+    int block_size = 16;
+    int iterations = 20;
+    const char* precision = "float";
+
+    // Command-line fallback
+    size       = parseIntParam(argc, argv, "--size", size);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+    precision  = parseStrParam(argc, argv, "--precision", precision);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
+
+    int iters = iterations;
     int M = size, N = size, K = size;
     float alpha = 1.0f, beta = 0.0f;
 
@@ -234,7 +183,6 @@ int main(int argc, char** argv) {
     float* h_C   = (float*)malloc(bytesC);
     float* h_ref = (float*)malloc(bytesC);
 
-    // Initialize inputs
     for (int i = 0; i < M * K; ++i)
         h_A[i] = (float)(i % 1000) * 0.001f;
     for (int i = 0; i < K * N; ++i)
@@ -257,24 +205,50 @@ int main(int argc, char** argv) {
     dim3 block(TILE_SIZE, TILE_SIZE);
     dim3 grid((N + TILE_SIZE - 1) / TILE_SIZE, (M + TILE_SIZE - 1) / TILE_SIZE);
 
-    char size_str[64];
-    snprintf(size_str, sizeof(size_str), "%d", size);
+    // Warmup
+    hipLaunchKernelGGL(gemm_kernel, grid, block, 0, 0,
+                       d_A, d_B, d_C, M, N, K, alpha, beta);
+    HIP_CHECK(hipDeviceSynchronize());
 
-    printCSVHeader();
-
-    BenchResult r = runBenchmark("gemm", size_str, iters, [&]() {
+    // Timed iterations
+    BenchmarkTimer timer;
+    std::vector<double> times(iters);
+    for (int i = 0; i < iters; ++i) {
+        timer.record_start();
         hipLaunchKernelGGL(gemm_kernel, grid, block, 0, 0,
                            d_A, d_B, d_C, M, N, K, alpha, beta);
-    });
+        timer.record_stop();
+        times[i] = static_cast<double>(timer.elapsed_ms());
+    }
 
-    printCSVRow(r);
+    // Statistics
+    double sum_t = 0.0, mn = DBL_MAX, mx = 0.0;
+    for (int i = 0; i < iters; ++i) {
+        sum_t += times[i];
+        if (times[i] < mn) mn = times[i];
+        if (times[i] > mx) mx = times[i];
+    }
+    double avg_ms = sum_t / iters;
+    double total_ms = sum_t;
 
-    // GFLOPS: 2 * M * N * K multiply-adds
+    // GFLOPS: 2 * M * N * K
     double gflops = 2.0 * (double)M * (double)N * (double)K
-                    / (r.avg_ms * 1e-3) / 1e9;
-    fprintf(stderr, "Performance: %.2f GFLOPS  (avg %.4f ms)\n", gflops, r.avg_ms);
+                    / (avg_ms * 1e-3) / 1e9;
 
-    // Verify correctness (only for small sizes to keep runtime short)
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"gemm_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,\"iterations\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_ms, size, block_size, iterations, precision);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
+           total_ms, gflops);
+
+    fprintf(stderr, "Performance: %.2f GFLOPS  (avg %.4f ms)\n", gflops, avg_ms);
+
+    // Verify correctness (only for small sizes)
     if (size <= 512) {
         HIP_CHECK(hipMemcpy(h_C, d_C, bytesC, hipMemcpyDeviceToHost));
         gemm_cpu(h_A, h_B, h_ref, M, N, K, alpha, beta);

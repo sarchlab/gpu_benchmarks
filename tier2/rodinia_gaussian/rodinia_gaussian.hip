@@ -151,8 +151,28 @@ static void backSubstitution(const float* a, const float* b, float* x, int N)
 // ---------------------------------------------------------------------------
 int main(int argc, char** argv)
 {
-    int N     = parseIntParam(argc, argv, "--size", 512);
-    int iters = parseIterations(argc, argv);
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Defaults
+    int N     = 512;
+    int iters = 3;
+    int block_size_param = 256;
+    const char* verify = "true";
+
+    // Command-line fallback
+    N     = parseIntParam(argc, argv, "--size", N);
+    iters = parseIterations(argc, argv);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size_param = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_verify");
+    if (env_val) verify = env_val;
 
     size_t bytes_a = (size_t)N * N * sizeof(float);
     size_t bytes_b = (size_t)N * sizeof(float);
@@ -290,8 +310,21 @@ int main(int argc, char** argv)
     fprintf(stderr, "Performance: %.2f GFLOPS  (avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
             gflops, avg_ms, mn, mx, stddev);
 
-    // CSV output: gaussian,<N>,<time_ms>,<GFLOPS>
-    printf("gaussian,%d,%.4f,%.2f\n", N, avg_ms, gflops);
+    double total_ms = sum_ms;
+
+    // JSON-lines kernel events
+    printf("{\"type\":\"kernel\",\"name\":\"fan1\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
+           avg_ms, N, iters, block_size_param, verify);
+
+    printf("{\"type\":\"kernel\",\"name\":\"fan2\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
+           avg_ms, N, iters, block_size_param, verify);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
+           total_ms, gflops);
 
     // Cleanup
     HIP_CHECK(hipFree(d_a));

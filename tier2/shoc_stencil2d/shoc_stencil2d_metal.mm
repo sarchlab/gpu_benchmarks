@@ -100,9 +100,22 @@ int main(int argc, char* argv[])
 {
     @autoreleasepool {
 
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     int N      = parseIntParam(argc, argv, "--n",          2048);
     int iters  = parseIntParam(argc, argv, "--iterations", 5);
     int trials = parseIntParam(argc, argv, "--trials",     3);
+    int block_size = 16;
+
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_n");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_trials");
+    if (env_val) trials = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
 
     size_t bytes = (size_t)N * N * sizeof(float);
 
@@ -183,10 +196,10 @@ int main(int argc, char* argv[])
     // Dims constant: { N, N, 0, 0 }
     uint32_t dims_data[4] = { (uint32_t)N, (uint32_t)N, 0, 0 };
 
-    // Thread configuration: 16×16 threadgroup, cover (N-2)×(N-2) interior
-    MTLSize threadgroupSize = MTLSizeMake(16, 16, 1);
-    NSUInteger gridW = ((NSUInteger)(N - 2) + 15) / 16;
-    NSUInteger gridH = ((NSUInteger)(N - 2) + 15) / 16;
+    // Thread configuration: block_size×block_size threadgroup, cover (N-2)×(N-2) interior
+    MTLSize threadgroupSize = MTLSizeMake(block_size, block_size, 1);
+    NSUInteger gridW = ((NSUInteger)(N - 2) + block_size - 1) / block_size;
+    NSUInteger gridH = ((NSUInteger)(N - 2) + block_size - 1) / block_size;
     MTLSize threadgroupGrid = MTLSizeMake(gridW, gridH, 1);
 
     // Lambda to run one trial (iters stencil steps) using ping-pong
@@ -321,8 +334,13 @@ int main(int argc, char* argv[])
     fprintf(stderr, "Bandwidth: %.2f GB/s  (avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
             gbps, avg_ms, mn_ms, mx_ms, stddev);
 
-    // CSV output: stencil2d,<N>,<ITERATIONS>,<time_ms>,<GBs>
-    printf("stencil2d,%d,%d,%.4f,%.2f\n", N, iters, avg_ms, gbps);
+    // JSON-lines output
+    printf("{\"type\":\"kernel\",\"name\":\"stencil2d_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"n\":%d,\"iterations\":%d,\"trials\":%d,\"block_size\":%d}}\n",
+           avg_ms, N, iters, trials, block_size);
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
+           avg_ms, gbps);
 
     return EXIT_SUCCESS;
 

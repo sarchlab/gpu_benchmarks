@@ -113,11 +113,36 @@ static void histogram_cpu(const unsigned char* data, unsigned int* histo, int N)
 // ---------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
-    int N     = parseIntParam(argc, argv, "--size", 16777216);  // 16M
-    int iters = parseIntParam(argc, argv, "--iterations", 5);
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Defaults from params.json
+    int size       = 16777216;
+    int iterations = 5;
+    int num_bins   = NUM_BINS;
+    int block_size = BLOCK_SIZE;
+
+    // Command-line fallback
+    size       = parseIntParam(argc, argv, "--size", size);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+    num_bins   = parseIntParam(argc, argv, "--num_bins", num_bins);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_num_bins");
+    if (env_val) num_bins = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+
+    int N     = size;
+    int iters = iterations;
 
     size_t data_bytes  = (size_t)N * sizeof(unsigned char);
-    size_t histo_bytes = NUM_BINS * sizeof(unsigned int);
+    size_t histo_bytes = num_bins * sizeof(unsigned int);
 
     // Print device info
     int device_id = 0;
@@ -127,7 +152,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Histogram  |  N: %d (%.2f MB)  |  Bins: %d  |  "
             "Iterations: 5 warmup + %d timed\n\n",
-            N, (double)data_bytes / (1024.0 * 1024.0), NUM_BINS, iters);
+            N, (double)data_bytes / (1024.0 * 1024.0), num_bins, iters);
 
     // Generate random input data (deterministic seed)
     unsigned char* h_data = (unsigned char*)malloc(data_bytes);
@@ -150,7 +175,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(d_data, h_data, data_bytes, hipMemcpyHostToDevice));
 
     // Kernel launch config
-    int blockSize = BLOCK_SIZE;
+    int blockSize = block_size;
     int gridSize  = (N + blockSize - 1) / blockSize;
     // Cap grid size to avoid too many blocks
     if (gridSize > 1024) gridSize = 1024;
@@ -199,8 +224,18 @@ int main(int argc, char** argv) {
     // GB/s = N * sizeof(uint8_t) / time_s / 1e9
     double gbs = (double)N * 1.0 / (avg_ms * 1e-3) / 1e9;
 
-    // CSV output to stdout
-    printf("chai_hsto,%d,%.4f,%.4f\n", N, avg_ms, gbs);
+    double total_ms = sum;
+
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"histogram_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"num_bins\":%d,"
+           "\"block_size\":%d}}\n",
+           avg_ms, size, iterations, num_bins, block_size);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"throughput_gbps\",\"value\":%.2f}]}\n",
+           total_ms, gbs);
 
     // Human-readable output to stderr
     fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
@@ -212,11 +247,11 @@ int main(int argc, char** argv) {
     {
         HIP_CHECK(hipMemcpy(h_histo, d_histo, histo_bytes, hipMemcpyDeviceToHost));
 
-        unsigned int cpu_histo[NUM_BINS];
-        histogram_cpu(h_data, cpu_histo, N);
+        std::vector<unsigned int> cpu_histo(num_bins);
+        histogram_cpu(h_data, cpu_histo.data(), N);
 
         int errors = 0;
-        for (int b = 0; b < NUM_BINS; ++b) {
+        for (int b = 0; b < num_bins; ++b) {
             if (h_histo[b] != cpu_histo[b]) {
                 if (errors < 10) {
                     fprintf(stderr, "Mismatch at bin %d: GPU=%u CPU=%u\n",
@@ -228,7 +263,7 @@ int main(int argc, char** argv) {
 
         if (errors > 0)
             fprintf(stderr, "FAIL: %d bin errors out of %d bins\n",
-                    errors, NUM_BINS);
+                    errors, num_bins);
         else
             fprintf(stderr, "PASS\n");
     }

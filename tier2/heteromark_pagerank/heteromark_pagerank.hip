@@ -161,11 +161,46 @@ static void pagerank_cpu(const std::vector<int>& rowPtr,
 // Main
 // ---------------------------------------------------------------------------
 
+static double parseDoubleParam(int argc, char** argv, const char* name, double defaultVal) {
+    for (int i = 1; i < argc - 1; ++i) {
+        if (strcmp(argv[i], name) == 0) {
+            double v = atof(argv[i + 1]);
+            return v;
+        }
+    }
+    return defaultVal;
+}
+
 int main(int argc, char** argv) {
-    int N       = parseIntParam(argc, argv, "--vertices", 65536);
-    int iters   = parseIntParam(argc, argv, "--iterations", 5);
-    int prIters = parseIntParam(argc, argv, "--pr-iterations", 20);
-    float damping = 0.85f;
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Defaults from params.json
+    int vertices     = 65536;
+    int pr_iterations = 20;
+    int iterations   = 5;
+    double damping_factor = 0.85;
+
+    // Command-line fallback
+    vertices      = parseIntParam(argc, argv, "--vertices", vertices);
+    pr_iterations = parseIntParam(argc, argv, "--pr-iterations", pr_iterations);
+    iterations    = parseIntParam(argc, argv, "--iterations", iterations);
+    damping_factor = parseDoubleParam(argc, argv, "--damping_factor", damping_factor);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_vertices");
+    if (env_val) vertices = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_pr_iterations");
+    if (env_val) pr_iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_damping_factor");
+    if (env_val) damping_factor = atof(env_val);
+
+    int N       = vertices;
+    int iters   = iterations;
+    int prIters = pr_iterations;
+    float damping = (float)damping_factor;
 
     // Print device info
     int device_id = 0;
@@ -262,8 +297,18 @@ int main(int argc, char** argv) {
     // edges_per_sec = numEdges * prIters / time_s
     double edges_per_sec = (double)numEdges * (double)prIters / (avg_ms * 1e-3);
 
-    // CSV output to stdout
-    printf("heteromark_pagerank,%d,%.4f,%.4e\n", N, avg_ms, edges_per_sec);
+    double total_ms = sum;
+
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"pagerank_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"vertices\":%d,\"pr_iterations\":%d,\"iterations\":%d,"
+           "\"damping_factor\":%.6f}}\n",
+           avg_ms, vertices, pr_iterations, iterations, damping_factor);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"edges_per_sec\",\"value\":%.2f}]}\n",
+           total_ms, edges_per_sec);
 
     // Human-readable output to stderr
     fprintf(stderr, "Average time: %.4f ms\n", avg_ms);

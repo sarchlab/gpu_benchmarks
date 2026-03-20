@@ -83,15 +83,6 @@ struct BenchResult {
     double      stddev_ms;
 };
 
-static void printCSVHeader() {
-    printf("kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms\n");
-}
-
-static void printCSVRow(const BenchResult& r) {
-    printf("%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n",
-           r.kernel_name, r.problem_size, r.iterations,
-           r.avg_ms, r.min_ms, r.max_ms, r.stddev_ms);
-}
 
 // ---------------------------------------------------------------------------
 // Graph generation (CSR, random)
@@ -210,10 +201,22 @@ static double run_bfs_once(id<MTLDevice>               device,
 int main(int argc, char* argv[])
 {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
     int num_nodes      = parseIntParam(argc, argv, "--num_nodes",      65536);
     int edges_per_node = parseIntParam(argc, argv, "--edges_per_node", 20);
     int iters          = parseIterations(argc, argv);
+    int block_size     = 256;
+
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_num_nodes");
+    if (env_val) num_nodes = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_edges_per_node");
+    if (env_val) edges_per_node = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
 
     // Generate random CSR graph
     std::vector<int> row_offsets, col_indices;
@@ -353,15 +356,27 @@ int main(int argc, char* argv[])
     r.max_ms       = mx;
     r.stddev_ms    = stddev;
 
-    printCSVHeader();
-    printCSVRow(r);
-
     // Bandwidth estimate: 2 × (row_offsets + col_indices + 3 × nodes) × sizeof(int)
     long long bytes_per_bfs =
         2LL * ((long long)(num_nodes + 1 + num_edges + 3 * num_nodes) * (int)sizeof(int));
     double bw_gb = (double)bytes_per_bfs / (avg * 1e-3) / 1e9;
     fprintf(stderr, "Effective bandwidth: %.2f GB/s  (avg %.4f ms/BFS)\n",
             bw_gb, avg);
+
+    // JSON-lines output
+    double edges_per_sec = (double)num_edges / (avg * 1e-3);
+    printf("{\"type\":\"kernel\",\"name\":\"bfs_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"num_nodes\":%d,\"edges_per_node\":%d,\"block_size\":%d,"
+           "\"iterations\":%d}}\n",
+           avg, num_nodes, edges_per_node, block_size, iters);
+    printf("{\"type\":\"kernel\",\"name\":\"bfs_update\",\"time_ms\":%.6f,"
+           "\"params\":{\"num_nodes\":%d,\"edges_per_node\":%d,\"block_size\":%d,"
+           "\"iterations\":%d}}\n",
+           avg, num_nodes, edges_per_node, block_size, iters);
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f},"
+           "{\"name\":\"edges_per_sec\",\"value\":%.2f}]}\n",
+           avg, bw_gb, edges_per_sec);
 
     return EXIT_SUCCESS;
 

@@ -225,11 +225,35 @@ static void direct_force_cpu(int N, const float* px, const float* py,
 
 int main(int argc, char* argv[]) {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    int N         = parseIntParam(argc, argv, "--bodies", 32768);
-    int timesteps = parseIntParam(argc, argv, "--timesteps", 10);
-    int iters     = parseIntParam(argc, argv, "--iterations", 5);
-    float theta   = parseFloatParam(argc, argv, "--theta", 0.5f);
+    // Defaults from params.json
+    int bodies      = 32768;
+    int timesteps_p = 10;
+    int iterations  = 5;
+    double theta_p  = 0.5;
+
+    // Command-line fallback
+    bodies      = parseIntParam(argc, argv, "--bodies", bodies);
+    timesteps_p = parseIntParam(argc, argv, "--timesteps", timesteps_p);
+    iterations  = parseIntParam(argc, argv, "--iterations", iterations);
+    theta_p     = (double)parseFloatParam(argc, argv, "--theta", (float)theta_p);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_bodies");
+    if (env_val) bodies = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_timesteps");
+    if (env_val) timesteps_p = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_theta");
+    if (env_val) theta_p = atof(env_val);
+
+    int N         = bodies;
+    int timesteps = timesteps_p;
+    int iters     = iterations;
+    float theta   = (float)theta_p;
     float dt      = 0.001f;
     float eps2    = 0.01f;
 
@@ -471,8 +495,23 @@ int main(int argc, char* argv[]) {
     double avg_flops = sum_flops / iters;
     double gflops = avg_flops / (avg_ms * 1e-3) / 1e9;
 
-    // CSV output to stdout
-    printf("lonestar_bh,%d,%.4f,%.4f\n", N, avg_ms, gflops);
+    double total_ms = sum_ms;
+
+    // JSON-lines kernel events
+    printf("{\"type\":\"kernel\",\"name\":\"bh_force_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"bodies\":%d,\"timesteps\":%d,\"theta\":%.6f,"
+           "\"iterations\":%d}}\n",
+           avg_ms, bodies, timesteps_p, theta_p, iterations);
+
+    printf("{\"type\":\"kernel\",\"name\":\"integrate_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"bodies\":%d,\"timesteps\":%d,\"theta\":%.6f,"
+           "\"iterations\":%d}}\n",
+           avg_ms, bodies, timesteps_p, theta_p, iterations);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
+           total_ms, gflops);
 
     // Human-readable to stderr
     fprintf(stderr, "Average time: %.4f ms\n", avg_ms);

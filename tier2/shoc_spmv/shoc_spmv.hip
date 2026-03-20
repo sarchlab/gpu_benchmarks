@@ -1,24 +1,13 @@
 // shoc_spmv.hip — SHOC CSR Sparse Matrix-Vector Multiply benchmark (HIP, self-contained)
 //
 // Computes: y = A * x
-//   where A is a synthetic CSR sparse matrix with exactly NNZ_PER_ROW non-zeros per row.
+//   where A is a synthetic CSR sparse matrix with exactly nnz_per_row non-zeros per row.
 //
-// Parameters (compile-time constants):
-//   NUM_ROWS    = 16384
-//   NNZ_PER_ROW = 32
-//   NNZ         = NUM_ROWS * NNZ_PER_ROW = 524288
+// Parameters are read from BENCH_PARAM_* environment variables,
+// with command-line --flags as fallback.
 //
-// GPU kernel: each thread handles one row (row-per-thread CSR SpMV).
-//
-// Metrics:
-//   GB/s   = (NNZ * (sizeof(float) + sizeof(int)) + (NUM_ROWS+1)*sizeof(int)
-//             + NUM_ROWS*sizeof(float) + NNZ*sizeof(float)) / time_s / 1e9
-//   GFLOPS = 2 * NNZ / time_s / 1e9
-//
-// Compiles with hipcc (AMD ROCm) or nvcc -x cu (CUDA).
-//
-// Output (stdout): CSV — spmv,<NUM_ROWS>,<NNZ_PER_ROW>,<time_ms>,<GBs>,<GFLOPS>
-// Output (stderr): device info, per-iteration times, verification result
+// Output (stdout): JSON-lines protocol
+// Output (stderr): Human-readable diagnostics
 
 #include <hip/hip_runtime.h>
 #include <cstdio>
@@ -27,17 +16,6 @@
 #include <cmath>
 #include <cfloat>
 #include <vector>
-
-// ---------------------------------------------------------------------------
-// Benchmark constants
-// ---------------------------------------------------------------------------
-
-#define NUM_ROWS    16384
-#define NNZ_PER_ROW 32
-#define NUM_COLS    NUM_ROWS
-#define NNZ         (NUM_ROWS * NNZ_PER_ROW)
-#define BLOCK_SIZE  256
-#define ITERATIONS  5
 
 // ---------------------------------------------------------------------------
 // Inlined utilities
@@ -52,6 +30,27 @@
             exit(1);                                                            \
         }                                                                       \
     } while (0)
+
+static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
+    for (int i = 1; i < argc - 1; ++i) {
+        if (strcmp(argv[i], name) == 0) {
+            int v = atoi(argv[i + 1]);
+            if (v > 0) return v;
+            break;
+        }
+    }
+    return defaultVal;
+}
+
+static const char* parseStrParam(int argc, char** argv, const char* name,
+                                 const char* defaultVal) {
+    for (int i = 1; i < argc - 1; ++i) {
+        if (strcmp(argv[i], name) == 0) {
+            return argv[i + 1];
+        }
+    }
+    return defaultVal;
+}
 
 struct BenchmarkTimer {
     hipEvent_t start, stop;
@@ -100,7 +99,7 @@ __global__ void spmv_csr_kernel(
 }
 
 // ---------------------------------------------------------------------------
-// CPU reference for correctness check
+// CPU reference
 // ---------------------------------------------------------------------------
 
 static void cpu_spmv(const int* row_ptr, const int* col_idx,
@@ -121,10 +120,35 @@ static void cpu_spmv(const int* row_ptr, const int* col_idx,
 
 int main(int argc, char** argv)
 {
-    const int num_rows    = NUM_ROWS;
-    const int nnz_per_row = NNZ_PER_ROW;
-    const int nnz         = NNZ;
-    const int iters       = ITERATIONS;
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Defaults
+    int num_rows    = 16384;
+    int nnz_per_row = 32;
+    int iterations  = 5;
+    const char* precision = "float";
+
+    // Command-line fallback
+    num_rows    = parseIntParam(argc, argv, "--num_rows", num_rows);
+    nnz_per_row = parseIntParam(argc, argv, "--nnz_per_row", nnz_per_row);
+    iterations  = parseIntParam(argc, argv, "--iterations", iterations);
+    precision   = parseStrParam(argc, argv, "--precision", precision);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_num_rows");
+    if (env_val) num_rows = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_nnz_per_row");
+    if (env_val) nnz_per_row = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
+
+    int iters      = iterations;
+    int num_cols   = num_rows;
+    int nnz        = num_rows * nnz_per_row;
+    int BLOCK_SIZE = 256;
 
     // Allocate host arrays
     int*   h_row_ptr = (int*)  malloc((size_t)(num_rows + 1) * sizeof(int));
@@ -134,13 +158,13 @@ int main(int argc, char** argv)
     float* h_y       = (float*)malloc((size_t)num_rows       * sizeof(float));
     float* h_y_ref   = (float*)malloc((size_t)num_rows       * sizeof(float));
 
-    // Build CSR matrix: exactly nnz_per_row non-zeros per row, random column indices
+    // Build CSR matrix
     srand(42);
     for (int i = 0; i <= num_rows; ++i)
         h_row_ptr[i] = i * nnz_per_row;
 
     for (int k = 0; k < nnz; ++k) {
-        h_col_idx[k] = rand() % NUM_COLS;
+        h_col_idx[k] = rand() % num_cols;
         h_values[k]  = (float)rand() / (float)RAND_MAX;
     }
     for (int i = 0; i < num_rows; ++i)
@@ -199,12 +223,12 @@ int main(int argc, char** argv)
     // Copy result back
     HIP_CHECK(hipMemcpy(h_y, d_y, (size_t)num_rows * sizeof(float), hipMemcpyDeviceToHost));
 
-    // CPU reference (verify first 32 elements)
+    // CPU reference
     cpu_spmv(h_row_ptr, h_col_idx, h_values, h_x, h_y_ref, num_rows);
 
     bool pass = true;
     int check_n = 32;
-    for (int i = 0; i < check_n; ++i) {
+    for (int i = 0; i < check_n && i < num_rows; ++i) {
         float ref = h_y_ref[i];
         float rel = fabsf(h_y[i] - ref) / (fabsf(ref) + 1e-6f);
         if (rel > 1e-4f) {
@@ -216,7 +240,7 @@ int main(int argc, char** argv)
     fprintf(stderr, "Correctness check (first %d elements): %s\n\n",
             check_n, pass ? "PASS" : "FAIL");
 
-    // Compute statistics
+    // Statistics
     double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
     for (int i = 0; i < iters; ++i) {
         sum_ms += times[i];
@@ -224,29 +248,30 @@ int main(int argc, char** argv)
         if (times[i] > mx) mx = times[i];
     }
     double avg_ms = sum_ms / iters;
+    double total_ms = sum_ms;
 
-    double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
-        double d = times[i] - avg_ms;
-        variance += d * d;
-    }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
-
-    // GB/s: values(float) + col_idx(int) + row_ptr(int) + x(float) + y(float)
-    // = nnz*8 + (num_rows+1)*4 + num_rows*4 + num_rows*4
-    double bytes = (double)nnz * (sizeof(float) + sizeof(int))
+    // GB/s and GFLOPS
+    double data_bytes = (double)nnz * (sizeof(float) + sizeof(int))
                  + (double)(num_rows + 1) * sizeof(int)
                  + (double)num_rows * sizeof(float)
                  + (double)num_rows * sizeof(float);
-    double gbps   = bytes / (avg_ms * 1e-3) / 1e9;
+    double gbps   = data_bytes / (avg_ms * 1e-3) / 1e9;
     double gflops = 2.0 * (double)nnz / (avg_ms * 1e-3) / 1e9;
 
-    fprintf(stderr, "GB/s: %.2f  GFLOPS: %.2f  (avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
-            gbps, gflops, avg_ms, mn, mx, stddev);
+    fprintf(stderr, "GB/s: %.2f  GFLOPS: %.2f  (avg %.4f ms, min %.4f ms, max %.4f ms)\n",
+            gbps, gflops, avg_ms, mn, mx);
 
-    // CSV output: spmv,<NUM_ROWS>,<NNZ_PER_ROW>,<time_ms>,<GBs>,<GFLOPS>
-    printf("spmv,%d,%d,%.4f,%.2f,%.2f\n",
-           num_rows, nnz_per_row, avg_ms, gbps, gflops);
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"spmv_csr_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"num_rows\":%d,\"nnz_per_row\":%d,\"iterations\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_ms, num_rows, nnz_per_row, iterations, precision);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f},"
+           "{\"name\":\"gflops\",\"value\":%.2f}]}\n",
+           total_ms, gbps, gflops);
 
     // Cleanup
     HIP_CHECK(hipFree(d_row_ptr));

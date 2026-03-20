@@ -119,10 +119,30 @@ static void nbody_cpu(vec4* pos, vec4* vel, int N) {
 
 int main(int argc, char* argv[]) {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    int N         = parseIntParam(argc, argv, "--bodies", 16384);
-    int iters     = parseIntParam(argc, argv, "--iterations", 5);
-    int timesteps = parseIntParam(argc, argv, "--timesteps", 10);
+    // Default values from params.json
+    int N          = 16384;
+    int timesteps  = 10;
+    int iters      = 5;
+    int block_size = 256;
+
+    // Command-line args as fallback
+    N         = parseIntParam(argc, argv, "--bodies", N);
+    iters     = parseIntParam(argc, argv, "--iterations", iters);
+    timesteps = parseIntParam(argc, argv, "--timesteps", timesteps);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+
+    // Env vars override
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_bodies");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_timesteps");
+    if (env_val) timesteps = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
 
     // -------------------------------------------------------------------
     // Metal device setup
@@ -256,8 +276,15 @@ int main(int argc, char* argv[]) {
     double gflops = 20.0 * (double)N * (double)N * (double)timesteps
                     / (avg_ms * 1e-3) / 1e9;
 
-    // CSV output to stdout
-    printf("cuda_nbody,%d,%.4f,%.4f\n", N, avg_ms, gflops);
+    // JSON-lines output
+    printf("{\"type\":\"kernel\",\"name\":\"nbody_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"bodies\":%d,\"timesteps\":%d,\"iterations\":%d,"
+           "\"block_size\":%d}}\n",
+           avg_ms, N, timesteps, iters, block_size);
+
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
+           sum, gflops);
 
     // Human-readable output to stderr
     fprintf(stderr, "Average time: %.4f ms\n", avg_ms);

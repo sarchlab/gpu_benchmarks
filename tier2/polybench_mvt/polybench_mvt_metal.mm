@@ -103,9 +103,22 @@ static void cpu_mvt(const float* A, const float* y1, const float* y2,
 int main(int argc, char* argv[])
 {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
     int n     = parseIntParam(argc, argv, "--n", 4096);
     int iters = parseIterations(argc, argv);
+    int block_size_param = 256;
+    const char* precision = "float";
+
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_n");
+    if (env_val) n = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size_param = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
 
     size_t bytes_A = (size_t)n * n * sizeof(float);
     size_t bytes_v = (size_t)n * sizeof(float);
@@ -312,8 +325,18 @@ int main(int argc, char* argv[])
     fprintf(stderr, "Bandwidth: %.2f GB/s  (avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
             gbps, avg_ms, mn, mx, stddev);
 
-    // CSV output
-    printf("mvt,%d,%.4f,%.2f\n", n, avg_ms, gbps);
+    // JSON-lines output
+    printf("{\"type\":\"kernel\",\"name\":\"mvt_kernel1\",\"time_ms\":%.6f,"
+           "\"params\":{\"n\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_ms, n, iters, block_size_param, precision);
+    printf("{\"type\":\"kernel\",\"name\":\"mvt_kernel2\",\"time_ms\":%.6f,"
+           "\"params\":{\"n\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_ms, n, iters, block_size_param, precision);
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
+           avg_ms, gbps);
 
     return EXIT_SUCCESS;
 

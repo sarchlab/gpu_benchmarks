@@ -13,7 +13,7 @@
  *   --size N        Matrix dimension N×N        (default: 2048)
  *   --iterations I  Timed benchmark iterations  (default: 5)
  *
- * Output (stdout): CSV — kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
+ * Output (stdout): JSON-lines protocol
  * Output (stderr): GFLOPS
  *
  * Build:
@@ -46,18 +46,6 @@ static double ticks_to_ms(uint64_t ticks)
 // Argument parsing
 // ---------------------------------------------------------------------------
 
-static int parseIterations(int argc, char** argv) {
-    int iters = 5;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
-
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], name) == 0) {
@@ -70,30 +58,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
 }
 
 // ---------------------------------------------------------------------------
-// CSV output
-// ---------------------------------------------------------------------------
-
-struct BenchResult {
-    const char* kernel_name;
-    const char* problem_size;
-    int         iterations;
-    double      avg_ms;
-    double      min_ms;
-    double      max_ms;
-    double      stddev_ms;
-};
-
-static void printCSVHeader() {
-    printf("kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms\n");
-}
-
-static void printCSVRow(const BenchResult& r) {
-    printf("%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n",
-           r.kernel_name, r.problem_size, r.iterations,
-           r.avg_ms, r.min_ms, r.max_ms, r.stddev_ms);
-}
-
-// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -101,8 +65,22 @@ int main(int argc, char* argv[])
 {
     @autoreleasepool {
 
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     int N     = parseIntParam(argc, argv, "--size", 2048);
-    int iters = parseIterations(argc, argv);
+    int iters = parseIntParam(argc, argv, "--iterations", 5);
+    int block_size = 256;
+    const char* precision = "float";
+
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
 
     int NI = N, NJ = N;
     size_t bytes = (size_t)NI * NJ * sizeof(float);
@@ -226,25 +204,18 @@ int main(int argc, char* argv[])
     }
     double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
 
-    char problemSize[64];
-    snprintf(problemSize, sizeof(problemSize), "%d", N);
-
-    BenchResult r;
-    r.kernel_name  = "polybench_2dconv";
-    r.problem_size = problemSize;
-    r.iterations   = iters;
-    r.avg_ms       = avg;
-    r.min_ms       = mn;
-    r.max_ms       = mx;
-    r.stddev_ms    = stddev;
-
-    printCSVHeader();
-    printCSVRow(r);
-
     // GFLOPS: each interior output element = 9 MACs = 18 FLOPs
     long long interior = (long long)(NI - 2) * (NJ - 2);
-    double gflops = 2.0 * 9.0 * (double)interior / (r.avg_ms * 1e-3) / 1e9;
-    fprintf(stderr, "GFLOPS: %.2f  (avg %.4f ms)\n", gflops, r.avg_ms);
+    double gflops = 2.0 * 9.0 * (double)interior / (avg * 1e-3) / 1e9;
+    fprintf(stderr, "GFLOPS: %.2f  (avg %.4f ms)\n", gflops, avg);
+
+    // JSON-lines output
+    printf("{\"type\":\"kernel\",\"name\":\"convolution2D_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"precision\":\"%s\"}}\n",
+           avg, N, iters, block_size, precision);
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
+           avg, gflops);
 
     return EXIT_SUCCESS;
 

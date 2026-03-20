@@ -91,15 +91,6 @@ struct BenchResult {
     double      stddev_ms;
 };
 
-static void printCSVHeader() {
-    printf("kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms\n");
-}
-
-static void printCSVRow(const BenchResult& r) {
-    printf("%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n",
-           r.kernel_name, r.problem_size, r.iterations,
-           r.avg_ms, r.min_ms, r.max_ms, r.stddev_ms);
-}
 
 // ---------------------------------------------------------------------------
 // Sparse matrix generation (CSR)
@@ -179,11 +170,32 @@ static float cpu_spmv_row(const std::vector<uint32_t>& row_ptr,
 int main(int argc, char* argv[])
 {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    int num_rows = parseIntParam(argc, argv, "--num_rows",         65536);
-    int avg_nnz  = parseIntParam(argc, argv, "--avg_nnz_per_row",  10);
-    int iters    = parseIterations(argc, argv);
-    int seed     = parseIntParam(argc, argv, "--seed",             42);
+    // Default values from params.json
+    int num_rows   = 65536;
+    int avg_nnz    = 10;
+    int block_size = 256;
+    int iters      = 10;
+    int seed       = 42;
+
+    // Command-line args as fallback
+    num_rows = parseIntParam(argc, argv, "--num_rows",         num_rows);
+    avg_nnz  = parseIntParam(argc, argv, "--avg_nnz_per_row",  avg_nnz);
+    block_size = parseIntParam(argc, argv, "--block_size",     block_size);
+    iters    = parseIterations(argc, argv);
+    seed     = parseIntParam(argc, argv, "--seed",             seed);
+
+    // Env vars override
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_num_rows");
+    if (env_val) num_rows = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_avg_nnz_per_row");
+    if (env_val) avg_nnz = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
 
     // -------------------------------------------------------------------
     // Generate sparse matrix
@@ -347,11 +359,18 @@ int main(int argc, char* argv[])
     r.max_ms       = mx;
     r.stddev_ms    = stddev;
 
-    printCSVHeader();
-    printCSVRow(r);
-
     double gflops = 2.0 * (double)total_nnz / (r.avg_ms * 1e-3) / 1e9;
-    fprintf(stderr, "parboil_spmv,%d,%.4f\n", num_rows, gflops);
+
+    // JSON-lines output
+    printf("{\"type\":\"kernel\",\"name\":\"spmv_csr\",\"time_ms\":%.6f,"
+           "\"params\":{\"num_rows\":%d,\"avg_nnz_per_row\":%d,\"block_size\":%d,"
+           "\"iterations\":%d}}\n",
+           r.avg_ms, num_rows, avg_nnz, block_size, iters);
+
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
+           r.avg_ms * iters, gflops);
+
     fprintf(stderr, "GFLOPS: %.4f  (avg %.4f ms)\n", gflops, r.avg_ms);
 
     // -------------------------------------------------------------------

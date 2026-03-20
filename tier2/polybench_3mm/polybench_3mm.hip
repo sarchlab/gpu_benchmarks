@@ -15,7 +15,7 @@
 //   --size N         Matrix dimension N (NxN for all matrices) (default: 256)
 //   --iterations I   Timed iterations                          (default: 5)
 //
-// Output (stdout): CSV — polybench_3mm,<N>,<GFLOPS>
+// Output (stdout): JSON-lines protocol
 // Output (stderr): device info, timing details
 
 #include <hip/hip_runtime.h>
@@ -43,18 +43,6 @@
 // ---------------------------------------------------------------------------
 // Argument parsing
 // ---------------------------------------------------------------------------
-
-static int parseIterations(int argc, char** argv) {
-    int iters = 5;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -151,8 +139,22 @@ __global__ void mm3_kernel3(const float* __restrict__ E,
 // ---------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     int N     = parseIntParam(argc, argv, "--size", 256);
-    int iters = parseIterations(argc, argv);
+    int iters = parseIntParam(argc, argv, "--iterations", 5);
+    int block_size = 256;
+    const char* precision = "float";
+
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
 
     // All matrices are N×N
     const int NI = N, NJ = N, NK = N, NL = N, NM = N;
@@ -220,44 +222,59 @@ int main(int argc, char** argv) {
     hipLaunchKernelGGL(mm3_kernel3, grid3, block, 0, 0, d_E, d_F, d_G, NI, NJ, NL);
     HIP_CHECK(hipDeviceSynchronize());
 
-    // Timed iterations — all 3 kernels per iteration
-    std::vector<double> times(iters);
+    // Timed iterations — time each kernel separately
+    std::vector<double> k1_times(iters), k2_times(iters), k3_times(iters);
     for (int iter = 0; iter < iters; ++iter) {
         timer.record_start();
         hipLaunchKernelGGL(mm3_kernel1, grid1, block, 0, 0, d_A, d_B, d_E, NI, NK, NJ);
+        timer.record_stop();
+        k1_times[iter] = static_cast<double>(timer.elapsed_ms());
+
+        timer.record_start();
         hipLaunchKernelGGL(mm3_kernel2, grid2, block, 0, 0, d_C, d_D, d_F, NJ, NM, NL);
+        timer.record_stop();
+        k2_times[iter] = static_cast<double>(timer.elapsed_ms());
+
+        timer.record_start();
         hipLaunchKernelGGL(mm3_kernel3, grid3, block, 0, 0, d_E, d_F, d_G, NI, NJ, NL);
         timer.record_stop();
-        times[iter] = static_cast<double>(timer.elapsed_ms());
+        k3_times[iter] = static_cast<double>(timer.elapsed_ms());
     }
 
     // Compute statistics
-    double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
+    double k1_sum = 0.0, k2_sum = 0.0, k3_sum = 0.0;
     for (int i = 0; i < iters; ++i) {
-        sum_ms += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
+        k1_sum += k1_times[i];
+        k2_sum += k2_times[i];
+        k3_sum += k3_times[i];
     }
-    double avg_ms = sum_ms / iters;
-
-    double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
-        double d = times[i] - avg_ms;
-        variance += d * d;
-    }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
+    double k1_avg = k1_sum / iters;
+    double k2_avg = k2_sum / iters;
+    double k3_avg = k3_sum / iters;
+    double total_avg_ms = k1_avg + k2_avg + k3_avg;
 
     // total_flops = 2*NI*NK*NJ + 2*NJ*NM*NL + 2*NI*NJ*NL
     double total_flops = 2.0 * ((double)NI * NK * NJ +
                                 (double)NJ * NM * NL +
                                 (double)NI * NJ * NL);
-    double gflops = total_flops / (avg_ms * 1e-3) / 1e9;
+    double gflops = total_flops / (total_avg_ms * 1e-3) / 1e9;
 
-    fprintf(stderr, "Performance: %.2f GFLOPS  (avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
-            gflops, avg_ms, mn, mx, stddev);
+    fprintf(stderr, "Performance: %.2f GFLOPS  (total avg %.4f ms: k1=%.4f k2=%.4f k3=%.4f)\n",
+            gflops, total_avg_ms, k1_avg, k2_avg, k3_avg);
 
-    // CSV output: polybench_3mm,<N>,<GFLOPS>
-    printf("polybench_3mm,%d,%.2f\n", N, gflops);
+    // JSON-lines output
+    printf("{\"type\":\"kernel\",\"name\":\"mm3_kernel1\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"precision\":\"%s\"}}\n",
+           k1_avg, N, iters, block_size, precision);
+    printf("{\"type\":\"kernel\",\"name\":\"mm3_kernel2\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"precision\":\"%s\"}}\n",
+           k2_avg, N, iters, block_size, precision);
+    printf("{\"type\":\"kernel\",\"name\":\"mm3_kernel3\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"precision\":\"%s\"}}\n",
+           k3_avg, N, iters, block_size, precision);
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
+           total_avg_ms, gflops);
 
     // Cleanup
     HIP_CHECK(hipFree(d_A));

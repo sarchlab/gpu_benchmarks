@@ -120,10 +120,30 @@ __global__ void kmeans_update_kernel(
 
 int main(int argc, char** argv)
 {
-    const int N        = parseIntParam(argc, argv, "--points",   16384);
-    const int D        = parseIntParam(argc, argv, "--dims",     16);
-    const int K        = parseIntParam(argc, argv, "--clusters", 8);
-    const int max_iter = parseIntParam(argc, argv, "--max_iter", 10);
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Defaults
+    int N        = 16384;
+    int D        = 16;
+    int K        = 8;
+    int max_iter = 10;
+
+    // Command-line fallback
+    N        = parseIntParam(argc, argv, "--points", N);
+    D        = parseIntParam(argc, argv, "--dims", D);
+    K        = parseIntParam(argc, argv, "--clusters", K);
+    max_iter = parseIntParam(argc, argv, "--max_iter", max_iter);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_points");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_dims");
+    if (env_val) D = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_clusters");
+    if (env_val) K = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_max_iter");
+    if (env_val) max_iter = atoi(env_val);
 
     // Print device info
     int device_id = 0;
@@ -290,9 +310,19 @@ int main(int argc, char** argv)
     // -----------------------------------------------------------------------
     double gpoints_per_s = (double)N * (double)iter / ((double)time_ms * 1e-3) / 1e9;
 
-    // CSV: kmeans,N,K,D,iterations,time_ms,Gpoints_per_s
-    printf("kmeans,%d,%d,%d,%d,%.4f,%.6f\n",
-           N, K, D, iter, (double)time_ms, gpoints_per_s);
+    // JSON-lines kernel events
+    printf("{\"type\":\"kernel\",\"name\":\"kmeans_assign_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"points\":%d,\"dims\":%d,\"clusters\":%d,\"max_iter\":%d}}\n",
+           (double)time_ms, N, D, K, max_iter);
+
+    printf("{\"type\":\"kernel\",\"name\":\"kmeans_update_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"points\":%d,\"dims\":%d,\"clusters\":%d,\"max_iter\":%d}}\n",
+           (double)time_ms, N, D, K, max_iter);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gpoints_per_s\",\"value\":%.6f}]}\n",
+           (double)time_ms, gpoints_per_s);
 
     fprintf(stderr, "Iterations: %d  Time: %.4f ms  Throughput: %.6f Gpoints/s\n",
             iter, (double)time_ms, gpoints_per_s);

@@ -6,17 +6,11 @@
  *   - Write-only
  *   - Read-write
  *
- * Usage:
- *   ./shoc_devicememory [--array_size_mb N] [--iterations I]
+ * Parameters are read from BENCH_PARAM_* environment variables,
+ * with command-line --flags as fallback.
  *
- *   --array_size_mb N  Array size in MB (default: 64)
- *   --iterations I     Timed iterations (default: 20)
- *
- * Output (stdout): 3 CSV rows (one per pattern)
- * Output (stderr): bandwidth in GB/s for each pattern
- *
- * Build:
- *   make PLATFORM=metal
+ * Output (stdout): JSON-lines protocol
+ * Output (stderr): Human-readable diagnostics
  */
 
 #import <Foundation/Foundation.h>
@@ -51,18 +45,6 @@ static double ticks_to_ms(uint64_t ticks)
 // Argument parsing
 // ---------------------------------------------------------------------------
 
-static int parseIterations(int argc, char** argv) {
-    int iters = 20;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
-
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], name) == 0) {
@@ -74,41 +56,32 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     return defaultVal;
 }
 
+static const char* parseStrParam(int argc, char** argv, const char* name,
+                                 const char* defaultVal) {
+    for (int i = 1; i < argc - 1; ++i) {
+        if (strcmp(argv[i], name) == 0) {
+            return argv[i + 1];
+        }
+    }
+    return defaultVal;
+}
+
 // ---------------------------------------------------------------------------
-// CSV output
+// Benchmark helper
 // ---------------------------------------------------------------------------
 
-struct BenchResult {
-    const char* kernel_name;
-    const char* problem_size;
-    int         iterations;
-    double      avg_ms;
-    double      min_ms;
-    double      max_ms;
-    double      stddev_ms;
+struct KernelResult {
+    double avg_ms;
+    double total_ms;
 };
 
-static void printCSVHeader() {
-    printf("kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms\n");
-}
-
-static void printCSVRow(const BenchResult& r) {
-    printf("%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n",
-           r.kernel_name, r.problem_size, r.iterations,
-           r.avg_ms, r.min_ms, r.max_ms, r.stddev_ms);
-}
-
-// ---------------------------------------------------------------------------
-// Benchmark helper: warm up then time N iterations
-// ---------------------------------------------------------------------------
-static BenchResult runBenchmarkMetal(const char*                  kernel_name,
-                                     const char*                  problem_size,
-                                     int                          iters,
-                                     id<MTLCommandQueue>          queue,
-                                     id<MTLComputePipelineState>  pso,
-                                     NSUInteger                   num_threads,
-                                     NSUInteger                   tg_size,
-                                     std::function<void(id<MTLComputeCommandEncoder>)> setup_fn)
+static KernelResult runBenchmarkMetal(
+    int                          iters,
+    id<MTLCommandQueue>          queue,
+    id<MTLComputePipelineState>  pso,
+    NSUInteger                   num_threads,
+    NSUInteger                   tg_size,
+    std::function<void(id<MTLComputeCommandEncoder>)> setup_fn)
 {
     auto dispatch_one = [&]() {
         id<MTLCommandBuffer>         cb  = [queue commandBuffer];
@@ -133,28 +106,13 @@ static BenchResult runBenchmarkMetal(const char*                  kernel_name,
         times[i] = ticks_to_ms(t1 - t0);
     }
 
-    double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
-        sum += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
+    double sum = 0.0;
+    for (int i = 0; i < iters; ++i) sum += times[i];
     double avg = sum / iters;
-    double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
-        double d = times[i] - avg;
-        variance += d * d;
-    }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
 
-    BenchResult r;
-    r.kernel_name  = kernel_name;
-    r.problem_size = problem_size;
-    r.iterations   = iters;
-    r.avg_ms       = avg;
-    r.min_ms       = mn;
-    r.max_ms       = mx;
-    r.stddev_ms    = stddev;
+    KernelResult r;
+    r.avg_ms = avg;
+    r.total_ms = sum;
     return r;
 }
 
@@ -166,9 +124,32 @@ int main(int argc, char* argv[])
 {
     @autoreleasepool {
 
-    int array_size_mb = parseIntParam(argc, argv, "--array_size_mb", 64);
-    int iters         = parseIterations(argc, argv);
+    setvbuf(stdout, NULL, _IONBF, 0);
 
+    // Defaults
+    int array_size_mb = 64;
+    int block_size    = 256;
+    int iterations    = 20;
+    const char* transfer_mode = "readwrite";
+
+    // Command-line fallback
+    array_size_mb = parseIntParam(argc, argv, "--array_size_mb", array_size_mb);
+    block_size    = parseIntParam(argc, argv, "--block_size", block_size);
+    iterations    = parseIntParam(argc, argv, "--iterations", iterations);
+    transfer_mode = parseStrParam(argc, argv, "--transfer_mode", transfer_mode);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_array_size_mb");
+    if (env_val) array_size_mb = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_transfer_mode");
+    if (env_val) transfer_mode = env_val;
+
+    int iters = iterations;
     size_t N     = (size_t)array_size_mb * 1024 * 1024 / sizeof(float);
     size_t bytes = N * sizeof(float);
 
@@ -213,7 +194,6 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    // Build pipelines for each kernel
     auto makePSO = [&](NSString* name) -> id<MTLComputePipelineState> {
         id<MTLFunction> fn = [library newFunctionWithName:name];
         if (!fn) {
@@ -242,64 +222,86 @@ int main(int argc, char* argv[])
     id<MTLBuffer> buf_output = [device newBufferWithLength:bytes
                                                    options:MTLResourceStorageModeShared];
 
-    // Initialize input
     float* h_input = (float*)buf_input.contents;
     for (size_t i = 0; i < N; ++i)
         h_input[i] = (float)(i % 1000) * 0.001f;
 
-    // Thread configuration
     NSUInteger tg_size    = 256;
     NSUInteger num_groups = (N + tg_size - 1) / tg_size;
     if (num_groups > 65535) num_groups = 65535;
     NSUInteger num_threads = num_groups * tg_size;
 
-    // params: {N, totalThreads}
     uint32_t params_ro[2] = { (uint32_t)N, (uint32_t)num_threads };
     uint32_t params_wo[2] = { (uint32_t)N, (uint32_t)num_threads };
     uint32_t params_rw[2] = { (uint32_t)N, (uint32_t)num_threads };
 
-    char size_str[64];
-    snprintf(size_str, sizeof(size_str), "%dMB", array_size_mb);
-
-    printCSVHeader();
+    double total_all_ms = 0.0;
 
     // --- Read-only ---
-    BenchResult r_read = runBenchmarkMetal(
-        "DeviceMemory_Read", size_str, iters, queue, pso_read, num_threads, tg_size,
-        [&](id<MTLComputeCommandEncoder> enc) {
-            [enc setBuffer:buf_input  offset:0 atIndex:0];
-            [enc setBuffer:buf_output offset:0 atIndex:1];
-            [enc setBytes:params_ro length:sizeof(params_ro) atIndex:2];
-        });
-    printCSVRow(r_read);
-    double read_bw = (double)bytes / (r_read.avg_ms * 1e-3) / 1e9;
-    fprintf(stderr, "Read-only bandwidth:  %.2f GB/s  (%d MB)\n", read_bw, array_size_mb);
+    {
+        KernelResult kr = runBenchmarkMetal(
+            iters, queue, pso_read, num_threads, tg_size,
+            [&](id<MTLComputeCommandEncoder> enc) {
+                [enc setBuffer:buf_input  offset:0 atIndex:0];
+                [enc setBuffer:buf_output offset:0 atIndex:1];
+                [enc setBytes:params_ro length:sizeof(params_ro) atIndex:2];
+            });
+        double read_bw = (double)bytes / (kr.avg_ms * 1e-3) / 1e9;
+        total_all_ms += kr.total_ms;
+
+        printf("{\"type\":\"kernel\",\"name\":\"readOnly_kernel\",\"time_ms\":%.6f,"
+               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d,\"iterations\":%d,"
+               "\"transfer_mode\":\"%s\"}}\n",
+               kr.avg_ms, array_size_mb, block_size, iterations, transfer_mode);
+
+        fprintf(stderr, "Read-only bandwidth:  %.2f GB/s  (%d MB)\n", read_bw, array_size_mb);
+    }
 
     // --- Write-only ---
-    BenchResult r_write = runBenchmarkMetal(
-        "DeviceMemory_Write", size_str, iters, queue, pso_write, num_threads, tg_size,
-        [&](id<MTLComputeCommandEncoder> enc) {
-            [enc setBuffer:buf_output offset:0 atIndex:0];
-            [enc setBytes:params_wo length:sizeof(params_wo) atIndex:1];
-        });
-    printCSVRow(r_write);
-    double write_bw = (double)bytes / (r_write.avg_ms * 1e-3) / 1e9;
-    fprintf(stderr, "Write-only bandwidth: %.2f GB/s  (%d MB)\n", write_bw, array_size_mb);
+    {
+        KernelResult kr = runBenchmarkMetal(
+            iters, queue, pso_write, num_threads, tg_size,
+            [&](id<MTLComputeCommandEncoder> enc) {
+                [enc setBuffer:buf_output offset:0 atIndex:0];
+                [enc setBytes:params_wo length:sizeof(params_wo) atIndex:1];
+            });
+        double write_bw = (double)bytes / (kr.avg_ms * 1e-3) / 1e9;
+        total_all_ms += kr.total_ms;
 
-    // --- Read-write: re-initialize input buffer ---
+        printf("{\"type\":\"kernel\",\"name\":\"writeOnly_kernel\",\"time_ms\":%.6f,"
+               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d,\"iterations\":%d,"
+               "\"transfer_mode\":\"%s\"}}\n",
+               kr.avg_ms, array_size_mb, block_size, iterations, transfer_mode);
+
+        fprintf(stderr, "Write-only bandwidth: %.2f GB/s  (%d MB)\n", write_bw, array_size_mb);
+    }
+
+    // --- Read-write ---
     for (size_t i = 0; i < N; ++i)
         h_input[i] = (float)(i % 1000) * 0.001f;
 
-    BenchResult r_rw = runBenchmarkMetal(
-        "DeviceMemory_ReadWrite", size_str, iters, queue, pso_rw, num_threads, tg_size,
-        [&](id<MTLComputeCommandEncoder> enc) {
-            [enc setBuffer:buf_input offset:0 atIndex:0];
-            [enc setBytes:params_rw length:sizeof(params_rw) atIndex:1];
-        });
-    printCSVRow(r_rw);
-    // Read-write: 2× data (1 read + 1 write)
-    double rw_bw = 2.0 * (double)bytes / (r_rw.avg_ms * 1e-3) / 1e9;
-    fprintf(stderr, "Read-write bandwidth: %.2f GB/s  (%d MB)\n", rw_bw, array_size_mb);
+    {
+        KernelResult kr = runBenchmarkMetal(
+            iters, queue, pso_rw, num_threads, tg_size,
+            [&](id<MTLComputeCommandEncoder> enc) {
+                [enc setBuffer:buf_input offset:0 atIndex:0];
+                [enc setBytes:params_rw length:sizeof(params_rw) atIndex:1];
+            });
+        double rw_bw = 2.0 * (double)bytes / (kr.avg_ms * 1e-3) / 1e9;
+        total_all_ms += kr.total_ms;
+
+        printf("{\"type\":\"kernel\",\"name\":\"readWrite_kernel\",\"time_ms\":%.6f,"
+               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d,\"iterations\":%d,"
+               "\"transfer_mode\":\"%s\"}}\n",
+               kr.avg_ms, array_size_mb, block_size, iterations, transfer_mode);
+
+        fprintf(stderr, "Read-write bandwidth: %.2f GB/s  (%d MB)\n", rw_bw, array_size_mb);
+    }
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[]}\n",
+           total_all_ms);
 
     return EXIT_SUCCESS;
 

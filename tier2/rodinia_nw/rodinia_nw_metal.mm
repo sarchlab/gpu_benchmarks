@@ -90,15 +90,6 @@ struct BenchResult {
     double      stddev_ms;
 };
 
-static void printCSVHeader() {
-    printf("kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms\n");
-}
-
-static void printCSVRow(const BenchResult& r) {
-    printf("%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n",
-           r.kernel_name, r.problem_size, r.iterations,
-           r.avg_ms, r.min_ms, r.max_ms, r.stddev_ms);
-}
 
 // ---------------------------------------------------------------------------
 // NWParams — must match the Metal struct definition
@@ -120,11 +111,30 @@ struct NWParams {
 int main(int argc, char* argv[])
 {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    int seq_len    = parseIntParam(argc, argv, "--sequence_length", 2048);
-    int block_size = parseIntParam(argc, argv, "--block_size",        16);
-    int penalty    = parseIntParam(argc, argv, "--penalty",            2);
-    int iters      = parseIterations(argc, argv);
+    // Defaults
+    int seq_len    = 2048;
+    int block_size = 16;
+    int penalty    = 2;
+    int iters      = 3;
+
+    // Command-line fallback
+    seq_len    = parseIntParam(argc, argv, "--sequence_length", seq_len);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+    penalty    = parseIntParam(argc, argv, "--penalty", penalty);
+    iters      = parseIterations(argc, argv);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_sequence_length");
+    if (env_val) seq_len = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_penalty");
+    if (env_val) penalty = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
 
     // Round up to multiple of block_size
     int num_blocks = (seq_len + block_size - 1) / block_size;
@@ -316,16 +326,28 @@ int main(int argc, char* argv[])
     r.max_ms       = mx;
     r.stddev_ms    = stddev;
 
-    printCSVHeader();
-    printCSVRow(r);
-
     // Performance metrics
     long cells   = (long)seq_len * seq_len;
     double gcups = (double)cells / (r.avg_ms * 1e-3) / 1e9;
     double eff_bw = (double)cells * 4 * sizeof(int) / (r.avg_ms * 1e-3) / 1e9;
+    double total_ms = r.avg_ms * iters;
+
+    // JSON-lines kernel events
+    printf("{\"type\":\"kernel\",\"name\":\"nw_kernel1\",\"time_ms\":%.6f,"
+           "\"params\":{\"sequence_length\":%d,\"block_size\":%d,\"penalty\":%d,\"iterations\":%d}}\n",
+           r.avg_ms, seq_len, block_size, penalty, iters);
+
+    printf("{\"type\":\"kernel\",\"name\":\"nw_kernel2\",\"time_ms\":%.6f,"
+           "\"params\":{\"sequence_length\":%d,\"block_size\":%d,\"penalty\":%d,\"iterations\":%d}}\n",
+           r.avg_ms, seq_len, block_size, penalty, iters);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gcups\",\"value\":%.2f},{\"name\":\"effective_gbps\",\"value\":%.2f}]}\n",
+           total_ms, gcups, eff_bw);
+
     fprintf(stderr, "GCUPS: %.2f  |  Effective GB/s: %.2f  (avg %.4f ms)\n",
             gcups, eff_bw, r.avg_ms);
-    printf("rodinia_nw,%d,%.4f\n", seq_len, gcups);
 
     return EXIT_SUCCESS;
 

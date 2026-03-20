@@ -193,7 +193,30 @@ static void transpose_cpu(const float* in, float* out, int width, int height) {
 // ---------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
-    int N = parseIntParam(argc, argv, "--size", 4096);
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Default values from params.json
+    int N          = 4096;
+    int iters      = 5;
+    int block_size = 256;
+    int tile_dim   = 32;
+
+    // Command-line args as fallback
+    N          = parseIntParam(argc, argv, "--size", N);
+    iters      = parseIntParam(argc, argv, "--iterations", iters);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+    tile_dim   = parseIntParam(argc, argv, "--tile_dim", tile_dim);
+
+    // Env vars override
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_tile_dim");
+    if (env_val) tile_dim = atoi(env_val);
 
     size_t num_elems = (size_t)N * N;
     size_t bytes     = num_elems * sizeof(float);
@@ -293,10 +316,24 @@ int main(int argc, char** argv) {
             (opt_errors == 0) ? "PASS" : "FAIL");
 
     // -----------------------------------------------------------------------
-    // CSV output to stdout
+    // JSON-lines output to stdout
     // -----------------------------------------------------------------------
-    printf("cuda_transpose,naive_%d,%.4f,%.2f\n", N, naive_ms, naive_gbs);
-    printf("cuda_transpose,optimized_%d,%.4f,%.2f\n", N, opt_ms, opt_gbs);
+    double total_ms = naive_ms * TIMED_ITERS + opt_ms * TIMED_ITERS;
+
+    printf("{\"type\":\"kernel\",\"name\":\"transpose_naive\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"tile_dim\":%d}}\n",
+           naive_ms, N, iters, block_size, tile_dim);
+
+    printf("{\"type\":\"kernel\",\"name\":\"transpose_optimized\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"tile_dim\":%d}}\n",
+           opt_ms, N, iters, block_size, tile_dim);
+
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"naive_bandwidth_gbps\",\"value\":%.2f},"
+           "{\"name\":\"optimized_bandwidth_gbps\",\"value\":%.2f}]}\n",
+           total_ms, naive_gbs, opt_gbs);
 
     // -----------------------------------------------------------------------
     // Cleanup

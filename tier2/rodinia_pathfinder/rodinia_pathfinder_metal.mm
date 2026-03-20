@@ -81,10 +81,29 @@ static void cpu_pathfinder(const int* wall, int* result, int rows, int cols) {
 int main(int argc, char* argv[])
 {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    int rows  = parseIntParam(argc, argv, "--rows",       100000);
-    int cols  = parseIntParam(argc, argv, "--cols",       100);
-    int iters = parseIntParam(argc, argv, "--iterations", 3);
+    // Defaults
+    int cols  = 100;
+    int rows  = 100000;
+    int iters = 3;
+    int block_size_param = 256;
+
+    // Command-line fallback
+    rows  = parseIntParam(argc, argv, "--rows", rows);
+    cols  = parseIntParam(argc, argv, "--cols", cols);
+    iters = parseIntParam(argc, argv, "--iterations", iters);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_cols");
+    if (env_val) cols = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_rows");
+    if (env_val) rows = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size_param = atoi(env_val);
 
     // -------------------------------------------------------------------
     // Metal device setup
@@ -334,9 +353,17 @@ int main(int argc, char* argv[])
     double total_bytes_accessed = (double)rows * cols * sizeof(int) * 3.0;
     double gb_s = total_bytes_accessed / (avg_ms * 1e-3) / 1e9;
 
-    // CSV output
-    printf("benchmark,rows,cols,time_ms,GBs\n");
-    printf("pathfinder,%d,%d,%.4f,%.4f\n", rows, cols, avg_ms, gb_s);
+    double total_ms = sum;
+
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"dynproc_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"cols\":%d,\"rows\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
+           avg_ms, cols, rows, iters, block_size_param);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.4f}]}\n",
+           total_ms, gb_s);
 
     free(h_wall);
     return EXIT_SUCCESS;

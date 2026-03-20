@@ -84,15 +84,6 @@ struct BenchResult {
     double      stddev_ms;
 };
 
-static void printCSVHeader() {
-    printf("kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms\n");
-}
-
-static void printCSVRow(const BenchResult& r) {
-    printf("%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n",
-           r.kernel_name, r.problem_size, r.iterations,
-           r.avg_ms, r.min_ms, r.max_ms, r.stddev_ms);
-}
 
 // ---------------------------------------------------------------------------
 // Run one SRAD iteration batch (num_iters srad1+srad2 pairs)
@@ -162,10 +153,18 @@ static void runSRADIters(
 int main(int argc, char* argv[])
 {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    int image_size  = parseIntParam(argc, argv, "--image_size",     512);
-    int num_iters   = parseIntParam(argc, argv, "--num_iterations",  50);
-    int iters       = parseIterations(argc, argv);
+    // Defaults
+    int image_size  = 512;
+    int num_iters   = 50;
+    int block_dim   = 16;
+    int iters       = 20;
+
+    // Command-line fallback
+    image_size = parseIntParam(argc, argv, "--image_size", image_size);
+    num_iters  = parseIntParam(argc, argv, "--num_iterations", num_iters);
+    iters      = parseIterations(argc, argv);
 
     float lambda = 0.25f;
     for (int i = 1; i < argc - 1; ++i) {
@@ -174,6 +173,17 @@ int main(int argc, char* argv[])
             break;
         }
     }
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_image_size");
+    if (env_val) image_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_num_iterations");
+    if (env_val) num_iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_dim = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
 
     int    rows = image_size;
     int    cols = image_size;
@@ -318,16 +328,26 @@ int main(int argc, char* argv[])
     r.max_ms       = mx;
     r.stddev_ms    = stddev;
 
-    printCSVHeader();
-    printCSVRow(r);
-
-    // Effective bandwidth:
-    //   srad1: reads J (1×size), writes dN+dS+dW+dE+c (5×size) → 6×size floats
-    //   srad2: reads J+dN+dS+dW+dE+c (6×size), writes J (1×size) → 7×size floats
-    //   Total per SRAD iteration: 13 × size × sizeof(float)
+    // Effective bandwidth
     double bytes_per_iter = 13.0 * (double)size * sizeof(float);
     double total_bytes    = bytes_per_iter * num_iters;
     double bw_gb = total_bytes / (r.avg_ms * 1e-3) / 1e9;
+    double total_ms = r.avg_ms * iters;
+
+    // JSON-lines kernel events
+    printf("{\"type\":\"kernel\",\"name\":\"srad1\",\"time_ms\":%.6f,"
+           "\"params\":{\"image_size\":%d,\"num_iterations\":%d,\"block_size\":%d,\"iterations\":%d}}\n",
+           r.avg_ms, image_size, num_iters, block_dim, iters);
+
+    printf("{\"type\":\"kernel\",\"name\":\"srad2\",\"time_ms\":%.6f,"
+           "\"params\":{\"image_size\":%d,\"num_iterations\":%d,\"block_size\":%d,\"iterations\":%d}}\n",
+           r.avg_ms, image_size, num_iters, block_dim, iters);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"effective_bandwidth_gbps\",\"value\":%.2f}]}\n",
+           total_ms, bw_gb);
+
     fprintf(stderr, "Effective bandwidth: %.2f GB/s  (avg %.4f ms, %d SRAD iters/launch)\n",
             bw_gb, r.avg_ms, num_iters);
 

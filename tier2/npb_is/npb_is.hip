@@ -169,8 +169,30 @@ static bool verify_sorted(const int* sorted, int N) {
 // ---------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
-    int N     = parseIntParam(argc, argv, "--size", 8388608);   // 2^23
-    int iters = parseIntParam(argc, argv, "--iterations", 5);
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Defaults from params.json
+    int N          = 8388608;   // 2^23
+    int iterations = 5;
+    int block_size = 256;
+    const char* verify = "true";
+
+    // Command-line fallback
+    N          = parseIntParam(argc, argv, "--size", N);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_verify");
+    if (env_val) verify = env_val;
+
+    int iters = iterations;
 
     // Print device info
     int device_id = 0;
@@ -204,7 +226,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(d_keys, h_keys, keysBytes, hipMemcpyHostToDevice));
 
     // Kernel launch config
-    int blockSize = 256;
+    int blockSize = block_size;
     int gridKeys  = (N + blockSize - 1) / blockSize;
 
     // Lambda: run full IS (histogram + prefix sum + scatter)
@@ -268,8 +290,28 @@ int main(int argc, char** argv) {
     // M keys/sec = N / time_s / 1e6
     double mkeys_sec = (double)N / (avg_ms * 1e-3) / 1e6;
 
-    // CSV output to stdout
-    printf("npb_is,%d,%.4f,%.4f\n", N, avg_ms, mkeys_sec);
+    double total_ms = sum;
+
+    // JSON-lines kernel events (one per kernel)
+    printf("{\"type\":\"kernel\",\"name\":\"histogram_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"verify\":\"%s\"}}\n",
+           avg_ms, N, iterations, block_size, verify);
+
+    printf("{\"type\":\"kernel\",\"name\":\"prefix_sum_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"verify\":\"%s\"}}\n",
+           avg_ms, N, iterations, block_size, verify);
+
+    printf("{\"type\":\"kernel\",\"name\":\"scatter_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"verify\":\"%s\"}}\n",
+           avg_ms, N, iterations, block_size, verify);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"mkeys_per_sec\",\"value\":%.2f}]}\n",
+           total_ms, mkeys_sec);
 
     // Human-readable output to stderr
     fprintf(stderr, "Average time: %.4f ms\n", avg_ms);

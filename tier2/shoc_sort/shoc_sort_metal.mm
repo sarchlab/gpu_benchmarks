@@ -2,22 +2,13 @@
  * shoc_sort_metal.mm — Apple Metal host for the SHOC Sort benchmark.
  *
  * Bitonic sort on a large array of random unsigned integers.
- * N = 1<<22 (4M elements) by default.
+ * O(n log^2 n) compare-and-swap network.
  *
- * Algorithm: bitonic sort — O(n log^2 n) compare-and-swap network.
- * Each dispatch pass performs one compare-and-swap step.
+ * Parameters are read from BENCH_PARAM_* environment variables,
+ * with command-line --flags as fallback.
  *
- * Usage:
- *   ./shoc_sort [--size N] [--iterations I]
- *
- *   --size N         Number of elements (power of 2, default: 4194304)
- *   --iterations I   Timed iterations (default: 5)
- *
- * Output (stdout): CSV — shoc_sort,<N>,<Melements/s>
- * Output (stderr): device info, timing details
- *
- * Build:
- *   make PLATFORM=metal
+ * Output (stdout): JSON-lines protocol
+ * Output (stderr): Human-readable diagnostics
  */
 
 #import <Foundation/Foundation.h>
@@ -51,18 +42,6 @@ static double ticks_to_ms(uint64_t ticks)
 // Argument parsing
 // ---------------------------------------------------------------------------
 
-static int parseIterations(int argc, char** argv) {
-    int iters = 5;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
-
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], name) == 0) {
@@ -74,8 +53,18 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     return defaultVal;
 }
 
+static const char* parseStrParam(int argc, char** argv, const char* name,
+                                 const char* defaultVal) {
+    for (int i = 1; i < argc - 1; ++i) {
+        if (strcmp(argv[i], name) == 0) {
+            return argv[i + 1];
+        }
+    }
+    return defaultVal;
+}
+
 // ---------------------------------------------------------------------------
-// Verify: check array is sorted
+// Verify
 // ---------------------------------------------------------------------------
 
 static bool verify_sorted(const uint32_t* arr, int N) {
@@ -97,8 +86,33 @@ int main(int argc, char* argv[])
 {
     @autoreleasepool {
 
-    int N     = parseIntParam(argc, argv, "--size", 1 << 22); // 4M default
-    int iters = parseIterations(argc, argv);
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Defaults
+    int size       = 1 << 22; // 4M
+    int iterations = 5;
+    int block_size = 256;
+    const char* precision = "uint";
+
+    // Command-line fallback
+    size       = parseIntParam(argc, argv, "--size", size);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+    precision  = parseStrParam(argc, argv, "--precision", precision);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
+
+    int N     = size;
+    int iters = iterations;
 
     // Round N up to next power of 2
     {
@@ -167,18 +181,16 @@ int main(int argc, char* argv[])
     }
 
     // -------------------------------------------------------------------
-    // Allocate Metal buffers (shared memory)
+    // Allocate Metal buffers
     // -------------------------------------------------------------------
     id<MTLBuffer> buf_data   = [device newBufferWithLength:bytes
                                                    options:MTLResourceStorageModeShared];
     id<MTLBuffer> buf_params = [device newBufferWithLength:2 * sizeof(uint32_t)
                                                    options:MTLResourceStorageModeShared];
 
-    // Host pointer for initialization and readback
     uint32_t* h_data   = (uint32_t*)buf_data.contents;
     uint32_t* h_params = (uint32_t*)buf_params.contents;
 
-    // Original data for re-initialization each iteration
     uint32_t* h_orig = (uint32_t*)malloc(bytes);
     if (!h_orig) {
         fprintf(stderr, "malloc failed\n");
@@ -189,12 +201,10 @@ int main(int argc, char* argv[])
         h_orig[i] = (uint32_t)rand();
     }
 
-    // Max threadgroup size for the kernel
     NSUInteger maxTG = pso.maxTotalThreadsPerThreadgroup;
     if (maxTG > 1024) maxTG = 1024;
     NSUInteger tg_size = maxTG;
 
-    // Helper: dispatch one bitonic_step(j, k) pass
     auto dispatch_step = [&](uint32_t j, uint32_t k) {
         h_params[0] = j;
         h_params[1] = k;
@@ -204,7 +214,6 @@ int main(int argc, char* argv[])
         [enc setComputePipelineState:pso];
         [enc setBuffer:buf_data   offset:0 atIndex:0];
         [enc setBuffer:buf_params offset:0 atIndex:1];
-        // Each thread handles one element
         [enc dispatchThreads:MTLSizeMake((NSUInteger)N, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(tg_size, 1, 1)];
         [enc endEncoding];
@@ -212,7 +221,6 @@ int main(int argc, char* argv[])
         [cb waitUntilCompleted];
     };
 
-    // Helper: run one full bitonic sort
     auto run_sort = [&]() {
         for (int k = 2; k <= N; k <<= 1) {
             for (int j = k >> 1; j > 0; j >>= 1) {
@@ -222,7 +230,7 @@ int main(int argc, char* argv[])
     };
 
     // -------------------------------------------------------------------
-    // Warmup (not measured)
+    // Warmup
     // -------------------------------------------------------------------
     memcpy(h_data, h_orig, bytes);
     run_sort();
@@ -232,7 +240,6 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     std::vector<double> times((size_t)iters);
     for (int i = 0; i < iters; ++i) {
-        // Fresh input each iteration
         memcpy(h_data, h_orig, bytes);
 
         uint64_t t0 = mach_absolute_time();
@@ -250,27 +257,30 @@ int main(int argc, char* argv[])
         if (times[i] > mx) mx = times[i];
     }
     double avg_ms = sum_ms / iters;
-    double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
-        double d = times[i] - avg_ms;
-        variance += d * d;
-    }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
+    double total_ms = sum_ms;
 
     double melems_per_sec = (double)N / (avg_ms * 1e-3) / 1e6;
 
-    fprintf(stderr, "Throughput: %.2f Melements/s  (avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
-            melems_per_sec, avg_ms, mn, mx, stddev);
+    fprintf(stderr, "Throughput: %.2f Melements/s  (avg %.4f ms, min %.4f ms, max %.4f ms)\n",
+            melems_per_sec, avg_ms, mn, mx);
 
-    // Correctness check (last iteration result still in buf_data)
+    // Correctness check
     if (verify_sorted(h_data, N)) {
         fprintf(stderr, "Correctness: PASS\n");
     } else {
         fprintf(stderr, "Correctness: FAIL\n");
     }
 
-    // CSV output: shoc_sort,<N>,<Melements/s>
-    printf("shoc_sort,%d,%.2f\n", N, melems_per_sec);
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"bitonic_step\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_ms, size, iterations, block_size, precision);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"melements_per_sec\",\"value\":%.2f}]}\n",
+           total_ms, melems_per_sec);
 
     free(h_orig);
     return EXIT_SUCCESS;

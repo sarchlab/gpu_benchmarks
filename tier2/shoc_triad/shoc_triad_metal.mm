@@ -7,17 +7,11 @@
  * The Metal compute kernel lives in shoc_triad.metal and is compiled at
  * runtime from source (loaded from the same directory as the binary).
  *
- * Usage:
- *   ./shoc_triad [--array_size N] [--iterations I]
+ * Parameters are read from BENCH_PARAM_* environment variables,
+ * with command-line --flags as fallback.
  *
- *   --array_size N   Number of float elements (default: 4194304 = 4 M)
- *   --iterations I   Timed kernel launches   (default: 20)
- *
- * Output (stdout): CSV — kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
- * Output (stderr): Effective bandwidth in GB/s, verification PASS/FAIL
- *
- * Build:
- *   make PLATFORM=metal
+ * Output (stdout): JSON-lines protocol
+ * Output (stderr): Human-readable diagnostics
  */
 
 #import <Foundation/Foundation.h>
@@ -55,18 +49,6 @@ static double ticks_to_ms(uint64_t ticks)
 // Argument parsing
 // ---------------------------------------------------------------------------
 
-static int parseIterations(int argc, char** argv) {
-    int iters = 20;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
-
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], name) == 0) {
@@ -78,28 +60,14 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     return defaultVal;
 }
 
-// ---------------------------------------------------------------------------
-// CSV output
-// ---------------------------------------------------------------------------
-
-struct BenchResult {
-    const char* kernel_name;
-    const char* problem_size;
-    int         iterations;
-    double      avg_ms;
-    double      min_ms;
-    double      max_ms;
-    double      stddev_ms;
-};
-
-static void printCSVHeader() {
-    printf("kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms\n");
-}
-
-static void printCSVRow(const BenchResult& r) {
-    printf("%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n",
-           r.kernel_name, r.problem_size, r.iterations,
-           r.avg_ms, r.min_ms, r.max_ms, r.stddev_ms);
+static const char* parseStrParam(int argc, char** argv, const char* name,
+                                 const char* defaultVal) {
+    for (int i = 1; i < argc - 1; ++i) {
+        if (strcmp(argv[i], name) == 0) {
+            return argv[i + 1];
+        }
+    }
+    return defaultVal;
 }
 
 // ---------------------------------------------------------------------------
@@ -110,8 +78,33 @@ int main(int argc, char* argv[])
 {
     @autoreleasepool {
 
-    int N     = parseIntParam(argc, argv, "--array_size", 4194304);
-    int iters = parseIterations(argc, argv);
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Defaults
+    int array_size  = 4194304;
+    int block_size  = 256;
+    int iterations  = 20;
+    const char* precision = "float";
+
+    // Command-line fallback
+    array_size = parseIntParam(argc, argv, "--array_size", array_size);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+    precision  = parseStrParam(argc, argv, "--precision", precision);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_array_size");
+    if (env_val) array_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
+
+    int N     = array_size;
+    int iters = iterations;
 
     size_t bytes  = (size_t)N * sizeof(float);
     float  scalar = 1.75f;
@@ -174,8 +167,6 @@ int main(int argc, char* argv[])
 
     // -------------------------------------------------------------------
     // Allocate buffers
-    //   b, c — shared (CPU writes initial data, GPU reads)
-    //   a    — private (GPU-only for timing; read back via staging for verify)
     // -------------------------------------------------------------------
     id<MTLBuffer> buf_a = [device newBufferWithLength:bytes
                                               options:MTLResourceStorageModePrivate];
@@ -240,35 +231,26 @@ int main(int argc, char* argv[])
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg = sum / iters;
-    double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
-        double d = times[i] - avg;
-        variance += d * d;
-    }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
-
-    char size_str[64];
-    snprintf(size_str, sizeof(size_str), "%d", N);
-
-    BenchResult r;
-    r.kernel_name  = "triad";
-    r.problem_size = size_str;
-    r.iterations   = iters;
-    r.avg_ms       = avg;
-    r.min_ms       = mn;
-    r.max_ms       = mx;
-    r.stddev_ms    = stddev;
-
-    // Print CSV
-    printCSVHeader();
-    printCSVRow(r);
+    double avg_ms = sum / iters;
+    double total_ms = sum;
 
     // Effective bandwidth: 3 arrays × N × 4 bytes / time
     double bandwidth_gb = 3.0 * (double)N * sizeof(float)
-                          / (r.avg_ms * 1e-3) / 1e9;
+                          / (avg_ms * 1e-3) / 1e9;
+
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"triad_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"array_size\":%d,\"block_size\":%d,\"iterations\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_ms, array_size, block_size, iterations, precision);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
+           total_ms, bandwidth_gb);
+
     fprintf(stderr, "Effective bandwidth: %.2f GB/s  (avg %.4f ms)\n",
-            bandwidth_gb, r.avg_ms);
+            bandwidth_gb, avg_ms);
 
     // -------------------------------------------------------------------
     // Verification: read back a[] and compare to CPU reference

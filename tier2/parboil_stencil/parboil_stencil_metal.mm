@@ -87,15 +87,6 @@ struct BenchResult {
     double      stddev_ms;
 };
 
-static void printCSVHeader() {
-    printf("kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms\n");
-}
-
-static void printCSVRow(const BenchResult& r) {
-    printf("%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n",
-           r.kernel_name, r.problem_size, r.iterations,
-           r.avg_ms, r.min_ms, r.max_ms, r.stddev_ms);
-}
 
 // ---------------------------------------------------------------------------
 // main
@@ -104,10 +95,30 @@ static void printCSVRow(const BenchResult& r) {
 int main(int argc, char* argv[])
 {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    int grid_dim      = parseIntParam(argc, argv, "--grid_dim",      64);
-    int num_timesteps = parseIntParam(argc, argv, "--num_timesteps", 10);
-    int iters         = parseIterations(argc, argv);
+    // Default values from params.json
+    int grid_dim      = 64;
+    int num_timesteps = 10;
+    int iters         = 5;
+    int block_size    = 256;
+
+    // Command-line args as fallback
+    grid_dim      = parseIntParam(argc, argv, "--grid_dim",      grid_dim);
+    num_timesteps = parseIntParam(argc, argv, "--num_timesteps", num_timesteps);
+    iters         = parseIterations(argc, argv);
+    block_size    = parseIntParam(argc, argv, "--block_size",    block_size);
+
+    // Env vars override
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_grid_dim");
+    if (env_val) grid_dim = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_num_timesteps");
+    if (env_val) num_timesteps = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
 
     int nx    = grid_dim;
     int ny    = grid_dim;
@@ -290,9 +301,6 @@ int main(int argc, char* argv[])
     r.max_ms       = mx;
     r.stddev_ms    = stddev;
 
-    printCSVHeader();
-    printCSVRow(r);
-
     // Performance metrics
     long long interior_cells = (long long)(nx - 2) * (ny - 2) * (nz - 2);
     double gflops = 8.0 * (double)interior_cells * num_timesteps
@@ -300,11 +308,19 @@ int main(int argc, char* argv[])
     double gb_s   = 8.0 * sizeof(float) * (double)interior_cells * num_timesteps
                     / (r.avg_ms * 1e-3) / 1e9;
 
+    // JSON-lines output
+    printf("{\"type\":\"kernel\",\"name\":\"stencil3d\",\"time_ms\":%.6f,"
+           "\"params\":{\"grid_dim\":%d,\"num_timesteps\":%d,\"iterations\":%d,"
+           "\"block_size\":%d}}\n",
+           r.avg_ms, grid_dim, num_timesteps, iters, block_size);
+
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f},"
+           "{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
+           r.avg_ms * iters, gflops, gb_s);
+
     fprintf(stderr, "GFLOPS: %.2f  |  GB/s: %.2f  (avg %.4f ms, %d timesteps/iter)\n",
             gflops, gb_s, r.avg_ms, num_timesteps);
-
-    // CSV summary line
-    printf("parboil_stencil,%dx%dx%d,%.4f\n", nx, ny, nz, gflops);
 
     return EXIT_SUCCESS;
 

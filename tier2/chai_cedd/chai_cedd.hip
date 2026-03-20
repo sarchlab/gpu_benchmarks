@@ -366,8 +366,31 @@ static void canny_cpu(const float* input, unsigned char* output, int W, int H) {
 // ---------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
-    int W = parseIntParam(argc, argv, "W=", 2048);
-    int H = parseIntParam(argc, argv, "H=", 2048);
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Defaults from params.json
+    int width          = 2048;
+    int height         = 2048;
+    int threshold_low  = 50;
+    int threshold_high = 150;
+
+    // Command-line fallback
+    width  = parseIntParam(argc, argv, "W=", width);
+    height = parseIntParam(argc, argv, "H=", height);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_width");
+    if (env_val) width = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_height");
+    if (env_val) height = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_threshold_low");
+    if (env_val) threshold_low = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_threshold_high");
+    if (env_val) threshold_high = atoi(env_val);
+
+    int W = width;
+    int H = height;
     int npix = W * H;
 
     // Print device info
@@ -405,7 +428,7 @@ int main(int argc, char** argv) {
     dim3 blockDim(16, 16);
     dim3 gridDim((W + 15) / 16, (H + 15) / 16);
 
-    float low_t = LOW_THRESH, high_t = HIGH_THRESH;
+    float low_t = (float)threshold_low, high_t = (float)threshold_high;
 
     auto run_cedd = [&]() {
         hipLaunchKernelGGL(gaussian_blur_kernel, gridDim, blockDim, 0, 0,
@@ -459,8 +482,38 @@ int main(int argc, char** argv) {
     // Mpixels/sec = W * H / time_s / 1e6
     double mpix_per_sec = (double)npix / (avg_ms * 1e-3) / 1e6;
 
-    // CSV output to stdout
-    printf("chai_cedd,%dx%d,%.4f,%.4f\n", W, H, avg_ms, mpix_per_sec);
+    double total_ms = sum;
+
+    // JSON-lines kernel events (5 kernels in the pipeline)
+    printf("{\"type\":\"kernel\",\"name\":\"gaussian_blur_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"width\":%d,\"height\":%d,\"threshold_low\":%d,"
+           "\"threshold_high\":%d}}\n",
+           avg_ms, width, height, threshold_low, threshold_high);
+
+    printf("{\"type\":\"kernel\",\"name\":\"sobel_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"width\":%d,\"height\":%d,\"threshold_low\":%d,"
+           "\"threshold_high\":%d}}\n",
+           avg_ms, width, height, threshold_low, threshold_high);
+
+    printf("{\"type\":\"kernel\",\"name\":\"magnitude_direction_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"width\":%d,\"height\":%d,\"threshold_low\":%d,"
+           "\"threshold_high\":%d}}\n",
+           avg_ms, width, height, threshold_low, threshold_high);
+
+    printf("{\"type\":\"kernel\",\"name\":\"nms_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"width\":%d,\"height\":%d,\"threshold_low\":%d,"
+           "\"threshold_high\":%d}}\n",
+           avg_ms, width, height, threshold_low, threshold_high);
+
+    printf("{\"type\":\"kernel\",\"name\":\"hysteresis_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"width\":%d,\"height\":%d,\"threshold_low\":%d,"
+           "\"threshold_high\":%d}}\n",
+           avg_ms, width, height, threshold_low, threshold_high);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"mpixels_per_sec\",\"value\":%.2f}]}\n",
+           total_ms, mpix_per_sec);
 
     // Human-readable output to stderr
     fprintf(stderr, "Average time: %.4f ms\n", avg_ms);

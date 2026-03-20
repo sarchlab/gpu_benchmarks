@@ -8,23 +8,11 @@
  * The Metal compute kernels live in shoc_scan.metal and are compiled at
  * runtime from source (loaded from the same directory as the binary).
  *
- * Multi-pass scan strategy:
- *   Phase 1: scan_block_kernel — per-threadgroup Blelloch scan
- *            → scanned output blocks + block_sums[]
- *   Phase 2: (recursive) scan block_sums[] → scanned_block_sums[]
- *   Phase 3: add_block_sums_kernel — add scanned_block_sums back
+ * Parameters are read from BENCH_PARAM_* environment variables,
+ * with command-line --flags as fallback.
  *
- * Usage:
- *   ./shoc_scan [--array_size N] [--iterations I]
- *
- *   --array_size N   Number of float elements (default: 1048576 = 1 M)
- *   --iterations I   Timed kernel launches   (default: 20)
- *
- * Output (stdout): CSV — kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
- * Output (stderr): Effective bandwidth in GB/s, verification PASS/FAIL
- *
- * Build:
- *   make PLATFORM=metal
+ * Output (stdout): JSON-lines protocol
+ * Output (stderr): Human-readable diagnostics
  */
 
 #import <Foundation/Foundation.h>
@@ -60,18 +48,6 @@ static double ticks_to_ms(uint64_t ticks)
 // Argument parsing
 // ---------------------------------------------------------------------------
 
-static int parseIterations(int argc, char** argv) {
-    int iters = 20;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
-
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], name) == 0) {
@@ -83,42 +59,20 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     return defaultVal;
 }
 
-// ---------------------------------------------------------------------------
-// CSV output
-// ---------------------------------------------------------------------------
-
-struct BenchResult {
-    const char* kernel_name;
-    const char* problem_size;
-    int         iterations;
-    double      avg_ms;
-    double      min_ms;
-    double      max_ms;
-    double      stddev_ms;
-};
-
-static void printCSVHeader() {
-    printf("kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms\n");
-}
-
-static void printCSVRow(const BenchResult& r) {
-    printf("%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n",
-           r.kernel_name, r.problem_size, r.iterations,
-           r.avg_ms, r.min_ms, r.max_ms, r.stddev_ms);
+static const char* parseStrParam(int argc, char** argv, const char* name,
+                                 const char* defaultVal) {
+    for (int i = 1; i < argc - 1; ++i) {
+        if (strcmp(argv[i], name) == 0) {
+            return argv[i + 1];
+        }
+    }
+    return defaultVal;
 }
 
 // ---------------------------------------------------------------------------
 // Metal scan dispatch helpers
 // ---------------------------------------------------------------------------
 
-/**
- * dispatch_scan_block — Run one pass of scan_block_kernel.
- *
- * Each threadgroup handles tg_size*2 elements.
- * block_sums receives one float per threadgroup (the block's total).
- *
- * Returns the number of threadgroups dispatched (= length of block_sums used).
- */
 static NSUInteger dispatch_scan_block(
     id<MTLCommandQueue>         queue,
     id<MTLComputePipelineState> pso_scan,
@@ -140,7 +94,6 @@ static NSUInteger dispatch_scan_block(
     [enc setBuffer:buf_output     offset:0 atIndex:1];
     [enc setBuffer:buf_block_sums offset:0 atIndex:2];
     [enc setBytes:&n32 length:sizeof(n32)  atIndex:3];
-    // threadgroup memory: 2 * tg_size floats
     [enc setThreadgroupMemoryLength:elems_per_tg * sizeof(float) atIndex:0];
     [enc dispatchThreadgroups:MTLSizeMake(num_groups, 1, 1)
        threadsPerThreadgroup:MTLSizeMake(tg_size,     1, 1)];
@@ -151,11 +104,6 @@ static NSUInteger dispatch_scan_block(
     return num_groups;
 }
 
-/**
- * dispatch_add_block_sums — Run one pass of add_block_sums_kernel.
- *
- * Adds scanned_block_sums[i] to every element in block i of data[].
- */
 static void dispatch_add_block_sums(
     id<MTLCommandQueue>         queue,
     id<MTLComputePipelineState> pso_add,
@@ -180,7 +128,7 @@ static void dispatch_add_block_sums(
     [cb waitUntilCompleted];
 }
 
-// Forward declaration for recursive call
+// Forward declaration
 static void scan_recursive_metal(
     id<MTLCommandQueue>         queue,
     id<MTLComputePipelineState> pso_scan,
@@ -191,16 +139,6 @@ static void scan_recursive_metal(
     id<MTLBuffer>               buf_output,
     NSUInteger                  N);
 
-/**
- * scan_recursive_metal — Recursively performs exclusive prefix scan.
- *
- * Phase 1: per-block Blelloch scan  (scan_block_kernel)
- * Phase 2: recursively scan the block totals
- * Phase 3: propagate block prefix sums (add_block_sums_kernel)
- *
- * For arrays that fit in a single threadgroup (num_groups == 1) only
- * Phase 1 is needed.
- */
 static void scan_recursive_metal(
     id<MTLCommandQueue>         queue,
     id<MTLComputePipelineState> pso_scan,
@@ -214,17 +152,14 @@ static void scan_recursive_metal(
     NSUInteger elems_per_tg = tg_size * 2;
     NSUInteger num_groups   = (N + elems_per_tg - 1) / elems_per_tg;
 
-    // Allocate block_sums buffer (one float per threadgroup)
     id<MTLBuffer> buf_block_sums =
         [device newBufferWithLength:num_groups * sizeof(float)
                             options:MTLResourceStorageModeShared];
 
-    // Phase 1: per-block scan
     dispatch_scan_block(queue, pso_scan, tg_size,
                         buf_input, buf_output, buf_block_sums, N);
 
     if (num_groups > 1) {
-        // Phase 2: scan the block sums recursively
         id<MTLBuffer> buf_scanned_block_sums =
             [device newBufferWithLength:num_groups * sizeof(float)
                                 options:MTLResourceStorageModeShared];
@@ -232,7 +167,6 @@ static void scan_recursive_metal(
         scan_recursive_metal(queue, pso_scan, pso_add, device, tg_size,
                              buf_block_sums, buf_scanned_block_sums, num_groups);
 
-        // Phase 3: add scanned block sums back to the output
         dispatch_add_block_sums(queue, pso_add, tg_size,
                                 buf_output, buf_scanned_block_sums, N, num_groups);
     }
@@ -246,11 +180,33 @@ int main(int argc, char* argv[])
 {
     @autoreleasepool {
 
-    int N     = parseIntParam(argc, argv, "--array_size", 1048576);
-    int iters = parseIterations(argc, argv);
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    // Pad N to a multiple of (tg_size * 2) after we know tg_size.
-    // We do the padding after pipeline creation.
+    // Defaults
+    int array_size = 1048576;
+    int block_size = 256;
+    int iterations = 20;
+    const char* precision = "float";
+
+    // Command-line fallback
+    array_size = parseIntParam(argc, argv, "--array_size", array_size);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+    precision  = parseStrParam(argc, argv, "--precision", precision);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_array_size");
+    if (env_val) array_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
+
+    int N     = array_size;
+    int iters = iterations;
 
     // -------------------------------------------------------------------
     // Metal device setup
@@ -291,7 +247,6 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    // Build compute pipelines for the two kernels
     id<MTLFunction> fn_scan = [library newFunctionWithName:@"scan_block_kernel"];
     if (!fn_scan) {
         fprintf(stderr, "Error: kernel 'scan_block_kernel' not found\n");
@@ -318,16 +273,15 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    // Choose threadgroup size (cap at 256; must be power-of-2 for Blelloch sweep)
     NSUInteger tg_size = pso_scan.maxTotalThreadsPerThreadgroup;
     if (tg_size > 256) tg_size = 256;
 
-    // Round tg_size down to the largest power-of-2 <= tg_size
+    // Round tg_size down to power-of-2
     NSUInteger tg_pow2 = 1;
     while (tg_pow2 * 2 <= tg_size) tg_pow2 <<= 1;
     tg_size = tg_pow2;
 
-    // Pad N_padded to next multiple of (tg_size * 2)
+    // Pad N_padded
     NSUInteger elems_per_tg = tg_size * 2;
     NSUInteger N_padded = ((NSUInteger)N + elems_per_tg - 1) / elems_per_tg
                           * elems_per_tg;
@@ -342,15 +296,12 @@ int main(int argc, char* argv[])
 
     // -------------------------------------------------------------------
     // Allocate GPU buffers
-    //   buf_input  — shared: CPU fills once, GPU reads (preserved across iters)
-    //   buf_output — shared: GPU writes scan result, CPU reads for verification
     // -------------------------------------------------------------------
     id<MTLBuffer> buf_input  = [device newBufferWithLength:bytes
                                                    options:MTLResourceStorageModeShared];
     id<MTLBuffer> buf_output = [device newBufferWithLength:bytes
                                                    options:MTLResourceStorageModeShared];
 
-    // Initialize input with the same pattern as the HIP version
     float* h_input = (float*)buf_input.contents;
     for (NSUInteger i = 0; i < N_padded; ++i) {
         h_input[i] = (i < (NSUInteger)N) ? ((float)(i % 7) + 1.0f) : 0.0f;
@@ -381,45 +332,40 @@ int main(int argc, char* argv[])
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg = sum_t / iters;
-    double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
-        double d = times[i] - avg;
-        variance += d * d;
-    }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
+    double avg_ms = sum_t / iters;
+    double total_ms = sum_t;
 
-    char size_str[64];
-    snprintf(size_str, sizeof(size_str), "%d", N);
-
-    BenchResult r;
-    r.kernel_name  = "scan";
-    r.problem_size = size_str;
-    r.iterations   = iters;
-    r.avg_ms       = avg;
-    r.min_ms       = mn;
-    r.max_ms       = mx;
-    r.stddev_ms    = stddev;
-
-    printCSVHeader();
-    printCSVRow(r);
-
-    // Effective bandwidth: 1 read (input) + 1 write (output) = 2 × N × sizeof(float)
+    // Effective bandwidth
     double bandwidth_gb = 2.0 * (double)N * sizeof(float)
-                          / (r.avg_ms * 1e-3) / 1e9;
+                          / (avg_ms * 1e-3) / 1e9;
+
+    // JSON-lines: one event per kernel listed in params.json
+    printf("{\"type\":\"kernel\",\"name\":\"scan_block_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"array_size\":%d,\"block_size\":%d,\"iterations\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_ms, array_size, block_size, iterations, precision);
+
+    printf("{\"type\":\"kernel\",\"name\":\"add_block_sums_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"array_size\":%d,\"block_size\":%d,\"iterations\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_ms, array_size, block_size, iterations, precision);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
+           total_ms, bandwidth_gb);
+
     fprintf(stderr, "Effective bandwidth: %.2f GB/s  (avg %.4f ms)\n",
-            bandwidth_gb, r.avg_ms);
+            bandwidth_gb, avg_ms);
 
     // -------------------------------------------------------------------
-    // Verification: compare GPU output against CPU exclusive scan
+    // Verification
     // -------------------------------------------------------------------
-    // Run one final scan for a clean result
     scan_recursive_metal(queue, pso_scan, pso_add, device, tg_size,
                          buf_input, buf_output, N_padded);
 
     const float* h_output = (const float*)buf_output.contents;
 
-    // CPU reference
     std::vector<float> h_ref((size_t)N);
     h_ref[0] = 0.0f;
     for (int i = 1; i < N; ++i) {

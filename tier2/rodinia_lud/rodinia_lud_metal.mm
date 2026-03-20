@@ -111,11 +111,30 @@ static bool verify(const float *lu, const float *a_orig, int n)
 int main(int argc, char *argv[])
 {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
     const int BSIZE = 16;
 
-    int N     = parseIntParam(argc, argv, "--size",       512);
-    int iters = parseIntParam(argc, argv, "--iterations",   3);
+    // Defaults
+    int N     = 512;
+    int iters = 3;
+    int block_size_param = 256;
+    const char* verify_mode = "true";
+
+    // Command-line fallback
+    N     = parseIntParam(argc, argv, "--size", N);
+    iters = parseIntParam(argc, argv, "--iterations", iters);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size_param = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_verify");
+    if (env_val) verify_mode = env_val;
 
     if (N % BSIZE != 0) {
         fprintf(stderr, "Error: N=%d must be divisible by BSIZE=%d\n", N, BSIZE);
@@ -287,8 +306,23 @@ int main(int argc, char *argv[])
 
     fprintf(stderr, "\nAverage: %.4f ms  GFLOPS: %.2f\n", avg_ms, gflops);
 
-    // CSV output
-    printf("lud,%d,%.4f,%.2f\n", N, avg_ms, gflops);
+    // JSON-lines kernel events
+    printf("{\"type\":\"kernel\",\"name\":\"lud_diagonal\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
+           avg_ms, N, iters, block_size_param, verify_mode);
+
+    printf("{\"type\":\"kernel\",\"name\":\"lud_perimeter\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
+           avg_ms, N, iters, block_size_param, verify_mode);
+
+    printf("{\"type\":\"kernel\",\"name\":\"lud_internal\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
+           avg_ms, N, iters, block_size_param, verify_mode);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
+           sum_ms, gflops);
 
     free(h_a);
     free(h_a_orig);

@@ -20,7 +20,7 @@
 //   --size N        Matrix dimension N×N   (default: 2048)
 //   --iterations I  Timed benchmark iterations (default: 5)
 //
-// Output (stdout): CSV — kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
+// Output (stdout): JSON-lines protocol
 // Output (stderr): GFLOPS
 
 #include <hip/hip_runtime.h>
@@ -45,28 +45,6 @@
         }                                                                      \
     } while (0)
 
-struct BenchResult {
-    const char* kernel_name;
-    const char* problem_size;
-    int         iterations;
-    double      avg_ms;
-    double      min_ms;
-    double      max_ms;
-    double      stddev_ms;
-};
-
-static int parseIterations(int argc, char** argv) {
-    int iters = 5;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
-
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], name) == 0) {
@@ -76,16 +54,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
         }
     }
     return defaultVal;
-}
-
-static void printCSVHeader() {
-    printf("kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms\n");
-}
-
-static void printCSVRow(const BenchResult& r) {
-    printf("%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n",
-           r.kernel_name, r.problem_size, r.iterations,
-           r.avg_ms, r.min_ms, r.max_ms, r.stddev_ms);
 }
 
 struct BenchmarkTimer {
@@ -112,61 +80,9 @@ struct BenchmarkTimer {
     }
 };
 
-template <typename Func>
-static BenchResult runBenchmark(const char* kernel_name,
-                                const char* problem_size,
-                                int         iterations,
-                                Func        func) {
-    BenchmarkTimer timer;
-
-    // Warmup (not measured)
-    func();
-    HIP_CHECK(hipDeviceSynchronize());
-
-    std::vector<double> times(iterations);
-    for (int i = 0; i < iterations; ++i) {
-        timer.record_start();
-        func();
-        timer.record_stop();
-        times[i] = static_cast<double>(timer.elapsed_ms());
-    }
-
-    double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iterations; ++i) {
-        sum += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg = sum / iterations;
-
-    double variance = 0.0;
-    for (int i = 0; i < iterations; ++i) {
-        double d = times[i] - avg;
-        variance += d * d;
-    }
-    double stddev = (iterations > 1) ? sqrt(variance / (iterations - 1)) : 0.0;
-
-    BenchResult r;
-    r.kernel_name  = kernel_name;
-    r.problem_size = problem_size;
-    r.iterations   = iterations;
-    r.avg_ms       = avg;
-    r.min_ms       = mn;
-    r.max_ms       = mx;
-    r.stddev_ms    = stddev;
-    return r;
-}
-
 // ---------------------------------------------------------------------------
 // PolyBench 2D Convolution kernel
 // ---------------------------------------------------------------------------
-// Fixed 3×3 kernel coefficients (PolyBench standard):
-//   c[0][0]=0.8  c[0][1]=0.2  c[0][2]=0.3
-//   c[1][0]=0.2  c[1][1]=0.7  c[1][2]=0.4
-//   c[2][0]=0.1  c[2][1]=0.2  c[2][2]=0.5
-//
-// Border elements (row 0, row N-1, col 0, col M-1) are unchanged (left as-is
-// in B — threads simply skip them, matching PolyBench reference).
 
 __global__ void convolution2D_kernel(const float* __restrict__ A,
                                      float*       __restrict__ B,
@@ -198,8 +114,22 @@ __global__ void convolution2D_kernel(const float* __restrict__ A,
 // Main
 // ---------------------------------------------------------------------------
 int main(int argc, char** argv) {
-    int N    = parseIntParam(argc, argv, "--size", 2048);
-    int iters = parseIterations(argc, argv);
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    int N     = parseIntParam(argc, argv, "--size", 2048);
+    int iters = parseIntParam(argc, argv, "--iterations", 5);
+    int block_size = 256;
+    const char* precision = "float";
+
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
 
     int NI = N, NJ = N;
     size_t matSize = (size_t)NI * NJ * sizeof(float);
@@ -231,23 +161,51 @@ int main(int argc, char** argv) {
     dim3 block(16, 16);
     dim3 grid((NJ + block.x - 1) / block.x, (NI + block.y - 1) / block.y);
 
-    char problemSize[64];
-    snprintf(problemSize, sizeof(problemSize), "%d", N);
+    BenchmarkTimer timer;
 
-    printCSVHeader();
+    // Warmup (not measured)
+    hipLaunchKernelGGL(convolution2D_kernel, grid, block, 0, 0,
+                       d_A, d_B, NI, NJ);
+    HIP_CHECK(hipDeviceSynchronize());
 
-    BenchResult r = runBenchmark("polybench_2dconv", problemSize, iters, [&]() {
+    // Timed iterations
+    std::vector<double> times(iters);
+    for (int i = 0; i < iters; ++i) {
+        timer.record_start();
         hipLaunchKernelGGL(convolution2D_kernel, grid, block, 0, 0,
                            d_A, d_B, NI, NJ);
-        HIP_CHECK(hipDeviceSynchronize());
-    });
+        timer.record_stop();
+        times[i] = static_cast<double>(timer.elapsed_ms());
+    }
 
-    printCSVRow(r);
+    double sum = 0.0, mn = DBL_MAX, mx = 0.0;
+    for (int i = 0; i < iters; ++i) {
+        sum += times[i];
+        if (times[i] < mn) mn = times[i];
+        if (times[i] > mx) mx = times[i];
+    }
+    double avg = sum / iters;
+
+    double variance = 0.0;
+    for (int i = 0; i < iters; ++i) {
+        double d = times[i] - avg;
+        variance += d * d;
+    }
+    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
 
     // GFLOPS: each interior output element = 9 MACs = 18 FLOPs
     long long interior = (long long)(NI - 2) * (NJ - 2);
-    double gflops = 2.0 * 9.0 * (double)interior / (r.avg_ms * 1e-3) / 1e9;
-    fprintf(stderr, "GFLOPS: %.2f  (avg %.4f ms)\n", gflops, r.avg_ms);
+    double gflops = 2.0 * 9.0 * (double)interior / (avg * 1e-3) / 1e9;
+
+    fprintf(stderr, "GFLOPS: %.2f  (avg %.4f ms)\n", gflops, avg);
+
+    // JSON-lines output
+    printf("{\"type\":\"kernel\",\"name\":\"convolution2D_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"precision\":\"%s\"}}\n",
+           avg, N, iters, block_size, precision);
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
+           avg, gflops);
 
     HIP_CHECK(hipFree(d_A));
     HIP_CHECK(hipFree(d_B));

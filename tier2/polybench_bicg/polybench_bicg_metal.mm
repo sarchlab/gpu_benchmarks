@@ -15,7 +15,7 @@
  *   --n N            Number of columns (default: 4096)
  *   --iterations I   Timed iterations  (default: 5)
  *
- * Output (stdout): CSV — bicg,<N>,<time_ms>,<GBs>
+ * Output (stdout): JSON-lines protocol
  * Output (stderr): device info, timing details
  *
  * Build:
@@ -95,9 +95,22 @@ int main(int argc, char* argv[])
 {
     @autoreleasepool {
 
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     int m     = parseIntParam(argc, argv, "--m", 4096);
     int n     = parseIntParam(argc, argv, "--n", 4096);
     int iters = parseIntParam(argc, argv, "--iterations", 5);
+    int block_size = 256;
+
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_m");
+    if (env_val) m = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_n");
+    if (env_val) n = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
 
     size_t bytes_A = (size_t)m * n * sizeof(float);
     size_t bytes_p = (size_t)n * sizeof(float);
@@ -208,53 +221,59 @@ int main(int argc, char* argv[])
     NSUInteger grid_size1 = (NSUInteger)n;  // kernel1: one thread per column
     NSUInteger grid_size2 = (NSUInteger)m;  // kernel2: one thread per row
 
-    auto dispatch_bicg = [&]() {
-        // Kernel 1: s = A^T * r
-        {
-            id<MTLCommandBuffer>         cb  = [queue commandBuffer];
-            id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
-            [enc setComputePipelineState:pso1];
-            [enc setBuffer:buf_A offset:0 atIndex:0];
-            [enc setBuffer:buf_r offset:0 atIndex:1];
-            [enc setBuffer:buf_s offset:0 atIndex:2];
-            [enc setBytes:dims_data length:sizeof(dims_data) atIndex:3];
-            [enc dispatchThreads:MTLSizeMake(grid_size1, 1, 1)
-                threadsPerThreadgroup:MTLSizeMake(tg_size1, 1, 1)];
-            [enc endEncoding];
-            [cb commit];
-            [cb waitUntilCompleted];
-        }
-        // Kernel 2: q = A * p
-        {
-            id<MTLCommandBuffer>         cb  = [queue commandBuffer];
-            id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
-            [enc setComputePipelineState:pso2];
-            [enc setBuffer:buf_A offset:0 atIndex:0];
-            [enc setBuffer:buf_p offset:0 atIndex:1];
-            [enc setBuffer:buf_q offset:0 atIndex:2];
-            [enc setBytes:dims_data length:sizeof(dims_data) atIndex:3];
-            [enc dispatchThreads:MTLSizeMake(grid_size2, 1, 1)
-                threadsPerThreadgroup:MTLSizeMake(tg_size2, 1, 1)];
-            [enc endEncoding];
-            [cb commit];
-            [cb waitUntilCompleted];
-        }
+    auto dispatch_kernel1 = [&]() {
+        id<MTLCommandBuffer>         cb  = [queue commandBuffer];
+        id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
+        [enc setComputePipelineState:pso1];
+        [enc setBuffer:buf_A offset:0 atIndex:0];
+        [enc setBuffer:buf_r offset:0 atIndex:1];
+        [enc setBuffer:buf_s offset:0 atIndex:2];
+        [enc setBytes:dims_data length:sizeof(dims_data) atIndex:3];
+        [enc dispatchThreads:MTLSizeMake(grid_size1, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(tg_size1, 1, 1)];
+        [enc endEncoding];
+        [cb commit];
+        [cb waitUntilCompleted];
+    };
+
+    auto dispatch_kernel2 = [&]() {
+        id<MTLCommandBuffer>         cb  = [queue commandBuffer];
+        id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
+        [enc setComputePipelineState:pso2];
+        [enc setBuffer:buf_A offset:0 atIndex:0];
+        [enc setBuffer:buf_p offset:0 atIndex:1];
+        [enc setBuffer:buf_q offset:0 atIndex:2];
+        [enc setBytes:dims_data length:sizeof(dims_data) atIndex:3];
+        [enc dispatchThreads:MTLSizeMake(grid_size2, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(tg_size2, 1, 1)];
+        [enc endEncoding];
+        [cb commit];
+        [cb waitUntilCompleted];
     };
 
     // -------------------------------------------------------------------
     // Warmup (not measured)
     // -------------------------------------------------------------------
-    dispatch_bicg();
+    dispatch_kernel1();
+    dispatch_kernel2();
 
     // -------------------------------------------------------------------
-    // Timed iterations
+    // Timed iterations — time each kernel separately
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
+    std::vector<double> k1_times((size_t)iters);
+    std::vector<double> k2_times((size_t)iters);
     for (int i = 0; i < iters; ++i) {
-        uint64_t t0 = mach_absolute_time();
-        dispatch_bicg();
-        uint64_t t1 = mach_absolute_time();
-        times[i] = ticks_to_ms(t1 - t0);
+        uint64_t t0, t1;
+
+        t0 = mach_absolute_time();
+        dispatch_kernel1();
+        t1 = mach_absolute_time();
+        k1_times[i] = ticks_to_ms(t1 - t0);
+
+        t0 = mach_absolute_time();
+        dispatch_kernel2();
+        t1 = mach_absolute_time();
+        k2_times[i] = ticks_to_ms(t1 - t0);
     }
 
     // -------------------------------------------------------------------
@@ -293,29 +312,32 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Statistics
     // -------------------------------------------------------------------
-    double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
+    double k1_sum = 0.0, k2_sum = 0.0;
     for (int i = 0; i < iters; ++i) {
-        sum_ms += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
+        k1_sum += k1_times[i];
+        k2_sum += k2_times[i];
     }
-    double avg_ms = sum_ms / iters;
-    double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
-        double d = times[i] - avg_ms;
-        variance += d * d;
-    }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
+    double k1_avg = k1_sum / iters;
+    double k2_avg = k2_sum / iters;
+    double total_avg_ms = k1_avg + k2_avg;
 
     // GB/s: A read twice (kernel1 + kernel2), each is M*N*4 bytes
     double gb   = 2.0 * (double)m * (double)n * sizeof(float) / 1e9;
-    double gbps = gb / (avg_ms * 1e-3);
+    double gbps = gb / (total_avg_ms * 1e-3);
 
-    fprintf(stderr, "Bandwidth: %.2f GB/s  (avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
-            gbps, avg_ms, mn, mx, stddev);
+    fprintf(stderr, "Bandwidth: %.2f GB/s  (total avg %.4f ms: k1=%.4f k2=%.4f)\n",
+            gbps, total_avg_ms, k1_avg, k2_avg);
 
-    // CSV output: bicg,<N>,<time_ms>,<GBs>
-    printf("bicg,%d,%.4f,%.2f\n", n, avg_ms, gbps);
+    // JSON-lines output
+    printf("{\"type\":\"kernel\",\"name\":\"bicg_kernel1\",\"time_ms\":%.6f,"
+           "\"params\":{\"m\":%d,\"n\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
+           k1_avg, m, n, iters, block_size);
+    printf("{\"type\":\"kernel\",\"name\":\"bicg_kernel2\",\"time_ms\":%.6f,"
+           "\"params\":{\"m\":%d,\"n\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
+           k2_avg, m, n, iters, block_size);
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
+           total_avg_ms, gbps);
 
     return EXIT_SUCCESS;
 

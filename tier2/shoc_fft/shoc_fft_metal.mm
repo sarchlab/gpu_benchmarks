@@ -10,7 +10,7 @@
  *   --size N         FFT size (must be power of 2, default: 1048576)
  *   --iterations I   Timed iterations (default: 5)
  *
- * Output (stdout): CSV — shoc_fft,<N>,<time_ms>,<GFLOPS>
+ * Output (stdout): JSON-lines protocol
  * Output (stderr): human-readable results
  *
  * Build:
@@ -124,8 +124,22 @@ static void fft_cpu(cpx* data, int N) {
 int main(int argc, char* argv[]) {
     @autoreleasepool {
 
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     int N     = parseIntParam(argc, argv, "--size", 1048576);
     int iters = parseIntParam(argc, argv, "--iterations", 5);
+    const char* precision = "float";
+    int batch_count = 1;
+
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
+    env_val = getenv("BENCH_PARAM_batch_count");
+    if (env_val) batch_count = atoi(env_val);
 
     if (!isPowerOfTwo(N)) {
         fprintf(stderr, "Error: N=%d must be a power of 2\n", N);
@@ -220,23 +234,25 @@ int main(int argc, char* argv[]) {
     NSUInteger gridN      = (NSUInteger)N;
     NSUInteger gridNhalf  = (NSUInteger)(N / 2);
 
-    // Lambda: run full FFT (bit-reversal + all butterfly stages)
-    auto run_fft = [&]() {
-        // Copy original data to working buffer
-        memcpy(bufData.contents, bufOrig.contents, bytes);
-
+    // Helper: run bit-reverse step
+    auto run_bit_reverse = [&]() {
+        uint32_t bitRevParams[2] = { (uint32_t)N, (uint32_t)log2N };
         id<MTLCommandBuffer> cb = [queue commandBuffer];
         id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
-
-        // 1. Bit-reversal
-        uint32_t bitRevParams[2] = { (uint32_t)N, (uint32_t)log2N };
         [enc setComputePipelineState:psoBitRev];
         [enc setBuffer:bufData offset:0 atIndex:0];
         [enc setBytes:bitRevParams length:sizeof(bitRevParams) atIndex:1];
         [enc dispatchThreads:MTLSizeMake(gridN, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(tgSize, 1, 1)];
+        [enc endEncoding];
+        [cb commit];
+        [cb waitUntilCompleted];
+    };
 
-        // 2. Butterfly stages
+    // Helper: run all butterfly stages
+    auto run_butterfly = [&]() {
+        id<MTLCommandBuffer> cb = [queue commandBuffer];
+        id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
         for (int s = 0; s < log2N; ++s) {
             uint32_t bflyParams[2] = { (uint32_t)N, (uint32_t)s };
             [enc setComputePipelineState:psoButterfly];
@@ -245,10 +261,16 @@ int main(int argc, char* argv[]) {
             [enc dispatchThreads:MTLSizeMake(gridNhalf, 1, 1)
                 threadsPerThreadgroup:MTLSizeMake(tgSize, 1, 1)];
         }
-
         [enc endEncoding];
         [cb commit];
         [cb waitUntilCompleted];
+    };
+
+    // Lambda: run full FFT
+    auto run_fft = [&]() {
+        memcpy(bufData.contents, bufOrig.contents, bytes);
+        run_bit_reverse();
+        run_butterfly();
     };
 
     // -------------------------------------------------------------------
@@ -259,29 +281,50 @@ int main(int argc, char* argv[]) {
     }
 
     // -------------------------------------------------------------------
-    // Timed iterations
+    // Timed iterations — time bit_reverse and butterfly separately
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
+    std::vector<double> br_times((size_t)iters);
+    std::vector<double> bf_times((size_t)iters);
     for (int i = 0; i < iters; ++i) {
+        memcpy(bufData.contents, bufOrig.contents, bytes);
+
         uint64_t t0 = mach_absolute_time();
-        run_fft();
+        run_bit_reverse();
         uint64_t t1 = mach_absolute_time();
-        times[i] = ticks_to_ms(t1 - t0);
+        run_butterfly();
+        uint64_t t2 = mach_absolute_time();
+
+        br_times[i] = ticks_to_ms(t1 - t0);
+        bf_times[i] = ticks_to_ms(t2 - t1);
     }
 
-    double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
+    double br_sum = 0.0, bf_sum = 0.0;
+    for (int i = 0; i < iters; ++i) {
+        br_sum += br_times[i];
+        bf_sum += bf_times[i];
+    }
+    double br_avg_ms = br_sum / iters;
+    double bf_avg_ms = bf_sum / iters;
+    double total_avg_ms = br_avg_ms + bf_avg_ms;
 
     // GFLOPS = 5 * N * log2(N) / time_s / 1e9
     double flops  = 5.0 * (double)N * (double)log2N;
-    double gflops = flops / (avg_ms * 1e-3) / 1e9;
+    double gflops = flops / (total_avg_ms * 1e-3) / 1e9;
 
-    // CSV output to stdout
-    printf("shoc_fft,%d,%.4f,%.4f\n", N, avg_ms, gflops);
+    // JSON-lines output
+    printf("{\"type\":\"kernel\",\"name\":\"bit_reverse_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"precision\":\"%s\",\"batch_count\":%d}}\n",
+           br_avg_ms, N, iters, precision, batch_count);
+    printf("{\"type\":\"kernel\",\"name\":\"fft_butterfly_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"precision\":\"%s\",\"batch_count\":%d}}\n",
+           bf_avg_ms, N, iters, precision, batch_count);
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.4f}]}\n",
+           total_avg_ms, gflops);
 
     // Human-readable output to stderr
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
+    fprintf(stderr, "Average time: %.4f ms (bit_reverse: %.4f ms, butterfly: %.4f ms)\n",
+            total_avg_ms, br_avg_ms, bf_avg_ms);
     fprintf(stderr, "Performance:  %.4f GFLOPS\n", gflops);
 
     // -------------------------------------------------------------------

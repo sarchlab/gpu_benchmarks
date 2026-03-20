@@ -257,11 +257,32 @@ static float cpu_spmv_row(const int* row_ptr, const int* col_idx,
 
 int main(int argc, char** argv)
 {
-    int num_rows   = parseIntParam(argc, argv, "--num_rows",         65536);
-    int avg_nnz    = parseIntParam(argc, argv, "--avg_nnz_per_row",  10);
-    int block_size = parseIntParam(argc, argv, "--block_size",       256);
-    int iters      = parseIterations(argc, argv);
-    int seed       = parseIntParam(argc, argv, "--seed",             42);
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Default values from params.json
+    int num_rows   = 65536;
+    int avg_nnz    = 10;
+    int block_size = 256;
+    int iters      = 10;
+    int seed       = 42;
+
+    // Command-line args as fallback
+    num_rows   = parseIntParam(argc, argv, "--num_rows",         num_rows);
+    avg_nnz    = parseIntParam(argc, argv, "--avg_nnz_per_row",  avg_nnz);
+    block_size = parseIntParam(argc, argv, "--block_size",       block_size);
+    iters      = parseIterations(argc, argv);
+    seed       = parseIntParam(argc, argv, "--seed",             seed);
+
+    // Env vars override
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_num_rows");
+    if (env_val) num_rows = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_avg_nnz_per_row");
+    if (env_val) avg_nnz = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
 
     // Generate sparse matrix
     int*   h_row_ptr  = nullptr;
@@ -314,16 +335,23 @@ int main(int argc, char** argv)
     char problemSize[64];
     snprintf(problemSize, sizeof(problemSize), "%d", num_rows);
 
-    printCSVHeader();
-
-    BenchResult r = runBenchmark("parboil_spmv", problemSize, iters, [&]() {
+    BenchResult r = runBenchmark("spmv_csr", problemSize, iters, [&]() {
         spmv_csr<<<grid, block>>>(d_row_ptr, d_col_idx, d_values, d_x, d_y, num_rows);
     });
-    printCSVRow(r);
 
     // GFLOPS = 2 * total_nnz (one multiply + one add per NNZ)
     double gflops = 2.0 * (double)total_nnz / (r.avg_ms * 1e-3) / 1e9;
-    fprintf(stderr, "parboil_spmv,%d,%.4f\n", num_rows, gflops);
+
+    // JSON-lines output
+    printf("{\"type\":\"kernel\",\"name\":\"spmv_csr\",\"time_ms\":%.6f,"
+           "\"params\":{\"num_rows\":%d,\"avg_nnz_per_row\":%d,\"block_size\":%d,"
+           "\"iterations\":%d}}\n",
+           r.avg_ms, num_rows, avg_nnz, block_size, iters);
+
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
+           r.avg_ms * iters, gflops);
+
     fprintf(stderr, "GFLOPS: %.4f  (avg %.4f ms)\n", gflops, r.avg_ms);
 
     // Verification: copy result back and check a sample of rows

@@ -107,9 +107,30 @@ kernel void histogram_kernel(
 int main(int argc, char* argv[])
 {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    uint32_t n    = (uint32_t)parseIntParam(argc, argv, "--n", 16 * 1024 * 1024);
-    int      iters = parseIntParam(argc, argv, "--iterations", 5);
+    // Default values from params.json
+    uint32_t n     = 16 * 1024 * 1024;
+    int      iters = 5;
+    int      num_bins = 256;
+    int      block_size = 256;
+
+    // Command-line args as fallback
+    n     = (uint32_t)parseIntParam(argc, argv, "--n", (int)n);
+    iters = parseIntParam(argc, argv, "--iterations", iters);
+    num_bins = parseIntParam(argc, argv, "--num_bins", num_bins);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+
+    // Env vars override
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_n");
+    if (env_val) n = (uint32_t)atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_num_bins");
+    if (env_val) num_bins = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
 
     size_t bytes_data = (size_t)n * sizeof(uint32_t);
     size_t bytes_hist = (size_t)NUM_BINS * sizeof(uint32_t);
@@ -255,8 +276,15 @@ int main(int argc, char* argv[])
     fprintf(stderr, "Timing:        avg %.4f ms  min %.4f ms  max %.4f ms  stddev %.4f ms\n",
             avg_ms, mn, mx, stddev);
 
-    // CSV output: histogram,<N>,<time_ms>,<GBs>
-    printf("histogram,%u,%.4f,%.2f\n", n, avg_ms, gbps);
+    // JSON-lines output
+    printf("{\"type\":\"kernel\",\"name\":\"histogram_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"n\":%u,\"iterations\":%d,\"num_bins\":%d,"
+           "\"block_size\":%d}}\n",
+           avg_ms, n, iters, num_bins, block_size);
+
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
+           sum_ms, gbps);
 
     return EXIT_SUCCESS;
 

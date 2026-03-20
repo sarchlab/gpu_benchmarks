@@ -79,9 +79,29 @@ static void sgemm_cpu(const float* A, const float* B, float* C,
 int main(int argc, char* argv[])
 {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    int N     = parseIntParam(argc, argv, "--size", 1024);
-    int iters = parseIntParam(argc, argv, "--iterations", 5);
+    // Default values from params.json
+    int N     = 1024;
+    int iters = 5;
+    int block_size = 256;
+    const char* precision = "float";
+
+    // Command-line args as fallback
+    N     = parseIntParam(argc, argv, "--size", N);
+    iters = parseIntParam(argc, argv, "--iterations", iters);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+
+    // Env vars override
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
 
     float alpha = 1.5f;
     float beta  = 1.2f;
@@ -225,8 +245,15 @@ int main(int argc, char* argv[])
     double gflops = 2.0 * (double)N * (double)N * (double)N
                     / (avg_ms * 1e-3) / 1e9;
 
-    // CSV output (stdout)
-    printf("parboil_sgemm,%d,%.4f\n", N, gflops);
+    // JSON-lines output
+    printf("{\"type\":\"kernel\",\"name\":\"sgemm_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_ms, N, iters, block_size, precision);
+
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
+           sum_t, gflops);
 
     // Human-readable stderr
     fprintf(stderr, "Performance: %.2f GFLOPS  (avg %.4f ms, min %.4f ms, max %.4f ms)\n",

@@ -3,17 +3,11 @@
 // Parallel sum reduction: reduces an array of floats to a single sum using
 // tree-based shared-memory reduction. Derived from the SHOC benchmark suite.
 //
-// Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
+// Parameters are read from BENCH_PARAM_* environment variables,
+// with command-line --flags as fallback.
 //
-// Usage:
-//   ./shoc_reduction [--size N] [--block_size B] [--iterations I]
-//
-//   --size N         Number of float elements (default: 4194304 = 4 M)
-//   --block_size B   GPU thread-block size    (default: 256)
-//   --iterations I   Timed iterations         (default: 20)
-//
-// Output (stdout): CSV row — kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-// Output (stderr): Effective bandwidth in GB/s (2 * N * sizeof(float) / time_sec), PASS/FAIL
+// Output (stdout): JSON-lines protocol
+// Output (stderr): Human-readable diagnostics
 
 #include <hip/hip_runtime.h>
 #include <cstdio>
@@ -38,30 +32,6 @@
         }                                                                      \
     } while (0)
 
-// Result record
-struct BenchResult {
-    const char* kernel_name;
-    const char* problem_size;
-    int         iterations;
-    double      avg_ms;
-    double      min_ms;
-    double      max_ms;
-    double      stddev_ms;
-};
-
-// Parse --iterations N from argv (default: 20)
-static int parseIterations(int argc, char** argv) {
-    int iters = 20;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
-
 // Parse --<name> N from argv (returns defaultVal if not found)
 static int parseIntParam(int argc, char** argv, const char* name,
                          int defaultVal) {
@@ -75,15 +45,14 @@ static int parseIntParam(int argc, char** argv, const char* name,
     return defaultVal;
 }
 
-// CSV output helpers
-static void printCSVHeader() {
-    printf("kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms\n");
-}
-
-static void printCSVRow(const BenchResult& r) {
-    printf("%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n",
-           r.kernel_name, r.problem_size, r.iterations,
-           r.avg_ms, r.min_ms, r.max_ms, r.stddev_ms);
+static const char* parseStrParam(int argc, char** argv, const char* name,
+                                 const char* defaultVal) {
+    for (int i = 1; i < argc - 1; ++i) {
+        if (strcmp(argv[i], name) == 0) {
+            return argv[i + 1];
+        }
+    }
+    return defaultVal;
 }
 
 // HIP-event-based timer
@@ -111,57 +80,8 @@ struct BenchmarkTimer {
     }
 };
 
-// runBenchmark: one warmup + N timed iterations, returns stats
-template <typename Func>
-static BenchResult runBenchmark(const char* kernel_name,
-                                const char* problem_size,
-                                int         iterations,
-                                Func        func) {
-    BenchmarkTimer timer;
-
-    // Warmup (not measured)
-    func();
-    HIP_CHECK(hipDeviceSynchronize());
-
-    std::vector<double> times(iterations);
-    for (int i = 0; i < iterations; ++i) {
-        timer.record_start();
-        func();
-        timer.record_stop();
-        times[i] = static_cast<double>(timer.elapsed_ms());
-    }
-
-    double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iterations; ++i) {
-        sum += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg = sum / iterations;
-
-    double variance = 0.0;
-    for (int i = 0; i < iterations; ++i) {
-        double d = times[i] - avg;
-        variance += d * d;
-    }
-    double stddev = (iterations > 1) ? sqrt(variance / (iterations - 1)) : 0.0;
-
-    BenchResult r;
-    r.kernel_name  = kernel_name;
-    r.problem_size = problem_size;
-    r.iterations   = iterations;
-    r.avg_ms       = avg;
-    r.min_ms       = mn;
-    r.max_ms       = mx;
-    r.stddev_ms    = stddev;
-    return r;
-}
-
 // ---------------------------------------------------------------------------
 // Reduction kernel — shared-memory tree reduction
-//
-// Each block reduces 2*blockDim.x elements to one partial sum.
-// The partial sums are written to output[blockIdx.x].
 // ---------------------------------------------------------------------------
 __global__ void reduce_kernel(const float* __restrict__ input,
                                float* __restrict__ output,
@@ -172,7 +92,6 @@ __global__ void reduce_kernel(const float* __restrict__ input,
     unsigned int tid = threadIdx.x;
     unsigned int i   = blockIdx.x * blockDim.x * 2 + threadIdx.x;
 
-    // Each thread loads and sums two elements (with bounds check)
     float val = 0.0f;
     if (i < (unsigned int)N)
         val = input[i];
@@ -181,7 +100,6 @@ __global__ void reduce_kernel(const float* __restrict__ input,
     sdata[tid] = val;
     __syncthreads();
 
-    // Tree reduction in shared memory
     for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
         if (tid < s) {
             sdata[tid] += sdata[tid + s];
@@ -189,17 +107,13 @@ __global__ void reduce_kernel(const float* __restrict__ input,
         __syncthreads();
     }
 
-    // Thread 0 writes the block's partial sum
     if (tid == 0) {
         output[blockIdx.x] = sdata[0];
     }
 }
 
 // ---------------------------------------------------------------------------
-// Two-pass (multi-level if needed) GPU reduction
-//
-// Reduces d_input[0..N-1] to a single float at d_result[0].
-// d_partial must be at least num_blocks floats in size.
+// Two-pass GPU reduction
 // ---------------------------------------------------------------------------
 static void gpu_reduce(const float* d_input, float* d_partial,
                        float* d_result, int N, int block_size)
@@ -208,26 +122,20 @@ static void gpu_reduce(const float* d_input, float* d_partial,
     int num_blocks      = (N + elems_per_block - 1) / elems_per_block;
     int shared_bytes    = block_size * sizeof(float);
 
-    // Pass 1: reduce input → partial sums (one per block)
     hipLaunchKernelGGL(reduce_kernel, dim3(num_blocks), dim3(block_size),
                        shared_bytes, 0,
                        d_input, d_partial, N);
 
     if (num_blocks == 1) {
-        // Already finished — copy d_partial[0] → d_result[0]
         HIP_CHECK(hipMemcpy(d_result, d_partial, sizeof(float),
                              hipMemcpyDeviceToDevice));
         return;
     }
 
-    // Pass 2 (and beyond if needed): keep reducing until one value remains
-    // For typical problem sizes num_blocks is a few thousand at most,
-    // so two passes are sufficient. Use recursive approach for generality.
     int remaining = num_blocks;
-    float* d_src  = d_partial;   // source for next pass
+    float* d_src  = d_partial;
     float* d_dst  = nullptr;
 
-    // Allocate a temporary buffer for intermediate passes
     float* d_temp = nullptr;
     bool   allocated_temp = false;
 
@@ -235,13 +143,11 @@ static void gpu_reduce(const float* d_input, float* d_partial,
         int next_blocks  = (remaining + elems_per_block - 1) / elems_per_block;
 
         if (next_blocks == 1) {
-            // Final pass writes to d_result
             hipLaunchKernelGGL(reduce_kernel, dim3(1), dim3(block_size),
                                shared_bytes, 0,
                                d_src, d_result, remaining);
             remaining = 1;
         } else {
-            // Intermediate pass — need a temp buffer
             if (!allocated_temp) {
                 HIP_CHECK(hipMalloc(&d_temp, next_blocks * sizeof(float)));
                 allocated_temp = true;
@@ -275,10 +181,33 @@ static double reduction_cpu(const float* data, int N) {
 // ---------------------------------------------------------------------------
 int main(int argc, char** argv)
 {
-    int N          = parseIntParam(argc, argv, "--size", 4194304);
-    int block_size = parseIntParam(argc, argv, "--block_size", 256);
-    int iters      = parseIterations(argc, argv);
+    setvbuf(stdout, NULL, _IONBF, 0);
 
+    // Defaults
+    int size       = 4194304;
+    int block_size = 256;
+    int iterations = 20;
+    const char* precision = "float";
+
+    // Command-line fallback
+    size       = parseIntParam(argc, argv, "--size", size);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+    precision  = parseStrParam(argc, argv, "--precision", precision);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
+
+    int N     = size;
+    int iters = iterations;
     size_t bytesIn = (size_t)N * sizeof(float);
 
     // Print device info
@@ -310,23 +239,47 @@ int main(int argc, char** argv)
 
     HIP_CHECK(hipMemcpy(d_input, h_input, bytesIn, hipMemcpyHostToDevice));
 
-    // Benchmark
-    char size_str[64];
-    snprintf(size_str, sizeof(size_str), "%d", N);
+    // Warmup
+    gpu_reduce(d_input, d_partial, d_result, N, block_size);
+    HIP_CHECK(hipDeviceSynchronize());
 
-    printCSVHeader();
-
-    BenchResult r = runBenchmark("reduction", size_str, iters, [&]() {
+    // Timed iterations
+    BenchmarkTimer timer;
+    std::vector<double> times(iters);
+    for (int i = 0; i < iters; ++i) {
+        timer.record_start();
         gpu_reduce(d_input, d_partial, d_result, N, block_size);
-    });
+        timer.record_stop();
+        times[i] = static_cast<double>(timer.elapsed_ms());
+    }
 
-    printCSVRow(r);
+    // Statistics
+    double sum_t = 0.0, mn = DBL_MAX, mx = 0.0;
+    for (int i = 0; i < iters; ++i) {
+        sum_t += times[i];
+        if (times[i] < mn) mn = times[i];
+        if (times[i] > mx) mx = times[i];
+    }
+    double avg_ms = sum_t / iters;
+    double total_ms = sum_t;
 
     // Effective bandwidth: 2 * N * sizeof(float) (read + result write)
     double bandwidth_gb = 2.0 * (double)N * sizeof(float)
-                          / (r.avg_ms * 1e-3) / 1e9;
+                          / (avg_ms * 1e-3) / 1e9;
+
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"reduce_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,\"iterations\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_ms, size, block_size, iterations, precision);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
+           total_ms, bandwidth_gb);
+
     fprintf(stderr, "Effective bandwidth: %.2f GB/s  (avg %.4f ms)\n",
-            bandwidth_gb, r.avg_ms);
+            bandwidth_gb, avg_ms);
 
     // Verify
     float gpu_result = 0.0f;

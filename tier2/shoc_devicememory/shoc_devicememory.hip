@@ -3,17 +3,11 @@
 // Device global memory bandwidth benchmark: read-only, write-only, and
 // read-write patterns.  Measures GB/s for each access pattern.
 //
-// Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
+// Parameters are read from BENCH_PARAM_* environment variables,
+// with command-line --flags as fallback.
 //
-// Usage:
-//   ./shoc_devicememory [--array_size_mb N] [--block_size B] [--iterations I]
-//
-//   --array_size_mb N  Array size in megabytes  (default: 64)
-//   --block_size B     Thread-block size        (default: 256)
-//   --iterations I     Timed iterations         (default: 20)
-//
-// Output (stdout): 3 CSV rows (readOnly, writeOnly, readWrite)
-// Output (stderr): bandwidth in GB/s for each pattern
+// Output (stdout): JSON-lines protocol
+// Output (stderr): Human-readable diagnostics
 
 #include <hip/hip_runtime.h>
 #include <cstdio>
@@ -37,28 +31,6 @@
         }                                                                      \
     } while (0)
 
-struct BenchResult {
-    const char* kernel_name;
-    const char* problem_size;
-    int         iterations;
-    double      avg_ms;
-    double      min_ms;
-    double      max_ms;
-    double      stddev_ms;
-};
-
-static int parseIterations(int argc, char** argv) {
-    int iters = 20;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
-
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], name) == 0) {
@@ -70,14 +42,14 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     return defaultVal;
 }
 
-static void printCSVHeader() {
-    printf("kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms\n");
-}
-
-static void printCSVRow(const BenchResult& r) {
-    printf("%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n",
-           r.kernel_name, r.problem_size, r.iterations,
-           r.avg_ms, r.min_ms, r.max_ms, r.stddev_ms);
+static const char* parseStrParam(int argc, char** argv, const char* name,
+                                 const char* defaultVal) {
+    for (int i = 1; i < argc - 1; ++i) {
+        if (strcmp(argv[i], name) == 0) {
+            return argv[i + 1];
+        }
+    }
+    return defaultVal;
 }
 
 struct BenchmarkTimer {
@@ -104,56 +76,10 @@ struct BenchmarkTimer {
     }
 };
 
-template <typename Func>
-static BenchResult runBenchmark(const char* kernel_name,
-                                const char* problem_size,
-                                int         iterations,
-                                Func        func) {
-    BenchmarkTimer timer;
-
-    // Warmup
-    func();
-    HIP_CHECK(hipDeviceSynchronize());
-
-    std::vector<double> times(iterations);
-    for (int i = 0; i < iterations; ++i) {
-        timer.record_start();
-        func();
-        timer.record_stop();
-        times[i] = static_cast<double>(timer.elapsed_ms());
-    }
-
-    double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iterations; ++i) {
-        sum += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg = sum / iterations;
-
-    double variance = 0.0;
-    for (int i = 0; i < iterations; ++i) {
-        double d = times[i] - avg;
-        variance += d * d;
-    }
-    double stddev = (iterations > 1) ? sqrt(variance / (iterations - 1)) : 0.0;
-
-    BenchResult r;
-    r.kernel_name  = kernel_name;
-    r.problem_size = problem_size;
-    r.iterations   = iterations;
-    r.avg_ms       = avg;
-    r.min_ms       = mn;
-    r.max_ms       = mx;
-    r.stddev_ms    = stddev;
-    return r;
-}
-
 // ---------------------------------------------------------------------------
 // Kernels
 // ---------------------------------------------------------------------------
 
-// Read-only: read elements from input, accumulate, write single result per thread
 __global__ void readOnly_kernel(const float* __restrict__ input,
                                 float* __restrict__ output,
                                 int N) {
@@ -164,13 +90,11 @@ __global__ void readOnly_kernel(const float* __restrict__ input,
     for (int i = gid; i < N; i += totalThreads) {
         sum += input[i];
     }
-    // Prevent dead-code elimination
     if (gid < N) {
         output[gid] = sum;
     }
 }
 
-// Write-only: write a value to each element (strided access pattern)
 __global__ void writeOnly_kernel(float* __restrict__ output,
                                  int N) {
     int gid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -181,7 +105,6 @@ __global__ void writeOnly_kernel(float* __restrict__ output,
     }
 }
 
-// Read-write: read + scale + write (triad-like, but with same array)
 __global__ void readWrite_kernel(float* __restrict__ data,
                                  int N) {
     int gid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -193,13 +116,69 @@ __global__ void readWrite_kernel(float* __restrict__ data,
 }
 
 // ---------------------------------------------------------------------------
+// Helper: run benchmark for one kernel
+// ---------------------------------------------------------------------------
+struct KernelResult {
+    double avg_ms;
+    double total_ms;
+};
+
+template <typename Func>
+static KernelResult benchKernel(int iters, Func func) {
+    BenchmarkTimer timer;
+
+    // Warmup
+    func();
+    HIP_CHECK(hipDeviceSynchronize());
+
+    std::vector<double> times(iters);
+    for (int i = 0; i < iters; ++i) {
+        timer.record_start();
+        func();
+        timer.record_stop();
+        times[i] = static_cast<double>(timer.elapsed_ms());
+    }
+
+    double sum = 0.0;
+    for (int i = 0; i < iters; ++i) sum += times[i];
+    double avg = sum / iters;
+
+    KernelResult r;
+    r.avg_ms = avg;
+    r.total_ms = sum;
+    return r;
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 int main(int argc, char** argv) {
-    int array_size_mb = parseIntParam(argc, argv, "--array_size_mb", 64);
-    int block_size    = parseIntParam(argc, argv, "--block_size", 256);
-    int iters         = parseIterations(argc, argv);
+    setvbuf(stdout, NULL, _IONBF, 0);
 
+    // Defaults
+    int array_size_mb = 64;
+    int block_size    = 256;
+    int iterations    = 20;
+    const char* transfer_mode = "readwrite";
+
+    // Command-line fallback
+    array_size_mb = parseIntParam(argc, argv, "--array_size_mb", array_size_mb);
+    block_size    = parseIntParam(argc, argv, "--block_size", block_size);
+    iterations    = parseIntParam(argc, argv, "--iterations", iterations);
+    transfer_mode = parseStrParam(argc, argv, "--transfer_mode", transfer_mode);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_array_size_mb");
+    if (env_val) array_size_mb = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_transfer_mode");
+    if (env_val) transfer_mode = env_val;
+
+    int iters = iterations;
     size_t N     = (size_t)array_size_mb * 1024 * 1024 / sizeof(float);
     size_t bytes = N * sizeof(float);
 
@@ -224,49 +203,78 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(d_input, h_init, bytes, hipMemcpyHostToDevice));
     free(h_init);
 
-    // Grid size: cap to avoid excessive launch overhead
     int num_blocks = (int)((N + block_size - 1) / block_size);
     if (num_blocks > 65535) num_blocks = 65535;
 
-    char size_str[64];
-    snprintf(size_str, sizeof(size_str), "%dMB", array_size_mb);
+    double total_all_ms = 0.0;
 
-    printCSVHeader();
+    // Determine which kernels to run based on transfer_mode
+    bool run_read  = (strcmp(transfer_mode, "read") == 0 || strcmp(transfer_mode, "readwrite") == 0);
+    bool run_write = (strcmp(transfer_mode, "write") == 0 || strcmp(transfer_mode, "readwrite") == 0);
+    bool run_rw    = (strcmp(transfer_mode, "readwrite") == 0);
 
     // --- Read-only bandwidth ---
-    BenchResult r_read = runBenchmark("DeviceMemory_Read", size_str, iters, [&]() {
-        hipLaunchKernelGGL(readOnly_kernel, dim3(num_blocks), dim3(block_size),
-                           0, 0, d_input, d_output, (int)N);
-    });
-    printCSVRow(r_read);
-    double read_bw = (double)bytes / (r_read.avg_ms * 1e-3) / 1e9;
-    fprintf(stderr, "Read-only bandwidth:  %.2f GB/s  (%d MB)\n", read_bw, array_size_mb);
+    if (run_read || strcmp(transfer_mode, "readwrite") == 0) {
+        KernelResult kr = benchKernel(iters, [&]() {
+            hipLaunchKernelGGL(readOnly_kernel, dim3(num_blocks), dim3(block_size),
+                               0, 0, d_input, d_output, (int)N);
+        });
+        double read_bw = (double)bytes / (kr.avg_ms * 1e-3) / 1e9;
+        total_all_ms += kr.total_ms;
+
+        printf("{\"type\":\"kernel\",\"name\":\"readOnly_kernel\",\"time_ms\":%.6f,"
+               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d,\"iterations\":%d,"
+               "\"transfer_mode\":\"%s\"}}\n",
+               kr.avg_ms, array_size_mb, block_size, iterations, transfer_mode);
+
+        fprintf(stderr, "Read-only bandwidth:  %.2f GB/s  (%d MB)\n", read_bw, array_size_mb);
+    }
 
     // --- Write-only bandwidth ---
-    BenchResult r_write = runBenchmark("DeviceMemory_Write", size_str, iters, [&]() {
-        hipLaunchKernelGGL(writeOnly_kernel, dim3(num_blocks), dim3(block_size),
-                           0, 0, d_output, (int)N);
-    });
-    printCSVRow(r_write);
-    double write_bw = (double)bytes / (r_write.avg_ms * 1e-3) / 1e9;
-    fprintf(stderr, "Write-only bandwidth: %.2f GB/s  (%d MB)\n", write_bw, array_size_mb);
+    if (run_write || strcmp(transfer_mode, "readwrite") == 0) {
+        KernelResult kr = benchKernel(iters, [&]() {
+            hipLaunchKernelGGL(writeOnly_kernel, dim3(num_blocks), dim3(block_size),
+                               0, 0, d_output, (int)N);
+        });
+        double write_bw = (double)bytes / (kr.avg_ms * 1e-3) / 1e9;
+        total_all_ms += kr.total_ms;
+
+        printf("{\"type\":\"kernel\",\"name\":\"writeOnly_kernel\",\"time_ms\":%.6f,"
+               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d,\"iterations\":%d,"
+               "\"transfer_mode\":\"%s\"}}\n",
+               kr.avg_ms, array_size_mb, block_size, iterations, transfer_mode);
+
+        fprintf(stderr, "Write-only bandwidth: %.2f GB/s  (%d MB)\n", write_bw, array_size_mb);
+    }
 
     // --- Read-write bandwidth ---
-    // Re-initialize d_input before read-write test
-    {
-        float* h_rw = (float*)malloc(bytes);
-        for (size_t i = 0; i < N; ++i) h_rw[i] = (float)(i % 1000) * 0.001f;
-        HIP_CHECK(hipMemcpy(d_input, h_rw, bytes, hipMemcpyHostToDevice));
-        free(h_rw);
+    if (run_rw || strcmp(transfer_mode, "readwrite") == 0) {
+        // Re-initialize d_input
+        {
+            float* h_rw = (float*)malloc(bytes);
+            for (size_t i = 0; i < N; ++i) h_rw[i] = (float)(i % 1000) * 0.001f;
+            HIP_CHECK(hipMemcpy(d_input, h_rw, bytes, hipMemcpyHostToDevice));
+            free(h_rw);
+        }
+        KernelResult kr = benchKernel(iters, [&]() {
+            hipLaunchKernelGGL(readWrite_kernel, dim3(num_blocks), dim3(block_size),
+                               0, 0, d_input, (int)N);
+        });
+        double rw_bw = 2.0 * (double)bytes / (kr.avg_ms * 1e-3) / 1e9;
+        total_all_ms += kr.total_ms;
+
+        printf("{\"type\":\"kernel\",\"name\":\"readWrite_kernel\",\"time_ms\":%.6f,"
+               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d,\"iterations\":%d,"
+               "\"transfer_mode\":\"%s\"}}\n",
+               kr.avg_ms, array_size_mb, block_size, iterations, transfer_mode);
+
+        fprintf(stderr, "Read-write bandwidth: %.2f GB/s  (%d MB)\n", rw_bw, array_size_mb);
     }
-    BenchResult r_rw = runBenchmark("DeviceMemory_ReadWrite", size_str, iters, [&]() {
-        hipLaunchKernelGGL(readWrite_kernel, dim3(num_blocks), dim3(block_size),
-                           0, 0, d_input, (int)N);
-    });
-    printCSVRow(r_rw);
-    // Read-write moves 2× the array (1 read + 1 write)
-    double rw_bw = 2.0 * (double)bytes / (r_rw.avg_ms * 1e-3) / 1e9;
-    fprintf(stderr, "Read-write bandwidth: %.2f GB/s  (%d MB)\n", rw_bw, array_size_mb);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[]}\n",
+           total_all_ms);
 
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_output));

@@ -1,21 +1,13 @@
 // shoc_sort.hip — SHOC Sort benchmark (HIP, self-contained)
 //
 // Bitonic sort on a large array of random unsigned integers.
-// N = 1<<22 (4M elements) by default.
+// O(n log^2 n) compare-and-swap network.
 //
-// Algorithm: bitonic sort — O(n log^2 n) compare-and-swap network.
-// Each GPU kernel pass performs one compare-and-swap step.
+// Parameters are read from BENCH_PARAM_* environment variables,
+// with command-line --flags as fallback.
 //
-// Compiles with hipcc (AMD ROCm) or nvcc (CUDA via HIP compat layer).
-//
-// Usage:
-//   ./shoc_sort [--size N] [--iterations I]
-//
-//   --size N         Number of elements (must be power of 2, default: 4194304)
-//   --iterations I   Timed iterations (default: 5)
-//
-// Output (stdout): CSV — shoc_sort,<N>,<Melements/s>
-// Output (stderr): device info, timing details
+// Output (stdout): JSON-lines protocol
+// Output (stderr): Human-readable diagnostics
 
 #include <hip/hip_runtime.h>
 #include <cstdio>
@@ -27,7 +19,7 @@
 #include <algorithm>
 
 // ---------------------------------------------------------------------------
-// Inlined HIP utilities (no shared headers)
+// Inlined HIP utilities
 // ---------------------------------------------------------------------------
 
 #define HIP_CHECK(cmd)                                                         \
@@ -40,24 +32,22 @@
         }                                                                      \
     } while (0)
 
-static int parseIterations(int argc, char** argv) {
-    int iters = 5;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
-
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], name) == 0) {
             int v = atoi(argv[i + 1]);
             if (v > 0) return v;
             break;
+        }
+    }
+    return defaultVal;
+}
+
+static const char* parseStrParam(int argc, char** argv, const char* name,
+                                 const char* defaultVal) {
+    for (int i = 1; i < argc - 1; ++i) {
+        if (strcmp(argv[i], name) == 0) {
+            return argv[i + 1];
         }
     }
     return defaultVal;
@@ -89,18 +79,12 @@ struct BenchmarkTimer {
 
 // ---------------------------------------------------------------------------
 // Bitonic sort kernel
-// Each thread performs one compare-and-swap in the bitonic network.
-// Parameters:
-//   data  — array to sort (in-place)
-//   j     — current sub-step distance
-//   k     — current stage size (power of 2)
 // ---------------------------------------------------------------------------
 __global__ void bitonic_step(unsigned int* data, int j, int k) {
     int i = (int)(threadIdx.x + blockIdx.x * blockDim.x);
     int ixj = i ^ j;
 
     if (ixj > i) {
-        // Determine sort direction: ascending when (i & k) == 0
         bool ascending = ((i & k) == 0);
         unsigned int a = data[i];
         unsigned int b = data[ixj];
@@ -113,8 +97,6 @@ __global__ void bitonic_step(unsigned int* data, int j, int k) {
 
 // ---------------------------------------------------------------------------
 // GPU bitonic sort driver
-// Launches O(log^2 N) kernel passes.
-// N must be a power of 2.
 // ---------------------------------------------------------------------------
 static void bitonic_sort_gpu(unsigned int* d_data, int N, int block_size) {
     int grid = (N + block_size - 1) / block_size;
@@ -128,7 +110,7 @@ static void bitonic_sort_gpu(unsigned int* d_data, int N, int block_size) {
 }
 
 // ---------------------------------------------------------------------------
-// Verify: check array is sorted
+// Verify
 // ---------------------------------------------------------------------------
 static bool verify_sorted(const unsigned int* arr, int N) {
     for (int i = 1; i < N; ++i) {
@@ -145,8 +127,33 @@ static bool verify_sorted(const unsigned int* arr, int N) {
 // Main
 // ---------------------------------------------------------------------------
 int main(int argc, char** argv) {
-    int N     = parseIntParam(argc, argv, "--size", 1 << 22); // 4M default
-    int iters = parseIterations(argc, argv);
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Defaults
+    int size       = 1 << 22; // 4M
+    int iterations = 5;
+    int block_size = 256;
+    const char* precision = "uint";
+
+    // Command-line fallback
+    size       = parseIntParam(argc, argv, "--size", size);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+    precision  = parseStrParam(argc, argv, "--precision", precision);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
+
+    int N     = size;
+    int iters = iterations;
 
     // Round N up to next power of 2
     {
@@ -158,7 +165,6 @@ int main(int argc, char** argv) {
         }
     }
 
-    const int BLOCK_SIZE = 256;
     size_t bytes = (size_t)N * sizeof(unsigned int);
 
     // Print device info
@@ -189,17 +195,16 @@ int main(int argc, char** argv) {
 
     BenchmarkTimer timer;
 
-    // Warmup (not measured)
+    // Warmup
     HIP_CHECK(hipMemcpy(d_data, h_orig, bytes, hipMemcpyHostToDevice));
-    bitonic_sort_gpu(d_data, N, BLOCK_SIZE);
+    bitonic_sort_gpu(d_data, N, block_size);
 
     // Timed iterations
     std::vector<double> times(iters);
     for (int i = 0; i < iters; ++i) {
-        // Fresh input each iteration
         HIP_CHECK(hipMemcpy(d_data, h_orig, bytes, hipMemcpyHostToDevice));
         timer.record_start();
-        bitonic_sort_gpu(d_data, N, BLOCK_SIZE);
+        bitonic_sort_gpu(d_data, N, block_size);
         timer.record_stop();
         times[i] = static_cast<double>(timer.elapsed_ms());
         fprintf(stderr, "  Iter %d: %.4f ms\n", i + 1, times[i]);
@@ -213,19 +218,14 @@ int main(int argc, char** argv) {
         if (times[i] > mx) mx = times[i];
     }
     double avg_ms = sum_ms / iters;
-    double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
-        double d = times[i] - avg_ms;
-        variance += d * d;
-    }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
+    double total_ms = sum_ms;
 
     double melems_per_sec = (double)N / (avg_ms * 1e-3) / 1e6;
 
-    fprintf(stderr, "Throughput: %.2f Melements/s  (avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
-            melems_per_sec, avg_ms, mn, mx, stddev);
+    fprintf(stderr, "Throughput: %.2f Melements/s  (avg %.4f ms, min %.4f ms, max %.4f ms)\n",
+            melems_per_sec, avg_ms, mn, mx);
 
-    // Correctness check (last iteration result still in d_data)
+    // Correctness check
     HIP_CHECK(hipMemcpy(h_data, d_data, bytes, hipMemcpyDeviceToHost));
     if (verify_sorted(h_data, N)) {
         fprintf(stderr, "Correctness: PASS\n");
@@ -233,8 +233,16 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Correctness: FAIL\n");
     }
 
-    // CSV output: shoc_sort,<N>,<Melements/s>
-    printf("shoc_sort,%d,%.2f\n", N, melems_per_sec);
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"bitonic_step\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_ms, size, iterations, block_size, precision);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"melements_per_sec\",\"value\":%.2f}]}\n",
+           total_ms, melems_per_sec);
 
     // Cleanup
     HIP_CHECK(hipFree(d_data));

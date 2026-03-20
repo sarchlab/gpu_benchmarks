@@ -7,24 +7,11 @@
  * The Metal compute kernel lives in shoc_reduction.metal and is compiled at
  * runtime from source (loaded from the same directory as the binary).
  *
- * Two-pass strategy:
- *   Pass 1: reduce_kernel dispatched over the full input array
- *           → partial_sums[0..num_groups-1]
- *   Pass 2: reduce_kernel dispatched over partial_sums
- *           → result[0]  (if partial array is still large)
- *   Repeat Pass 2 until a single value remains.
+ * Parameters are read from BENCH_PARAM_* environment variables,
+ * with command-line --flags as fallback.
  *
- * Usage:
- *   ./shoc_reduction [--size N] [--iterations I]
- *
- *   --size N         Number of float elements (default: 4194304 = 4 M)
- *   --iterations I   Timed kernel launches   (default: 20)
- *
- * Output (stdout): CSV — kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
- * Output (stderr): Effective bandwidth in GB/s (2*N*sizeof(float)/time), PASS/FAIL
- *
- * Build:
- *   make PLATFORM=metal
+ * Output (stdout): JSON-lines protocol
+ * Output (stderr): Human-readable diagnostics
  */
 
 #import <Foundation/Foundation.h>
@@ -60,18 +47,6 @@ static double ticks_to_ms(uint64_t ticks)
 // Argument parsing
 // ---------------------------------------------------------------------------
 
-static int parseIterations(int argc, char** argv) {
-    int iters = 20;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
-
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], name) == 0) {
@@ -83,35 +58,18 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     return defaultVal;
 }
 
-// ---------------------------------------------------------------------------
-// CSV output
-// ---------------------------------------------------------------------------
-
-struct BenchResult {
-    const char* kernel_name;
-    const char* problem_size;
-    int         iterations;
-    double      avg_ms;
-    double      min_ms;
-    double      max_ms;
-    double      stddev_ms;
-};
-
-static void printCSVHeader() {
-    printf("kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms\n");
-}
-
-static void printCSVRow(const BenchResult& r) {
-    printf("%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n",
-           r.kernel_name, r.problem_size, r.iterations,
-           r.avg_ms, r.min_ms, r.max_ms, r.stddev_ms);
+static const char* parseStrParam(int argc, char** argv, const char* name,
+                                 const char* defaultVal) {
+    for (int i = 1; i < argc - 1; ++i) {
+        if (strcmp(argv[i], name) == 0) {
+            return argv[i + 1];
+        }
+    }
+    return defaultVal;
 }
 
 // ---------------------------------------------------------------------------
 // Reduction dispatch helper
-//
-// Runs multi-pass reduction until a single value remains in d_result[0].
-// Returns via the provided staging buffer (read back by caller).
 // ---------------------------------------------------------------------------
 
 static id<MTLBuffer> dispatch_reduction(
@@ -119,17 +77,13 @@ static id<MTLBuffer> dispatch_reduction(
     id<MTLComputePipelineState>  pso,
     NSUInteger                   tg_size,
     id<MTLBuffer>                buf_input,
-    NSUInteger                   N_input,        // elements in buf_input
-    id<MTLBuffer>                buf_scratch1,   // pre-allocated, size >= ceil(N_input / (2*tg_size))
-    id<MTLBuffer>                buf_scratch2)   // pre-allocated, size >= ceil(scratch1 / (2*tg_size))
+    NSUInteger                   N_input,
+    id<MTLBuffer>                buf_scratch1,
+    id<MTLBuffer>                buf_scratch2)
 {
-    // We perform successive passes until one element remains.
-    // buf_src  → buf_dst, then swap if another pass is needed.
-
     id<MTLBuffer> buf_src = buf_input;
     NSUInteger    n_src   = N_input;
 
-    // ping-pong between scratch1 and scratch2
     id<MTLBuffer> scratch[2] = { buf_scratch1, buf_scratch2 };
     int scratch_idx = 0;
 
@@ -138,7 +92,6 @@ static id<MTLBuffer> dispatch_reduction(
         id<MTLBuffer> buf_dst = scratch[scratch_idx & 1];
         scratch_idx++;
 
-        // Encode one reduction pass
         id<MTLCommandBuffer>       cb  = [queue commandBuffer];
         id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
         [enc setComputePipelineState:pso];
@@ -146,7 +99,6 @@ static id<MTLBuffer> dispatch_reduction(
         [enc setBuffer:buf_dst  offset:0 atIndex:1];
         uint32_t n32 = (uint32_t)n_src;
         [enc setBytes:&n32 length:sizeof(n32) atIndex:2];
-        // threadgroup memory: tg_size floats
         [enc setThreadgroupMemoryLength:tg_size * sizeof(float) atIndex:0];
         [enc dispatchThreadgroups:MTLSizeMake(num_groups, 1, 1)
            threadsPerThreadgroup:MTLSizeMake(tg_size, 1, 1)];
@@ -158,7 +110,7 @@ static id<MTLBuffer> dispatch_reduction(
         n_src   = num_groups;
     }
 
-    return buf_src;   // points to the buffer containing result[0]
+    return buf_src;
 }
 
 // ---------------------------------------------------------------------------
@@ -169,9 +121,33 @@ int main(int argc, char* argv[])
 {
     @autoreleasepool {
 
-    int N     = parseIntParam(argc, argv, "--size", 4194304);
-    int iters = parseIterations(argc, argv);
+    setvbuf(stdout, NULL, _IONBF, 0);
 
+    // Defaults
+    int size       = 4194304;
+    int block_size = 256;
+    int iterations = 20;
+    const char* precision = "float";
+
+    // Command-line fallback
+    size       = parseIntParam(argc, argv, "--size", size);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+    precision  = parseStrParam(argc, argv, "--precision", precision);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
+
+    int N     = size;
+    int iters = iterations;
     size_t bytes = (size_t)N * sizeof(float);
 
     // -------------------------------------------------------------------
@@ -229,15 +205,11 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    // Choose threadgroup size (cap at 256 for broad compatibility)
     NSUInteger tg_size = pso.maxTotalThreadsPerThreadgroup;
     if (tg_size > 256) tg_size = 256;
 
     // -------------------------------------------------------------------
     // Allocate buffers
-    //   buf_input   — input array (shared, CPU fills once)
-    //   buf_s1, s2  — ping-pong scratch buffers for multi-pass reduction
-    // The largest scratch needed is ceil(N / (2*tg_size)) per pass.
     // -------------------------------------------------------------------
     NSUInteger num_groups1 = ((NSUInteger)N + tg_size * 2 - 1) / (tg_size * 2);
     NSUInteger num_groups2 = (num_groups1 + tg_size * 2 - 1) / (tg_size * 2);
@@ -250,7 +222,6 @@ int main(int argc, char* argv[])
     id<MTLBuffer> buf_s2    = [device newBufferWithLength:(num_groups2 < 1 ? 1 : num_groups2) * sizeof(float)
                                                   options:MTLResourceStorageModeShared];
 
-    // Initialize input with known pattern (same as HIP version)
     float* h_input = (float*)buf_input.contents;
     for (int i = 0; i < N; ++i) {
         h_input[i] = (float)(i % 1000) * 0.001f;
@@ -283,37 +254,29 @@ int main(int argc, char* argv[])
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg = sum_t / iters;
-    double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
-        double d = times[i] - avg;
-        variance += d * d;
-    }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
+    double avg_ms = sum_t / iters;
+    double total_ms = sum_t;
 
-    char size_str[64];
-    snprintf(size_str, sizeof(size_str), "%d", N);
-
-    BenchResult r;
-    r.kernel_name  = "reduction";
-    r.problem_size = size_str;
-    r.iterations   = iters;
-    r.avg_ms       = avg;
-    r.min_ms       = mn;
-    r.max_ms       = mx;
-    r.stddev_ms    = stddev;
-
-    printCSVHeader();
-    printCSVRow(r);
-
-    // Effective bandwidth: 2 * N * sizeof(float) (read input + write result)
+    // Effective bandwidth
     double bandwidth_gb = 2.0 * (double)N * sizeof(float)
-                          / (r.avg_ms * 1e-3) / 1e9;
+                          / (avg_ms * 1e-3) / 1e9;
+
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"reduce_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,\"iterations\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_ms, size, block_size, iterations, precision);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
+           total_ms, bandwidth_gb);
+
     fprintf(stderr, "Effective bandwidth: %.2f GB/s  (avg %.4f ms)\n",
-            bandwidth_gb, r.avg_ms);
+            bandwidth_gb, avg_ms);
 
     // -------------------------------------------------------------------
-    // Verification — compare GPU result with CPU reference
+    // Verification
     // -------------------------------------------------------------------
     float gpu_result = *((const float*)buf_result.contents);
 

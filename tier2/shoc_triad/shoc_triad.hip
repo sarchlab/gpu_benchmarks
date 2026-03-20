@@ -5,15 +5,11 @@
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
-// Usage:
-//   ./shoc_triad [--array_size N] [--block_size B] [--iterations I]
+// Parameters are read from BENCH_PARAM_* environment variables,
+// with command-line --flags as fallback.
 //
-//   --array_size N   Number of float elements (default: 4194304 = 4M)
-//   --block_size B   GPU thread-block size     (default: 256)
-//   --iterations I   Timed iterations          (default: 20)
-//
-// Output (stdout): CSV row — kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-// Output (stderr): Effective bandwidth in GB/s, verification PASS/FAIL
+// Output (stdout): JSON-lines protocol
+// Output (stderr): Human-readable diagnostics
 
 #include <hip/hip_runtime.h>
 #include <cstdio>
@@ -38,30 +34,6 @@
         }                                                                      \
     } while (0)
 
-// Result record
-struct BenchResult {
-    const char* kernel_name;
-    const char* problem_size;
-    int         iterations;
-    double      avg_ms;
-    double      min_ms;
-    double      max_ms;
-    double      stddev_ms;
-};
-
-// Parse --iterations N from argv (default: 20)
-static int parseIterations(int argc, char** argv) {
-    int iters = 20;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
-
 // Parse --<name> N from argv (returns defaultVal if not found)
 static int parseIntParam(int argc, char** argv, const char* name,
                          int defaultVal) {
@@ -75,15 +47,14 @@ static int parseIntParam(int argc, char** argv, const char* name,
     return defaultVal;
 }
 
-// CSV output helpers
-static void printCSVHeader() {
-    printf("kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms\n");
-}
-
-static void printCSVRow(const BenchResult& r) {
-    printf("%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n",
-           r.kernel_name, r.problem_size, r.iterations,
-           r.avg_ms, r.min_ms, r.max_ms, r.stddev_ms);
+static const char* parseStrParam(int argc, char** argv, const char* name,
+                                 const char* defaultVal) {
+    for (int i = 1; i < argc - 1; ++i) {
+        if (strcmp(argv[i], name) == 0) {
+            return argv[i + 1];
+        }
+    }
+    return defaultVal;
 }
 
 // HIP-event-based timer
@@ -110,52 +81,6 @@ struct BenchmarkTimer {
         return ms;
     }
 };
-
-// runBenchmark: one warmup + N timed iterations, returns stats
-template <typename Func>
-static BenchResult runBenchmark(const char* kernel_name,
-                                const char* problem_size,
-                                int         iterations,
-                                Func        func) {
-    BenchmarkTimer timer;
-
-    // Warmup (not measured)
-    func();
-    HIP_CHECK(hipDeviceSynchronize());
-
-    std::vector<double> times(iterations);
-    for (int i = 0; i < iterations; ++i) {
-        timer.record_start();
-        func();
-        timer.record_stop();
-        times[i] = static_cast<double>(timer.elapsed_ms());
-    }
-
-    double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iterations; ++i) {
-        sum += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg = sum / iterations;
-
-    double variance = 0.0;
-    for (int i = 0; i < iterations; ++i) {
-        double d = times[i] - avg;
-        variance += d * d;
-    }
-    double stddev = (iterations > 1) ? sqrt(variance / (iterations - 1)) : 0.0;
-
-    BenchResult r;
-    r.kernel_name  = kernel_name;
-    r.problem_size = problem_size;
-    r.iterations   = iterations;
-    r.avg_ms       = avg;
-    r.min_ms       = mn;
-    r.max_ms       = mx;
-    r.stddev_ms    = stddev;
-    return r;
-}
 
 // ---------------------------------------------------------------------------
 // Triad kernel: a[i] = b[i] + scalar * c[i]
@@ -184,10 +109,33 @@ static void triad_cpu(float* a, const float* b, const float* c,
 // Main
 // ---------------------------------------------------------------------------
 int main(int argc, char** argv) {
-    int N          = parseIntParam(argc, argv, "--array_size", 4194304);
-    int block_size = parseIntParam(argc, argv, "--block_size", 256);
-    int iters      = parseIterations(argc, argv);
+    setvbuf(stdout, NULL, _IONBF, 0);
 
+    // Defaults
+    int array_size  = 4194304;
+    int block_size  = 256;
+    int iterations  = 20;
+    const char* precision = "float";
+
+    // Command-line fallback
+    array_size = parseIntParam(argc, argv, "--array_size", array_size);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+    precision  = parseStrParam(argc, argv, "--precision", precision);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_array_size");
+    if (env_val) array_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
+
+    int N = array_size;
+    int iters = iterations;
     size_t bytes  = (size_t)N * sizeof(float);
     float  scalar = 1.75f;
 
@@ -224,24 +172,49 @@ int main(int argc, char** argv) {
 
     int grid = (N + block_size - 1) / block_size;
 
-    // Benchmark
-    char size_str[64];
-    snprintf(size_str, sizeof(size_str), "%d", N);
+    // Warmup
+    hipLaunchKernelGGL(triad_kernel, dim3(grid), dim3(block_size),
+                       0, 0, d_a, d_b, d_c, scalar, N);
+    HIP_CHECK(hipDeviceSynchronize());
 
-    printCSVHeader();
-
-    BenchResult r = runBenchmark("triad", size_str, iters, [&]() {
+    // Timed iterations
+    BenchmarkTimer timer;
+    std::vector<double> times(iters);
+    for (int i = 0; i < iters; ++i) {
+        timer.record_start();
         hipLaunchKernelGGL(triad_kernel, dim3(grid), dim3(block_size),
                            0, 0, d_a, d_b, d_c, scalar, N);
-    });
+        timer.record_stop();
+        times[i] = static_cast<double>(timer.elapsed_ms());
+    }
 
-    printCSVRow(r);
+    // Statistics
+    double sum = 0.0, mn = DBL_MAX, mx = 0.0;
+    for (int i = 0; i < iters; ++i) {
+        sum += times[i];
+        if (times[i] < mn) mn = times[i];
+        if (times[i] > mx) mx = times[i];
+    }
+    double avg_ms = sum / iters;
 
     // Effective bandwidth: 2 reads (b, c) + 1 write (a) = 3 * N * sizeof(float)
     double bandwidth_gb = 3.0 * (double)N * sizeof(float)
-                          / (r.avg_ms * 1e-3) / 1e9;
+                          / (avg_ms * 1e-3) / 1e9;
+    double total_ms = sum;
+
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"triad_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"array_size\":%d,\"block_size\":%d,\"iterations\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_ms, array_size, block_size, iterations, precision);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
+           total_ms, bandwidth_gb);
+
     fprintf(stderr, "Effective bandwidth: %.2f GB/s  (avg %.4f ms)\n",
-            bandwidth_gb, r.avg_ms);
+            bandwidth_gb, avg_ms);
 
     // Verify correctness
     HIP_CHECK(hipMemcpy(h_a, d_a, bytes, hipMemcpyDeviceToHost));

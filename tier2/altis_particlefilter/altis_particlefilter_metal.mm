@@ -166,9 +166,30 @@ static inline unsigned int lcg_rand(unsigned int* state) {
 
 int main(int argc, char* argv[]) {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    int N     = parseIntParam(argc, argv, "--size", 100000);
-    int iters = parseIntParam(argc, argv, "--iterations", 5);
+    // Defaults from params.json
+    int N          = 100000;
+    int iterations = 5;
+    const char* num_particles_ratio = "0.5";
+    int seed_param = 42;
+
+    // Command-line fallback
+    N          = parseIntParam(argc, argv, "--size", N);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_num_particles_ratio");
+    if (env_val) num_particles_ratio = env_val;
+    env_val = getenv("BENCH_PARAM_seed");
+    if (env_val) seed_param = atoi(env_val);
+
+    int iters = iterations;
 
     // -------------------------------------------------------------------
     // Metal device setup
@@ -436,7 +457,38 @@ int main(int argc, char* argv[]) {
 
     double particles_per_sec = (double)N * TIME_STEPS / (avg_ms * 1e-3);
 
-    printf("altis_particlefilter,%d,%.4f,%.4f\n", N, avg_ms, particles_per_sec);
+    double total_ms = sum;
+
+    // JSON-lines kernel events (one per kernel)
+    printf("{\"type\":\"kernel\",\"name\":\"update_particles_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,"
+           "\"num_particles_ratio\":\"%s\",\"seed\":%d}}\n",
+           avg_ms, N, iterations, num_particles_ratio, seed_param);
+
+    printf("{\"type\":\"kernel\",\"name\":\"compute_weights_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,"
+           "\"num_particles_ratio\":\"%s\",\"seed\":%d}}\n",
+           avg_ms, N, iterations, num_particles_ratio, seed_param);
+
+    printf("{\"type\":\"kernel\",\"name\":\"prefix_sum_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,"
+           "\"num_particles_ratio\":\"%s\",\"seed\":%d}}\n",
+           avg_ms, N, iterations, num_particles_ratio, seed_param);
+
+    printf("{\"type\":\"kernel\",\"name\":\"add_block_sums_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,"
+           "\"num_particles_ratio\":\"%s\",\"seed\":%d}}\n",
+           avg_ms, N, iterations, num_particles_ratio, seed_param);
+
+    printf("{\"type\":\"kernel\",\"name\":\"resample_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,"
+           "\"num_particles_ratio\":\"%s\",\"seed\":%d}}\n",
+           avg_ms, N, iterations, num_particles_ratio, seed_param);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"particles_per_sec\",\"value\":%.2f}]}\n",
+           total_ms, particles_per_sec);
 
     fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
     fprintf(stderr, "Throughput:   %.4f particles/sec\n", particles_per_sec);

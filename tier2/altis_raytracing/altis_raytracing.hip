@@ -285,10 +285,32 @@ static void cpu_raytrace_pixel(
 // ---------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
-    int W     = parseIntParam(argc, argv, "--width", 1024);
-    int H     = parseIntParam(argc, argv, "--height", 1024);
-    int nSph  = parseIntParam(argc, argv, "--spheres", 64);
-    int iters = parseIntParam(argc, argv, "--iterations", 5);
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Defaults from params.json
+    int W          = 1024;
+    int H          = 1024;
+    int nSph       = 64;
+    int iterations = 5;
+
+    // Command-line fallback
+    W          = parseIntParam(argc, argv, "--width", W);
+    H          = parseIntParam(argc, argv, "--height", H);
+    nSph       = parseIntParam(argc, argv, "--spheres", nSph);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_width");
+    if (env_val) W = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_height");
+    if (env_val) H = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_spheres");
+    if (env_val) nSph = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+
+    int iters = iterations;
 
     int total_pixels = W * H;
     size_t image_bytes  = (size_t)total_pixels * 4;
@@ -380,8 +402,18 @@ int main(int argc, char** argv) {
     // Mrays/sec = W * H / time_s / 1e6
     double mrays = (double)(W * H) / (avg_ms * 1e-3) / 1e6;
 
-    // CSV output to stdout
-    printf("altis_raytracing,%dx%d,%.4f,%.4f\n", W, H, avg_ms, mrays);
+    double total_ms = sum;
+
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"raytrace_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"width\":%d,\"height\":%d,\"spheres\":%d,"
+           "\"iterations\":%d}}\n",
+           avg_ms, W, H, nSph, iterations);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"mrays_per_sec\",\"value\":%.2f}]}\n",
+           total_ms, mrays);
 
     // Human-readable output to stderr
     fprintf(stderr, "Average time: %.4f ms\n", avg_ms);

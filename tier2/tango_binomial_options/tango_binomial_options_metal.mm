@@ -117,10 +117,31 @@ static float randRange(unsigned& seed, float lo, float hi) {
 
 int main(int argc, char* argv[]) {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    int numOptions = parseIntParam(argc, argv, "--options", 512);
-    int numSteps   = parseIntParam(argc, argv, "--steps",   1024);
-    int iters      = parseIntParam(argc, argv, "--iterations", 5);
+    // Defaults from params.json
+    int numOptions = 512;
+    int numSteps   = 1024;
+    int iterations = 5;
+    const char* precision = "float";
+
+    // Command-line fallback
+    numOptions = parseIntParam(argc, argv, "--options", numOptions);
+    numSteps   = parseIntParam(argc, argv, "--steps",   numSteps);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_options");
+    if (env_val) numOptions = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_steps");
+    if (env_val) numSteps = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
+
+    int iters = iterations;
 
     // Shared memory must hold (numSteps+1) floats; clamp to reasonable limit
     if (numSteps > 4096) {
@@ -260,9 +281,18 @@ int main(int argc, char* argv[]) {
     // options/sec = numOptions / time_s
     double opts_per_sec = (double)numOptions / (avg_ms * 1e-3);
 
-    // CSV output to stdout
-    printf("tango_binomial_options,%dx%d,%.4f,%.4f\n",
-           numOptions, numSteps, avg_ms, opts_per_sec);
+    double total_ms = sum;
+
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"binomial_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"options\":%d,\"steps\":%d,\"iterations\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_ms, numOptions, numSteps, iterations, precision);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"options_per_sec\",\"value\":%.2f}]}\n",
+           total_ms, opts_per_sec);
 
     // Human-readable output to stderr
     fprintf(stderr, "Average time: %.4f ms\n", avg_ms);

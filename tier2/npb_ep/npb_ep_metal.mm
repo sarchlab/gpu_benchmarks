@@ -107,9 +107,30 @@ static void ep_cpu(int N, unsigned long long* bins) {
 
 int main(int argc, char* argv[]) {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    int N     = parseIntParam(argc, argv, "--size", 16777216);  // 2^24
-    int iters = parseIntParam(argc, argv, "--iterations", 5);
+    // Defaults from params.json
+    int N          = 16777216;  // 2^24
+    int iterations = 5;
+    int block_size = 256;
+    int seed_param = 271828183;
+
+    // Command-line fallback
+    N          = parseIntParam(argc, argv, "--size", N);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_seed");
+    if (env_val) seed_param = atoi(env_val);
+
+    int iters = iterations;
 
     // -------------------------------------------------------------------
     // Metal device setup
@@ -222,8 +243,18 @@ int main(int argc, char* argv[]) {
     // G pairs/sec = N / time_s / 1e9
     double gpairs_sec = (double)N / (avg_ms * 1e-3) / 1e9;
 
-    // CSV output to stdout
-    printf("npb_ep,%d,%.4f,%.4f\n", N, avg_ms, gpairs_sec);
+    double total_ms = sum;
+
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"ep_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"seed\":%d}}\n",
+           avg_ms, N, iterations, block_size, seed_param);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"gpairs_per_sec\",\"value\":%.2f}]}\n",
+           total_ms, gpairs_sec);
 
     // Human-readable output to stderr
     fprintf(stderr, "Average time: %.4f ms\n", avg_ms);

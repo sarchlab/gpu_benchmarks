@@ -1,15 +1,29 @@
+import json
+import os
+import sys
 import torch
 import torch.nn.functional as F
-import time
+
 
 def benchmark():
     device = torch.device('cuda')
-    B, H, S, D = 8, 16, 1024, 64
-    dtype = torch.float16
 
-    q = torch.randn(B, H, S, D, device=device, dtype=dtype)
-    k = torch.randn(B, H, S, D, device=device, dtype=dtype)
-    v = torch.randn(B, H, S, D, device=device, dtype=dtype)
+    # Read parameters from environment variables
+    seq_len = int(os.environ.get('BENCH_PARAM_seq_len', '1024'))
+    batch_size = int(os.environ.get('BENCH_PARAM_batch_size', '8'))
+    num_heads = int(os.environ.get('BENCH_PARAM_num_heads', '16'))
+    head_dim = int(os.environ.get('BENCH_PARAM_head_dim', '64'))
+    dtype_str = os.environ.get('BENCH_PARAM_dtype', 'float16')
+
+    dtype_map = {'float16': torch.float16, 'bfloat16': torch.bfloat16, 'float32': torch.float32}
+    dtype = dtype_map.get(dtype_str, torch.float16)
+
+    print(f"SDPA benchmark — B={batch_size}, H={num_heads}, S={seq_len}, "
+          f"D={head_dim}, dtype={dtype_str}", file=sys.stderr)
+
+    q = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device, dtype=dtype)
+    k = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device, dtype=dtype)
+    v = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device, dtype=dtype)
 
     # Warmup
     for _ in range(5):
@@ -17,19 +31,44 @@ def benchmark():
     torch.cuda.synchronize()
 
     # Timed
+    num_iters = 50
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)
     start.record()
-    for _ in range(50):
+    for _ in range(num_iters):
         _ = F.scaled_dot_product_attention(q, k, v)
     end.record()
     torch.cuda.synchronize()
 
     total_ms = start.elapsed_time(end)
-    ms_per_iter = total_ms / 50
+    avg_ms = total_ms / num_iters
     # TFLOPS: 2 * B * H * S * S * D per attention computation
-    tflops = 2 * B * H * S * S * D / (ms_per_iter / 1000) / 1e12
-    print(f'sdpa_bench,{S},{ms_per_iter:.3f},{tflops:.4f}')
+    tflops = 2 * batch_size * num_heads * seq_len * seq_len * head_dim / (avg_ms / 1000) / 1e12
+
+    print(f"  avg: {avg_ms:.3f} ms, {tflops:.4f} TFLOPS", file=sys.stderr)
+
+    params = {
+        "seq_len": seq_len,
+        "batch_size": batch_size,
+        "num_heads": num_heads,
+        "head_dim": head_dim,
+        "dtype": dtype_str,
+    }
+
+    print(json.dumps({
+        "type": "kernel",
+        "name": "scaled_dot_product_attention",
+        "time_ms": avg_ms,
+        "params": params,
+    }))
+
+    print(json.dumps({
+        "type": "summary",
+        "total_time_ms": avg_ms,
+        "metrics": [
+            {"name": "tflops", "value": tflops},
+        ],
+    }))
 
 if __name__ == '__main__':
     benchmark()

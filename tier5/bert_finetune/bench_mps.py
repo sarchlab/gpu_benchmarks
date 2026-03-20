@@ -1,3 +1,5 @@
+import json
+import os
 import sys
 import time
 import torch
@@ -6,19 +8,25 @@ from transformers import BertForSequenceClassification, BertConfig
 
 def benchmark():
     device = torch.device('mps')
+
+    # Read parameters from environment variables
+    batch_size = int(os.environ.get('BENCH_PARAM_batch_size', '16'))
+    seq_len = int(os.environ.get('BENCH_PARAM_seq_len', '128'))
+    num_hidden_layers = int(os.environ.get('BENCH_PARAM_num_hidden_layers', '6'))
+    hidden_size = int(os.environ.get('BENCH_PARAM_hidden_size', '384'))
+    num_labels = int(os.environ.get('BENCH_PARAM_num_labels', '2'))
+
     config = BertConfig(
-        num_hidden_layers=6,
-        hidden_size=384,
-        num_attention_heads=6,
-        intermediate_size=1536,
+        num_hidden_layers=num_hidden_layers,
+        hidden_size=hidden_size,
+        num_attention_heads=max(1, hidden_size // 64),
+        intermediate_size=hidden_size * 4,
         vocab_size=30522,
-        num_labels=2,
+        num_labels=num_labels,
     )
     model = BertForSequenceClassification(config).to(device)
     model.train()
 
-    batch_size = 16
-    seq_len = 128
     optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
 
     input_ids = torch.randint(0, config.vocab_size, (batch_size, seq_len),
@@ -27,11 +35,9 @@ def benchmark():
                                 device=device)
     labels = torch.randint(0, config.num_labels, (batch_size,), device=device)
 
-    print(f"BERT fine-tune benchmark — {config.num_hidden_layers} layers, "
-          f"hidden={config.hidden_size}, heads={config.num_attention_heads}",
+    print(f"BERT fine-tune benchmark (MPS) — {num_hidden_layers} layers, "
+          f"hidden={hidden_size}, batch={batch_size}, seq_len={seq_len}",
           file=sys.stderr)
-    print(f"Batch={batch_size}, seq_len={seq_len}, "
-          f"forward+backward+optimizer step", file=sys.stderr)
 
     # Warmup
     for i in range(5):
@@ -64,7 +70,29 @@ def benchmark():
     samples_per_sec = batch_size / (avg_ms / 1000)
     print(f"  avg: {avg_ms:.3f} ms, {samples_per_sec:.2f} samples/sec",
           file=sys.stderr)
-    print(f'bert_finetune,{batch_size},{avg_ms:.3f},{samples_per_sec:.2f}')
+
+    params = {
+        "batch_size": batch_size,
+        "seq_len": seq_len,
+        "num_hidden_layers": num_hidden_layers,
+        "hidden_size": hidden_size,
+        "num_labels": num_labels,
+    }
+
+    print(json.dumps({
+        "type": "kernel",
+        "name": "forward_backward_step",
+        "time_ms": avg_ms,
+        "params": params,
+    }))
+
+    print(json.dumps({
+        "type": "summary",
+        "total_time_ms": avg_ms,
+        "metrics": [
+            {"name": "samples_per_sec", "value": samples_per_sec},
+        ],
+    }))
 
 
 if __name__ == '__main__':

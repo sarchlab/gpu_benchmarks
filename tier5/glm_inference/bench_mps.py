@@ -1,3 +1,5 @@
+import json
+import os
 import sys
 import time
 import torch
@@ -17,22 +19,28 @@ def generate(model, prompt, num_new_tokens):
 
 def benchmark():
     device = torch.device('mps')
+
+    # Read parameters from environment variables
+    num_new_tokens = int(os.environ.get('BENCH_PARAM_num_new_tokens', '128'))
+    prompt_len = int(os.environ.get('BENCH_PARAM_prompt_len', '32'))
+    n_layer = int(os.environ.get('BENCH_PARAM_n_layer', '6'))
+    n_embd = int(os.environ.get('BENCH_PARAM_n_embd', '512'))
+    n_head = int(os.environ.get('BENCH_PARAM_n_head', '8'))
+
     config = GPT2Config(
-        n_layer=6,
-        n_embd=512,
-        n_head=8,
-        n_inner=2048,
+        n_layer=n_layer,
+        n_embd=n_embd,
+        n_head=n_head,
+        n_inner=n_embd * 4,
         vocab_size=32000,
     )
     model = AutoModelForCausalLM.from_config(config).to(device)
     model.eval()
 
-    prompt_len = 32
-    num_new_tokens = 128
     prompt = torch.randint(0, config.vocab_size, (1, prompt_len), device=device)
 
-    print(f"GLM inference benchmark — {config.n_layer} layers, "
-          f"hidden={config.n_embd}, heads={config.n_head}", file=sys.stderr)
+    print(f"GLM inference benchmark (MPS) — {n_layer} layers, "
+          f"hidden={n_embd}, heads={n_head}", file=sys.stderr)
     print(f"Generating {num_new_tokens} tokens from {prompt_len}-token prompt",
           file=sys.stderr)
 
@@ -57,7 +65,29 @@ def benchmark():
     tokens_per_sec = num_new_tokens / (avg_ms / 1000)
     print(f"  avg: {avg_ms:.3f} ms, {tokens_per_sec:.2f} tokens/sec",
           file=sys.stderr)
-    print(f'glm_inference,{num_new_tokens},{avg_ms:.3f},{tokens_per_sec:.2f}')
+
+    params = {
+        "num_new_tokens": num_new_tokens,
+        "prompt_len": prompt_len,
+        "n_layer": n_layer,
+        "n_embd": n_embd,
+        "n_head": n_head,
+    }
+
+    print(json.dumps({
+        "type": "kernel",
+        "name": "generate",
+        "time_ms": avg_ms,
+        "params": params,
+    }))
+
+    print(json.dumps({
+        "type": "summary",
+        "total_time_ms": avg_ms,
+        "metrics": [
+            {"name": "tokens_per_sec", "value": tokens_per_sec},
+        ],
+    }))
 
 
 if __name__ == '__main__':

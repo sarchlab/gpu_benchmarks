@@ -9,6 +9,12 @@
 #   make PLATFORM=rocm          # Force ROCm/AMD build
 #   make PLATFORM=metal         # Force Metal/Apple build
 #
+# gpubench CLI shortcuts:
+#   make list                   # List all benchmarks
+#   make validate               # Validate params.json files
+#   make run                    # Run benchmarks (results → results.db)
+#   make info                   # Show detected platform info
+#
 # Platform Detection:
 #   PLATFORM=auto (default) — detects the platform at build time:
 #     - Darwin   → metal
@@ -29,7 +35,7 @@ endif
 
 export PLATFORM
 
-.PHONY: all tier1 tier2 tier3 tier4 tier5 clean run-all report
+.PHONY: all tier1 tier2 tier3 tier4 tier5 clean list validate run info
 
 all: tier1 tier2 tier3 tier4 tier5
 
@@ -55,10 +61,14 @@ clean:
 	$(MAKE) -C tier4 clean PLATFORM=$(PLATFORM)
 	$(MAKE) -C tier5 clean PLATFORM=$(PLATFORM)
 
-run-all:
-	bash scripts/run_all.sh $(PLATFORM)
+list:
+	python3 scripts/gpubench list
 
-report:
-	@latest=$$(ls -1t results/ 2>/dev/null | head -1); \
-	if [ -z "$$latest" ]; then echo "No results found. Run 'make run-all' first."; exit 1; fi; \
-	python3 scripts/report.py results/$$latest
+validate:
+	python3 scripts/gpubench validate
+
+run:
+	python3 scripts/gpubench run
+
+info:
+	python3 scripts/gpubench info

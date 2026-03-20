@@ -145,9 +145,13 @@ gpu_benchmarks/
 │   ├── multi_agent_bench/
 │   ├── sdxl_inference/
 │   └── gptneox_train/
-└── scripts/                        # Helper scripts
-    ├── run_all.sh
-    └── report.py
+├── scripts/                        # CLI tool
+│   └── gpubench                    # gpubench CLI (Python, no dependencies)
+└── docs/                          # Detailed specifications
+    ├── cli_design.md
+    ├── output_protocol.md
+    ├── params_format.md
+    └── schema.sql
 ```
 
 ---
@@ -340,44 +344,141 @@ make clean
 
 ---
 
-## Benchmark Harness Usage
+## gpubench CLI
 
-### Run All Benchmarks
-
-```bash
-# Run the full suite with auto-detected platform
-make run-all
-
-# Run with a specific platform
-make run-all PLATFORM=cuda
-
-# Generate a summary report from the latest results
-make report
-```
-
-### Run Individual Benchmarks
-
-Each benchmark produces a standalone executable in its own subdirectory:
+The suite ships with `gpubench`, a single-file Python CLI (no pip dependencies) that discovers, compiles, runs, and validates all benchmarks. Results are stored in an SQLite database.
 
 ```bash
-cd tier1/fp32_throughput
-make
-./fp32_throughput
+# Location
+scripts/gpubench
 ```
 
-### CSV Output Format
+### Commands
 
-All benchmarks emit results in CSV format to stdout, making it easy to collect and aggregate data:
+| Command | Description |
+|---------|-------------|
+| `list` | List discovered benchmarks |
+| `compile` | Compile C++ benchmarks (Tier 1–3) |
+| `run` | Run benchmarks with parameter sweeps; store results in SQLite |
+| `validate` | Validate all `params.json` files |
+| `info` | Display detected platform information |
+
+### Quick Start
+
+```bash
+# List all benchmarks
+python3 scripts/gpubench list
+
+# List benchmarks in a specific tier
+python3 scripts/gpubench list --tier 1
+
+# Show detected platform info
+python3 scripts/gpubench info
+
+# Compile all C++ benchmarks (auto-detect platform)
+python3 scripts/gpubench compile
+
+# Validate every params.json
+python3 scripts/gpubench validate
+
+# Run all benchmarks (7 reps, results → results.db)
+python3 scripts/gpubench run
+
+# Run a single benchmark with 3 reps
+python3 scripts/gpubench run --benchmark shoc_gemm --reps 3
+
+# Run only Tier 1 benchmarks
+python3 scripts/gpubench run --tier 1
+
+# Preview the execution plan without running
+python3 scripts/gpubench run --dry-run
+
+# Override scaling parameter values
+python3 scripts/gpubench run --benchmark fp32_throughput --scaling-values 64,256,1024
+
+# Full parameter sweep (scaling × non-scaling Cartesian product)
+python3 scripts/gpubench run --sweep-non-scaling
+```
+
+### Makefile Shortcuts
+
+```bash
+make list       # python3 scripts/gpubench list
+make validate   # python3 scripts/gpubench validate
+make run        # python3 scripts/gpubench run
+make info       # python3 scripts/gpubench info
+```
+
+### JSON-Lines Output Protocol
+
+Benchmarks communicate results to the CLI via **JSON-lines on stdout** — one JSON object per line. Human-readable messages go to stderr.
+
+| Message type | Purpose |
+|-------------|---------|
+| `kernel` | Per-kernel execution timing (`name`, `time_ms`, `params`) |
+| `summary` | Aggregate metrics emitted at the end (`total_time_ms`, `metrics`) |
+| `error` | Fatal or warning-level error report |
+| `info` | Optional benchmark metadata |
+
+Example stdout from a benchmark:
 
 ```
-benchmark,metric,value,unit
-fp32_throughput,throughput,12345.6,GFLOPS
+{"type":"kernel","name":"gemm_kernel","time_ms":0.234,"params":{"matrix_size":256,"block_size":16}}
+{"type":"summary","total_time_ms":0.234,"metrics":[{"name":"GFLOPS","value":143.2}]}
 ```
+
+### SQLite Results Database
+
+All run data is stored in `results.db` (override with `--db`). The schema contains five tables:
+
+| Table | Contents |
+|-------|----------|
+| `platforms` | Hardware/software environment (GPU model, driver, OS, etc.) |
+| `sessions` | One row per `gpubench run` invocation |
+| `runs` | One row per (benchmark × parameter config × repetition) |
+| `kernel_results` | Per-kernel timing from `kernel` events |
+| `metrics` | Derived metrics from `summary` events (GFLOPS, bandwidth, etc.) |
+
+Query example — average kernel time across scaling values:
+
+```sql
+SELECT r.scaling_param_value, AVG(kr.time_ms) AS avg_ms
+FROM runs r
+JOIN kernel_results kr ON kr.run_id = r.id
+WHERE r.benchmark = 'polybench_gemm' AND r.status = 'ok'
+GROUP BY r.scaling_param_value
+ORDER BY CAST(r.scaling_param_value AS INTEGER);
+```
+
+### Parameterization (`params.json`)
+
+Every benchmark directory contains a `params.json` that describes the benchmark identity, its scaling parameter (≥ 10 values), optional non-scaling parameters, and expected kernel names.
+
+The CLI passes parameters to benchmarks via environment variables:
+
+```bash
+BENCH_PARAM_matrix_size=1024 BENCH_PARAM_block_size=16 ./benchmark
+```
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | All runs passed |
+| 1 | Some runs failed (results still saved) |
+| 2 | CLI usage error |
+| 3 | No benchmarks matched filters |
+| 4 | Database error |
+| 130 | Interrupted (Ctrl+C) — partial results saved |
 
 ---
 
 ## Reference Documents
 
+- [`docs/cli_design.md`](docs/cli_design.md) — Full CLI command reference
+- [`docs/output_protocol.md`](docs/output_protocol.md) — JSON-lines output protocol specification
+- [`docs/params_format.md`](docs/params_format.md) — `params.json` format specification
+- [`docs/schema.sql`](docs/schema.sql) — SQLite results database schema
 - [`spec.md`](spec.md) — Project specification
 - [`roadmap.md`](roadmap.md) — Development roadmap and milestones
 - [`benchmark_report.md`](benchmark_report.md) — Research report: benchmark selection and rationale

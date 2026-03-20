@@ -102,32 +102,27 @@ static inline float  to_float(half_t h) { return __half2float(h); }
 #endif
 
 /* -------------------------------------------------------------------------
- * Benchmark parameters
+ * Benchmark default parameters (overridable via BENCH_PARAM_* env vars)
  * ---------------------------------------------------------------------- */
-#define M      4096
-#define N      4096
-#define K      4096
-#define WARMUP 5
-#define ITERS  5
 
 /* -------------------------------------------------------------------------
  * CPU reference GEMM — converts FP16 inputs to float for accumulation,
  * only for a small corner — O(verify_m * verify_n * K)
  * ---------------------------------------------------------------------- */
 static void cpu_hgemm_ref(int vm, int vn, int vk,
-                           const half_t * __restrict__ A,
-                           const half_t * __restrict__ B,
+                           const half_t * __restrict__ A, int lda,
+                           const half_t * __restrict__ B, int ldb,
                            float        * __restrict__ C)
 {
-    /* A is vm×vk (row-major, stride K)
-     * B is vk×vn (row-major, stride N)
+    /* A is vm×vk (row-major, stride lda)
+     * B is vk×vn (row-major, stride ldb)
      * C is vm×vn (row-major, stride vn) — float output */
     for (int i = 0; i < vm; i++) {
         for (int j = 0; j < vn; j++) {
             float s = 0.0f;
             for (int p = 0; p < vk; p++)
-                s += to_float(A[(size_t)i * K + p]) *
-                     to_float(B[(size_t)p * N + j]);
+                s += to_float(A[(size_t)i * lda + p]) *
+                     to_float(B[(size_t)p * ldb + j]);
             C[i * vn + j] = s;
         }
     }
@@ -138,6 +133,28 @@ static void cpu_hgemm_ref(int vm, int vn, int vk,
  * ---------------------------------------------------------------------- */
 int main(void)
 {
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    /* ------------------------------------------------------------------ */
+    /* Benchmark parameters (overridable via BENCH_PARAM_* env vars)       */
+    /* ------------------------------------------------------------------ */
+    int M = 4096;
+    int N = 4096;
+    int K = 4096;
+    int WARMUP = 5;
+    int ITERS = 5;
+    float alpha_param = 1.0f;
+
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_matrix_dim");
+    if (env_val) { M = atoi(env_val); N = M; K = M; }
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) WARMUP = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iters");
+    if (env_val) ITERS = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_alpha");
+    if (env_val) alpha_param = (float)atof(env_val);
+
     /* ------------------------------------------------------------------ */
     /* Allocate and initialize host matrices in float, then convert       */
     /* ------------------------------------------------------------------ */
@@ -186,7 +203,7 @@ int main(void)
     cublasHandle_t handle;
     BLAS_CHECK(cublasCreate(&handle));
 
-    half_t alpha = to_half(1.0f), beta = to_half(0.0f);
+    half_t alpha = to_half(alpha_param), beta = to_half(0.0f);
 
 #   define RUN_HGEMM() \
         BLAS_CHECK(cublasHgemm(handle,                              \
@@ -205,7 +222,7 @@ int main(void)
     rocblas_handle handle;
     BLAS_CHECK(rocblas_create_handle(&handle));
 
-    half_t alpha = to_half(1.0f), beta = to_half(0.0f);
+    half_t alpha = to_half(alpha_param), beta = to_half(0.0f);
 
 #   define RUN_HGEMM() \
         BLAS_CHECK(rocblas_hgemm(handle,                                   \
@@ -262,7 +279,7 @@ int main(void)
     /* ------------------------------------------------------------------ */
     const int VN = 8;
     float *cpuC = (float *)calloc((size_t)VN * VN, sizeof(float));
-    cpu_hgemm_ref(VN, VN, K, hA, hB, cpuC);
+    cpu_hgemm_ref(VN, VN, K, hA, K, hB, N, cpuC);
 
     /* cpuC is packed VN×VN (row stride = VN), float.
      * hC is full M×N (row stride = N), half_t.
@@ -289,8 +306,21 @@ int main(void)
     /* ------------------------------------------------------------------ */
     double tflops = 2.0 * M * N * K / (avg_ms / 1000.0) / 1e12;
 
-    /* CSV line */
-    printf("cublas_hgemm,%d,%.3f,%.2f\n", M, avg_ms, tflops);
+    /* JSON-lines kernel event */
+#ifdef USE_CUBLAS
+    printf("{\"type\":\"kernel\",\"name\":\"cublasHgemm\",\"time_ms\":%.6f,"
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"alpha\":%.6f}}\n",
+           avg_ms, M, WARMUP, ITERS, alpha_param);
+#elif defined(USE_ROCBLAS)
+    printf("{\"type\":\"kernel\",\"name\":\"rocblas_hgemm\",\"time_ms\":%.6f,"
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"alpha\":%.6f}}\n",
+           avg_ms, M, WARMUP, ITERS, alpha_param);
+#endif
+    /* JSON-lines summary event */
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"TFLOPS\",\"value\":%.2f}]}\n",
+           (double)total_ms, tflops);
+
     /* Human-readable */
     fprintf(stderr, "cublas_hgemm  M=%d N=%d K=%d  time_ms=%.3f  TFLOPS=%.2f\n",
             M, N, K, avg_ms, tflops);

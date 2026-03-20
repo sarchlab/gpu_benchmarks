@@ -42,12 +42,8 @@
 #include <mach/mach_time.h>
 
 /* -------------------------------------------------------------------------
- * Benchmark parameters
+ * Benchmark default parameters (overridable via BENCH_PARAM_* env vars)
  * ---------------------------------------------------------------------- */
-#define M      4096
-#define N      4096
-#define WARMUP 5
-#define ITERS  5
 
 /* -------------------------------------------------------------------------
  * Embedded Metal shader source
@@ -104,6 +100,27 @@ static void cpu_sgemv(const float * __restrict__ A,
 int main(int argc, char* argv[])
 {
     @autoreleasepool {
+
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    /* ------------------------------------------------------------------ */
+    /* Benchmark parameters (overridable via BENCH_PARAM_* env vars)       */
+    /* ------------------------------------------------------------------ */
+    int M = 4096;
+    int N = 4096;
+    int WARMUP = 5;
+    int ITERS = 5;
+    float alpha_param = 1.0f;
+
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_matrix_dim");
+    if (env_val) { M = atoi(env_val); N = M; }
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) WARMUP = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iters");
+    if (env_val) ITERS = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_alpha");
+    if (env_val) alpha_param = (float)atof(env_val);
 
     /* ------------------------------------------------------------------ */
     /* Metal device setup                                                  */
@@ -218,7 +235,7 @@ int main(int argc, char* argv[])
     /* ------------------------------------------------------------------ */
     /* Verify all M elements vs CPU GEMV                                  */
     /* ------------------------------------------------------------------ */
-    std::vector<float> hy_ref((size_t)M);
+    std::vector<float> hy_ref((size_t)M, 0.0f);
     cpu_sgemv(hA, hx, hy_ref.data(), M, N);
 
     const float* hy_gpu = (const float*)bufY.contents;
@@ -264,8 +281,15 @@ int main(int argc, char* argv[])
     fprintf(stderr, "GB/s: %.2f  GFLOPS: %.2f  (avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
             gbps, gflops, avg_ms, mn, mx, stddev);
 
-    /* CSV output */
-    printf("cublas_gemv,%d,%.4f,%.2f,%.2f\n", M, avg_ms, gbps, gflops);
+    /* JSON-lines kernel event */
+    printf("{\"type\":\"kernel\",\"name\":\"cublasSgemv\",\"time_ms\":%.6f,"
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"alpha\":%.6f}}\n",
+           avg_ms, M, WARMUP, ITERS, alpha_param);
+    /* JSON-lines summary event */
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GB/s\",\"value\":%.2f},{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
+           sum_ms, gbps, gflops);
+
     /* Human-readable */
     fprintf(stderr, "cublas_gemv  M=%d N=%d  time_ms=%.4f  GB/s=%.2f  GFLOPS=%.2f\n",
             M, N, avg_ms, gbps, gflops);

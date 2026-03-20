@@ -94,12 +94,8 @@ typedef hipEvent_t gpu_event_t;
 #endif
 
 /* -------------------------------------------------------------------------
- * Benchmark parameters
+ * Benchmark default parameters (overridable via BENCH_PARAM_* env vars)
  * ---------------------------------------------------------------------- */
-#define M      4096
-#define N      4096
-#define WARMUP 5
-#define ITERS  5
 
 /* -------------------------------------------------------------------------
  * CPU reference GEMV — y[i] = sum_j A[i*N+j] * x[j]
@@ -122,6 +118,27 @@ static void cpu_sgemv(const float * __restrict__ A,
  * ---------------------------------------------------------------------- */
 int main(void)
 {
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    /* ------------------------------------------------------------------ */
+    /* Benchmark parameters (overridable via BENCH_PARAM_* env vars)       */
+    /* ------------------------------------------------------------------ */
+    int M = 4096;
+    int N = 4096;
+    int WARMUP = 5;
+    int ITERS = 5;
+    float alpha_param = 1.0f;
+
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_matrix_dim");
+    if (env_val) { M = atoi(env_val); N = M; }
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) WARMUP = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iters");
+    if (env_val) ITERS = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_alpha");
+    if (env_val) alpha_param = (float)atof(env_val);
+
     /* ------------------------------------------------------------------ */
     /* Allocate and initialize host arrays                                 */
     /* ------------------------------------------------------------------ */
@@ -174,7 +191,7 @@ int main(void)
     cublasHandle_t handle;
     BLAS_CHECK(cublasCreate(&handle));
 
-    float alpha = 1.0f, beta = 0.0f;
+    float alpha = alpha_param, beta = 0.0f;
 
     /* Row-major A(M×N) looks col-major as A_cm(N×M).
      * y = A_rm * x  =>  y = A_cm^T * x
@@ -201,7 +218,7 @@ int main(void)
     rocblas_handle handle;
     BLAS_CHECK(rocblas_create_handle(&handle));
 
-    float alpha = 1.0f, beta = 0.0f;
+    float alpha = alpha_param, beta = 0.0f;
 
 #   define RUN_SGEMV() \
         BLAS_CHECK(rocblas_sgemv(handle,                      \
@@ -229,7 +246,7 @@ int main(void)
     GPU_EVENT_CREATE(ev_start);
     GPU_EVENT_CREATE(ev_stop);
 
-    double times[ITERS];
+    double *times = (double *)malloc(ITERS * sizeof(double));
     for (int i = 0; i < ITERS; i++) {
         GPU_EVENT_RECORD(ev_start);
         RUN_SGEMV();
@@ -287,12 +304,26 @@ int main(void)
     double bytes = ((double)M * N + M + N) * sizeof(float);
     double gbps  = bytes / (avg_ms * 1e-3) / 1e9;
 
-    /* CSV output */
-    printf("cublas_gemv,%d,%.4f,%.2f,%.2f\n", M, avg_ms, gbps, gflops);
+    /* JSON-lines kernel event */
+#ifdef USE_CUBLAS
+    printf("{\"type\":\"kernel\",\"name\":\"cublasSgemv\",\"time_ms\":%.6f,"
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"alpha\":%.6f}}\n",
+           avg_ms, M, WARMUP, ITERS, alpha_param);
+#elif defined(USE_ROCBLAS)
+    printf("{\"type\":\"kernel\",\"name\":\"rocblas_sgemv\",\"time_ms\":%.6f,"
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"alpha\":%.6f}}\n",
+           avg_ms, M, WARMUP, ITERS, alpha_param);
+#endif
+    /* JSON-lines summary event */
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GB/s\",\"value\":%.2f},{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
+           sum_ms, gbps, gflops);
+
     /* Human-readable */
     fprintf(stderr, "cublas_gemv  M=%d N=%d  time_ms=%.4f  GB/s=%.2f  GFLOPS=%.2f\n",
             M, N, avg_ms, gbps, gflops);
 
+    free(times);
     free(hA); free(hx); free(hy); free(hy_ref);
     return pass ? 0 : 1;
 }

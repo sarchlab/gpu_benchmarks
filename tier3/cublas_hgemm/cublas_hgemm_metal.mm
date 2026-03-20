@@ -39,13 +39,8 @@
 #include <mach/mach_time.h>
 
 /* -------------------------------------------------------------------------
- * Benchmark parameters
+ * Benchmark default parameters (overridable via BENCH_PARAM_* env vars)
  * ---------------------------------------------------------------------- */
-#define GEMM_M  4096
-#define GEMM_N  4096
-#define GEMM_K  4096
-#define WARMUP  5
-#define ITERS   5
 
 /* -------------------------------------------------------------------------
  * Timing helpers
@@ -65,16 +60,16 @@ static double ticks_to_ms(uint64_t ticks)
  * C: vm×vn (row-major, stride vn) — float output
  * ---------------------------------------------------------------------- */
 static void cpu_hgemm_ref(int vm, int vn, int vk,
-                           const __fp16 * __restrict__ A,
-                           const __fp16 * __restrict__ B,
+                           const __fp16 * __restrict__ A, int lda,
+                           const __fp16 * __restrict__ B, int ldb,
                            float         * __restrict__ C)
 {
     for (int i = 0; i < vm; i++) {
         for (int j = 0; j < vn; j++) {
             float s = 0.0f;
             for (int p = 0; p < vk; p++)
-                s += (float)A[(size_t)i * GEMM_K + p] *
-                     (float)B[(size_t)p * GEMM_N + j];
+                s += (float)A[(size_t)i * lda + p] *
+                     (float)B[(size_t)p * ldb + j];
             C[i * vn + j] = s;
         }
     }
@@ -87,9 +82,27 @@ int main(int argc, char *argv[])
 {
     @autoreleasepool {
 
-    const int M = GEMM_M;
-    const int N = GEMM_N;
-    const int K = GEMM_K;
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    /* ------------------------------------------------------------------ */
+    /* Benchmark parameters (overridable via BENCH_PARAM_* env vars)       */
+    /* ------------------------------------------------------------------ */
+    int M = 4096;
+    int N = 4096;
+    int K = 4096;
+    int WARMUP = 5;
+    int ITERS = 5;
+    float alpha_param = 1.0f;
+
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_matrix_dim");
+    if (env_val) { M = atoi(env_val); N = M; K = M; }
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) WARMUP = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iters");
+    if (env_val) ITERS = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_alpha");
+    if (env_val) alpha_param = (float)atof(env_val);
 
     /* ------------------------------------------------------------------ */
     /* Metal device setup                                                  */
@@ -177,7 +190,7 @@ int main(int argc, char *argv[])
                                          resultRows:(NSUInteger)M
                                       resultColumns:(NSUInteger)N
                                     interiorColumns:(NSUInteger)K
-                                              alpha:1.0
+                                              alpha:(double)alpha_param
                                                beta:0.0];
 
     /* Helper lambda: encode + commit one GEMM */
@@ -213,7 +226,7 @@ int main(int argc, char *argv[])
     /* ------------------------------------------------------------------ */
     const int VN = 8;
     std::vector<float> cpuC((size_t)VN * VN, 0.0f);
-    cpu_hgemm_ref(VN, VN, K, hA, hB, cpuC.data());
+    cpu_hgemm_ref(VN, VN, K, hA, K, hB, N, cpuC.data());
 
     /* cpuC is packed VN×VN (row stride = VN), float.
      * hC is full M×N (row stride = N), __fp16.
@@ -243,8 +256,15 @@ int main(int argc, char *argv[])
 
     double tflops = 2.0 * M * N * K / (avg_ms / 1000.0) / 1e12;
 
-    /* CSV output */
-    printf("cublas_hgemm,%d,%.3f,%.2f\n", M, avg_ms, tflops);
+    /* JSON-lines kernel event */
+    printf("{\"type\":\"kernel\",\"name\":\"cublasHgemm\",\"time_ms\":%.6f,"
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"alpha\":%.6f}}\n",
+           avg_ms, M, WARMUP, ITERS, alpha_param);
+    /* JSON-lines summary event */
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"TFLOPS\",\"value\":%.2f}]}\n",
+           sum_ms, tflops);
+
     /* Human-readable */
     fprintf(stderr, "cublas_hgemm  M=%d N=%d K=%d  time_ms=%.3f  TFLOPS=%.2f\n",
             M, N, K, avg_ms, tflops);

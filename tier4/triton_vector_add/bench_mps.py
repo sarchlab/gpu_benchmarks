@@ -25,14 +25,14 @@ def benchmark():
     # Warmup
     for _ in range(5):
         c = torch.add(a, b)
-    _ = c.item()
+    _ = c.sum().item()
 
     # Timed
     times = []
     for _ in range(5):
         t0 = time.perf_counter()
         c = torch.add(a, b)
-        _ = c.item()  # force sync
+        _ = c.sum().item()  # force sync
         t1 = time.perf_counter()
         times.append((t1 - t0) * 1000)
     avg_ms = sum(times) / len(times)

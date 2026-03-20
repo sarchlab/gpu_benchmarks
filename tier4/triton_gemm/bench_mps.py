@@ -1,12 +1,26 @@
+import json
+import os
+import sys
 import torch
 import time
 
 def benchmark():
     device = torch.device('mps')
-    M, N, K = 4096, 4096, 4096
 
-    a = torch.rand((M, K), device=device, dtype=torch.float32)
-    b = torch.rand((K, N), device=device, dtype=torch.float32)
+    # Read parameters from environment variables
+    m = int(os.environ.get('BENCH_PARAM_m', '4096'))
+    block_m = int(os.environ.get('BENCH_PARAM_block_m', '128'))
+    block_n = int(os.environ.get('BENCH_PARAM_block_n', '256'))
+    block_k = int(os.environ.get('BENCH_PARAM_block_k', '64'))
+    group_size_m = int(os.environ.get('BENCH_PARAM_group_size_m', '8'))
+
+    # Square matrices: M = N = K
+    M_dim, N_dim, K_dim = m, m, m
+
+    print(f"Running triton_gemm (MPS) with m={m}, block_m={block_m}, block_n={block_n}, block_k={block_k}, group_size_m={group_size_m}", file=sys.stderr)
+
+    a = torch.rand((M_dim, K_dim), device=device, dtype=torch.float32)
+    b = torch.rand((K_dim, N_dim), device=device, dtype=torch.float32)
 
     # Warmup
     for _ in range(5):
@@ -21,10 +35,32 @@ def benchmark():
         _ = c.sum().item()  # force sync
         t1 = time.perf_counter()
         times.append((t1 - t0) * 1000)
-    ms = sum(times) / len(times)
+    avg_ms = sum(times) / len(times)
 
-    tflops = 2 * M * N * K / (ms / 1000) / 1e12
-    print(f'triton_gemm,{M},{ms:.3f},{tflops:.2f}')
+    tflops = 2 * M_dim * N_dim * K_dim / (avg_ms / 1000) / 1e12
+
+    params = {
+        "m": m,
+        "block_m": block_m,
+        "block_n": block_n,
+        "block_k": block_k,
+        "group_size_m": group_size_m,
+    }
+
+    print(json.dumps({
+        "type": "kernel",
+        "name": "matmul_kernel",
+        "time_ms": avg_ms,
+        "params": params,
+    }))
+
+    print(json.dumps({
+        "type": "summary",
+        "total_time_ms": avg_ms,
+        "metrics": [
+            {"name": "tflops", "value": tflops},
+        ],
+    }))
 
 if __name__ == '__main__':
     benchmark()

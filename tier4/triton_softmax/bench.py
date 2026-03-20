@@ -1,3 +1,6 @@
+import json
+import os
+import sys
 import torch
 import triton
 import triton.language as tl
@@ -28,21 +31,34 @@ def softmax_kernel(
 
 def benchmark():
     device = 'cuda'
-    M, N = 4096, 4096
-    BLOCK_SIZE = triton.next_power_of_2(N)
 
-    x = torch.rand((M, N), device=device, dtype=torch.float32)
+    # Read parameters from environment variables
+    n = int(os.environ.get('BENCH_PARAM_n', '4096'))
+    m = int(os.environ.get('BENCH_PARAM_m', '4096'))
+    num_warps = int(os.environ.get('BENCH_PARAM_num_warps', '4'))
+    dtype_str = os.environ.get('BENCH_PARAM_dtype', 'float32')
+
+    dtype_map = {'float16': torch.float16, 'float32': torch.float32, 'float64': torch.float64}
+    dtype = dtype_map.get(dtype_str, torch.float32)
+    bytes_per_elem = torch.tensor([], dtype=dtype).element_size()
+
+    BLOCK_SIZE = triton.next_power_of_2(n)
+
+    print(f"Running triton_softmax with m={m}, n={n}, dtype={dtype_str}, num_warps={num_warps}", file=sys.stderr)
+
+    x = torch.rand((m, n), device=device, dtype=dtype)
     y = torch.empty_like(x)
 
-    grid = (M,)
+    grid = (m,)
 
     # Warmup
     for _ in range(5):
         softmax_kernel[grid](
             y, x,
             x.stride(0), y.stride(0),
-            N,
+            n,
             BLOCK_SIZE=BLOCK_SIZE,
+            num_warps=num_warps,
         )
     torch.cuda.synchronize()
 
@@ -54,16 +70,38 @@ def benchmark():
         softmax_kernel[grid](
             y, x,
             x.stride(0), y.stride(0),
-            N,
+            n,
             BLOCK_SIZE=BLOCK_SIZE,
+            num_warps=num_warps,
         )
     end.record()
     torch.cuda.synchronize()
-    ms = start.elapsed_time(end) / 5
+    avg_ms = start.elapsed_time(end) / 5
 
-    # GB/s: read input + write output = 2 * M * N * 4 bytes
-    gb_s = 2 * M * N * 4 / (ms / 1000) / 1e9
-    print(f'triton_softmax,{M}x{N},{ms:.3f},{gb_s:.2f}')
+    # GB/s: read input + write output = 2 * m * n * bytes_per_elem
+    gb_s = 2 * m * n * bytes_per_elem / (avg_ms / 1000) / 1e9
+
+    params = {
+        "n": n,
+        "m": m,
+        "dtype": dtype_str,
+        "num_warps": num_warps,
+    }
+
+    print(json.dumps({
+        "type": "kernel",
+        "name": "softmax_kernel",
+        "time_ms": avg_ms,
+        "params": params,
+    }))
+
+    print(json.dumps({
+        "type": "summary",
+        "total_time_ms": avg_ms,
+        "metrics": [
+            {"name": "bandwidth_gbps", "value": gb_s},
+        ],
+    }))
 
 if __name__ == '__main__':
     benchmark()

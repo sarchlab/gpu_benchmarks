@@ -1,37 +1,24 @@
 # scripts/
 
-Utility scripts for running benchmarks and collecting results.
+## gpubench
 
-## run_all.sh
-
-Runs all benchmarks in the suite and captures CSV output to `results/<timestamp>/`.
+The `gpubench` CLI tool discovers, compiles, runs, and validates GPU benchmarks. Results are stored in an SQLite database. No pip dependencies — Python 3.7+ stdlib only.
 
 ```bash
-# Auto-detect platform
-bash scripts/run_all.sh
+# List all benchmarks
+python3 scripts/gpubench list
 
-# Force CUDA
-bash scripts/run_all.sh cuda
+# Compile C++ benchmarks
+python3 scripts/gpubench compile
 
-# Force ROCm
-bash scripts/run_all.sh rocm
+# Run benchmarks (results → results.db)
+python3 scripts/gpubench run
 
-# Force Metal (Apple)
-bash scripts/run_all.sh metal
+# Validate params.json files
+python3 scripts/gpubench validate
 
-# Custom timeout (seconds per benchmark, default 300)
-bash scripts/run_all.sh cuda 120
+# Show platform info
+python3 scripts/gpubench info
 ```
 
-## report.py
-
-Generates a markdown summary from collected results.
-
-```bash
-# Run after run_all.sh
-python3 scripts/report.py results/<timestamp>/
-
-# Or use make
-make run-all    # runs all benchmarks
-make report     # generates report from latest results
-```
+See [`docs/cli_design.md`](../docs/cli_design.md) for the full command reference.

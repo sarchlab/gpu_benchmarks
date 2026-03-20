@@ -4,9 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define N (32*1024*1024)
 #define WARMUP 5
-#define ITERS  5
 
 static const char *shaderSrcC =
     "#include <metal_stdlib>\n"
@@ -54,6 +52,26 @@ static double mach_time_to_ms(uint64_t t) {
 }
 
 int main() {
+    @autoreleasepool {
+
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    int n = 32 * 1024 * 1024;
+    int threads_per_block = 256;
+    float scalar = 2.0f;
+    int num_times = 100;
+
+    /* Read parameters from environment variables */
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_n");
+    if (env_val) n = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_threads_per_block");
+    if (env_val) threads_per_block = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_scalar");
+    if (env_val) scalar = (float)atof(env_val);
+    env_val = getenv("BENCH_PARAM_num_times");
+    if (env_val) num_times = atoi(env_val);
+
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
     if (!device) { fprintf(stderr, "No Metal device\n"); return 1; }
 
@@ -71,25 +89,26 @@ int main() {
     id<MTLComputePipelineState> triad_ps = [device newComputePipelineStateWithFunction:[lib newFunctionWithName:@"triad_kernel"] error:nil];
     id<MTLComputePipelineState> dot_ps   = [device newComputePipelineStateWithFunction:[lib newFunctionWithName:@"dot_kernel"] error:nil];
 
-    size_t sz = (size_t)N * sizeof(float);
+    size_t sz = (size_t)n * sizeof(float);
     id<MTLBuffer> bufa = [device newBufferWithLength:sz options:MTLResourceStorageModeShared];
     id<MTLBuffer> bufb = [device newBufferWithLength:sz options:MTLResourceStorageModeShared];
     id<MTLBuffer> bufc = [device newBufferWithLength:sz options:MTLResourceStorageModeShared];
     id<MTLBuffer> bufd = [device newBufferWithLength:sz options:MTLResourceStorageModeShared]; /* dot output */
 
-    float s_val = 2.0f;
-    id<MTLBuffer> s_buf = [device newBufferWithBytes:&s_val length:sizeof(float) options:MTLResourceStorageModeShared];
+    id<MTLBuffer> s_buf = [device newBufferWithBytes:&scalar length:sizeof(float) options:MTLResourceStorageModeShared];
 
     /* Initialize */
     float *pa = (float*)bufa.contents;
     float *pb = (float*)bufb.contents;
-    for (int i = 0; i < N; i++) { pa[i] = 1.0f; pb[i] = 2.0f; }
+    for (int i = 0; i < n; i++) { pa[i] = 1.0f; pb[i] = 2.0f; }
 
-    MTLSize threadgroupSize = MTLSizeMake(256, 1, 1);
-    MTLSize gridSize = MTLSizeMake(N, 1, 1);
+    MTLSize threadgroupSize = MTLSizeMake(threads_per_block, 1, 1);
+    MTLSize gridSize = MTLSizeMake(n, 1, 1);
 
-    /* Macro to run a kernel and time it */
-#define RUN_BENCH(name, setup_block, bytes_expr) \
+    double total_time_all = 0.0;
+
+    /* Helper: run a kernel, warmup + time, emit JSON kernel event */
+#define RUN_BENCH(kernel_name, ps, setup_block, bytes_expr) \
     do { \
         for (int _w = 0; _w < WARMUP; _w++) { \
             id<MTLCommandBuffer> cb = [queue commandBuffer]; \
@@ -100,7 +119,7 @@ int main() {
             [cb commit]; [cb waitUntilCompleted]; \
         } \
         uint64_t t0 = mach_absolute_time(); \
-        for (int _i = 0; _i < ITERS; _i++) { \
+        for (int _i = 0; _i < num_times; _i++) { \
             id<MTLCommandBuffer> cb = [queue commandBuffer]; \
             id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder]; \
             setup_block \
@@ -109,50 +128,61 @@ int main() {
             [cb commit]; [cb waitUntilCompleted]; \
         } \
         uint64_t t1 = mach_absolute_time(); \
-        double ms = mach_time_to_ms(t1 - t0) / ITERS; \
+        double ms = mach_time_to_ms(t1 - t0) / num_times; \
         double gbs = (bytes_expr) / (ms / 1000.0) / 1e9; \
-        printf("%s,%d,%.3f,%.2f\n", name, N, ms, gbs); \
+        total_time_all += ms * num_times; \
+        printf("{\"type\":\"kernel\",\"name\":\"%s\",\"time_ms\":%.6f," \
+               "\"params\":{\"n\":%d,\"threads_per_block\":%d,\"scalar\":%.6f,\"num_times\":%d}}\n", \
+               kernel_name, ms, n, threads_per_block, (double)scalar, num_times); \
+        fprintf(stderr, "%s: %.3f ms, %.2f GB/s\n", kernel_name, ms, gbs); \
     } while(0)
 
     /* COPY */
-    RUN_BENCH("babelstream_copy",
+    RUN_BENCH("copy_kernel", copy_ps,
         [enc setComputePipelineState:copy_ps];
         [enc setBuffer:bufa offset:0 atIndex:0];
         [enc setBuffer:bufc offset:0 atIndex:1];,
-        2.0 * N * sizeof(float));
+        2.0 * n * sizeof(float));
 
     /* SCALE */
-    RUN_BENCH("babelstream_scale",
+    RUN_BENCH("scale_kernel", scale_ps,
         [enc setComputePipelineState:scale_ps];
         [enc setBuffer:bufc offset:0 atIndex:0];
         [enc setBuffer:bufb offset:0 atIndex:1];
         [enc setBuffer:s_buf offset:0 atIndex:2];,
-        2.0 * N * sizeof(float));
+        2.0 * n * sizeof(float));
 
     /* ADD */
-    RUN_BENCH("babelstream_add",
+    RUN_BENCH("add_kernel", add_ps,
         [enc setComputePipelineState:add_ps];
         [enc setBuffer:bufa offset:0 atIndex:0];
         [enc setBuffer:bufb offset:0 atIndex:1];
         [enc setBuffer:bufc offset:0 atIndex:2];,
-        3.0 * N * sizeof(float));
+        3.0 * n * sizeof(float));
 
     /* TRIAD */
-    RUN_BENCH("babelstream_triad",
+    RUN_BENCH("triad_kernel", triad_ps,
         [enc setComputePipelineState:triad_ps];
         [enc setBuffer:bufb offset:0 atIndex:0];
         [enc setBuffer:bufc offset:0 atIndex:1];
         [enc setBuffer:bufa offset:0 atIndex:2];
         [enc setBuffer:s_buf offset:0 atIndex:3];,
-        3.0 * N * sizeof(float));
+        3.0 * n * sizeof(float));
 
     /* DOT */
-    RUN_BENCH("babelstream_dot",
+    RUN_BENCH("dot_kernel", dot_ps,
         [enc setComputePipelineState:dot_ps];
         [enc setBuffer:bufa offset:0 atIndex:0];
         [enc setBuffer:bufb offset:0 atIndex:1];
         [enc setBuffer:bufd offset:0 atIndex:2];,
-        2.0 * N * sizeof(float));
+        2.0 * n * sizeof(float));
+
+    /* Summary */
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[]}\n",
+           total_time_all);
 
     return 0;
+
+    } /* @autoreleasepool */
 }

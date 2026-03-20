@@ -31,9 +31,7 @@ typedef hipEvent_t GpuEvent;
 #error "Define USE_CUDA or USE_HIP"
 #endif
 
-#define N (32*1024*1024)
 #define WARMUP 5
-#define ITERS  5
 
 __global__ void copy_kernel(const float* __restrict__ a, float* __restrict__ c, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -70,94 +68,137 @@ __global__ void dot_kernel(const float* __restrict__ a, const float* __restrict_
 }
 
 int main() {
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    int n = 32 * 1024 * 1024;
+    int threads_per_block = 256;
+    float scalar = 2.0f;
+    int num_times = 100;
+
+    /* Read parameters from environment variables */
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_n");
+    if (env_val) n = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_threads_per_block");
+    if (env_val) threads_per_block = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_scalar");
+    if (env_val) scalar = (float)atof(env_val);
+    env_val = getenv("BENCH_PARAM_num_times");
+    if (env_val) num_times = atoi(env_val);
+
     float *da, *db, *dc;
-    MALLOC((void**)&da, N * sizeof(float));
-    MALLOC((void**)&db, N * sizeof(float));
-    MALLOC((void**)&dc, N * sizeof(float));
+    MALLOC((void**)&da, (size_t)n * sizeof(float));
+    MALLOC((void**)&db, (size_t)n * sizeof(float));
+    MALLOC((void**)&dc, (size_t)n * sizeof(float));
 
     /* Initialize on host then copy */
-    float *ha = (float*)malloc(N * sizeof(float));
-    float *hb = (float*)malloc(N * sizeof(float));
-    float *hc = (float*)malloc(N * sizeof(float));
-    for (int i = 0; i < N; i++) { ha[i] = 1.0f; hb[i] = 2.0f; hc[i] = 0.0f; }
-    MEMCPY_H2D(da, ha, N * sizeof(float));
-    MEMCPY_H2D(db, hb, N * sizeof(float));
-    MEMCPY_H2D(dc, hc, N * sizeof(float));
+    float *ha = (float*)malloc((size_t)n * sizeof(float));
+    float *hb = (float*)malloc((size_t)n * sizeof(float));
+    float *hc = (float*)malloc((size_t)n * sizeof(float));
+    for (int i = 0; i < n; i++) { ha[i] = 1.0f; hb[i] = 2.0f; hc[i] = 0.0f; }
+    MEMCPY_H2D(da, ha, (size_t)n * sizeof(float));
+    MEMCPY_H2D(db, hb, (size_t)n * sizeof(float));
+    MEMCPY_H2D(dc, hc, (size_t)n * sizeof(float));
 
-    const float s = 2.0f;
-    int threads = 256;
-    int blocks = (N + threads - 1) / threads;
+    int blocks = (n + threads_per_block - 1) / threads_per_block;
 
     /* Dot reduction buffer */
     float *d_partial;
-    MALLOC((void**)&d_partial, blocks * sizeof(float));
-    float *h_partial = (float*)malloc(blocks * sizeof(float));
+    MALLOC((void**)&d_partial, (size_t)blocks * sizeof(float));
+    float *h_partial = (float*)malloc((size_t)blocks * sizeof(float));
 
     GpuEvent ev_start, ev_stop;
     EVENT_CREATE(ev_start);
     EVENT_CREATE(ev_stop);
 
+    double total_time_all = 0.0;
+
     /* --- COPY --- */
-    for (int i = 0; i < WARMUP; i++) copy_kernel<<<blocks, threads>>>(da, dc, N);
+    for (int i = 0; i < WARMUP; i++) copy_kernel<<<blocks, threads_per_block>>>(da, dc, n);
     DEVICE_SYNC();
     EVENT_RECORD(ev_start);
-    for (int i = 0; i < ITERS; i++) copy_kernel<<<blocks, threads>>>(da, dc, N);
+    for (int i = 0; i < num_times; i++) copy_kernel<<<blocks, threads_per_block>>>(da, dc, n);
     EVENT_RECORD(ev_stop);
     EVENT_SYNC(ev_stop);
-    { float ms = 0; EVENT_ELAPSED(ms, ev_start, ev_stop); ms /= ITERS;
-      double gbs = 2.0 * N * sizeof(float) / (ms / 1000.0) / 1e9;
-      printf("babelstream_copy,%d,%.3f,%.2f\n", N, ms, gbs); }
+    { float ms = 0; EVENT_ELAPSED(ms, ev_start, ev_stop); ms /= num_times;
+      double gbs = 2.0 * n * sizeof(float) / (ms / 1000.0) / 1e9;
+      total_time_all += ms * num_times;
+      printf("{\"type\":\"kernel\",\"name\":\"copy_kernel\",\"time_ms\":%.6f,"
+             "\"params\":{\"n\":%d,\"threads_per_block\":%d,\"scalar\":%.6f,\"num_times\":%d}}\n",
+             (double)ms, n, threads_per_block, (double)scalar, num_times);
+      fprintf(stderr, "copy_kernel: %.3f ms, %.2f GB/s\n", ms, gbs); }
 
     /* --- SCALE --- */
-    for (int i = 0; i < WARMUP; i++) scale_kernel<<<blocks, threads>>>(dc, db, s, N);
+    for (int i = 0; i < WARMUP; i++) scale_kernel<<<blocks, threads_per_block>>>(dc, db, scalar, n);
     DEVICE_SYNC();
     EVENT_RECORD(ev_start);
-    for (int i = 0; i < ITERS; i++) scale_kernel<<<blocks, threads>>>(dc, db, s, N);
+    for (int i = 0; i < num_times; i++) scale_kernel<<<blocks, threads_per_block>>>(dc, db, scalar, n);
     EVENT_RECORD(ev_stop);
     EVENT_SYNC(ev_stop);
-    { float ms = 0; EVENT_ELAPSED(ms, ev_start, ev_stop); ms /= ITERS;
-      double gbs = 2.0 * N * sizeof(float) / (ms / 1000.0) / 1e9;
-      printf("babelstream_scale,%d,%.3f,%.2f\n", N, ms, gbs); }
+    { float ms = 0; EVENT_ELAPSED(ms, ev_start, ev_stop); ms /= num_times;
+      double gbs = 2.0 * n * sizeof(float) / (ms / 1000.0) / 1e9;
+      total_time_all += ms * num_times;
+      printf("{\"type\":\"kernel\",\"name\":\"scale_kernel\",\"time_ms\":%.6f,"
+             "\"params\":{\"n\":%d,\"threads_per_block\":%d,\"scalar\":%.6f,\"num_times\":%d}}\n",
+             (double)ms, n, threads_per_block, (double)scalar, num_times);
+      fprintf(stderr, "scale_kernel: %.3f ms, %.2f GB/s\n", ms, gbs); }
 
     /* --- ADD --- */
-    for (int i = 0; i < WARMUP; i++) add_kernel<<<blocks, threads>>>(da, db, dc, N);
+    for (int i = 0; i < WARMUP; i++) add_kernel<<<blocks, threads_per_block>>>(da, db, dc, n);
     DEVICE_SYNC();
     EVENT_RECORD(ev_start);
-    for (int i = 0; i < ITERS; i++) add_kernel<<<blocks, threads>>>(da, db, dc, N);
+    for (int i = 0; i < num_times; i++) add_kernel<<<blocks, threads_per_block>>>(da, db, dc, n);
     EVENT_RECORD(ev_stop);
     EVENT_SYNC(ev_stop);
-    { float ms = 0; EVENT_ELAPSED(ms, ev_start, ev_stop); ms /= ITERS;
-      double gbs = 3.0 * N * sizeof(float) / (ms / 1000.0) / 1e9;
-      printf("babelstream_add,%d,%.3f,%.2f\n", N, ms, gbs); }
+    { float ms = 0; EVENT_ELAPSED(ms, ev_start, ev_stop); ms /= num_times;
+      double gbs = 3.0 * n * sizeof(float) / (ms / 1000.0) / 1e9;
+      total_time_all += ms * num_times;
+      printf("{\"type\":\"kernel\",\"name\":\"add_kernel\",\"time_ms\":%.6f,"
+             "\"params\":{\"n\":%d,\"threads_per_block\":%d,\"scalar\":%.6f,\"num_times\":%d}}\n",
+             (double)ms, n, threads_per_block, (double)scalar, num_times);
+      fprintf(stderr, "add_kernel: %.3f ms, %.2f GB/s\n", ms, gbs); }
 
     /* --- TRIAD --- */
-    for (int i = 0; i < WARMUP; i++) triad_kernel<<<blocks, threads>>>(db, dc, da, s, N);
+    for (int i = 0; i < WARMUP; i++) triad_kernel<<<blocks, threads_per_block>>>(db, dc, da, scalar, n);
     DEVICE_SYNC();
     EVENT_RECORD(ev_start);
-    for (int i = 0; i < ITERS; i++) triad_kernel<<<blocks, threads>>>(db, dc, da, s, N);
+    for (int i = 0; i < num_times; i++) triad_kernel<<<blocks, threads_per_block>>>(db, dc, da, scalar, n);
     EVENT_RECORD(ev_stop);
     EVENT_SYNC(ev_stop);
-    { float ms = 0; EVENT_ELAPSED(ms, ev_start, ev_stop); ms /= ITERS;
-      double gbs = 3.0 * N * sizeof(float) / (ms / 1000.0) / 1e9;
-      printf("babelstream_triad,%d,%.3f,%.2f\n", N, ms, gbs); }
+    { float ms = 0; EVENT_ELAPSED(ms, ev_start, ev_stop); ms /= num_times;
+      double gbs = 3.0 * n * sizeof(float) / (ms / 1000.0) / 1e9;
+      total_time_all += ms * num_times;
+      printf("{\"type\":\"kernel\",\"name\":\"triad_kernel\",\"time_ms\":%.6f,"
+             "\"params\":{\"n\":%d,\"threads_per_block\":%d,\"scalar\":%.6f,\"num_times\":%d}}\n",
+             (double)ms, n, threads_per_block, (double)scalar, num_times);
+      fprintf(stderr, "triad_kernel: %.3f ms, %.2f GB/s\n", ms, gbs); }
 
     /* --- DOT --- */
     for (int i = 0; i < WARMUP; i++) {
-        dot_kernel<<<blocks, threads, threads * sizeof(float)>>>(da, db, d_partial, N);
-        MEMCPY_D2H(h_partial, d_partial, blocks * sizeof(float));
+        dot_kernel<<<blocks, threads_per_block, threads_per_block * sizeof(float)>>>(da, db, d_partial, n);
+        MEMCPY_D2H(h_partial, d_partial, (size_t)blocks * sizeof(float));
         float sum = 0; for (int j = 0; j < blocks; j++) sum += h_partial[j];
         (void)sum;
     }
     DEVICE_SYNC();
     EVENT_RECORD(ev_start);
-    for (int i = 0; i < ITERS; i++) {
-        dot_kernel<<<blocks, threads, threads * sizeof(float)>>>(da, db, d_partial, N);
+    for (int i = 0; i < num_times; i++) {
+        dot_kernel<<<blocks, threads_per_block, threads_per_block * sizeof(float)>>>(da, db, d_partial, n);
     }
     EVENT_RECORD(ev_stop);
     EVENT_SYNC(ev_stop);
-    { float ms = 0; EVENT_ELAPSED(ms, ev_start, ev_stop); ms /= ITERS;
-      double gbs = 2.0 * N * sizeof(float) / (ms / 1000.0) / 1e9;
-      printf("babelstream_dot,%d,%.3f,%.2f\n", N, ms, gbs); }
+    { float ms = 0; EVENT_ELAPSED(ms, ev_start, ev_stop); ms /= num_times;
+      double gbs = 2.0 * n * sizeof(float) / (ms / 1000.0) / 1e9;
+      total_time_all += ms * num_times;
+      printf("{\"type\":\"kernel\",\"name\":\"dot_kernel\",\"time_ms\":%.6f,"
+             "\"params\":{\"n\":%d,\"threads_per_block\":%d,\"scalar\":%.6f,\"num_times\":%d}}\n",
+             (double)ms, n, threads_per_block, (double)scalar, num_times);
+      fprintf(stderr, "dot_kernel: %.3f ms, %.2f GB/s\n", ms, gbs); }
+
+    /* Summary */
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[]}\n",
+           total_time_all);
 
     FREE(da); FREE(db); FREE(dc); FREE(d_partial);
     free(ha); free(hb); free(hc); free(h_partial);

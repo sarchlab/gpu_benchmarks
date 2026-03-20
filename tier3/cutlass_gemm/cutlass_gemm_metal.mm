@@ -7,17 +7,11 @@
  *
  * Computes: C = A * B
  *   where A is M×K, B is K×N, C is M×N (row-major, FP32)
- *   M = N = K = 4096
- *
- * Warmup: 5 command buffers (not timed)
- * Timed:  5 command buffers, report average via mach_absolute_time()
  *
  * Verification: compare first 8×8 corner against CPU GEMM
  * GFLOPS = 2 * M * N * K / time_s / 1e9
  *
- * Output:
- *   CSV  (stdout): cutlass_gemm,<M>,<time_ms>,<GFLOPS>
- *   Info (stderr): device name, per-iteration times, verification result
+ * Output: JSON-lines protocol (stdout)
  *
  * Build:
  *   make PLATFORM=metal
@@ -36,15 +30,6 @@
 #include <cmath>
 #include <vector>
 #include <mach/mach_time.h>
-
-/* -------------------------------------------------------------------------
- * Benchmark parameters
- * ---------------------------------------------------------------------- */
-#define GEMM_M   4096
-#define GEMM_N   4096
-#define GEMM_K   4096
-#define WARMUP   5
-#define ITERS    5
 
 /* Tile parameters — must match the Metal shader */
 #define BM   64
@@ -72,20 +57,20 @@ static double ticks_to_ms(uint64_t ticks)
 
 /* -------------------------------------------------------------------------
  * CPU reference GEMM — only for the small verification corner
- * A: vm×vk (row-major, full-width stride GEMM_K)
- * B: vk×vn (row-major, full-width stride GEMM_N)
+ * A: vm×vk (row-major, stride ldA)
+ * B: vk×vn (row-major, stride ldB)
  * C: vm×vn (row-major, stride vn)
  * ---------------------------------------------------------------------- */
 static void cpu_gemm(int vm, int vn, int vk,
-                     const float * __restrict__ A,
-                     const float * __restrict__ B,
+                     const float * __restrict__ A, int ldA,
+                     const float * __restrict__ B, int ldB,
                      float       * __restrict__ C)
 {
     for (int i = 0; i < vm; i++) {
         for (int j = 0; j < vn; j++) {
             float s = 0.0f;
             for (int p = 0; p < vk; p++)
-                s += A[(size_t)i * GEMM_K + p] * B[(size_t)p * GEMM_N + j];
+                s += A[(size_t)i * ldA + p] * B[(size_t)p * ldB + j];
             C[i * vn + j] = s;
         }
     }
@@ -98,9 +83,25 @@ int main(int argc, char *argv[])
 {
     @autoreleasepool {
 
-    const int M = GEMM_M;
-    const int N = GEMM_N;
-    const int K = GEMM_K;
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    int M = 4096;
+    int N = 4096;
+    int K = 4096;
+    int warmup = 5;
+    int iters = 5;
+    int block_tile_m = BM;
+
+    /* Read parameters from environment variables */
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_matrix_dim");
+    if (env_val) { M = atoi(env_val); N = M; K = M; }
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) warmup = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iters");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_tile_m");
+    if (env_val) block_tile_m = atoi(env_val);
 
     /* ------------------------------------------------------------------ */
     /* Metal device setup                                                  */
@@ -114,7 +115,7 @@ int main(int argc, char *argv[])
     fprintf(stderr, "M=%d  N=%d  K=%d  BM=%d BN=%d TM=%d TN=%d\n",
             M, N, K, BM, BN, TM, TN);
     fprintf(stderr, "threads/group=%d  warmup=%d  iters=%d\n\n",
-            NUM_THREADS, WARMUP, ITERS);
+            NUM_THREADS, warmup, iters);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -236,13 +237,13 @@ int main(int argc, char *argv[])
     /* ------------------------------------------------------------------ */
     /* Warmup                                                              */
     /* ------------------------------------------------------------------ */
-    for (int i = 0; i < WARMUP; i++) run_gemm();
+    for (int i = 0; i < warmup; i++) run_gemm();
 
     /* ------------------------------------------------------------------ */
     /* Timed iterations                                                    */
     /* ------------------------------------------------------------------ */
-    std::vector<double> times((size_t)ITERS);
-    for (int i = 0; i < ITERS; i++) {
+    std::vector<double> times((size_t)iters);
+    for (int i = 0; i < iters; i++) {
         uint64_t t0 = mach_absolute_time();
         run_gemm();
         uint64_t t1 = mach_absolute_time();
@@ -255,7 +256,7 @@ int main(int argc, char *argv[])
     /* ------------------------------------------------------------------ */
     const int VN = 8;
     std::vector<float> cpuC((size_t)VN * VN, 0.0f);
-    cpu_gemm(VN, VN, K, hA, hB, cpuC.data());
+    cpu_gemm(VN, VN, K, hA, K, hB, N, cpuC.data());
 
     bool pass = true;
     for (int i = 0; i < VN && pass; i++) {
@@ -277,14 +278,26 @@ int main(int argc, char *argv[])
     /* Statistics                                                          */
     /* ------------------------------------------------------------------ */
     double sum_ms = 0.0;
-    for (int i = 0; i < ITERS; i++) sum_ms += times[i];
-    double avg_ms = sum_ms / ITERS;
+    for (int i = 0; i < iters; i++) sum_ms += times[i];
+    double avg_ms = sum_ms / iters;
+    double total_ms = sum_ms;
 
     double gflops = 2.0 * M * N * K / (avg_ms / 1000.0) / 1e9;
 
-    /* CSV output */
-    printf("cutlass_gemm,%d,%.3f,%.2f\n", M, avg_ms, gflops);
-    /* Human-readable */
+    /* ------------------------------------------------------------------ */
+    /* Report — JSON-lines protocol                                        */
+    /* ------------------------------------------------------------------ */
+
+    /* Kernel event */
+    printf("{\"type\":\"kernel\",\"name\":\"tiled_gemm_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"block_tile_m\":%d}}\n",
+           avg_ms, M, warmup, iters, block_tile_m);
+
+    /* Summary event */
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
+           total_ms, gflops);
+
     fprintf(stderr, "cutlass_gemm  M=%d N=%d K=%d  time_ms=%.3f  GFLOPS=%.2f\n",
             M, N, K, avg_ms, gflops);
 

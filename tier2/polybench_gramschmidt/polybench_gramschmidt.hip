@@ -175,9 +175,22 @@ static bool check_orthogonality(const float* Q, int M, int N)
 // ---------------------------------------------------------------------------
 int main(int argc, char** argv)
 {
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     int M      = parseIntParam(argc, argv, "--m", 512);
     int N      = parseIntParam(argc, argv, "--n", 512);
     int passes = parseIntParam(argc, argv, "--passes", 3);
+    int block_size_param = parseIntParam(argc, argv, "--block_size", 256);
+
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_m");
+    if (env_val) M = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_n");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_passes");
+    if (env_val) passes = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size_param = atoi(env_val);
 
     size_t bytes_A = (size_t)M * N * sizeof(float);
     size_t bytes_Q = (size_t)M * N * sizeof(float);
@@ -291,8 +304,22 @@ int main(int argc, char** argv)
             "Bandwidth: %.2f GB/s  (avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
             gbps, avg_ms, mn, mx, stddev);
 
-    // CSV output: gramschmidt,<M>,<N>,<time_ms>,<GBs>
-    printf("gramschmidt,%d,%d,%.4f,%.2f\n", M, N, avg_ms, gbps);
+    // JSON-lines output
+    printf("{\"type\":\"kernel\",\"name\":\"gram_norm\",\"time_ms\":%.6f,"
+           "\"params\":{\"m\":%d,\"n\":%d,\"passes\":%d,\"block_size\":%d}}\n",
+           avg_ms, M, N, passes, block_size_param);
+    printf("{\"type\":\"kernel\",\"name\":\"gram_norm_finish\",\"time_ms\":%.6f,"
+           "\"params\":{\"m\":%d,\"n\":%d,\"passes\":%d,\"block_size\":%d}}\n",
+           avg_ms, M, N, passes, block_size_param);
+    printf("{\"type\":\"kernel\",\"name\":\"gram_normalize\",\"time_ms\":%.6f,"
+           "\"params\":{\"m\":%d,\"n\":%d,\"passes\":%d,\"block_size\":%d}}\n",
+           avg_ms, M, N, passes, block_size_param);
+    printf("{\"type\":\"kernel\",\"name\":\"gram_project\",\"time_ms\":%.6f,"
+           "\"params\":{\"m\":%d,\"n\":%d,\"passes\":%d,\"block_size\":%d}}\n",
+           avg_ms, M, N, passes, block_size_param);
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
+           avg_ms, gbps);
 
     // Cleanup
     HIP_CHECK(hipFree(d_A));

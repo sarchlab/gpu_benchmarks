@@ -86,15 +86,6 @@ struct BenchResult {
     double      stddev_ms;
 };
 
-static void printCSVHeader() {
-    printf("kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms\n");
-}
-
-static void printCSVRow(const BenchResult& r) {
-    printf("%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n",
-           r.kernel_name, r.problem_size, r.iterations,
-           r.avg_ms, r.min_ms, r.max_ms, r.stddev_ms);
-}
 
 // ---------------------------------------------------------------------------
 // Chip thermal constants (Rodinia defaults)
@@ -113,10 +104,22 @@ static void printCSVRow(const BenchResult& r) {
 int main(int argc, char* argv[])
 {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
     int grid_size      = parseIntParam(argc, argv, "--grid_size",     512);
     int num_iterations = parseIntParam(argc, argv, "--num_iterations", 10);
     int iters          = parseIterations(argc, argv);
+    int block_dim      = 16;
+
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_grid_size");
+    if (env_val) grid_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_dim = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_num_iterations");
+    if (env_val) num_iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
 
     int grid_rows   = grid_size;
     int grid_cols   = grid_size;
@@ -308,15 +311,21 @@ int main(int argc, char* argv[])
     r.max_ms       = mx;
     r.stddev_ms    = stddev;
 
-    printCSVHeader();
-    printCSVRow(r);
-
     // Effective bandwidth per stencil step: 2 reads (temp_src, power) + 1 write
     double bytes_per_step = 3.0 * (double)total_cells * sizeof(float);
     double total_bytes    = bytes_per_step * num_iterations;
     double bw_gb = total_bytes / (r.avg_ms * 1e-3) / 1e9;
     fprintf(stderr, "Effective bandwidth: %.2f GB/s  (avg %.4f ms, %d steps/iter)\n",
             bw_gb, r.avg_ms, num_iterations);
+
+    // JSON-lines output
+    printf("{\"type\":\"kernel\",\"name\":\"hotspot_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"grid_size\":%d,\"block_size\":%d,\"num_iterations\":%d,"
+           "\"iterations\":%d}}\n",
+           r.avg_ms, grid_size, block_dim, num_iterations, iters);
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
+           r.avg_ms, bw_gb);
 
     return EXIT_SUCCESS;
 

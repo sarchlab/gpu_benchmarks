@@ -86,10 +86,22 @@ static void cpu_jacobi2d(const float* A, float* B, int N)
 int main(int argc, char* argv[])
 {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
     int N      = parseIntParam(argc, argv, "--n",      1024);
     int TSTEPS = parseIntParam(argc, argv, "--tsteps", 50);
     int trials = parseIntParam(argc, argv, "--trials", 3);
+    int block_size_param = 256;
+
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_n");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_tsteps");
+    if (env_val) TSTEPS = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_trials");
+    if (env_val) trials = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size_param = atoi(env_val);
 
     size_t bytes = (size_t)N * N * sizeof(float);
 
@@ -326,8 +338,13 @@ int main(int argc, char* argv[])
     fprintf(stderr, "Bandwidth: %.2f GB/s  (avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
             gbps, avg_ms, mn, mx, stddev);
 
-    // CSV output: jacobi2d,<N>,<TSTEPS>,<time_ms>,<GBs>
-    printf("jacobi2d,%d,%d,%.4f,%.2f\n", N, TSTEPS, avg_ms, gbps);
+    // JSON-lines output
+    printf("{\"type\":\"kernel\",\"name\":\"jacobi2d_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"n\":%d,\"tsteps\":%d,\"trials\":%d,\"block_size\":%d}}\n",
+           avg_ms, N, TSTEPS, trials, block_size_param);
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
+           avg_ms, gbps);
 
     return EXIT_SUCCESS;
 

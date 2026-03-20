@@ -72,15 +72,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     return defaultVal;
 }
 
-static void printCSVHeader() {
-    printf("kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms\n");
-}
-
-static void printCSVRow(const BenchResult& r) {
-    printf("%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n",
-           r.kernel_name, r.problem_size, r.iterations,
-           r.avg_ms, r.min_ms, r.max_ms, r.stddev_ms);
-}
 
 struct BenchmarkTimer {
     hipEvent_t start, stop;
@@ -196,10 +187,22 @@ __global__ void hotspot_kernel(const float* __restrict__ temp_src,
 // Main
 // ---------------------------------------------------------------------------
 int main(int argc, char** argv) {
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     int grid_size      = parseIntParam(argc, argv, "--grid_size",      512);
     int block_dim      = parseIntParam(argc, argv, "--block_size",      16);
     int num_iterations = parseIntParam(argc, argv, "--num_iterations",  10);
     int iters          = parseIterations(argc, argv);
+
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_grid_size");
+    if (env_val) grid_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_dim = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_num_iterations");
+    if (env_val) num_iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iters = atoi(env_val);
 
     int grid_rows  = grid_size;
     int grid_cols  = grid_size;
@@ -254,8 +257,6 @@ int main(int argc, char** argv) {
     char problemSize[64];
     snprintf(problemSize, sizeof(problemSize), "%d", grid_size);
 
-    printCSVHeader();
-
     BenchResult r = runBenchmark(
         "hotspot", problemSize, iters, [&]() {
             // Reset temperature for each benchmark iteration
@@ -278,14 +279,21 @@ int main(int argc, char** argv) {
             HIP_CHECK(hipDeviceSynchronize());
         });
 
-    printCSVRow(r);
-
     // Effective bandwidth per stencil step: 2 reads (temp_src, power) + 1 write (temp_dst)
     double bytes_per_step = 3.0 * (double)total_cells * sizeof(float);
     double total_bytes    = bytes_per_step * num_iterations;
     double bw_gb = total_bytes / (r.avg_ms * 1e-3) / 1e9;
     fprintf(stderr, "Effective bandwidth: %.2f GB/s  (avg %.4f ms, %d steps/iter)\n",
             bw_gb, r.avg_ms, num_iterations);
+
+    // JSON-lines output
+    printf("{\"type\":\"kernel\",\"name\":\"hotspot_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"grid_size\":%d,\"block_size\":%d,\"num_iterations\":%d,"
+           "\"iterations\":%d}}\n",
+           r.avg_ms, grid_size, block_dim, num_iterations, iters);
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
+           r.avg_ms, bw_gb);
 
     HIP_CHECK(hipFree(d_temp_src));
     HIP_CHECK(hipFree(d_temp_dst));

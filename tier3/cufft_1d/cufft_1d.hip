@@ -117,17 +117,31 @@
 #endif
 
 /* -------------------------------------------------------------------------
- * Benchmark parameters
+ * Benchmark parameters (mutable — overridable via BENCH_PARAM_* env vars)
  * ---------------------------------------------------------------------- */
-#define N      (1 << 22)   /* 4194304 complex samples */
-#define WARMUP 5
-#define ITERS  5
+static int N      = (1 << 22);   /* 4194304 complex samples */
+static int WARMUP = 5;
+static int ITERS  = 5;
+static const char* DIRECTION = "forward";
 
 /* -------------------------------------------------------------------------
  * main
  * ---------------------------------------------------------------------- */
 int main(void)
 {
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    /* Read parameters from environment variables */
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_n");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) WARMUP = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iters");
+    if (env_val) ITERS = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_direction");
+    if (env_val) DIRECTION = env_val;
+
     /* ------------------------------------------------------------------ */
     /* Host allocation and initialization                                  */
     /* ------------------------------------------------------------------ */
@@ -230,7 +244,19 @@ int main(void)
     double bytes  = 2.0 * N * 2 * sizeof(float);
     double GBs    = bytes / (avg_ms / 1000.0) / 1e9;
 
-    printf("cufft_1d,%d,%.3f,%.2f\n", N, avg_ms, GBs);
+    /* JSON-lines output */
+#ifdef USE_CUFFT
+    printf("{\"type\":\"kernel\",\"name\":\"cufftExecC2C\",\"time_ms\":%.6f,"
+           "\"params\":{\"n\":%d,\"warmup\":%d,\"iters\":%d,\"direction\":\"%s\"}}\n",
+           (double)avg_ms, N, WARMUP, ITERS, DIRECTION);
+#elif defined(USE_HIPFFT)
+    printf("{\"type\":\"kernel\",\"name\":\"hipfftExecC2C\",\"time_ms\":%.6f,"
+           "\"params\":{\"n\":%d,\"warmup\":%d,\"iters\":%d,\"direction\":\"%s\"}}\n",
+           (double)avg_ms, N, WARMUP, ITERS, DIRECTION);
+#endif
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GB/s\",\"value\":%.2f}]}\n",
+           (double)total_ms, GBs);
     fprintf(stderr, "cufft_1d  N=%d  time_ms=%.3f  GB/s=%.2f\n", N, avg_ms, GBs);
 
     /* ------------------------------------------------------------------ */

@@ -3,13 +3,11 @@
  *
  * Wraps cuFFT (NVIDIA) or hipFFT (AMD).
  *
- * Parameters:
- *   NX = NY = 2048
- *   Complex single-precision input: NX*NY cufftComplex / hipfftComplex values
- *   Forward C2C FFT (CUFFT_FORWARD / HIPFFT_FORWARD)
- *
- * Warmup: 5 iterations (not timed)
- * Timed:  5 iterations; report average
+ * Parameters (from env vars BENCH_PARAM_*):
+ *   grid_dim  — square grid dimension NX=NY for the 2D FFT
+ *   warmup    — warmup iterations (not timed)
+ *   iters     — timed iterations
+ *   direction — FFT direction (forward/inverse/roundtrip)
  *
  * Verification: 2D sinusoidal input at frequencies (kx=3, ky=5)
  *   → magnitude at bin [3][5] ≈ NX*NY/2
@@ -17,8 +15,8 @@
  * GB/s = 2 * NX*NY * 2 * sizeof(float) / time_s / 1e9
  *        (read input + write output, each NX*NY complex floats)
  *
- * Output:
- *   cufft_2d,2048,<time_ms>,<GBs>
+ * Output (stdout): JSON-lines protocol
+ * Output (stderr): human-readable diagnostics
  *
  * Build:
  *   CUDA:  nvcc -O3 -std=c++14 -x cu -DUSE_CUFFT  cufft_2d.hip -lcufft  -o cufft_2d
@@ -72,6 +70,7 @@
 #  define FFT_PLAN_2D(plan, nx, ny)   FFT_CHECK(cufftPlan2d(&(plan), (nx), (ny), CUFFT_C2C))
 #  define FFT_EXEC(plan, in, out)     FFT_CHECK(cufftExecC2C((plan), (in), (out), CUFFT_FORWARD))
 #  define FFT_DESTROY(plan)           FFT_CHECK(cufftDestroy(plan))
+#  define KERNEL_NAME "cufftExecC2C"
 
 #elif defined(USE_HIPFFT)
 #  include <hipfft/hipfft.h>
@@ -112,24 +111,39 @@
 #  define FFT_PLAN_2D(plan, nx, ny)   FFT_CHECK(hipfftPlan2d(&(plan), (nx), (ny), HIPFFT_C2C))
 #  define FFT_EXEC(plan, in, out)     FFT_CHECK(hipfftExecC2C((plan), (in), (out), HIPFFT_FORWARD))
 #  define FFT_DESTROY(plan)           FFT_CHECK(hipfftDestroy(plan))
+#  define KERNEL_NAME "hipfftExecC2C"
 
 #else
 #  error "Define USE_CUFFT (NVIDIA) or USE_HIPFFT (AMD)"
 #endif
 
 /* -------------------------------------------------------------------------
- * Benchmark parameters
- * ---------------------------------------------------------------------- */
-#define NX     2048
-#define NY     2048
-#define WARMUP 5
-#define ITERS  5
-
-/* -------------------------------------------------------------------------
  * main
  * ---------------------------------------------------------------------- */
 int main(void)
 {
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    /* ------------------------------------------------------------------ */
+    /* Default parameters (overridden by BENCH_PARAM_* env vars)          */
+    /* ------------------------------------------------------------------ */
+    int grid_dim = 2048;
+    int warmup   = 5;
+    int iters    = 5;
+    const char *direction = "forward";
+
+    const char *env_val;
+    env_val = getenv("BENCH_PARAM_grid_dim");
+    if (env_val) grid_dim = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) warmup = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iters");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_direction");
+    if (env_val) direction = env_val;
+
+    int NX = grid_dim;
+    int NY = grid_dim;
     long long total = (long long)NX * NY;
 
     /* ------------------------------------------------------------------ */
@@ -177,7 +191,7 @@ int main(void)
     /* ------------------------------------------------------------------ */
     /* Warmup                                                              */
     /* ------------------------------------------------------------------ */
-    for (int i = 0; i < WARMUP; i++) {
+    for (int i = 0; i < warmup; i++) {
         FFT_EXEC(plan, d_in, d_out);
     }
     GPU_DEVICE_SYNC();
@@ -190,7 +204,7 @@ int main(void)
     GPU_EVENT_CREATE(ev_stop);
 
     GPU_EVENT_RECORD(ev_start);
-    for (int i = 0; i < ITERS; i++) {
+    for (int i = 0; i < iters; i++) {
         FFT_EXEC(plan, d_in, d_out);
     }
     GPU_EVENT_RECORD(ev_stop);
@@ -198,7 +212,7 @@ int main(void)
 
     float total_ms = 0.0f;
     GPU_EVENT_ELAPSED(ev_start, ev_stop, total_ms);
-    float avg_ms = total_ms / (float)ITERS;
+    float avg_ms = total_ms / (float)iters;
 
     /* ------------------------------------------------------------------ */
     /* Copy result back for verification                                   */
@@ -247,7 +261,16 @@ int main(void)
     double bytes = 2.0 * total * 2 * sizeof(float);
     double GBs   = bytes / (avg_ms / 1000.0) / 1e9;
 
-    printf("cufft_2d,%d,%.3f,%.2f\n", NX, avg_ms, GBs);
+    /* JSON-lines: kernel event */
+    printf("{\"type\":\"kernel\",\"name\":\"%s\",\"time_ms\":%.6f,"
+           "\"params\":{\"grid_dim\":%d,\"warmup\":%d,\"iters\":%d,\"direction\":\"%s\"}}\n",
+           KERNEL_NAME, (double)avg_ms, grid_dim, warmup, iters, direction);
+
+    /* JSON-lines: summary event */
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GB/s\",\"value\":%.2f}]}\n",
+           (double)total_ms, GBs);
+
     fprintf(stderr, "cufft_2d  NX=%d NY=%d  time_ms=%.3f  GB/s=%.2f\n",
             NX, NY, avg_ms, GBs);
 

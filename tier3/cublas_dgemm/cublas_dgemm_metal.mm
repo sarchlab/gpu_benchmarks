@@ -7,17 +7,9 @@
  *
  * Computes: C = A * B
  *   where A is M×K, B is K×N, C is M×N (row-major, FP64)
- *   M = N = K = 4096
  *
- * Warmup: 5 iterations (not timed)
- * Timed:  5 iterations, report average
- *
- * Verification: compare first 8×8 corner of C against a simple CPU DGEMM loop
- * GFLOPS = 2 * M * N * K / time_s / 1e9
- *
- * Output:
- *   CSV  (stdout): cublas_dgemm,<M>,<time_ms>,<GFLOPS>
- *   Info (stderr): per-iteration times, verification result
+ * Parameters read from BENCH_PARAM_* environment variables.
+ * Output: JSON-lines to stdout, human-readable info to stderr.
  *
  * Build:
  *   make PLATFORM=metal
@@ -38,13 +30,14 @@
 #include <vector>
 
 /* -------------------------------------------------------------------------
- * Benchmark parameters
+ * Benchmark parameters (defaults, overridable via BENCH_PARAM_* env vars)
  * ---------------------------------------------------------------------- */
-#define GEMM_M  4096
-#define GEMM_N  4096
-#define GEMM_K  4096
-#define WARMUP  5
-#define ITERS   5
+static int GEMM_M  = 4096;
+static int GEMM_N  = 4096;
+static int GEMM_K  = 4096;
+static int WARMUP  = 5;
+static int ITERS   = 5;
+static double ALPHA = 1.0;
 
 /* -------------------------------------------------------------------------
  * Timing helpers
@@ -84,6 +77,21 @@ int main(int argc, char *argv[])
 {
     @autoreleasepool {
 
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    /* ------------------------------------------------------------------ */
+    /* Read parameters from environment variables                          */
+    /* ------------------------------------------------------------------ */
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_matrix_dim");
+    if (env_val) { GEMM_M = atoi(env_val); GEMM_N = GEMM_M; GEMM_K = GEMM_M; }
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) WARMUP = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iters");
+    if (env_val) ITERS = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_alpha");
+    if (env_val) ALPHA = atof(env_val);
+
     const int M = GEMM_M;
     const int N = GEMM_N;
     const int K = GEMM_K;
@@ -113,7 +121,7 @@ int main(int argc, char *argv[])
     auto run_dgemm = [&]() {
         cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
                     M, N, K,
-                    1.0, A, K,
+                    ALPHA, A, K,
                          B, N,
                     0.0, C, N);
     };
@@ -170,9 +178,18 @@ int main(int argc, char *argv[])
 
     double gflops = 2.0 * M * N * K / (avg_ms / 1000.0) / 1e9;
 
-    /* CSV output */
-    printf("cublas_dgemm,%d,%.3f,%.2f\n", M, avg_ms, gflops);
-    /* Human-readable */
+    /* ------------------------------------------------------------------ */
+    /* Report — JSON-lines to stdout                                       */
+    /* ------------------------------------------------------------------ */
+    printf("{\"type\":\"kernel\",\"name\":\"cublasDgemm\",\"time_ms\":%.6f,"
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"alpha\":%.6f}}\n",
+           avg_ms, M, WARMUP, ITERS, ALPHA);
+
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
+           sum_ms, gflops);
+
+    /* Human-readable to stderr */
     fprintf(stderr, "cublas_dgemm  M=%d N=%d K=%d  time_ms=%.3f  GFLOPS=%.2f  (Accelerate cblas_dgemm, CPU-only)\n",
             M, N, K, avg_ms, gflops);
 

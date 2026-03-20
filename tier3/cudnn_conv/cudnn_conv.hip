@@ -104,21 +104,21 @@ typedef hipEvent_t gpu_event_t;
 #endif
 
 /* =========================================================================
- * Benchmark parameters
+ * Benchmark parameters (runtime-configurable via BENCH_PARAM_* env vars)
  * ======================================================================= */
-#define BATCH_N  32
-#define IN_C     3
-#define IN_H     224
-#define IN_W     224
-#define OUT_K    64
-#define FILT_R   7
-#define FILT_S   7
-#define STRIDE   2
-#define PAD      3
-#define OUT_H    112   /* floor((IN_H + 2*PAD - FILT_R) / STRIDE) + 1 */
-#define OUT_W    112
-#define WARMUP   5
-#define ITERS    5
+static int BATCH_N  = 32;
+static int IN_C     = 3;
+static int IN_H     = 224;
+static int IN_W     = 224;
+static int OUT_K    = 64;
+static int FILT_R   = 7;
+static int FILT_S   = 7;
+static const int STRIDE = 2;
+static const int PAD    = 3;
+static int OUT_H    = 112;   /* floor((IN_H + 2*PAD - FILT_R) / STRIDE) + 1 */
+static int OUT_W    = 112;
+static const int WARMUP = 5;
+static const int ITERS  = 5;
 
 /* =========================================================================
  * CPU reference convolution — only for a small patch
@@ -170,6 +170,25 @@ static void cpu_conv2d(int vn, int vk, int voh, int vow,
  * ======================================================================= */
 int main(void)
 {
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    /* Read parameters from environment variables */
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_input_hw");
+    if (env_val) { IN_H = atoi(env_val); IN_W = IN_H; }
+    env_val = getenv("BENCH_PARAM_batch_n");
+    if (env_val) BATCH_N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_in_channels");
+    if (env_val) IN_C = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_out_channels");
+    if (env_val) OUT_K = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_filter_size");
+    if (env_val) { FILT_R = atoi(env_val); FILT_S = FILT_R; }
+
+    /* Recompute output dimensions */
+    OUT_H = (IN_H + 2 * PAD - FILT_R) / STRIDE + 1;
+    OUT_W = (IN_W + 2 * PAD - FILT_S) / STRIDE + 1;
+
     /* ------------------------------------------------------------------
      * Host allocation and initialisation
      * ---------------------------------------------------------------- */
@@ -399,9 +418,22 @@ int main(void)
                    IN_C * FILT_R * FILT_S;
     double gflops = flops / (avg_ms / 1000.0) / 1e9;
 
-    /* CSV line (stdout) */
-    printf("cudnn_conv,%dx%dx%dx%d,%.3f,%.2f\n",
-           BATCH_N, IN_C, IN_H, IN_W, avg_ms, gflops);
+    /* JSON-lines output */
+#ifdef USE_CUDNN
+    printf("{\"type\":\"kernel\",\"name\":\"cudnnConvolutionForward\",\"time_ms\":%.6f,"
+           "\"params\":{\"input_hw\":%d,\"batch_n\":%d,\"in_channels\":%d,"
+           "\"out_channels\":%d,\"filter_size\":%d}}\n",
+           (double)avg_ms, IN_H, BATCH_N, IN_C, OUT_K, FILT_R);
+#elif defined(USE_MIOPEN)
+    printf("{\"type\":\"kernel\",\"name\":\"miopenConvolutionForward\",\"time_ms\":%.6f,"
+           "\"params\":{\"input_hw\":%d,\"batch_n\":%d,\"in_channels\":%d,"
+           "\"out_channels\":%d,\"filter_size\":%d}}\n",
+           (double)avg_ms, IN_H, BATCH_N, IN_C, OUT_K, FILT_R);
+#endif
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
+           (double)total_ms, gflops);
+
     /* Human-readable (stderr) */
     fprintf(stderr,
         "cudnn_conv  N=%d C=%d H=%d W=%d K=%d R=%d S=%d stride=%d pad=%d  "

@@ -4,16 +4,17 @@
 // Computes: y = A * x
 //   where A is a synthetic CSR sparse matrix with exactly NNZ_PER_ROW non-zeros per row.
 //
-// Parameters (compile-time constants):
-//   NUM_ROWS    = 16384
-//   NNZ_PER_ROW = 32
-//   NNZ         = NUM_ROWS * NNZ_PER_ROW = 524288
+// Parameters (from env vars BENCH_PARAM_*):
+//   num_rows    — number of rows (and columns) in the square sparse matrix
+//   nnz_per_row — non-zeros per row
+//   warmup      — warmup iterations
+//   iters       — timed iterations
 //
 // Metrics:
 //   GB/s   = NNZ * 12.0 / time_s / 1e9
 //   GFLOPS = 2.0 * NNZ  / time_s / 1e9
 //
-// Output (stdout): CSV — cusparse_spmv,<NUM_ROWS>,<NNZ_PER_ROW>,<time_ms>,<GBs>,<GFLOPS>
+// Output (stdout): JSON-lines protocol
 // Output (stderr): device info, per-iteration times, verification result
 //
 // Build:
@@ -52,6 +53,8 @@
     }                                                                      \
 } while (0)
 
+#define KERNEL_NAME "cusparseSpMV"
+
 #elif defined(USE_ROCSPARSE)
 #include <rocsparse/rocsparse.h>
 #include <hip/hip_runtime.h>
@@ -74,20 +77,11 @@
     }                                                                      \
 } while (0)
 
+#define KERNEL_NAME "rocsparse_scsrmv"
+
 #else
 #error "Define USE_CUSPARSE or USE_ROCSPARSE"
 #endif
-
-// ---------------------------------------------------------------------------
-// Benchmark constants
-// ---------------------------------------------------------------------------
-
-#define NUM_ROWS    16384
-#define NNZ_PER_ROW 32
-#define NUM_COLS    NUM_ROWS
-#define NNZ         (NUM_ROWS * NNZ_PER_ROW)
-#define WARMUP      5
-#define ITERS       5
 
 // ---------------------------------------------------------------------------
 // CPU SpMV reference for correctness verification
@@ -110,10 +104,28 @@ static void cpu_spmv(int num_rows, const int *row_ptr, const int *col_idx,
 
 int main(int argc, char **argv)
 {
-    const int num_rows    = NUM_ROWS;
-    const int num_cols    = NUM_COLS;
-    const int nnz_per_row = NNZ_PER_ROW;
-    const int nnz         = NNZ;
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // -----------------------------------------------------------------------
+    // Default parameters (overridden by BENCH_PARAM_* env vars)
+    // -----------------------------------------------------------------------
+    int num_rows    = 16384;
+    int nnz_per_row = 32;
+    int warmup      = 5;
+    int iters       = 5;
+
+    const char *env_val;
+    env_val = getenv("BENCH_PARAM_num_rows");
+    if (env_val) num_rows = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_nnz_per_row");
+    if (env_val) nnz_per_row = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) warmup = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iters");
+    if (env_val) iters = atoi(env_val);
+
+    const int num_cols = num_rows;
+    const int nnz      = num_rows * nnz_per_row;
 
     // -----------------------------------------------------------------------
     // Allocate host arrays
@@ -165,7 +177,7 @@ int main(int argc, char **argv)
     }
     fprintf(stderr, "Rows: %d  |  NNZ_per_row: %d  |  Total NNZ: %d\n"
                     "Warmup: %d  |  Iterations: %d\n\n",
-            num_rows, nnz_per_row, nnz, WARMUP, ITERS);
+            num_rows, nnz_per_row, nnz, warmup, iters);
 
     // Device allocations
     int   *d_row_ptr;
@@ -227,7 +239,7 @@ int main(int argc, char **argv)
     CUDA_CHECK(cudaEventCreate(&ev_stop));
 
     // Warmup
-    for (int w = 0; w < WARMUP; w++) {
+    for (int w = 0; w < warmup; w++) {
         SP_CHECK(cusparseSpMV(
             sp_handle,
             CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -238,9 +250,9 @@ int main(int argc, char **argv)
     CUDA_CHECK(cudaDeviceSynchronize());
 
     // Timed iterations
-    double times[ITERS];
+    double times[64];
     double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int iter = 0; iter < ITERS; iter++) {
+    for (int iter = 0; iter < iters; iter++) {
         float ms_f = 0.0f;
         CUDA_CHECK(cudaEventRecord(ev_start, 0));
         SP_CHECK(cusparseSpMV(
@@ -280,13 +292,13 @@ int main(int argc, char **argv)
             check_n, pass ? "PASS" : "FAIL");
 
     // Statistics
-    double avg_ms = sum_ms / ITERS;
+    double avg_ms = sum_ms / iters;
     double variance = 0.0;
-    for (int i = 0; i < ITERS; i++) {
+    for (int i = 0; i < iters; i++) {
         double d = times[i] - avg_ms;
         variance += d * d;
     }
-    double stddev = (ITERS > 1) ? sqrt(variance / (ITERS - 1)) : 0.0;
+    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
     double time_s = avg_ms * 1e-3;
     double gbps   = (double)nnz * 12.0 / time_s / 1e9;
     double gflops = 2.0 * (double)nnz / time_s / 1e9;
@@ -296,8 +308,15 @@ int main(int argc, char **argv)
             "(avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
             gbps, gflops, avg_ms, mn, mx, stddev);
 
-    printf("cusparse_spmv,%d,%d,%.4f,%.2f,%.2f\n",
-           num_rows, nnz_per_row, avg_ms, gbps, gflops);
+    // JSON-lines: kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"%s\",\"time_ms\":%.6f,"
+           "\"params\":{\"num_rows\":%d,\"nnz_per_row\":%d,\"warmup\":%d,\"iters\":%d}}\n",
+           KERNEL_NAME, avg_ms, num_rows, nnz_per_row, warmup, iters);
+
+    // JSON-lines: summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GB/s\",\"value\":%.2f},{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
+           sum_ms, gbps, gflops);
 
     // Cleanup
     if (d_buffer) cudaFree(d_buffer);
@@ -331,7 +350,7 @@ int main(int argc, char **argv)
     }
     fprintf(stderr, "Rows: %d  |  NNZ_per_row: %d  |  Total NNZ: %d\n"
                     "Warmup: %d  |  Iterations: %d\n\n",
-            num_rows, nnz_per_row, nnz, WARMUP, ITERS);
+            num_rows, nnz_per_row, nnz, warmup, iters);
 
     // Device allocations
     int   *d_row_ptr;
@@ -370,7 +389,7 @@ int main(int argc, char **argv)
     HIP_CHECK(hipEventCreate(&ev_stop));
 
     // Warmup
-    for (int w = 0; w < WARMUP; w++) {
+    for (int w = 0; w < warmup; w++) {
         SP_CHECK(rocsparse_scsrmv(
             sp_handle,
             rocsparse_operation_none,
@@ -382,9 +401,9 @@ int main(int argc, char **argv)
     HIP_CHECK(hipDeviceSynchronize());
 
     // Timed iterations
-    double times[ITERS];
+    double times[64];
     double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int iter = 0; iter < ITERS; iter++) {
+    for (int iter = 0; iter < iters; iter++) {
         float ms_f = 0.0f;
         HIP_CHECK(hipEventRecord(ev_start, 0));
         SP_CHECK(rocsparse_scsrmv(
@@ -425,13 +444,13 @@ int main(int argc, char **argv)
             check_n, pass ? "PASS" : "FAIL");
 
     // Statistics
-    double avg_ms = sum_ms / ITERS;
+    double avg_ms = sum_ms / iters;
     double variance = 0.0;
-    for (int i = 0; i < ITERS; i++) {
+    for (int i = 0; i < iters; i++) {
         double d = times[i] - avg_ms;
         variance += d * d;
     }
-    double stddev = (ITERS > 1) ? sqrt(variance / (ITERS - 1)) : 0.0;
+    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
     double time_s = avg_ms * 1e-3;
     double gbps   = (double)nnz * 12.0 / time_s / 1e9;
     double gflops = 2.0 * (double)nnz / time_s / 1e9;
@@ -441,8 +460,15 @@ int main(int argc, char **argv)
             "(avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
             gbps, gflops, avg_ms, mn, mx, stddev);
 
-    printf("cusparse_spmv,%d,%d,%.4f,%.2f,%.2f\n",
-           num_rows, nnz_per_row, avg_ms, gbps, gflops);
+    // JSON-lines: kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"%s\",\"time_ms\":%.6f,"
+           "\"params\":{\"num_rows\":%d,\"nnz_per_row\":%d,\"warmup\":%d,\"iters\":%d}}\n",
+           KERNEL_NAME, avg_ms, num_rows, nnz_per_row, warmup, iters);
+
+    // JSON-lines: summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GB/s\",\"value\":%.2f},{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
+           sum_ms, gbps, gflops);
 
     // Cleanup
     rocsparse_destroy_mat_descr(mat_descr);

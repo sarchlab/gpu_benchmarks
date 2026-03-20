@@ -1,9 +1,10 @@
+import json
+import os
+import sys
 import torch
 import triton
 import triton.language as tl
 import time
-
-BLOCK_SIZE = 1024
 
 @triton.jit
 def vector_add_kernel(
@@ -22,16 +23,28 @@ def vector_add_kernel(
 
 def benchmark():
     device = 'cuda'
-    N = 1 << 26  # 67108864
-    a = torch.rand(N, device=device, dtype=torch.float32)
-    b = torch.rand(N, device=device, dtype=torch.float32)
-    c = torch.empty(N, device=device, dtype=torch.float32)
 
-    grid = lambda meta: (triton.cdiv(N, meta['BLOCK_SIZE']),)
+    # Read parameters from environment variables
+    n = int(os.environ.get('BENCH_PARAM_n', '67108864'))
+    block_size = int(os.environ.get('BENCH_PARAM_block_size', '1024'))
+    num_warps = int(os.environ.get('BENCH_PARAM_num_warps', '4'))
+    dtype_str = os.environ.get('BENCH_PARAM_dtype', 'float32')
+
+    dtype_map = {'float16': torch.float16, 'float32': torch.float32, 'float64': torch.float64}
+    dtype = dtype_map.get(dtype_str, torch.float32)
+    bytes_per_elem = torch.tensor([], dtype=dtype).element_size()
+
+    print(f"Running vector_add with n={n}, block_size={block_size}, dtype={dtype_str}, num_warps={num_warps}", file=sys.stderr)
+
+    a = torch.rand(n, device=device, dtype=dtype)
+    b = torch.rand(n, device=device, dtype=dtype)
+    c = torch.empty(n, device=device, dtype=dtype)
+
+    grid = lambda meta: (triton.cdiv(n, meta['BLOCK_SIZE']),)
 
     # Warmup
     for _ in range(5):
-        vector_add_kernel[grid](a, b, c, N, BLOCK_SIZE=BLOCK_SIZE)
+        vector_add_kernel[grid](a, b, c, n, BLOCK_SIZE=block_size, num_warps=num_warps)
     torch.cuda.synchronize()
 
     # Timed
@@ -39,14 +52,35 @@ def benchmark():
     end = torch.cuda.Event(enable_timing=True)
     start.record()
     for _ in range(5):
-        vector_add_kernel[grid](a, b, c, N, BLOCK_SIZE=BLOCK_SIZE)
+        vector_add_kernel[grid](a, b, c, n, BLOCK_SIZE=block_size, num_warps=num_warps)
     end.record()
     torch.cuda.synchronize()
-    ms = start.elapsed_time(end) / 5
+    avg_ms = start.elapsed_time(end) / 5
 
-    # GB/s: 3 arrays (2 reads + 1 write) * N * 4 bytes
-    gb_s = 3 * N * 4 / (ms / 1000) / 1e9
-    print(f'vector_add,{N},{ms:.3f},{gb_s:.2f}')
+    # GB/s: 3 arrays (2 reads + 1 write) * n * bytes_per_elem
+    gb_s = 3 * n * bytes_per_elem / (avg_ms / 1000) / 1e9
+
+    params = {
+        "n": n,
+        "block_size": block_size,
+        "dtype": dtype_str,
+        "num_warps": num_warps,
+    }
+
+    print(json.dumps({
+        "type": "kernel",
+        "name": "vector_add_kernel",
+        "time_ms": avg_ms,
+        "params": params,
+    }))
+
+    print(json.dumps({
+        "type": "summary",
+        "total_time_ms": avg_ms,
+        "metrics": [
+            {"name": "bandwidth_gbps", "value": gb_s},
+        ],
+    }))
 
 if __name__ == '__main__':
     benchmark()

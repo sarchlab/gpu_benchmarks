@@ -6,7 +6,6 @@
  *
  * Computes: C = A * B
  *   where A is M×K, B is K×N, C is M×N (row-major, FP32)
- *   M = N = K = 4096
  *
  * Tile parameters:
  *   Block tile:  BM×BN = 64×64
@@ -23,14 +22,10 @@
  *     3. Synchronize before the next K-tile
  *   Finally, each thread writes its TM×TN results to global memory.
  *
- * Warmup: 5 iterations (not timed)
- * Timed:  5 iterations, report average
- *
  * Verification: compare first 8×8 corner against CPU GEMM
  * GFLOPS = 2 * M * N * K / time_s / 1e9
  *
- * Output:
- *   cutlass_gemm,<M>,<time_ms>,<GFLOPS>
+ * Output: JSON-lines protocol (stdout)
  *
  * Build:
  *   CUDA: nvcc -O3 -std=c++14 -x cu -DUSE_CUDA  cutlass_gemm.hip -o cutlass_gemm
@@ -86,15 +81,6 @@ typedef hipEvent_t gpu_event_t;
 #else
 #  error "Define USE_CUDA or USE_HIP"
 #endif
-
-/* -------------------------------------------------------------------------
- * Benchmark parameters
- * ---------------------------------------------------------------------- */
-#define GEMM_M    4096
-#define GEMM_N    4096
-#define GEMM_K    4096
-#define WARMUP    5
-#define ITERS     5
 
 /* -------------------------------------------------------------------------
  * Tile parameters
@@ -214,20 +200,20 @@ __global__ void tiled_gemm_kernel(const float* __restrict__ A,
 /* -------------------------------------------------------------------------
  * CPU reference GEMM — only for the small verification corner
  *
- * A: vm×vk (row-major, full-width stride K)
- * B: vk×vn (row-major, full-width stride N)
+ * A: vm×vk (row-major, stride ldA)
+ * B: vk×vn (row-major, stride ldB)
  * C: vm×vn (row-major, stride vn)
  * ---------------------------------------------------------------------- */
 static void cpu_gemm(int vm, int vn, int vk,
-                     const float * __restrict__ A,
-                     const float * __restrict__ B,
+                     const float * __restrict__ A, int ldA,
+                     const float * __restrict__ B, int ldB,
                      float       * __restrict__ C)
 {
     for (int i = 0; i < vm; i++) {
         for (int j = 0; j < vn; j++) {
             float s = 0.0f;
             for (int p = 0; p < vk; p++)
-                s += A[(size_t)i * GEMM_K + p] * B[(size_t)p * GEMM_N + j];
+                s += A[(size_t)i * ldA + p] * B[(size_t)p * ldB + j];
             C[i * vn + j] = s;
         }
     }
@@ -238,9 +224,25 @@ static void cpu_gemm(int vm, int vn, int vk,
  * ---------------------------------------------------------------------- */
 int main(void)
 {
-    const int M = GEMM_M;
-    const int N = GEMM_N;
-    const int K = GEMM_K;
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    int M = 4096;
+    int N = 4096;
+    int K = 4096;
+    int warmup = 5;
+    int iters = 5;
+    int block_tile_m = BM;
+
+    /* Read parameters from environment variables */
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_matrix_dim");
+    if (env_val) { M = atoi(env_val); N = M; K = M; }
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) warmup = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iters");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_tile_m");
+    if (env_val) block_tile_m = atoi(env_val);
 
     /* ------------------------------------------------------------------ */
     /* Allocate and initialize host matrices                               */
@@ -300,7 +302,7 @@ int main(void)
     /* ------------------------------------------------------------------ */
     /* Warmup                                                              */
     /* ------------------------------------------------------------------ */
-    for (int i = 0; i < WARMUP; i++) {
+    for (int i = 0; i < warmup; i++) {
         tiled_gemm_kernel<<<grid, block>>>(dA, dB, dC, M, N, K);
     }
     GPU_DEVICE_SYNC();
@@ -313,7 +315,7 @@ int main(void)
     GPU_EVENT_CREATE(ev_stop);
 
     GPU_EVENT_RECORD(ev_start);
-    for (int i = 0; i < ITERS; i++) {
+    for (int i = 0; i < iters; i++) {
         tiled_gemm_kernel<<<grid, block>>>(dA, dB, dC, M, N, K);
     }
     GPU_EVENT_RECORD(ev_stop);
@@ -321,7 +323,7 @@ int main(void)
 
     float total_ms = 0.0f;
     GPU_EVENT_ELAPSED(ev_start, ev_stop, total_ms);
-    float avg_ms = total_ms / (float)ITERS;
+    float avg_ms = total_ms / (float)iters;
 
     /* ------------------------------------------------------------------ */
     /* Copy result back                                                    */
@@ -341,7 +343,7 @@ int main(void)
     /* ------------------------------------------------------------------ */
     const int VN = 8;
     float *cpuC = (float *)calloc((size_t)VN * VN, sizeof(float));
-    cpu_gemm(VN, VN, K, hA, hB, cpuC);
+    cpu_gemm(VN, VN, K, hA, K, hB, N, cpuC);
 
     int pass = 1;
     for (int i = 0; i < VN && pass; i++) {
@@ -361,13 +363,20 @@ int main(void)
             pass ? "PASS" : "FAIL");
 
     /* ------------------------------------------------------------------ */
-    /* Report                                                              */
+    /* Report — JSON-lines protocol                                        */
     /* ------------------------------------------------------------------ */
     double gflops = 2.0 * M * N * K / (avg_ms / 1000.0) / 1e9;
 
-    /* CSV line */
-    printf("cutlass_gemm,%d,%.3f,%.2f\n", M, avg_ms, gflops);
-    /* Human-readable */
+    /* Kernel event */
+    printf("{\"type\":\"kernel\",\"name\":\"tiled_gemm_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"block_tile_m\":%d}}\n",
+           (double)avg_ms, M, warmup, iters, block_tile_m);
+
+    /* Summary event */
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
+           (double)total_ms, gflops);
+
     fprintf(stderr, "cutlass_gemm  M=%d N=%d K=%d  time_ms=%.3f  GFLOPS=%.2f\n",
             M, N, K, avg_ms, gflops);
 

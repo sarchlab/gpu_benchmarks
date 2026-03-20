@@ -48,14 +48,14 @@
 #include <mach/mach_time.h>
 
 /* =========================================================================
- * Benchmark parameters
+ * Benchmark parameters (mutable — overridable via BENCH_PARAM_* env vars)
  * ======================================================================= */
-#define BATCH_N  64
-#define CHAN_C   256
-#define IN_H     56
-#define IN_W     56
-#define WARMUP   5
-#define ITERS    5
+static int BATCH_N  = 64;
+static int CHAN_C   = 256;
+static int IN_H     = 56;
+static int IN_W     = 56;
+static int WARMUP   = 5;
+static int ITERS    = 5;
 #define BN_EPS   1e-5f
 
 /* =========================================================================
@@ -216,6 +216,20 @@ static void read_mpsimage_to_nchw(MPSImage *img,
 int main(int argc, char *argv[])
 {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    /* Read parameters from environment variables */
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_spatial_dim");
+    if (env_val) { IN_H = atoi(env_val); IN_W = IN_H; }
+    env_val = getenv("BENCH_PARAM_batch_n");
+    if (env_val) BATCH_N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_channels");
+    if (env_val) CHAN_C = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) WARMUP = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iters");
+    if (env_val) ITERS = atoi(env_val);
 
     /* ------------------------------------------------------------------
      * Metal device setup
@@ -394,9 +408,13 @@ int main(int argc, char *argv[])
     double time_s = avg_ms / 1000.0;
     double gbs = total_bytes / time_s / 1e9;
 
-    /* CSV output (stdout) */
-    printf("cudnn_batchnorm,%dx%dx%dx%d,%.3f,%.2f\n",
-           BATCH_N, CHAN_C, IN_H, IN_W, avg_ms, gbs);
+    /* JSON-lines output */
+    printf("{\"type\":\"kernel\",\"name\":\"cudnnBatchNormalizationForwardTraining\",\"time_ms\":%.6f,"
+           "\"params\":{\"spatial_dim\":%d,\"batch_n\":%d,\"channels\":%d,\"warmup\":%d,\"iters\":%d}}\n",
+           avg_ms, IN_H, BATCH_N, CHAN_C, WARMUP, ITERS);
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GB/s\",\"value\":%.2f}]}\n",
+           sum_ms, gbs);
     /* Human-readable (stderr) */
     fprintf(stderr,
         "cudnn_batchnorm  N=%d C=%d H=%d W=%d  time_ms=%.3f  GB/s=%.2f  "

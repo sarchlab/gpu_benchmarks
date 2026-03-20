@@ -92,14 +92,14 @@ typedef hipEvent_t gpu_event_t;
 #endif
 
 /* -------------------------------------------------------------------------
- * Benchmark parameters
+ * Benchmark parameters (runtime-configurable via BENCH_PARAM_* env vars)
  * ---------------------------------------------------------------------- */
-#define BATCH_COUNT 64
-#define M           512
-#define N           512
-#define K           512
-#define WARMUP      5
-#define ITERS       5
+static int BATCH_COUNT = 64;
+static int M           = 512;
+static int N           = 512;
+static int K           = 512;
+static int WARMUP      = 5;
+static int ITERS       = 5;
 
 /* -------------------------------------------------------------------------
  * CPU reference GEMM (only for a small corner — O(verify_m * verify_n * K))
@@ -127,6 +127,19 @@ static void cpu_sgemm(int vm, int vn, int vk,
  * ---------------------------------------------------------------------- */
 int main(void)
 {
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    /* Read parameters from environment variables */
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_matrix_dim");
+    if (env_val) { M = atoi(env_val); N = M; K = M; }
+    env_val = getenv("BENCH_PARAM_batch_count");
+    if (env_val) BATCH_COUNT = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) WARMUP = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iters");
+    if (env_val) ITERS = atoi(env_val);
+
     const size_t sizeA = (size_t)M * K;
     const size_t sizeB = (size_t)K * N;
     const size_t sizeC = (size_t)M * N;
@@ -156,9 +169,9 @@ int main(void)
     float *dA, *dB, *dC;
 
     /* Host arrays of device pointers for batched BLAS calls */
-    float *h_Aptrs[BATCH_COUNT];
-    float *h_Bptrs[BATCH_COUNT];
-    float *h_Cptrs[BATCH_COUNT];
+    float **h_Aptrs = (float **)malloc(BATCH_COUNT * sizeof(float *));
+    float **h_Bptrs = (float **)malloc(BATCH_COUNT * sizeof(float *));
+    float **h_Cptrs = (float **)malloc(BATCH_COUNT * sizeof(float *));
 
     /* Device arrays of device pointers */
     float **d_Aptrs, **d_Bptrs, **d_Cptrs;
@@ -316,12 +329,25 @@ int main(void)
     /* ------------------------------------------------------------------ */
     double gflops = (double)BATCH_COUNT * 2.0 * M * N * K / (avg_ms / 1000.0) / 1e9;
 
-    /* CSV line */
-    printf("cublas_batched_gemm,%dx%d,%.3f,%.2f\n", BATCH_COUNT, M, avg_ms, gflops);
+    /* JSON-lines output */
+#ifdef USE_CUBLAS
+    printf("{\"type\":\"kernel\",\"name\":\"cublasSgemmBatched\",\"time_ms\":%.6f,"
+           "\"params\":{\"matrix_dim\":%d,\"batch_count\":%d,\"warmup\":%d,\"iters\":%d}}\n",
+           (double)avg_ms, M, BATCH_COUNT, WARMUP, ITERS);
+#elif defined(USE_ROCBLAS)
+    printf("{\"type\":\"kernel\",\"name\":\"rocblas_sgemm_batched\",\"time_ms\":%.6f,"
+           "\"params\":{\"matrix_dim\":%d,\"batch_count\":%d,\"warmup\":%d,\"iters\":%d}}\n",
+           (double)avg_ms, M, BATCH_COUNT, WARMUP, ITERS);
+#endif
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
+           (double)total_ms, gflops);
+
     /* Human-readable */
     fprintf(stderr, "cublas_batched_gemm  batch=%d M=%d N=%d K=%d  time_ms=%.3f  GFLOPS=%.2f\n",
             BATCH_COUNT, M, N, K, avg_ms, gflops);
 
     free(hA); free(hB); free(hC);
+    free(h_Aptrs); free(h_Bptrs); free(h_Cptrs);
     return pass ? 0 : 1;
 }

@@ -34,12 +34,26 @@
 #include <stdlib.h>
 #include <math.h>
 
-#define N      (1 << 22)   /* 4194304 complex samples */
-#define WARMUP 5
-#define ITERS  5
+static int N      = (1 << 22);   /* 4194304 complex samples */
+static int WARMUP = 5;
+static int ITERS  = 5;
+static const char* DIRECTION = "forward";
 
 int main(void)
 {
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    /* Read parameters from environment variables */
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_n");
+    if (env_val) N = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) WARMUP = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iters");
+    if (env_val) ITERS = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_direction");
+    if (env_val) DIRECTION = env_val;
+
     /* ------------------------------------------------------------------ */
     /* Allocate split-complex buffers                                      */
     /* ------------------------------------------------------------------ */
@@ -63,7 +77,7 @@ int main(void)
     /* ------------------------------------------------------------------ */
     /* Create FFT setup                                                    */
     /* ------------------------------------------------------------------ */
-    const vDSP_Length log2N = 22;   /* log2(4194304) = 22 */
+    const vDSP_Length log2N = (vDSP_Length)log2((double)N);
     FFTSetup setup = vDSP_create_fftsetup(log2N, FFT_RADIX2);
     if (!setup) {
         fprintf(stderr, "vDSP_create_fftsetup failed\n");
@@ -155,7 +169,13 @@ int main(void)
     double bytes = 2.0 * N * 2 * sizeof(float);
     double GBs   = bytes / (avg_ms / 1000.0) / 1e9;
 
-    printf("cufft_1d,%d,%.3f,%.2f\n", N, avg_ms, GBs);
+    /* JSON-lines output */
+    printf("{\"type\":\"kernel\",\"name\":\"cufftExecC2C\",\"time_ms\":%.6f,"
+           "\"params\":{\"n\":%d,\"warmup\":%d,\"iters\":%d,\"direction\":\"%s\"}}\n",
+           avg_ms, N, WARMUP, ITERS, DIRECTION);
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GB/s\",\"value\":%.2f}]}\n",
+           (double)(avg_ms * ITERS), GBs);
     fprintf(stderr, "cufft_1d  N=%d  time_ms=%.3f  GB/s=%.2f  (Accelerate vDSP_fft_zip)\n",
             N, avg_ms, GBs);
 

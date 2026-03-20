@@ -40,14 +40,14 @@
 #include <mach/mach_time.h>
 
 /* -------------------------------------------------------------------------
- * Benchmark parameters
+ * Benchmark parameters (runtime-configurable via BENCH_PARAM_* env vars)
  * ---------------------------------------------------------------------- */
-#define BATCH_COUNT 64
-#define GEMM_M      512
-#define GEMM_N      512
-#define GEMM_K      512
-#define WARMUP      5
-#define ITERS       5
+static int BATCH_COUNT = 64;
+static int GEMM_M      = 512;
+static int GEMM_N      = 512;
+static int GEMM_K      = 512;
+static int WARMUP      = 5;
+static int ITERS       = 5;
 
 /* -------------------------------------------------------------------------
  * Timing helpers
@@ -86,6 +86,18 @@ static void cpu_sgemm(int vm, int vn, int vk,
 int main(int argc, char *argv[])
 {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    /* Read parameters from environment variables */
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_matrix_dim");
+    if (env_val) { GEMM_M = atoi(env_val); GEMM_N = GEMM_M; GEMM_K = GEMM_M; }
+    env_val = getenv("BENCH_PARAM_batch_count");
+    if (env_val) BATCH_COUNT = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) WARMUP = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iters");
+    if (env_val) ITERS = atoi(env_val);
 
     const int M = GEMM_M;
     const int N = GEMM_N;
@@ -270,8 +282,14 @@ int main(int argc, char *argv[])
 
     double gflops = (double)BATCH_COUNT * 2.0 * M * N * K / (avg_ms / 1000.0) / 1e9;
 
-    /* CSV output */
-    printf("cublas_batched_gemm,%dx%d,%.3f,%.2f\n", BATCH_COUNT, M, avg_ms, gflops);
+    /* JSON-lines output */
+    printf("{\"type\":\"kernel\",\"name\":\"cublasSgemmBatched\",\"time_ms\":%.6f,"
+           "\"params\":{\"matrix_dim\":%d,\"batch_count\":%d,\"warmup\":%d,\"iters\":%d}}\n",
+           avg_ms, M, BATCH_COUNT, WARMUP, ITERS);
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
+           sum_ms, gflops);
+
     /* Human-readable */
     fprintf(stderr, "cublas_batched_gemm  batch=%d M=%d N=%d K=%d  time_ms=%.3f  GFLOPS=%.2f\n",
             BATCH_COUNT, M, N, K, avg_ms, gflops);

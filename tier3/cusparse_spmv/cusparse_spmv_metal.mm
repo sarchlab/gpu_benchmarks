@@ -2,8 +2,8 @@
  * cusparse_spmv_metal.mm — Apple Metal host for the cuSPARSE SpMV benchmark.
  *
  * Computes: y = A * x
- *   where A is a synthetic CSR sparse matrix with exactly NNZ_PER_ROW=32
- *   non-zeros per row and NUM_ROWS=16384 rows.
+ *   where A is a synthetic CSR sparse matrix with exactly NNZ_PER_ROW
+ *   non-zeros per row and NUM_ROWS rows.
  *
  * Metal has no equivalent to cuSPARSE, so this file uses a custom CSR SpMV
  * Metal compute shader (same kernel as tier2/shoc_spmv).  The benchmark
@@ -13,11 +13,17 @@
  * The Metal shader is compiled at runtime from an embedded source string
  * (no separate .metallib file required — binary is self-contained).
  *
+ * Parameters (from env vars BENCH_PARAM_*):
+ *   num_rows    — number of rows (and columns) in the square sparse matrix
+ *   nnz_per_row — non-zeros per row
+ *   warmup      — warmup iterations
+ *   iters       — timed iterations
+ *
  * Metrics:
  *   GB/s   = NNZ * 12.0 / time_s / 1e9
  *   GFLOPS = 2.0 * NNZ  / time_s / 1e9
  *
- * Output (stdout): CSV — cusparse_spmv,<NUM_ROWS>,<NNZ_PER_ROW>,<time_ms>,<GBs>,<GFLOPS>
+ * Output (stdout): JSON-lines protocol
  * Output (stderr): device info, per-iteration times, verification result
  *
  * Build:
@@ -34,17 +40,6 @@
 #include <cfloat>
 #include <vector>
 #include <mach/mach_time.h>
-
-// ---------------------------------------------------------------------------
-// Benchmark constants
-// ---------------------------------------------------------------------------
-
-#define NUM_ROWS    16384
-#define NNZ_PER_ROW 32
-#define NUM_COLS    NUM_ROWS
-#define NNZ         (NUM_ROWS * NNZ_PER_ROW)
-#define WARMUP      5
-#define ITERS       5
 
 // ---------------------------------------------------------------------------
 // Embedded Metal shader source
@@ -113,10 +108,28 @@ static void cpu_spmv(const int* row_ptr, const int* col_idx,
 int main(int argc, char* argv[])
 {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    const int num_rows    = NUM_ROWS;
-    const int nnz_per_row = NNZ_PER_ROW;
-    const int nnz         = NNZ;
+    // -------------------------------------------------------------------
+    // Default parameters (overridden by BENCH_PARAM_* env vars)
+    // -------------------------------------------------------------------
+    int num_rows    = 16384;
+    int nnz_per_row = 32;
+    int warmup      = 5;
+    int iters       = 5;
+
+    const char *env_val;
+    env_val = getenv("BENCH_PARAM_num_rows");
+    if (env_val) num_rows = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_nnz_per_row");
+    if (env_val) nnz_per_row = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) warmup = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iters");
+    if (env_val) iters = atoi(env_val);
+
+    const int num_cols = num_rows;
+    const int nnz      = num_rows * nnz_per_row;
 
     // -------------------------------------------------------------------
     // Metal device setup
@@ -130,7 +143,7 @@ int main(int argc, char* argv[])
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
     fprintf(stderr, "Rows: %d  |  NNZ_per_row: %d  |  Total NNZ: %d\n"
                     "Warmup: %d  |  Iterations: %d\n\n",
-            num_rows, nnz_per_row, nnz, WARMUP, ITERS);
+            num_rows, nnz_per_row, nnz, warmup, iters);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -192,7 +205,7 @@ int main(int argc, char* argv[])
         h_row_ptr[i] = i * nnz_per_row;
 
     for (int k = 0; k < nnz; ++k) {
-        h_col_idx[k] = rand() % NUM_COLS;
+        h_col_idx[k] = rand() % num_cols;
         h_values[k]  = (float)rand() / (float)RAND_MAX;
     }
     for (int i = 0; i < num_rows; ++i)
@@ -225,15 +238,15 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Warmup (not measured)
     // -------------------------------------------------------------------
-    for (int w = 0; w < WARMUP; w++)
+    for (int w = 0; w < warmup; w++)
         dispatch_spmv();
 
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)ITERS);
+    std::vector<double> times((size_t)iters);
     double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < ITERS; ++i) {
+    for (int i = 0; i < iters; ++i) {
         uint64_t t0 = mach_absolute_time();
         dispatch_spmv();
         uint64_t t1 = mach_absolute_time();
@@ -268,13 +281,13 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Statistics
     // -------------------------------------------------------------------
-    double avg_ms = sum_ms / ITERS;
+    double avg_ms = sum_ms / iters;
     double variance = 0.0;
-    for (int i = 0; i < ITERS; ++i) {
+    for (int i = 0; i < iters; ++i) {
         double d = times[i] - avg_ms;
         variance += d * d;
     }
-    double stddev = (ITERS > 1) ? sqrt(variance / (ITERS - 1)) : 0.0;
+    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
 
     double time_s = avg_ms * 1e-3;
     double gbps   = (double)nnz * 12.0 / time_s / 1e9;
@@ -285,9 +298,15 @@ int main(int argc, char* argv[])
             "(avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
             gbps, gflops, avg_ms, mn, mx, stddev);
 
-    // CSV output: cusparse_spmv,<NUM_ROWS>,<NNZ_PER_ROW>,<time_ms>,<GBs>,<GFLOPS>
-    printf("cusparse_spmv,%d,%d,%.4f,%.2f,%.2f\n",
-           num_rows, nnz_per_row, avg_ms, gbps, gflops);
+    // JSON-lines: kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"cusparseSpMV\",\"time_ms\":%.6f,"
+           "\"params\":{\"num_rows\":%d,\"nnz_per_row\":%d,\"warmup\":%d,\"iters\":%d}}\n",
+           avg_ms, num_rows, nnz_per_row, warmup, iters);
+
+    // JSON-lines: summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GB/s\",\"value\":%.2f},{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
+           sum_ms, gbps, gflops);
 
     return pass ? EXIT_SUCCESS : EXIT_FAILURE;
 

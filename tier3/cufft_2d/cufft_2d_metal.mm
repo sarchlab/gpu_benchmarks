@@ -7,21 +7,19 @@
  *
  * This is mathematically equivalent to a 2D DFT by the separability property.
  *
- * Parameters:
- *   NX = NY = 2048
- *   Complex single-precision input (split-complex format)
- *   Forward FFT (FFT_FORWARD)
- *
- * Warmup: 5 iterations (not timed)
- * Timed:  5 iterations; report average
+ * Parameters (from env vars BENCH_PARAM_*):
+ *   grid_dim  — square grid dimension NX=NY for the 2D FFT
+ *   warmup    — warmup iterations (not timed)
+ *   iters     — timed iterations
+ *   direction — FFT direction (forward/inverse/roundtrip)
  *
  * Verification: 2D sinusoidal input at (kx=3, ky=5)
  *   → magnitude at split-complex bin [3][5] ≈ NX*NY/2
  *
  * GB/s = 2 * NX*NY * 2 * sizeof(float) / time_s / 1e9
  *
- * Output:
- *   cufft_2d,2048,<time_ms>,<GBs>
+ * Output (stdout): JSON-lines protocol
+ * Output (stderr): human-readable diagnostics
  *
  * Build:
  *   clang++ -O2 -std=c++17 -fobjc-arc \
@@ -35,11 +33,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-
-#define NX     2048
-#define NY     2048
-#define WARMUP 5
-#define ITERS  5
 
 /* -------------------------------------------------------------------------
  * fft_rows: apply a 1D forward FFT to each row of the split-complex matrix.
@@ -115,15 +108,50 @@ static void fill_input(float *realp, float *imagp, int nx, int ny)
 }
 
 /* -------------------------------------------------------------------------
+ * Compute floor(log2(n)) for positive integers
+ * ---------------------------------------------------------------------- */
+static vDSP_Length ilog2(int n)
+{
+    vDSP_Length l = 0;
+    while ((1 << (l + 1)) <= n) l++;
+    return l;
+}
+
+/* -------------------------------------------------------------------------
  * main
  * ---------------------------------------------------------------------- */
 int main(void)
 {
-    const vDSP_Length log2NX = 11;   /* log2(2048) = 11 */
-    const vDSP_Length log2NY = 11;
+    @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    /* Create FFT setup (supports up to length 2^11 = 2048) */
-    FFTSetup setup = vDSP_create_fftsetup(11, FFT_RADIX2);
+    /* ------------------------------------------------------------------ */
+    /* Default parameters (overridden by BENCH_PARAM_* env vars)          */
+    /* ------------------------------------------------------------------ */
+    int grid_dim = 2048;
+    int warmup   = 5;
+    int iters    = 5;
+    const char *direction = "forward";
+
+    const char *env_val;
+    env_val = getenv("BENCH_PARAM_grid_dim");
+    if (env_val) grid_dim = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) warmup = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iters");
+    if (env_val) iters = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_direction");
+    if (env_val) direction = env_val;
+
+    int NX = grid_dim;
+    int NY = grid_dim;
+
+    vDSP_Length log2NX = ilog2(NX);
+    vDSP_Length log2NY = ilog2(NY);
+    vDSP_Length max_log2 = log2NX > log2NY ? log2NX : log2NY;
+
+    /* Create FFT setup (supports up to length 2^max_log2) */
+    FFTSetup setup = vDSP_create_fftsetup(max_log2, FFT_RADIX2);
     if (!setup) {
         fprintf(stderr, "vDSP_create_fftsetup failed\n");
         return 1;
@@ -144,9 +172,9 @@ int main(void)
     mach_timebase_info(&tb);
 
     /* ------------------------------------------------------------------ */
-    /* Warmup (5 iterations, not timed)                                   */
+    /* Warmup (not timed)                                                  */
     /* ------------------------------------------------------------------ */
-    for (int w = 0; w < WARMUP; w++) {
+    for (int w = 0; w < warmup; w++) {
         fill_input(realp, imagp, NX, NY);
         fft_rows(setup, realp, imagp, NX, NY, log2NY);
         fft_cols(setup, realp, imagp, NX, NY, log2NX);
@@ -159,15 +187,16 @@ int main(void)
     /* Timed iterations (time only the FFT calls, not data init)          */
     /* ------------------------------------------------------------------ */
     uint64_t t0 = mach_absolute_time();
-    for (int iter = 0; iter < ITERS; iter++) {
+    for (int iter = 0; iter < iters; iter++) {
         fft_rows(setup, realp, imagp, NX, NY, log2NY);
         fft_cols(setup, realp, imagp, NX, NY, log2NX);
     }
     uint64_t t1 = mach_absolute_time();
 
     double total_ns = (double)(t1 - t0) * tb.numer / tb.denom;
-    double avg_ns   = total_ns / ITERS;
+    double avg_ns   = total_ns / iters;
     double avg_ms   = avg_ns / 1e6;
+    double total_ms = total_ns / 1e6;
 
     /* ------------------------------------------------------------------ */
     /* Verification: run one fresh 2D FFT on a clean sinusoidal input.    */
@@ -225,7 +254,16 @@ int main(void)
     double bytes = 2.0 * total * 2 * sizeof(float);
     double GBs   = bytes / (avg_ms / 1000.0) / 1e9;
 
-    printf("cufft_2d,%d,%.3f,%.2f\n", NX, avg_ms, GBs);
+    /* JSON-lines: kernel event */
+    printf("{\"type\":\"kernel\",\"name\":\"cufftExecC2C\",\"time_ms\":%.6f,"
+           "\"params\":{\"grid_dim\":%d,\"warmup\":%d,\"iters\":%d,\"direction\":\"%s\"}}\n",
+           avg_ms, grid_dim, warmup, iters, direction);
+
+    /* JSON-lines: summary event */
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GB/s\",\"value\":%.2f}]}\n",
+           total_ms, GBs);
+
     fprintf(stderr,
             "cufft_2d  NX=%d NY=%d  time_ms=%.3f  GB/s=%.2f"
             "  (Accelerate vDSP row+col FFTs)\n",
@@ -238,4 +276,6 @@ int main(void)
     free(realp);
     free(imagp);
     return 0;
+
+    } // @autoreleasepool
 }

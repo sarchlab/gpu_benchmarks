@@ -1,3 +1,6 @@
+import json
+import os
+import sys
 import torch
 import triton
 import triton.language as tl
@@ -47,26 +50,35 @@ def matmul_kernel(
 
 def benchmark():
     device = 'cuda'
-    M, N, K = 4096, 4096, 4096
-    BLOCK_M, BLOCK_N, BLOCK_K = 128, 256, 64
-    GROUP_SIZE_M = 8
 
-    a = torch.rand((M, K), device=device, dtype=torch.float32)
-    b = torch.rand((K, N), device=device, dtype=torch.float32)
-    c = torch.empty((M, N), device=device, dtype=torch.float32)
+    # Read parameters from environment variables
+    m = int(os.environ.get('BENCH_PARAM_m', '4096'))
+    block_m = int(os.environ.get('BENCH_PARAM_block_m', '128'))
+    block_n = int(os.environ.get('BENCH_PARAM_block_n', '256'))
+    block_k = int(os.environ.get('BENCH_PARAM_block_k', '64'))
+    group_size_m = int(os.environ.get('BENCH_PARAM_group_size_m', '8'))
 
-    grid = lambda meta: (triton.cdiv(M, meta['BLOCK_M']) * triton.cdiv(N, meta['BLOCK_N']),)
+    # Square matrices: M = N = K
+    M_dim, N_dim, K_dim = m, m, m
+
+    print(f"Running triton_gemm with m={m}, block_m={block_m}, block_n={block_n}, block_k={block_k}, group_size_m={group_size_m}", file=sys.stderr)
+
+    a = torch.rand((M_dim, K_dim), device=device, dtype=torch.float32)
+    b = torch.rand((K_dim, N_dim), device=device, dtype=torch.float32)
+    c = torch.empty((M_dim, N_dim), device=device, dtype=torch.float32)
+
+    grid = lambda meta: (triton.cdiv(M_dim, meta['BLOCK_M']) * triton.cdiv(N_dim, meta['BLOCK_N']),)
 
     # Warmup
     for _ in range(5):
         matmul_kernel[grid](
             a, b, c,
-            M, N, K,
+            M_dim, N_dim, K_dim,
             a.stride(0), a.stride(1),
             b.stride(0), b.stride(1),
             c.stride(0), c.stride(1),
-            BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N, BLOCK_K=BLOCK_K,
-            GROUP_SIZE_M=GROUP_SIZE_M,
+            BLOCK_M=block_m, BLOCK_N=block_n, BLOCK_K=block_k,
+            GROUP_SIZE_M=group_size_m,
         )
     torch.cuda.synchronize()
 
@@ -77,19 +89,41 @@ def benchmark():
     for _ in range(5):
         matmul_kernel[grid](
             a, b, c,
-            M, N, K,
+            M_dim, N_dim, K_dim,
             a.stride(0), a.stride(1),
             b.stride(0), b.stride(1),
             c.stride(0), c.stride(1),
-            BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N, BLOCK_K=BLOCK_K,
-            GROUP_SIZE_M=GROUP_SIZE_M,
+            BLOCK_M=block_m, BLOCK_N=block_n, BLOCK_K=block_k,
+            GROUP_SIZE_M=group_size_m,
         )
     end.record()
     torch.cuda.synchronize()
-    ms = start.elapsed_time(end) / 5
+    avg_ms = start.elapsed_time(end) / 5
 
-    tflops = 2 * M * N * K / (ms / 1000) / 1e12
-    print(f'triton_gemm,{M},{ms:.3f},{tflops:.2f}')
+    tflops = 2 * M_dim * N_dim * K_dim / (avg_ms / 1000) / 1e12
+
+    params = {
+        "m": m,
+        "block_m": block_m,
+        "block_n": block_n,
+        "block_k": block_k,
+        "group_size_m": group_size_m,
+    }
+
+    print(json.dumps({
+        "type": "kernel",
+        "name": "matmul_kernel",
+        "time_ms": avg_ms,
+        "params": params,
+    }))
+
+    print(json.dumps({
+        "type": "summary",
+        "total_time_ms": avg_ms,
+        "metrics": [
+            {"name": "tflops", "value": tflops},
+        ],
+    }))
 
 if __name__ == '__main__':
     benchmark()

@@ -437,6 +437,8 @@ clean:
 | 93 | Planning | Athena | New human requests: Issue #142 (complete benchmarks), #143 (parameterize), #144 (CLI tool). Reopen project. Define M21. |
 | 94–103 | Implementation+Verification | Ares+Apollo | M21 implemented: 107 params.json files + 4 design docs. Multiple fix rounds. Merged PR #19. |
 | 104 | Planning | Athena | M21 complete. Define M22 (CLI tool + Tier 1 refactoring). |
+| 105–117 | Implementation+Verification | Ares+Apollo | M22 implemented: gpubench CLI + 12 Tier 1 benchmarks refactored. Fix rounds for enum mismatches. Merged PR #20. |
+| 118 | Planning | Athena | M22 complete. Define M23 (Tier 2 refactoring, 51 benchmarks). |
 
 ---
 
@@ -456,21 +458,30 @@ New human requirements: parameterize all benchmarks, build a CLI tool for compil
 
 **Branch:** `ares/m21-milestone` (merged to main via PR #19)
 
-### M22 — CLI Tool Implementation + Tier 1 Benchmark Refactoring (Prototype)
+### M22 — CLI Tool Implementation + Tier 1 Benchmark Refactoring (Prototype) ✅ COMPLETE (cycles used: ~6)
 **Goal:** Build the `gpubench` CLI tool (scripts/gpubench) and refactor all 12 Tier 1 benchmarks to:
 - Read parameters from `BENCH_PARAM_*` environment variables
 - Output JSON-lines protocol (kernel events + summary) to stdout
 - Send human-readable messages to stderr only
 - Support the full parameter sweep driven by the CLI
 
-The CLI must implement: `list`, `compile`, `run`, `info`, `validate` commands per `docs/cli_design.md`.
-End-to-end: `gpubench run --tier 1 --reps 1` should work.
+The CLI implements: `list`, `compile`, `run`, `info`, `validate` commands per `docs/cli_design.md`.
+End-to-end: `gpubench run --tier 1 --reps 1` works.
 
-**Budget:** 6 cycles
+**Branch:** `ares/m22-cli-benchmarks` (merged to main via PR #20)
 
 ### M23 — Tier 2 Benchmark Refactoring (51 benchmarks)
-**Goal:** Refactor all Tier 2 benchmarks for parameterized execution and kernel-level timing.
-**Budget:** 8 cycles (estimated)
+**Goal:** Refactor all 51 Tier 2 benchmarks for parameterized execution and kernel-level timing.
+
+Each benchmark has 2 source files (.hip + _metal.mm) = 102 files total. For each file:
+1. Read all parameters from `BENCH_PARAM_*` environment variables (matching params.json)
+2. Output JSON-lines protocol to stdout (kernel events with params + summary with metrics)
+3. Send human-readable messages to stderr only
+4. Add `setvbuf(stdout, NULL, _IONBF, 0)` at the start of main
+
+After refactoring: `gpubench run --tier 2 --reps 1` should work end-to-end.
+
+**Budget:** 8 cycles
 
 ### M24 — Tier 3 + Tier 4 Benchmark Refactoring (18 benchmarks)
 **Goal:** Refactor Tier 3 (11) and Tier 4 (7) benchmarks.

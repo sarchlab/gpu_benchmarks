@@ -1,6 +1,7 @@
+import json
+import os
 import subprocess
 import sys
-import os
 import re
 import time
 
@@ -45,7 +46,7 @@ def parse_tokens_per_sec(output):
     return None
 
 
-def run_inference(binary, model, n_predict=128, n_gpu_layers=99):
+def run_inference(binary, model, n_predict=128, n_gpu_layers=99, threads=4):
     """Run a single llama.cpp inference using Metal backend."""
     cmd = [
         binary,
@@ -53,6 +54,7 @@ def run_inference(binary, model, n_predict=128, n_gpu_layers=99):
         "-p", "The meaning of life is",
         "-n", str(n_predict),
         "-ngl", str(n_gpu_layers),
+        "-t", str(threads),
         "--no-display-prompt",
     ]
     result = subprocess.run(
@@ -67,13 +69,27 @@ def run_inference(binary, model, n_predict=128, n_gpu_layers=99):
 
 
 def benchmark():
+    # Read parameters from environment variables
+    n_predict = int(os.environ.get('BENCH_PARAM_n_predict', '128'))
+    n_gpu_layers = int(os.environ.get('BENCH_PARAM_n_gpu_layers', '99'))
+    quantization = os.environ.get('BENCH_PARAM_quantization', 'Q4_0')
+    threads = int(os.environ.get('BENCH_PARAM_threads', '4'))
+
+    params = {
+        "n_predict": n_predict,
+        "n_gpu_layers": n_gpu_layers,
+        "quantization": quantization,
+        "threads": threads,
+    }
+
     binary = find_binary()
     if binary is None:
         print(
             "llamacpp_bench: SKIPPED (llama.cpp not built, run 'make setup')",
             file=sys.stderr,
         )
-        print("llamacpp_bench,128,0.000,0.00")
+        print(json.dumps({"type": "kernel", "name": "generate", "time_ms": 0.0, "params": params}))
+        print(json.dumps({"type": "summary", "total_time_ms": 0.0, "metrics": [{"name": "tokens_per_sec", "value": 0.0}]}))
         return
 
     model = find_model()
@@ -82,19 +98,20 @@ def benchmark():
             "llamacpp_bench: SKIPPED (no GGUF model found, run 'make setup')",
             file=sys.stderr,
         )
-        print("llamacpp_bench,128,0.000,0.00")
+        print(json.dumps({"type": "kernel", "name": "generate", "time_ms": 0.0, "params": params}))
+        print(json.dumps({"type": "summary", "total_time_ms": 0.0, "metrics": [{"name": "tokens_per_sec", "value": 0.0}]}))
         return
 
-    n_predict = 128
     print(f"Binary: {binary}", file=sys.stderr)
     print(f"Model: {model}", file=sys.stderr)
     print(f"Backend: Metal (Apple GPU)", file=sys.stderr)
     print(f"Tokens to generate: {n_predict}", file=sys.stderr)
+    print(f"GPU layers: {n_gpu_layers}, quantization: {quantization}, threads: {threads}", file=sys.stderr)
 
     # Warmup
     print("Warmup: 5 iterations", file=sys.stderr)
     for i in range(5):
-        tps = run_inference(binary, model, n_predict)
+        tps = run_inference(binary, model, n_predict, n_gpu_layers, threads)
         status = f"{tps:.2f} tok/s" if tps else "parse failed"
         print(f"  warmup {i+1}/5: {status}", file=sys.stderr)
 
@@ -104,7 +121,7 @@ def benchmark():
     tps_list = []
     for i in range(10):
         t0 = time.perf_counter()
-        tps = run_inference(binary, model, n_predict)
+        tps = run_inference(binary, model, n_predict, n_gpu_layers, threads)
         t1 = time.perf_counter()
         elapsed_ms = (t1 - t0) * 1000
         times.append(elapsed_ms)
@@ -122,7 +139,20 @@ def benchmark():
     print(f"Average time: {avg_ms:.3f} ms", file=sys.stderr)
     print(f"Average tokens/sec: {avg_tps:.2f}", file=sys.stderr)
 
-    print(f"llamacpp_bench,{n_predict},{avg_ms:.3f},{avg_tps:.2f}")
+    print(json.dumps({
+        "type": "kernel",
+        "name": "generate",
+        "time_ms": avg_ms,
+        "params": params,
+    }))
+
+    print(json.dumps({
+        "type": "summary",
+        "total_time_ms": avg_ms,
+        "metrics": [
+            {"name": "tokens_per_sec", "value": avg_tps},
+        ],
+    }))
 
 
 if __name__ == "__main__":

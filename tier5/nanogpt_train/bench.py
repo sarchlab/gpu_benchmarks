@@ -1,7 +1,9 @@
+import json
+import os
+import sys
 import torch
 import torch.nn as nn
 import math
-import time
 
 # GPT-2 style model — defined inline
 class CausalSelfAttention(nn.Module):
@@ -74,16 +76,26 @@ class GPT(nn.Module):
 
 def benchmark():
     device = torch.device('cuda')
+
+    # Read parameters from environment variables
+    batch_size = int(os.environ.get('BENCH_PARAM_batch_size', '4'))
+    block_size = int(os.environ.get('BENCH_PARAM_block_size', '256'))
+    n_layer = int(os.environ.get('BENCH_PARAM_n_layer', '6'))
+    n_embd = int(os.environ.get('BENCH_PARAM_n_embd', '384'))
+    n_head = int(os.environ.get('BENCH_PARAM_n_head', '6'))
+
     vocab_size = 50257
-    n_layer, n_head, n_embd, block_size = 6, 6, 384, 256
-    batch = 4
+
+    print(f"NanoGPT train benchmark — n_layer={n_layer}, n_embd={n_embd}, "
+          f"n_head={n_head}, block_size={block_size}, batch={batch_size}",
+          file=sys.stderr)
 
     model = GPT(vocab_size, n_layer, n_head, n_embd, block_size).to(device)
     model.train()
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 
-    x = torch.randint(0, vocab_size, (batch, block_size), device=device)
-    y = torch.randint(0, vocab_size, (batch, block_size), device=device)
+    x = torch.randint(0, vocab_size, (batch_size, block_size), device=device)
+    y = torch.randint(0, vocab_size, (batch_size, block_size), device=device)
 
     criterion = nn.CrossEntropyLoss()
 
@@ -96,23 +108,51 @@ def benchmark():
         return loss
 
     # Warmup
-    for _ in range(5):
+    for i in range(5):
         step()
+        print(f"  warmup {i+1}/5", file=sys.stderr)
     torch.cuda.synchronize()
 
     # Timed
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)
-    start.record()
-    for _ in range(10):
+    total_ms = 0.0
+    for i in range(10):
+        start.record()
         step()
-    end.record()
-    torch.cuda.synchronize()
+        end.record()
+        torch.cuda.synchronize()
+        elapsed = start.elapsed_time(end)
+        total_ms += elapsed
+        print(f"  run {i+1}/10: {elapsed:.3f} ms", file=sys.stderr)
 
-    total_ms = start.elapsed_time(end)
-    ms_per_step = total_ms / 10
-    tokens_per_sec = batch * block_size * 10 / (total_ms / 1000)
-    print(f'nanogpt_train,{batch * block_size},{ms_per_step:.3f},{tokens_per_sec:.2f}')
+    avg_ms = total_ms / 10
+    tokens_per_sec = (batch_size * block_size) / (avg_ms / 1000)
+    print(f"  avg: {avg_ms:.3f} ms, {tokens_per_sec:.2f} tokens/sec",
+          file=sys.stderr)
+
+    params = {
+        "batch_size": batch_size,
+        "block_size": block_size,
+        "n_layer": n_layer,
+        "n_embd": n_embd,
+        "n_head": n_head,
+    }
+
+    print(json.dumps({
+        "type": "kernel",
+        "name": "forward_backward_step",
+        "time_ms": avg_ms,
+        "params": params,
+    }))
+
+    print(json.dumps({
+        "type": "summary",
+        "total_time_ms": avg_ms,
+        "metrics": [
+            {"name": "tokens_per_sec", "value": tokens_per_sec},
+        ],
+    }))
 
 if __name__ == '__main__':
     benchmark()

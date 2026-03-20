@@ -115,9 +115,34 @@ static void fir_cpu(const float* input, float* output, const float* coeff,
 // ---------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
-    int N     = parseIntParam(argc, argv, "--size", 1048576);
-    int iters = parseIntParam(argc, argv, "--iterations", 5);
-    int taps  = NUM_TAPS;
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Defaults from params.json
+    int size       = 1048576;
+    int iterations = 5;
+    int num_taps   = 64;
+    int block_size = 256;
+
+    // Command-line fallback
+    size       = parseIntParam(argc, argv, "--size", size);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+    num_taps   = parseIntParam(argc, argv, "--num_taps", num_taps);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_num_taps");
+    if (env_val) num_taps = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+
+    int N     = size;
+    int iters = iterations;
+    int taps  = num_taps;
 
     size_t input_bytes  = (size_t)N * sizeof(float);
     size_t output_bytes = (size_t)N * sizeof(float);
@@ -167,7 +192,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(d_coeff, h_coeff, coeff_bytes, hipMemcpyHostToDevice));
 
     // Kernel launch config
-    int blockSize = 256;
+    int blockSize = block_size;
     int gridSize  = (N + blockSize - 1) / blockSize;
 
     // Lambda: run FIR filter
@@ -215,8 +240,18 @@ int main(int argc, char** argv) {
     double total_bytes = (double)(input_bytes + output_bytes);
     double gbs = total_bytes / (avg_ms * 1e-3) / 1e9;
 
-    // CSV output to stdout
-    printf("heteromark_fir,%d,%.4f,%.4f\n", N, avg_ms, gbs);
+    double total_ms = sum;
+
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"fir_filter_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"num_taps\":%d,"
+           "\"block_size\":%d}}\n",
+           avg_ms, size, iterations, num_taps, block_size);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"throughput_gbps\",\"value\":%.2f}]}\n",
+           total_ms, gbs);
 
     // Human-readable output to stderr
     fprintf(stderr, "Average time: %.4f ms\n", avg_ms);

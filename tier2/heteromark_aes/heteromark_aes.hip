@@ -270,9 +270,44 @@ static void aes256_encrypt_cpu(unsigned char* block,
 // Main
 // ---------------------------------------------------------------------------
 
+static const char* parseStrParam(int argc, char** argv, const char* name,
+                                 const char* defaultVal) {
+    for (int i = 1; i < argc - 1; ++i) {
+        if (strcmp(argv[i], name) == 0) {
+            return argv[i + 1];
+        }
+    }
+    return defaultVal;
+}
+
 int main(int argc, char** argv) {
-    int N     = parseIntParam(argc, argv, "--size", 1048576);
-    int iters = parseIntParam(argc, argv, "--iterations", 5);
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Defaults from params.json
+    int size       = 1048576;
+    int iterations = 5;
+    int block_size = 256;
+    const char* key_length = "256";
+
+    // Command-line fallback
+    size       = parseIntParam(argc, argv, "--size", size);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+    key_length = parseStrParam(argc, argv, "--key_length", key_length);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_key_length");
+    if (env_val) key_length = env_val;
+
+    int N     = size;
+    int iters = iterations;
 
     size_t data_bytes = (size_t)N * 16;
     size_t key_bytes  = 240;  // 15 round keys * 16 bytes
@@ -313,7 +348,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(d_keys, expanded_key, key_bytes, hipMemcpyHostToDevice));
 
     // Kernel launch config
-    int blockSize = 256;
+    int blockSize = block_size;
     int gridSize  = (N + blockSize - 1) / blockSize;
 
     // Lambda: run AES encryption
@@ -363,8 +398,18 @@ int main(int argc, char** argv) {
     // GB/s = N * 16 / time_s / 1e9
     double gbs = (double)N * 16.0 / (avg_ms * 1e-3) / 1e9;
 
-    // CSV output to stdout
-    printf("heteromark_aes,%d,%.4f,%.4f\n", N, avg_ms, gbs);
+    double total_ms = sum;
+
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"aes256_encrypt_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"key_length\":\"%s\"}}\n",
+           avg_ms, size, iterations, block_size, key_length);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"throughput_gbps\",\"value\":%.2f}]}\n",
+           total_ms, gbs);
 
     // Human-readable output to stderr
     fprintf(stderr, "Average time: %.4f ms\n", avg_ms);

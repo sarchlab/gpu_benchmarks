@@ -1,3 +1,5 @@
+import json
+import os
 import sys
 import time
 import torch
@@ -83,14 +85,14 @@ class RAGPipeline(nn.Module):
         self.retriever = Retriever(top_k=top_k)
         self.generator = Generator(vocab_size=vocab_size, hidden=hidden, heads=heads, num_layers=num_layers)
 
-    def forward(self, query_ids, doc_emb_matrix):
+    def forward(self, query_ids, doc_emb_matrix, generate_len=64):
         # Encode queries
         query_emb = self.encoder(query_ids)  # (B, hidden)
         # Retrieve top-k docs
         _, topk_embs = self.retriever(query_emb, doc_emb_matrix)  # (B, top_k, hidden)
         # Generate tokens using retrieved context as cross-attention memory
         start_tokens = torch.zeros(query_ids.shape[0], 1, dtype=torch.long, device=query_ids.device)
-        output = self.generator(start_tokens, topk_embs, generate_len=64)
+        output = self.generator(start_tokens, topk_embs, generate_len=generate_len)
         return output
 
 
@@ -98,17 +100,19 @@ class RAGPipeline(nn.Module):
 def benchmark():
     device = torch.device('mps')
 
-    # Config
+    # Read parameters from environment variables
+    num_docs = int(os.environ.get('BENCH_PARAM_num_docs', '1000'))
+    batch = int(os.environ.get('BENCH_PARAM_batch', '4'))
+    top_k = int(os.environ.get('BENCH_PARAM_top_k', '5'))
+    generate_len = int(os.environ.get('BENCH_PARAM_generate_len', '64'))
+    num_layers = int(os.environ.get('BENCH_PARAM_num_layers', '4'))
+    hidden = int(os.environ.get('BENCH_PARAM_hidden', '256'))
+
+    # Fixed config
     vocab_size = 50257
-    hidden = 256
     heads = 4
-    num_layers = 4
-    num_docs = 1000
     doc_len = 128
-    top_k = 5
-    batch = 4
     query_len = 32
-    generate_len = 64
 
     print(f"RAG Pipeline Benchmark (MPS)", file=sys.stderr)
     print(f"  encoder/generator: layers={num_layers}, hidden={hidden}, heads={heads}", file=sys.stderr)
@@ -131,7 +135,7 @@ def benchmark():
         doc_ids = torch.randint(0, vocab_size, (end - i, doc_len), device=device)
         emb = model.encoder(doc_ids)
         doc_embs_list.append(emb)
-    doc_emb_matrix = torch.cat(doc_embs_list, dim=0)  # (1000, 256)
+    doc_emb_matrix = torch.cat(doc_embs_list, dim=0)  # (num_docs, hidden)
     _ = doc_emb_matrix.sum().item()  # sync
     print(f"Document embeddings shape: {doc_emb_matrix.shape}", file=sys.stderr)
 
@@ -141,7 +145,7 @@ def benchmark():
     # Warmup
     print("Warming up...", file=sys.stderr)
     for _ in range(5):
-        out = model(query_ids, doc_emb_matrix)
+        out = model(query_ids, doc_emb_matrix, generate_len=generate_len)
     _ = out.sum().item()  # sync
 
     # Timed iterations
@@ -149,7 +153,7 @@ def benchmark():
     times = []
     for _ in range(10):
         t0 = time.perf_counter()
-        out = model(query_ids, doc_emb_matrix)
+        out = model(query_ids, doc_emb_matrix, generate_len=generate_len)
         _ = out.sum().item()  # force sync
         t1 = time.perf_counter()
         times.append((t1 - t0) * 1000)
@@ -159,7 +163,30 @@ def benchmark():
 
     print(f"Average time: {avg_ms:.3f} ms", file=sys.stderr)
     print(f"Queries/sec: {queries_per_sec:.2f}", file=sys.stderr)
-    print(f"rag_pipeline,{num_docs},{avg_ms:.3f},{queries_per_sec:.2f}")
+
+    params = {
+        "num_docs": num_docs,
+        "batch": batch,
+        "top_k": top_k,
+        "generate_len": generate_len,
+        "num_layers": num_layers,
+        "hidden": hidden,
+    }
+
+    print(json.dumps({
+        "type": "kernel",
+        "name": "rag_pipeline",
+        "time_ms": avg_ms,
+        "params": params,
+    }))
+
+    print(json.dumps({
+        "type": "summary",
+        "total_time_ms": avg_ms,
+        "metrics": [
+            {"name": "queries_per_sec", "value": queries_per_sec},
+        ],
+    }))
 
 
 if __name__ == '__main__':

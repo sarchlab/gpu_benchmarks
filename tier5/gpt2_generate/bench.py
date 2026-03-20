@@ -1,9 +1,12 @@
+import json
+import os
+import sys
 import torch
 import torch.nn as nn
 import math
-import time
 
-# GPT-2 style model — defined inline (same as nanogpt_train)
+
+# GPT-2 style model — defined inline
 class CausalSelfAttention(nn.Module):
     def __init__(self, n_embd, n_head, block_size):
         super().__init__()
@@ -22,11 +25,12 @@ class CausalSelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-        att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+        att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float('-inf'))
         att = torch.softmax(att, dim=-1)
         y = att @ v
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         return self.c_proj(y)
+
 
 class MLP(nn.Module):
     def __init__(self, n_embd):
@@ -37,6 +41,7 @@ class MLP(nn.Module):
 
     def forward(self, x):
         return self.c_proj(self.gelu(self.c_fc(x)))
+
 
 class Block(nn.Module):
     def __init__(self, n_embd, n_head, block_size):
@@ -50,6 +55,7 @@ class Block(nn.Module):
         x = x + self.attn(self.ln_1(x))
         x = x + self.mlp(self.ln_2(x))
         return x
+
 
 class GPT(nn.Module):
     def __init__(self, vocab_size, n_layer, n_head, n_embd, block_size):
@@ -86,9 +92,19 @@ def generate(model, prompt, num_new_tokens):
 def benchmark():
     device = torch.device('cuda')
     vocab_size = 50257
-    n_layer, n_head, n_embd, block_size = 6, 6, 384, 256
-    prompt_len = 32
-    num_new_tokens = 128
+
+    # Read parameters from environment variables
+    num_new_tokens = int(os.environ.get('BENCH_PARAM_num_new_tokens', '128'))
+    prompt_len = int(os.environ.get('BENCH_PARAM_prompt_len', '32'))
+    n_layer = int(os.environ.get('BENCH_PARAM_n_layer', '6'))
+    n_embd = int(os.environ.get('BENCH_PARAM_n_embd', '384'))
+    n_head = int(os.environ.get('BENCH_PARAM_n_head', '6'))
+
+    block_size = prompt_len + num_new_tokens
+
+    print(f"Running gpt2_generate with num_new_tokens={num_new_tokens}, "
+          f"prompt_len={prompt_len}, n_layer={n_layer}, n_embd={n_embd}, "
+          f"n_head={n_head}", file=sys.stderr)
 
     model = GPT(vocab_size, n_layer, n_head, n_embd, block_size).to(device)
     model.eval()
@@ -96,11 +112,13 @@ def benchmark():
     prompt = torch.randint(0, vocab_size, (1, prompt_len), device=device)
 
     # Warmup
+    print("Warmup...", file=sys.stderr)
     for _ in range(5):
         generate(model, prompt, num_new_tokens)
     torch.cuda.synchronize()
 
     # Timed
+    print("Benchmarking...", file=sys.stderr)
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)
     total_ms = 0.0
@@ -113,7 +131,33 @@ def benchmark():
 
     avg_ms = total_ms / 5
     tokens_per_sec = num_new_tokens / (avg_ms / 1000)
-    print(f'gpt2_generate,{num_new_tokens},{avg_ms:.3f},{tokens_per_sec:.2f}')
+
+    print(f"Average time: {avg_ms:.3f} ms", file=sys.stderr)
+    print(f"Tokens/sec: {tokens_per_sec:.2f}", file=sys.stderr)
+
+    params = {
+        "num_new_tokens": num_new_tokens,
+        "prompt_len": prompt_len,
+        "n_layer": n_layer,
+        "n_embd": n_embd,
+        "n_head": n_head,
+    }
+
+    print(json.dumps({
+        "type": "kernel",
+        "name": "generate",
+        "time_ms": avg_ms,
+        "params": params,
+    }))
+
+    print(json.dumps({
+        "type": "summary",
+        "total_time_ms": avg_ms,
+        "metrics": [
+            {"name": "tokens_per_sec", "value": tokens_per_sec},
+        ],
+    }))
+
 
 if __name__ == '__main__':
     benchmark()

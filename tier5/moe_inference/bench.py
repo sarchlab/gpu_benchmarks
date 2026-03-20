@@ -1,3 +1,5 @@
+import json
+import os
 import sys
 import torch
 import torch.nn as nn
@@ -23,11 +25,9 @@ class TopKGating(nn.Module):
         self.gate = nn.Linear(hidden_size, num_experts)
 
     def forward(self, x):
-        # x: (batch*seq, hidden)
         logits = self.gate(x)
         probs = F.softmax(logits, dim=-1)
         gate_values, indices = torch.topk(probs, self.top_k, dim=-1)
-        # Renormalize gate values
         gate_values = gate_values / gate_values.sum(dim=-1, keepdim=True)
         return gate_values, indices
 
@@ -42,15 +42,14 @@ class MoELayer(nn.Module):
         self.num_experts = num_experts
 
     def forward(self, x):
-        # x: (batch, seq, hidden)
         bsz, seq_len, hidden = x.shape
-        flat = x.view(-1, hidden)  # (batch*seq, hidden)
-        gate_values, indices = self.gating(flat)  # both (batch*seq, top_k)
+        flat = x.view(-1, hidden)
+        gate_values, indices = self.gating(flat)
 
         output = torch.zeros_like(flat)
         for k in range(self.top_k):
-            expert_idx = indices[:, k]  # (batch*seq,)
-            gate_w = gate_values[:, k].unsqueeze(-1)  # (batch*seq, 1)
+            expert_idx = indices[:, k]
+            gate_w = gate_values[:, k].unsqueeze(-1)
             for e_id in range(self.num_experts):
                 mask = (expert_idx == e_id)
                 if mask.any():
@@ -71,11 +70,9 @@ class TransformerBlock(nn.Module):
         self.moe = MoELayer(hidden_size, num_experts, top_k)
 
     def forward(self, x):
-        # Self-attention with residual
         h = self.ln1(x)
         attn_out, _ = self.attn(h, h, h, need_weights=False)
         x = x + attn_out
-        # MoE feedforward with residual
         h = self.ln2(x)
         x = x + self.moe(h)
         return x
@@ -119,17 +116,19 @@ def generate(model, prompt, num_new_tokens):
 
 def benchmark():
     device = torch.device('cuda')
-
-    # Config
-    hidden_size = 512
-    num_experts = 4
-    top_k = 2
-    num_layers = 4
-    num_heads = 8
     vocab_size = 50257
     batch_size = 4
-    seq_len = 256
-    num_new_tokens = 64
+
+    # Read parameters from environment variables
+    num_new_tokens = int(os.environ.get('BENCH_PARAM_num_new_tokens', '64'))
+    seq_len = int(os.environ.get('BENCH_PARAM_seq_len', '256'))
+    num_experts = int(os.environ.get('BENCH_PARAM_num_experts', '4'))
+    top_k = int(os.environ.get('BENCH_PARAM_top_k', '2'))
+    num_layers = int(os.environ.get('BENCH_PARAM_num_layers', '4'))
+    hidden_size = int(os.environ.get('BENCH_PARAM_hidden_size', '512'))
+
+    num_heads = max(1, hidden_size // 64)
+    max_seq_len = seq_len + num_new_tokens
 
     model = MoETransformer(
         vocab_size=vocab_size,
@@ -138,6 +137,7 @@ def benchmark():
         num_heads=num_heads,
         num_experts=num_experts,
         top_k=top_k,
+        max_seq_len=max_seq_len,
     ).to(device)
     model.eval()
 
@@ -150,12 +150,14 @@ def benchmark():
           f"batch={batch_size}", file=sys.stderr)
 
     # Warmup
+    print("Warmup...", file=sys.stderr)
     for i in range(5):
         generate(model, prompt, num_new_tokens)
         torch.cuda.synchronize()
         print(f"  warmup {i+1}/5", file=sys.stderr)
 
     # Timed
+    print("Benchmarking...", file=sys.stderr)
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)
     total_ms = 0.0
@@ -170,8 +172,32 @@ def benchmark():
 
     avg_ms = total_ms / 10
     tokens_per_sec = num_new_tokens / (avg_ms / 1000)
+
     print(f"  avg: {avg_ms:.3f} ms, {tokens_per_sec:.2f} tokens/sec", file=sys.stderr)
-    print(f'moe_inference,{seq_len},{avg_ms:.3f},{tokens_per_sec:.2f}')
+
+    params = {
+        "num_new_tokens": num_new_tokens,
+        "seq_len": seq_len,
+        "num_experts": num_experts,
+        "top_k": top_k,
+        "num_layers": num_layers,
+        "hidden_size": hidden_size,
+    }
+
+    print(json.dumps({
+        "type": "kernel",
+        "name": "generate",
+        "time_ms": avg_ms,
+        "params": params,
+    }))
+
+    print(json.dumps({
+        "type": "summary",
+        "total_time_ms": avg_ms,
+        "metrics": [
+            {"name": "tokens_per_sec", "value": tokens_per_sec},
+        ],
+    }))
 
 
 if __name__ == '__main__':

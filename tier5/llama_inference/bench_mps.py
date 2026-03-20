@@ -1,3 +1,5 @@
+import json
+import os
 import sys
 import time
 import torch
@@ -17,22 +19,28 @@ def generate(model, prompt, num_new_tokens):
 
 def benchmark():
     device = torch.device('mps')
+
+    # Read parameters from environment variables
+    num_new_tokens = int(os.environ.get('BENCH_PARAM_num_new_tokens', '128'))
+    prompt_len = int(os.environ.get('BENCH_PARAM_prompt_len', '32'))
+    num_hidden_layers = int(os.environ.get('BENCH_PARAM_num_hidden_layers', '6'))
+    hidden_size = int(os.environ.get('BENCH_PARAM_hidden_size', '512'))
+    num_attention_heads = int(os.environ.get('BENCH_PARAM_num_attention_heads', '8'))
+
     config = LlamaConfig(
-        num_hidden_layers=6,
-        hidden_size=512,
-        num_attention_heads=8,
+        num_hidden_layers=num_hidden_layers,
+        hidden_size=hidden_size,
+        num_attention_heads=num_attention_heads,
         intermediate_size=1376,
         vocab_size=32000,
     )
     model = LlamaForCausalLM(config).to(device)
     model.eval()
 
-    prompt_len = 32
-    num_new_tokens = 128
     prompt = torch.randint(0, config.vocab_size, (1, prompt_len), device=device)
 
-    print(f"Llama inference benchmark — {config.num_hidden_layers} layers, "
-          f"hidden={config.hidden_size}, heads={config.num_attention_heads}", file=sys.stderr)
+    print(f"Llama inference benchmark — {num_hidden_layers} layers, "
+          f"hidden={hidden_size}, heads={num_attention_heads}", file=sys.stderr)
     print(f"Generating {num_new_tokens} tokens from {prompt_len}-token prompt", file=sys.stderr)
 
     # Warmup
@@ -55,7 +63,29 @@ def benchmark():
     avg_ms = total_time / 10
     tokens_per_sec = num_new_tokens / (avg_ms / 1000)
     print(f"  avg: {avg_ms:.3f} ms, {tokens_per_sec:.2f} tokens/sec", file=sys.stderr)
-    print(f'llama_inference,{num_new_tokens},{avg_ms:.3f},{tokens_per_sec:.2f}')
+
+    params = {
+        "num_new_tokens": num_new_tokens,
+        "prompt_len": prompt_len,
+        "num_hidden_layers": num_hidden_layers,
+        "hidden_size": hidden_size,
+        "num_attention_heads": num_attention_heads,
+    }
+
+    print(json.dumps({
+        "type": "kernel",
+        "name": "generate",
+        "time_ms": avg_ms,
+        "params": params,
+    }))
+
+    print(json.dumps({
+        "type": "summary",
+        "total_time_ms": avg_ms,
+        "metrics": [
+            {"name": "tokens_per_sec", "value": tokens_per_sec},
+        ],
+    }))
 
 
 if __name__ == '__main__':

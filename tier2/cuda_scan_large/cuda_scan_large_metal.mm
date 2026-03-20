@@ -140,11 +140,45 @@ static void scan_recursive_metal(id<MTLBuffer> bufData, int N) {
 // main
 // ---------------------------------------------------------------------------
 
+static const char* parseStrParam(int argc, char** argv, const char* name,
+                                 const char* defaultVal) {
+    for (int i = 1; i < argc - 1; ++i) {
+        if (strcmp(argv[i], name) == 0) {
+            return argv[i + 1];
+        }
+    }
+    return defaultVal;
+}
+
 int main(int argc, char* argv[]) {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    int N     = parseIntParam(argc, argv, "--size", 16777216);
-    int iters = parseIntParam(argc, argv, "--iterations", 5);
+    // Defaults from params.json
+    int size       = 16777216;
+    int iterations = 5;
+    int block_size = 256;
+    const char* verify = "true";
+
+    // Command-line fallback
+    size       = parseIntParam(argc, argv, "--size", size);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+    verify     = parseStrParam(argc, argv, "--verify", verify);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_verify");
+    if (env_val) verify = env_val;
+
+    int N     = size;
+    int iters = iterations;
 
     size_t bytes = (size_t)N * sizeof(unsigned int);
 
@@ -256,8 +290,23 @@ int main(int argc, char* argv[]) {
     double data_bytes = 2.0 * (double)N * sizeof(unsigned int);
     double gbs = data_bytes / (avg_ms * 1e-3) / 1e9;
 
-    // CSV output to stdout
-    printf("cuda_scan_large,%d,%.4f,%.4f\n", N, avg_ms, gbs);
+    double total_ms = sum;
+
+    // JSON-lines kernel events
+    printf("{\"type\":\"kernel\",\"name\":\"scan_block_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"verify\":\"%s\"}}\n",
+           avg_ms, size, iterations, block_size, verify);
+
+    printf("{\"type\":\"kernel\",\"name\":\"add_block_sums_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"verify\":\"%s\"}}\n",
+           avg_ms, size, iterations, block_size, verify);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"throughput_gbps\",\"value\":%.2f}]}\n",
+           total_ms, gbs);
 
     // Human-readable output to stderr
     fprintf(stderr, "Average time: %.4f ms\n", avg_ms);

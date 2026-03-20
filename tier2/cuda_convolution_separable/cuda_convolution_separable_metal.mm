@@ -97,11 +97,32 @@ static void conv_separable_cpu(const float* input, float* output,
 
 int main(int argc, char* argv[]) {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    int width  = parseIntParam(argc, argv, "--width",  4096);
-    int height = parseIntParam(argc, argv, "--height", 4096);
-    int radius = parseIntParam(argc, argv, "--radius", 8);
-    int iters  = parseIntParam(argc, argv, "--iterations", 5);
+    // Defaults from params.json
+    int width  = 4096;
+    int height = 4096;
+    int radius = 8;
+    int iterations = 5;
+
+    // Command-line fallback
+    width  = parseIntParam(argc, argv, "--width",  width);
+    height = parseIntParam(argc, argv, "--height", height);
+    radius = parseIntParam(argc, argv, "--radius", radius);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_width");
+    if (env_val) width = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_height");
+    if (env_val) height = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_radius");
+    if (env_val) radius = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+
+    int iters = iterations;
 
     int klen = 2 * radius + 1;
     size_t imageBytes = (size_t)width * height * sizeof(float);
@@ -272,9 +293,21 @@ int main(int argc, char* argv[]) {
     double data_bytes = 2.0 * (double)width * (double)height * sizeof(float);
     double gbs = data_bytes / (avg_ms * 1e-3) / 1e9;
 
-    // CSV output to stdout
-    printf("cuda_convolution_separable,%dx%d,%.4f,%.4f\n",
-           width, height, avg_ms, gbs);
+    double total_ms = tsum;
+
+    // JSON-lines kernel events (one per kernel)
+    printf("{\"type\":\"kernel\",\"name\":\"convolution_row_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"width\":%d,\"height\":%d,\"radius\":%d,\"iterations\":%d}}\n",
+           avg_ms, width, height, radius, iterations);
+
+    printf("{\"type\":\"kernel\",\"name\":\"convolution_col_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"width\":%d,\"height\":%d,\"radius\":%d,\"iterations\":%d}}\n",
+           avg_ms, width, height, radius, iterations);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"throughput_gbps\",\"value\":%.2f}]}\n",
+           total_ms, gbs);
 
     // Human-readable output to stderr
     fprintf(stderr, "Average time: %.4f ms\n", avg_ms);

@@ -1,17 +1,29 @@
+import json
+import os
+import sys
 import torch
 import torchvision.models as models
 import time
 
 def benchmark():
     device = torch.device('cuda')
-    model = models.resnet50(weights=None).to(device)
+
+    # Read parameters from environment variables
+    batch_size = int(os.environ.get('BENCH_PARAM_batch_size', '32'))
+    image_size = int(os.environ.get('BENCH_PARAM_image_size', '224'))
+    num_classes = int(os.environ.get('BENCH_PARAM_num_classes', '1000'))
+    learning_rate = float(os.environ.get('BENCH_PARAM_learning_rate', '0.01'))
+
+    print(f"Running resnet50_train with batch_size={batch_size}, image_size={image_size}, "
+          f"num_classes={num_classes}, lr={learning_rate}", file=sys.stderr)
+
+    model = models.resnet50(weights=None, num_classes=num_classes).to(device)
     model.train()
 
-    batch = 32
-    x = torch.randn(batch, 3, 224, 224, device=device)
-    y = torch.randint(0, 1000, (batch,), device=device)
+    x = torch.randn(batch_size, 3, image_size, image_size, device=device)
+    y = torch.randint(0, num_classes, (batch_size,), device=device)
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+    optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9)
     criterion = torch.nn.CrossEntropyLoss()
 
     # Warmup
@@ -23,11 +35,13 @@ def benchmark():
         optimizer.step()
     torch.cuda.synchronize()
 
+    num_iters = 10
+
     # Timed
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)
     start.record()
-    for _ in range(10):
+    for _ in range(num_iters):
         optimizer.zero_grad()
         out = model(x)
         loss = criterion(out, y)
@@ -36,9 +50,30 @@ def benchmark():
     end.record()
     torch.cuda.synchronize()
 
-    ms = start.elapsed_time(end) / 10
-    images_per_sec = batch / (ms / 1000)
-    print(f'resnet50_train,{batch},{ms:.3f},{images_per_sec:.2f}')
+    avg_ms = start.elapsed_time(end) / num_iters
+    images_per_sec = batch_size / (avg_ms / 1000)
+
+    params = {
+        "batch_size": batch_size,
+        "image_size": image_size,
+        "num_classes": num_classes,
+        "learning_rate": learning_rate,
+    }
+
+    print(json.dumps({
+        "type": "kernel",
+        "name": "train_step",
+        "time_ms": avg_ms,
+        "params": params,
+    }))
+
+    print(json.dumps({
+        "type": "summary",
+        "total_time_ms": avg_ms,
+        "metrics": [
+            {"name": "images_per_sec", "value": images_per_sec},
+        ],
+    }))
 
 if __name__ == '__main__':
     benchmark()

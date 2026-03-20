@@ -1,7 +1,9 @@
+import json
+import os
+import sys
 import torch
 import torch.nn as nn
 import math
-import sys
 
 
 class CausalSelfAttention(nn.Module):
@@ -86,37 +88,41 @@ class AgentModel(nn.Module):
 
 
 @torch.no_grad()
-def multi_agent_pipeline(agent_a, agent_b, agent_c, prompt):
-    """Multi-agent pipeline: 3 agents each generate 64 tokens."""
-    # Agent A: starts with prompt (32 tokens), generates 64 tokens
-    output_a = agent_a.generate(prompt, 64)
+def multi_agent_pipeline(agent_a, agent_b, agent_c, prompt, tokens_per_agent):
+    """Multi-agent pipeline: 3 agents each generate tokens_per_agent tokens."""
+    half = max(tokens_per_agent // 2, 1)
 
-    # Agent B: takes last 64 tokens of output_a as input, generates 64 tokens
-    input_b = output_a[:, -64:]
-    output_b = agent_b.generate(input_b, 64)
+    # Agent A: starts with prompt, generates tokens_per_agent tokens
+    output_a = agent_a.generate(prompt, tokens_per_agent)
 
-    # Agent C: takes concat of output_a[-32:] + output_b[-32:] (64 tokens), generates 64 tokens
-    input_c = torch.cat([output_a[:, -32:], output_b[:, -32:]], dim=1)
-    output_c = agent_c.generate(input_c, 64)
+    # Agent B: takes last tokens_per_agent tokens of output_a as input
+    input_b = output_a[:, -tokens_per_agent:]
+    output_b = agent_b.generate(input_b, tokens_per_agent)
+
+    # Agent C: takes concat of output_a[-half:] + output_b[-half:], generates tokens_per_agent
+    input_c = torch.cat([output_a[:, -half:], output_b[:, -half:]], dim=1)
+    output_c = agent_c.generate(input_c, tokens_per_agent)
 
     return output_c
 
 
 def benchmark():
     device = torch.device('cuda')
-
-    # Config
-    num_layers = 4
-    hidden_size = 256
-    num_heads = 4
     vocab_size = 50257
-    max_seq_len = 512
-    prompt_len = 32
-    total_generated = 3 * 64  # 192 tokens
 
-    print(f'Multi-agent LLM benchmark', file=sys.stderr)
-    print(f'Config: layers={num_layers}, hidden={hidden_size}, heads={num_heads}', file=sys.stderr)
-    print(f'Agents: 3, Tokens per agent: 64, Total: {total_generated}', file=sys.stderr)
+    # Read parameters from environment variables
+    tokens_per_agent = int(os.environ.get('BENCH_PARAM_tokens_per_agent', '64'))
+    prompt_len = int(os.environ.get('BENCH_PARAM_prompt_len', '32'))
+    num_layers = int(os.environ.get('BENCH_PARAM_num_layers', '4'))
+    hidden_size = int(os.environ.get('BENCH_PARAM_hidden_size', '256'))
+    num_heads = int(os.environ.get('BENCH_PARAM_num_heads', '4'))
+
+    total_generated = 3 * tokens_per_agent
+    max_seq_len = prompt_len + 2 * tokens_per_agent
+
+    print(f"Multi-agent LLM benchmark", file=sys.stderr)
+    print(f"Config: layers={num_layers}, hidden={hidden_size}, heads={num_heads}", file=sys.stderr)
+    print(f"Agents: 3, Tokens per agent: {tokens_per_agent}, Total: {total_generated}", file=sys.stderr)
 
     agent_a = AgentModel(vocab_size, num_layers, num_heads, hidden_size, max_seq_len).to(device)
     agent_b = AgentModel(vocab_size, num_layers, num_heads, hidden_size, max_seq_len).to(device)
@@ -128,28 +134,51 @@ def benchmark():
     prompt = torch.randint(0, vocab_size, (1, prompt_len), device=device)
 
     # Warmup
-    print('Warmup...', file=sys.stderr)
+    print("Warmup...", file=sys.stderr)
     for _ in range(5):
-        multi_agent_pipeline(agent_a, agent_b, agent_c, prompt)
+        multi_agent_pipeline(agent_a, agent_b, agent_c, prompt, tokens_per_agent)
     torch.cuda.synchronize()
 
     # Timed
-    print('Benchmarking...', file=sys.stderr)
+    print("Benchmarking...", file=sys.stderr)
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)
     total_ms = 0.0
     for _ in range(10):
         start.record()
-        multi_agent_pipeline(agent_a, agent_b, agent_c, prompt)
+        multi_agent_pipeline(agent_a, agent_b, agent_c, prompt, tokens_per_agent)
         end.record()
         torch.cuda.synchronize()
         total_ms += start.elapsed_time(end)
 
     avg_ms = total_ms / 10
     tokens_per_sec = total_generated / (avg_ms / 1000)
-    print(f'Average time: {avg_ms:.3f} ms', file=sys.stderr)
-    print(f'Tokens/sec: {tokens_per_sec:.2f}', file=sys.stderr)
-    print(f'multi_agent_bench,3x64,{avg_ms:.3f},{tokens_per_sec:.2f}')
+
+    print(f"Average time: {avg_ms:.3f} ms", file=sys.stderr)
+    print(f"Tokens/sec: {tokens_per_sec:.2f}", file=sys.stderr)
+
+    params = {
+        "tokens_per_agent": tokens_per_agent,
+        "prompt_len": prompt_len,
+        "num_layers": num_layers,
+        "hidden_size": hidden_size,
+        "num_heads": num_heads,
+    }
+
+    print(json.dumps({
+        "type": "kernel",
+        "name": "agent_step",
+        "time_ms": avg_ms,
+        "params": params,
+    }))
+
+    print(json.dumps({
+        "type": "summary",
+        "total_time_ms": avg_ms,
+        "metrics": [
+            {"name": "tokens_per_sec", "value": tokens_per_sec},
+        ],
+    }))
 
 
 if __name__ == '__main__':

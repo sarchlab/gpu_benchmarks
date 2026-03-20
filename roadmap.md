@@ -445,6 +445,8 @@ clean:
 | 131 | Planning | Athena | M24 complete. Define M25 (Tier 5 refactoring, 26 benchmarks, 52 files). |
 | 132–136 | Implementation+Verification | Ares+Apollo | M25 implemented (26 Tier 5 benchmarks, 52 Python files refactored). Merged PR #23. |
 | 137 | Planning | Athena | M25 complete. Define M26 (Integration, Testing & Final Polish). |
+| 138–140 | Implementation+Verification | Ares+Apollo | M26 implemented (README rewrite, old harness cleanup, Makefile update, smoke test). Merged PR #24. |
+| 141 | Planning | Athena | M26 complete. All milestones done. All human issues closed. **PROJECT COMPLETE.** |
 
 ---
 
@@ -499,32 +501,17 @@ After refactoring: `gpubench run --tier 2 --reps 1` works end-to-end.
 **Deliverables (completed):** All 52 Python files refactored (26 bench.py + 26 bench_mps.py). JSON-lines protocol, BENCH_PARAM_* env vars, import json/os/sys. All pass py_compile + AST validation. Merged via PR #23.
 **Branch:** `ares/m25-tier5-refactor` (merged to main via PR #23)
 
-### M26 — Integration, Testing & Final Polish
+### M26 — Integration, Testing & Final Polish ✅ COMPLETE (cycles used: ~3)
 **Goal:** Complete the project: update README with CLI documentation, run end-to-end tests, clean up old harness code, close human issues.
 
-**Deliverables:**
-1. **README.md rewrite** — Replace the old "Benchmark Harness Usage" and "CSV Output Format" sections with comprehensive `gpubench` CLI documentation:
-   - `gpubench list` — discover benchmarks
-   - `gpubench compile` — compile C++ benchmarks
-   - `gpubench run` — run with parameterized sweeps, repetitions, SQLite storage
-   - `gpubench validate` — validate params.json files
-   - `gpubench info` — show platform info
-   - Document the JSON-lines output protocol
-   - Document the SQLite results database schema
-   - Reference `docs/` for detailed specifications
-   - Remove old CSV output format references
-   - Remove old `make run-all` / `make report` references
+**Deliverables (completed):**
+1. **README.md rewrite** — Comprehensive gpubench CLI documentation (list, compile, run, validate, info). JSON-lines output protocol and SQLite schema documented. Old CSV/harness references removed.
+2. **End-to-end smoke test** — `gpubench run --benchmark sdpa_bench --scaling-values 32 --reps 1` passed. All 5 SQLite tables verified.
+3. **Old harness cleanup** — `scripts/run_all.sh` and `scripts/report.py` removed.
+4. **Root Makefile update** — Old targets removed, gpubench convenience targets added.
+5. **Human issues** — #142, #143, #144 all closed with verification comments.
 
-2. **End-to-end smoke test** — Verify a few benchmarks actually run and produce valid SQLite results:
-   - At least one C++ benchmark (Tier 1 or 2) if compilable
-   - At least one Python benchmark (Tier 4 or 5) via `gpubench run`
-   - Verify results appear in SQLite database
-
-3. **Clean up old harness** — Remove or update `scripts/run_all.sh` and `scripts/report.py` (the old pre-CLI harness scripts) since they are superseded by `gpubench`
-
-4. **Root Makefile update** — Remove `run-all` and `report` targets that reference old harness scripts; optionally add `gpubench` convenience targets
-
-**Budget:** 3 cycles
+**Branch:** `ares/m26-final-polish` (merged to main via PR #24)
 
 ---
 
@@ -538,3 +525,16 @@ After refactoring: `gpubench run --tier 2 --reps 1` works end-to-end.
 - **Tier 5:** 26 ML workloads (ResNet, BERT, GPT-2, ViT, NanoGPT, SDPA, torch.compile, vLLM, llama.cpp, Ollama, LLaMA, DeepSeek, Qwen, GLM, Phi, Mistral, BERT fine-tune, Whisper, Stable Diffusion, MoE, RAG, CoT, Multi-Agent, SDXL, GPT-NeoX)
 
 All benchmarks support 3 platforms (NVIDIA/CUDA, AMD/ROCm, Apple/Metal), use Make-only build system, and are self-contained.
+
+**Phase 2 complete (M21–M26).** All 107 benchmarks parameterized with params.json. gpubench CLI tool built (list, compile, run, validate, info). SQLite output with platform info, session tracking, per-kernel timing, computed metrics. All human issues (#142, #143, #144) closed.
+
+## 🎉 PROJECT COMPLETE
+
+**Final stats:**
+- **107 benchmarks** across 5 tiers (12 T1 + 51 T2 + 11 T3 + 7 T4 + 26 T5)
+- **26 milestones** completed over ~141 cycles
+- **24 pull requests** merged
+- **3 platforms** supported: NVIDIA/CUDA, AMD/ROCm, Apple/Metal
+- **gpubench CLI** for automated compilation, execution, and result collection
+- **SQLite database** with platform info, kernel-level timing, parameterized sweeps
+- All human requirements fulfilled

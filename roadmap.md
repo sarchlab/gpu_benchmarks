@@ -439,6 +439,8 @@ clean:
 | 104 | Planning | Athena | M21 complete. Define M22 (CLI tool + Tier 1 refactoring). |
 | 105–117 | Implementation+Verification | Ares+Apollo | M22 implemented: gpubench CLI + 12 Tier 1 benchmarks refactored. Fix rounds for enum mismatches. Merged PR #20. |
 | 118 | Planning | Athena | M22 complete. Define M23 (Tier 2 refactoring, 51 benchmarks). |
+| 119–125 | Implementation+Verification | Ares+Apollo | M23 implemented (51 Tier 2 benchmarks refactored, 102 files). Fix round for rodinia_lud + dead CSV. Merged PR #21. |
+| 126 | Planning | Athena | M23 complete. Define M24 (Tier 3 + Tier 4 refactoring, 18 benchmarks). |
 
 ---
 
@@ -470,7 +472,7 @@ End-to-end: `gpubench run --tier 1 --reps 1` works.
 
 **Branch:** `ares/m22-cli-benchmarks` (merged to main via PR #20)
 
-### M23 — Tier 2 Benchmark Refactoring (51 benchmarks)
+### M23 — Tier 2 Benchmark Refactoring (51 benchmarks) ✅ COMPLETE (cycles used: ~8)
 **Goal:** Refactor all 51 Tier 2 benchmarks for parameterized execution and kernel-level timing.
 
 Each benchmark has 2 source files (.hip + _metal.mm) = 102 files total. For each file:
@@ -479,13 +481,27 @@ Each benchmark has 2 source files (.hip + _metal.mm) = 102 files total. For each
 3. Send human-readable messages to stderr only
 4. Add `setvbuf(stdout, NULL, _IONBF, 0)` at the start of main
 
-After refactoring: `gpubench run --tier 2 --reps 1` should work end-to-end.
+After refactoring: `gpubench run --tier 2 --reps 1` works end-to-end.
 
-**Budget:** 8 cycles
+**Branch:** `ares/m23-tier2-refactor` (merged to main via PR #21)
 
 ### M24 — Tier 3 + Tier 4 Benchmark Refactoring (18 benchmarks)
-**Goal:** Refactor Tier 3 (11) and Tier 4 (7) benchmarks.
-**Budget:** 4 cycles (estimated)
+**Goal:** Refactor all Tier 3 (11 C++ benchmarks) and Tier 4 (7 benchmarks: 1 C++ + 6 Python) for parameterized execution and kernel-level timing.
+
+**C++ benchmarks (Tier 3 + babelstream):** 12 benchmarks × 2 files (.hip + _metal.mm) = 24 C++ files. Same pattern as Tier 1/2:
+1. Read all parameters from `BENCH_PARAM_*` environment variables (matching params.json)
+2. Output JSON-lines protocol to stdout (kernel events + summary)
+3. Human-readable messages to stderr only
+4. `setvbuf(stdout, NULL, _IONBF, 0)` at start of main
+
+**Python benchmarks (Tier 4 Triton):** 6 benchmarks × 2 files (bench.py + bench_mps.py) = 12 Python files:
+1. Read all parameters from `BENCH_PARAM_*` environment variables (matching params.json)
+2. Output JSON-lines protocol to stdout (kernel events + summary)
+3. Human-readable messages to stderr only
+
+After refactoring: `gpubench run --tier 3 --reps 1` and `gpubench run --tier 4 --reps 1` should work end-to-end.
+
+**Budget:** 5 cycles
 
 ### M25 — Tier 5 Benchmark Refactoring (26 benchmarks)
 **Goal:** Refactor all Tier 5 Python benchmarks for parameterized execution and kernel-level timing.

@@ -443,6 +443,8 @@ clean:
 | 126 | Planning | Athena | M23 complete. Define M24 (Tier 3 + Tier 4 refactoring, 18 benchmarks). |
 | 127–130 | Implementation+Verification | Ares+Apollo | M24 implemented (18 benchmarks, 36 files refactored). Fix round for triton_vector_add. Merged PR #22. |
 | 131 | Planning | Athena | M24 complete. Define M25 (Tier 5 refactoring, 26 benchmarks, 52 files). |
+| 132–136 | Implementation+Verification | Ares+Apollo | M25 implemented (26 Tier 5 benchmarks, 52 Python files refactored). Merged PR #23. |
+| 137 | Planning | Athena | M25 complete. Define M26 (Integration, Testing & Final Polish). |
 
 ---
 
@@ -492,26 +494,37 @@ After refactoring: `gpubench run --tier 2 --reps 1` works end-to-end.
 **Deliverables (completed):** All 36 source files refactored (24 C++ + 12 Python). JSON-lines protocol, BENCH_PARAM_* env vars, setvbuf for C++. Fix round for triton_vector_add bench_mps.py. Merged via PR #22.
 **Branch:** `ares/m24-tier3-tier4-refactor` (merged to main via PR #22)
 
-### M25 — Tier 5 Benchmark Refactoring (26 benchmarks)
+### M25 — Tier 5 Benchmark Refactoring (26 benchmarks) ✅ COMPLETE (cycles used: ~5)
 **Goal:** Refactor all 26 Tier 5 Python benchmarks for parameterized execution and kernel-level timing.
-
-**Scope:** 26 benchmarks × 2 files (bench.py + bench_mps.py) = 52 Python files. For each file:
-1. Read all parameters from `BENCH_PARAM_*` environment variables (matching params.json)
-2. Output JSON-lines protocol to stdout (`{"type":"kernel",...}` + `{"type":"summary",...}`)
-3. Human-readable messages to stderr only (use `print(..., file=sys.stderr)`)
-4. Use `import json, os, sys` at the top
-5. Report each kernel event with `time_ms` and `params` (all param values)
-6. Report summary with `total_time_ms` and `metrics` array
-
-After refactoring: `gpubench run --tier 5 --reps 1` should work end-to-end.
-
-**Reference:** See `tier4/triton_vector_add/bench.py` and `tier4/triton_vector_add/bench_mps.py` for the exact pattern.
-
-**Budget:** 5 cycles
+**Deliverables (completed):** All 52 Python files refactored (26 bench.py + 26 bench_mps.py). JSON-lines protocol, BENCH_PARAM_* env vars, import json/os/sys. All pass py_compile + AST validation. Merged via PR #23.
+**Branch:** `ares/m25-tier5-refactor` (merged to main via PR #23)
 
 ### M26 — Integration, Testing & Final Polish
-**Goal:** End-to-end testing of CLI across all tiers, fix issues, update README.
-**Budget:** 3 cycles (estimated)
+**Goal:** Complete the project: update README with CLI documentation, run end-to-end tests, clean up old harness code, close human issues.
+
+**Deliverables:**
+1. **README.md rewrite** — Replace the old "Benchmark Harness Usage" and "CSV Output Format" sections with comprehensive `gpubench` CLI documentation:
+   - `gpubench list` — discover benchmarks
+   - `gpubench compile` — compile C++ benchmarks
+   - `gpubench run` — run with parameterized sweeps, repetitions, SQLite storage
+   - `gpubench validate` — validate params.json files
+   - `gpubench info` — show platform info
+   - Document the JSON-lines output protocol
+   - Document the SQLite results database schema
+   - Reference `docs/` for detailed specifications
+   - Remove old CSV output format references
+   - Remove old `make run-all` / `make report` references
+
+2. **End-to-end smoke test** — Verify a few benchmarks actually run and produce valid SQLite results:
+   - At least one C++ benchmark (Tier 1 or 2) if compilable
+   - At least one Python benchmark (Tier 4 or 5) via `gpubench run`
+   - Verify results appear in SQLite database
+
+3. **Clean up old harness** — Remove or update `scripts/run_all.sh` and `scripts/report.py` (the old pre-CLI harness scripts) since they are superseded by `gpubench`
+
+4. **Root Makefile update** — Remove `run-all` and `report` targets that reference old harness scripts; optionally add `gpubench` convenience targets
+
+**Budget:** 3 cycles
 
 ---
 

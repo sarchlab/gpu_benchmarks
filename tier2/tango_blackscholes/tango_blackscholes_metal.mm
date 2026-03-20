@@ -116,11 +116,45 @@ struct BSParams {
 // main
 // ---------------------------------------------------------------------------
 
+static const char* parseStrParam(int argc, char** argv, const char* name,
+                                 const char* defaultVal) {
+    for (int i = 1; i < argc - 1; ++i) {
+        if (strcmp(argv[i], name) == 0) {
+            return argv[i + 1];
+        }
+    }
+    return defaultVal;
+}
+
 int main(int argc, char* argv[]) {
     @autoreleasepool {
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    int N     = parseIntParam(argc, argv, "--size", 4194304);
-    int iters = parseIntParam(argc, argv, "--iterations", 5);
+    // Defaults from params.json
+    int size       = 4194304;
+    int iterations = 5;
+    int block_size = 256;
+    const char* precision = "float";
+
+    // Command-line fallback
+    size       = parseIntParam(argc, argv, "--size", size);
+    iterations = parseIntParam(argc, argv, "--iterations", iterations);
+    block_size = parseIntParam(argc, argv, "--block_size", block_size);
+    precision  = parseStrParam(argc, argv, "--precision", precision);
+
+    // Environment variable overrides
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_size");
+    if (env_val) size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iterations");
+    if (env_val) iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
+
+    int N     = size;
+    int iters = iterations;
 
     const float r = 0.02f;
     size_t bytes = (size_t)N * sizeof(float);
@@ -213,7 +247,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Threadgroup size
-    NSUInteger tgSize = 256;
+    NSUInteger tgSize = (NSUInteger)block_size;
     NSUInteger gridN  = (NSUInteger)N;
 
     BSParams params;
@@ -266,8 +300,18 @@ int main(int argc, char* argv[]) {
     // M options/sec = N / time_s / 1e6
     double mopts = (double)N / (avg_ms * 1e-3) / 1e6;
 
-    // CSV output to stdout
-    printf("tango_blackscholes,%d,%.4f,%.4f\n", N, avg_ms, mopts);
+    double total_ms = sum;
+
+    // JSON-lines kernel event
+    printf("{\"type\":\"kernel\",\"name\":\"blackscholes_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_ms, size, iterations, block_size, precision);
+
+    // JSON-lines summary event
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"moptions_per_sec\",\"value\":%.2f}]}\n",
+           total_ms, mopts);
 
     // Human-readable output to stderr
     fprintf(stderr, "Average time: %.4f ms\n", avg_ms);

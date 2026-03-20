@@ -1,3 +1,6 @@
+import json
+import os
+import sys
 import torch
 import triton
 import triton.language as tl
@@ -31,22 +34,33 @@ def layer_norm_kernel(
 
 def benchmark():
     device = 'cuda'
-    M, N = 4096, 4096
-    eps = 1e-5
-    BLOCK_SIZE = triton.next_power_of_2(N)
 
-    x = torch.rand((M, N), device=device, dtype=torch.float32)
-    weight = torch.ones(N, device=device, dtype=torch.float32)
-    bias = torch.zeros(N, device=device, dtype=torch.float32)
+    # Read parameters from environment variables
+    n = int(os.environ.get('BENCH_PARAM_n', '4096'))
+    m = int(os.environ.get('BENCH_PARAM_m', '4096'))
+    eps = float(os.environ.get('BENCH_PARAM_eps', '1e-5'))
+    dtype_str = os.environ.get('BENCH_PARAM_dtype', 'float32')
+
+    dtype_map = {'float16': torch.float16, 'float32': torch.float32, 'float64': torch.float64}
+    dtype = dtype_map.get(dtype_str, torch.float32)
+    bytes_per_elem = torch.tensor([], dtype=dtype).element_size()
+
+    BLOCK_SIZE = triton.next_power_of_2(n)
+
+    print(f"Running layer_norm with m={m}, n={n}, eps={eps}, dtype={dtype_str}", file=sys.stderr)
+
+    x = torch.rand((m, n), device=device, dtype=dtype)
+    weight = torch.ones(n, device=device, dtype=dtype)
+    bias = torch.zeros(n, device=device, dtype=dtype)
     y = torch.empty_like(x)
 
-    grid = (M,)
+    grid = (m,)
 
     # Warmup
     for _ in range(5):
         layer_norm_kernel[grid](
             x, weight, bias, y,
-            N, eps,
+            n, eps,
             x.stride(0),
             BLOCK_SIZE=BLOCK_SIZE,
         )
@@ -59,18 +73,39 @@ def benchmark():
     for _ in range(5):
         layer_norm_kernel[grid](
             x, weight, bias, y,
-            N, eps,
+            n, eps,
             x.stride(0),
             BLOCK_SIZE=BLOCK_SIZE,
         )
     end.record()
     torch.cuda.synchronize()
-    ms = start.elapsed_time(end) / 5
+    avg_ms = start.elapsed_time(end) / 5
 
     # GB/s: read x + weight + bias + write y
-    # Simplified: 2 * M * N * 4 bytes (dominant term)
-    gb_s = 2 * M * N * 4 / (ms / 1000) / 1e9
-    print(f'triton_layer_norm,{M}x{N},{ms:.3f},{gb_s:.2f}')
+    # Simplified: 2 * m * n * bytes_per_elem (dominant term)
+    gb_s = 2 * m * n * bytes_per_elem / (avg_ms / 1000) / 1e9
+
+    params = {
+        "n": n,
+        "m": m,
+        "eps": eps,
+        "dtype": dtype_str,
+    }
+
+    print(json.dumps({
+        "type": "kernel",
+        "name": "layer_norm_kernel",
+        "time_ms": avg_ms,
+        "params": params,
+    }))
+
+    print(json.dumps({
+        "type": "summary",
+        "total_time_ms": avg_ms,
+        "metrics": [
+            {"name": "bandwidth_gbps", "value": gb_s},
+        ],
+    }))
 
 if __name__ == '__main__':
     benchmark()

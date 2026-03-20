@@ -1,3 +1,6 @@
+import json
+import os
+import sys
 import torch
 import triton
 import triton.language as tl
@@ -73,16 +76,26 @@ def flash_attention_fwd(
 
 def benchmark():
     device = 'cuda'
-    B, H, S, D = 2, 16, 1024, 64
-    BLOCK_M, BLOCK_N, BLOCK_D = 128, 64, 64
-    sm_scale = 1.0 / math.sqrt(D)
 
-    Q = torch.randn((B, H, S, D), device=device, dtype=torch.float16)
-    K = torch.randn((B, H, S, D), device=device, dtype=torch.float16)
-    V = torch.randn((B, H, S, D), device=device, dtype=torch.float16)
+    # Read parameters from environment variables
+    s = int(os.environ.get('BENCH_PARAM_s', '1024'))
+    b = int(os.environ.get('BENCH_PARAM_b', '2'))
+    h = int(os.environ.get('BENCH_PARAM_h', '16'))
+    d = int(os.environ.get('BENCH_PARAM_d', '64'))
+    block_m = int(os.environ.get('BENCH_PARAM_block_m', '128'))
+    block_n = int(os.environ.get('BENCH_PARAM_block_n', '64'))
+
+    BLOCK_D = d
+    sm_scale = 1.0 / math.sqrt(d)
+
+    print(f"Running flash_attention with b={b}, h={h}, s={s}, d={d}, block_m={block_m}, block_n={block_n}", file=sys.stderr)
+
+    Q = torch.randn((b, h, s, d), device=device, dtype=torch.float16)
+    K = torch.randn((b, h, s, d), device=device, dtype=torch.float16)
+    V = torch.randn((b, h, s, d), device=device, dtype=torch.float16)
     O = torch.empty_like(Q)
 
-    grid = (triton.cdiv(S, BLOCK_M), B * H)
+    grid = (triton.cdiv(s, block_m), b * h)
 
     # Warmup
     for _ in range(5):
@@ -92,8 +105,8 @@ def benchmark():
             K.stride(0), K.stride(1), K.stride(2), K.stride(3),
             V.stride(0), V.stride(1), V.stride(2), V.stride(3),
             O.stride(0), O.stride(1), O.stride(2), O.stride(3),
-            H, S, sm_scale,
-            BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N, BLOCK_D=BLOCK_D,
+            h, s, sm_scale,
+            BLOCK_M=block_m, BLOCK_N=block_n, BLOCK_D=BLOCK_D,
         )
     torch.cuda.synchronize()
 
@@ -108,15 +121,38 @@ def benchmark():
             K.stride(0), K.stride(1), K.stride(2), K.stride(3),
             V.stride(0), V.stride(1), V.stride(2), V.stride(3),
             O.stride(0), O.stride(1), O.stride(2), O.stride(3),
-            H, S, sm_scale,
-            BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N, BLOCK_D=BLOCK_D,
+            h, s, sm_scale,
+            BLOCK_M=block_m, BLOCK_N=block_n, BLOCK_D=BLOCK_D,
         )
     end.record()
     torch.cuda.synchronize()
-    ms = start.elapsed_time(end) / 5
+    avg_ms = start.elapsed_time(end) / 5
 
-    tflops = 4 * B * H * S * S * D / (ms / 1000) / 1e12
-    print(f'triton_flash_attention,{B}x{H}x{S}x{D},{ms:.3f},{tflops:.2f}')
+    tflops = 4 * b * h * s * s * d / (avg_ms / 1000) / 1e12
+
+    params = {
+        "s": s,
+        "b": b,
+        "h": h,
+        "d": d,
+        "block_m": block_m,
+        "block_n": block_n,
+    }
+
+    print(json.dumps({
+        "type": "kernel",
+        "name": "flash_attention_fwd",
+        "time_ms": avg_ms,
+        "params": params,
+    }))
+
+    print(json.dumps({
+        "type": "summary",
+        "total_time_ms": avg_ms,
+        "metrics": [
+            {"name": "tflops", "value": tflops},
+        ],
+    }))
 
 if __name__ == '__main__':
     benchmark()

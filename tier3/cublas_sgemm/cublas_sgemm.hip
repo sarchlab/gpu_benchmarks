@@ -3,21 +3,14 @@
  *
  * Computes: C = A * B
  *   where A is M×K, B is K×N, C is M×N (all row-major, FP32)
- *   M = N = K = 4096
  *
  * Row-major GEMM via col-major BLAS trick:
  *   Row-major C = A*B  ↔  Col-major C^T = B^T * A^T
  *   cublasSgemm / rocblas_sgemm with op_none, op_none, dims (N, M, K)
  *   and leading dimensions: ldB=N, ldA=K, ldC=N
  *
- * Warmup: 5 iterations (not timed)
- * Timed:  5 iterations, report average
- *
- * Verification: compare first 8×8 corner of C against CPU GEMM
- * GFLOPS = 2 * M * N * K / time_s / 1e9
- *
- * Output:
- *   cublas_sgemm,<M>,<time_ms>,<GFLOPS>
+ * Parameters read from BENCH_PARAM_* environment variables.
+ * Output: JSON-lines to stdout, human-readable info to stderr.
  *
  * Build:
  *   CUDA:   nvcc -O3 -std=c++14 -x cu -DUSE_CUBLAS  cublas_sgemm.hip -lcublas -o cublas_sgemm
@@ -92,13 +85,13 @@ typedef hipEvent_t gpu_event_t;
 #endif
 
 /* -------------------------------------------------------------------------
- * Benchmark parameters
+ * Benchmark parameters (defaults, overridable via BENCH_PARAM_* env vars)
  * ---------------------------------------------------------------------- */
-#define M      4096
-#define N      4096
-#define K      4096
-#define WARMUP 5
-#define ITERS  5
+static int M      = 4096;
+static int N      = 4096;
+static int K      = 4096;
+static int WARMUP = 5;
+static int ITERS  = 5;
 
 /* -------------------------------------------------------------------------
  * CPU reference GEMM (only for a small corner — O(verify_m * verify_n * K))
@@ -110,7 +103,7 @@ static void cpu_sgemm(int vm, int vn, int vk,
 {
     /* A is vm×vk (row-major, stride K)
      * B is vk×vn (row-major, stride N)
-     * C is vm×vn (row-major, stride N) */
+     * C is vm×vn (row-major, stride vn) */
     for (int i = 0; i < vm; i++) {
         for (int j = 0; j < vn; j++) {
             float s = 0.0f;
@@ -126,6 +119,19 @@ static void cpu_sgemm(int vm, int vn, int vk,
  * ---------------------------------------------------------------------- */
 int main(void)
 {
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    /* ------------------------------------------------------------------ */
+    /* Read parameters from environment variables                          */
+    /* ------------------------------------------------------------------ */
+    const char* env_val;
+    env_val = getenv("BENCH_PARAM_matrix_dim");
+    if (env_val) { M = atoi(env_val); N = M; K = M; }
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) WARMUP = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_iters");
+    if (env_val) ITERS = atoi(env_val);
+
     /* ------------------------------------------------------------------ */
     /* Allocate and initialize host matrices                               */
     /* ------------------------------------------------------------------ */
@@ -147,6 +153,10 @@ int main(void)
     /* Device memory                                                        */
     /* ------------------------------------------------------------------ */
     float *dA, *dB, *dC;
+    float alpha = 1.0f, beta = 0.0f;
+
+    env_val = getenv("BENCH_PARAM_alpha");
+    if (env_val) alpha = (float)atof(env_val);
 
 #ifdef USE_CUBLAS
     GPU_CHECK(cudaMalloc(&dA, (size_t)M * K * sizeof(float)));
@@ -158,8 +168,6 @@ int main(void)
 
     cublasHandle_t handle;
     BLAS_CHECK(cublasCreate(&handle));
-
-    float alpha = 1.0f, beta = 0.0f;
 
 #   define RUN_SGEMM() \
         BLAS_CHECK(cublasSgemm(handle,                              \
@@ -177,8 +185,6 @@ int main(void)
 
     rocblas_handle handle;
     BLAS_CHECK(rocblas_create_handle(&handle));
-
-    float alpha = 1.0f, beta = 0.0f;
 
 #   define RUN_SGEMM() \
         BLAS_CHECK(rocblas_sgemm(handle,                                   \
@@ -254,15 +260,27 @@ int main(void)
             pass ? "PASS" : "FAIL");
 
     /* ------------------------------------------------------------------ */
-    /* Report                                                              */
+    /* Report — JSON-lines to stdout                                       */
     /* ------------------------------------------------------------------ */
     double gflops = 2.0 * M * N * K / (avg_ms / 1000.0) / 1e9;
 
-    /* CSV line */
-    printf("cublas_sgemm,%d,%.3f,%.2f\n", M, avg_ms, gflops);
-    /* Human-readable */
+#ifdef USE_CUBLAS
+    printf("{\"type\":\"kernel\",\"name\":\"cublasSgemm\",\"time_ms\":%.6f,"
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"alpha\":%.6f}}\n",
+           (double)avg_ms, M, WARMUP, ITERS, (double)alpha);
+#elif defined(USE_ROCBLAS)
+    printf("{\"type\":\"kernel\",\"name\":\"rocblas_sgemm\",\"time_ms\":%.6f,"
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"alpha\":%.6f}}\n",
+           (double)avg_ms, M, WARMUP, ITERS, (double)alpha);
+#endif
+
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
+           (double)total_ms, gflops);
+
+    /* Human-readable to stderr */
     fprintf(stderr, "cublas_sgemm  M=%d N=%d K=%d  time_ms=%.3f  GFLOPS=%.2f\n",
-            M, N, K, avg_ms, gflops);
+            M, N, K, (double)avg_ms, gflops);
 
     free(hA); free(hB); free(hC);
     return pass ? 0 : 1;

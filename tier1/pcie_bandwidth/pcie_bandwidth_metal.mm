@@ -18,17 +18,17 @@
  * MTLResourceStorageModePrivate buffers reside in GPU-optimized tiled memory;
  * blitting between Shared and Private measures the internal memory-fabric
  * copy overhead rather than a PCIe transfer.
- * This benchmark provides an equivalent metric for comparing host↔GPU
- * transfer latency and bandwidth across platforms (CUDA/HIP/Metal).
  *
  * Timing uses mach_absolute_time() for wall-clock accuracy.
- * Command buffers are committed one at a time and waited on
- * (waitUntilCompleted) to give a faithful per-transfer measurement.
  *
  * Usage:
  *   ./pcie_bandwidth [buffer_size_mb]
  *
- *   buffer_size_mb  – optional transfer size in MiB (default 256)
+ * Environment variables (override argv):
+ *   BENCH_PARAM_buffer_size_mb
+ *   BENCH_PARAM_num_iterations
+ *   BENCH_PARAM_transfer_type     (h2d, d2h, bidir, all)
+ *   BENCH_PARAM_use_pinned_memory (true, false)
  *
  * Build:
  *   make PLATFORM=metal
@@ -43,18 +43,26 @@
 #include <mach/mach_time.h>
 
 // ---------------------------------------------------------------------------
-// Constants
+// Constants (defaults)
 // ---------------------------------------------------------------------------
 
-static const int    DEFAULT_BUFFER_MB = 256;
-static const int    NUM_ITERATIONS    = 20;
-static const double BYTES_PER_GB      = 1e9;
+static const int    DEFAULT_BUFFER_MB      = 256;
+static const int    DEFAULT_NUM_ITERATIONS = 20;
+static const double BYTES_PER_GB           = 1e9;
+
+// ---------------------------------------------------------------------------
+// Result struct
+// ---------------------------------------------------------------------------
+
+struct BenchResult {
+    double bandwidth_gbps;
+    double total_ms;
+};
 
 // ---------------------------------------------------------------------------
 // Timing helpers
 // ---------------------------------------------------------------------------
 
-/** Convert mach_absolute_time ticks to seconds. */
 static double ticks_to_seconds(uint64_t ticks)
 {
     static mach_timebase_info_data_t tb = {0, 0};
@@ -68,35 +76,18 @@ static double ticks_to_seconds(uint64_t ticks)
 // Benchmark: unidirectional Host → Device
 // ---------------------------------------------------------------------------
 
-/**
- * Measure H2D (shared → private) bandwidth via MTLBlitCommandEncoder.
- *
- * Allocates a CPU-visible shared buffer (source) and a GPU-only private
- * buffer (destination).  Each iteration blits the full contents from
- * shared to private memory.
- *
- * On Apple Silicon the "H2D" transfer moves data from the CPU-coherent
- * region of unified memory to the GPU-tiled (private) region.
- *
- * @param device    MTLDevice to use
- * @param bytes     Transfer size in bytes
- * @return          Average bandwidth in GB/s
- */
-static double benchmark_h2d(id<MTLDevice> device, size_t bytes)
+static BenchResult benchmark_h2d(id<MTLDevice> device, size_t bytes,
+                                  int num_iterations)
 {
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
-    // Source: shared buffer (CPU-accessible)
     id<MTLBuffer> src = [device newBufferWithLength:bytes
                                            options:MTLResourceStorageModeShared];
-    // Destination: private buffer (GPU-only)
     id<MTLBuffer> dst = [device newBufferWithLength:bytes
                                            options:MTLResourceStorageModePrivate];
-
-    // Initialize source with a recognizable pattern
     memset(src.contents, 0xAB, bytes);
 
-    // Warm-up: one blit to prime the memory fabric
+    /* Warm-up. */
     {
         id<MTLCommandBuffer> cb = [queue commandBuffer];
         id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
@@ -108,9 +99,8 @@ static double benchmark_h2d(id<MTLDevice> device, size_t bytes)
         [cb waitUntilCompleted];
     }
 
-    // Timed iterations
     uint64_t t0 = mach_absolute_time();
-    for (int i = 0; i < NUM_ITERATIONS; ++i) {
+    for (int i = 0; i < num_iterations; ++i) {
         id<MTLCommandBuffer> cb = [queue commandBuffer];
         id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
         [blit copyFromBuffer:src sourceOffset:0
@@ -123,36 +113,25 @@ static double benchmark_h2d(id<MTLDevice> device, size_t bytes)
     uint64_t t1 = mach_absolute_time();
 
     double elapsed_s = ticks_to_seconds(t1 - t0);
-    return ((double)bytes * NUM_ITERATIONS) / elapsed_s / BYTES_PER_GB;
+    double bw = ((double)bytes * num_iterations) / elapsed_s / BYTES_PER_GB;
+    return {bw, elapsed_s * 1e3};
 }
 
 // ---------------------------------------------------------------------------
 // Benchmark: unidirectional Device → Host
 // ---------------------------------------------------------------------------
 
-/**
- * Measure D2H (private → shared) bandwidth via MTLBlitCommandEncoder.
- *
- * Allocates a GPU-only private buffer (source) and a CPU-visible shared
- * buffer (destination).  A staging blit seeds the private source before
- * timing begins.
- *
- * @param device    MTLDevice to use
- * @param bytes     Transfer size in bytes
- * @return          Average bandwidth in GB/s
- */
-static double benchmark_d2h(id<MTLDevice> device, size_t bytes)
+static BenchResult benchmark_d2h(id<MTLDevice> device, size_t bytes,
+                                  int num_iterations)
 {
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
-    // Source: private buffer (GPU-only)
     id<MTLBuffer> src = [device newBufferWithLength:bytes
                                            options:MTLResourceStorageModePrivate];
-    // Destination: shared buffer (CPU-accessible)
     id<MTLBuffer> dst = [device newBufferWithLength:bytes
                                            options:MTLResourceStorageModeShared];
 
-    // Seed the private source via a shared staging buffer
+    /* Seed the private source via a shared staging buffer. */
     {
         id<MTLBuffer> stage = [device newBufferWithLength:bytes
                                                   options:MTLResourceStorageModeShared];
@@ -167,7 +146,7 @@ static double benchmark_d2h(id<MTLDevice> device, size_t bytes)
         [cb waitUntilCompleted];
     }
 
-    // Warm-up
+    /* Warm-up. */
     {
         id<MTLCommandBuffer> cb = [queue commandBuffer];
         id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
@@ -179,9 +158,8 @@ static double benchmark_d2h(id<MTLDevice> device, size_t bytes)
         [cb waitUntilCompleted];
     }
 
-    // Timed iterations
     uint64_t t0 = mach_absolute_time();
-    for (int i = 0; i < NUM_ITERATIONS; ++i) {
+    for (int i = 0; i < num_iterations; ++i) {
         id<MTLCommandBuffer> cb = [queue commandBuffer];
         id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
         [blit copyFromBuffer:src sourceOffset:0
@@ -194,45 +172,34 @@ static double benchmark_d2h(id<MTLDevice> device, size_t bytes)
     uint64_t t1 = mach_absolute_time();
 
     double elapsed_s = ticks_to_seconds(t1 - t0);
-    return ((double)bytes * NUM_ITERATIONS) / elapsed_s / BYTES_PER_GB;
+    double bw = ((double)bytes * num_iterations) / elapsed_s / BYTES_PER_GB;
+    return {bw, elapsed_s * 1e3};
 }
 
 // ---------------------------------------------------------------------------
-// Benchmark: bidirectional (interleaved H2D + D2H in one command buffer)
+// Benchmark: bidirectional (interleaved H2D + D2H)
 // ---------------------------------------------------------------------------
 
-/**
- * Measure aggregate bidirectional bandwidth.
- *
- * Each iteration encodes both an H2D blit (shared→private) and a D2H blit
- * (private→shared) into the same MTLCommandBuffer.  The Metal runtime
- * may overlap them on the blit engine.  The reported aggregate bandwidth
- * is (2 × bytes × iterations) / elapsed_time.
- *
- * @param device    MTLDevice to use
- * @param bytes     Transfer size per direction in bytes
- * @return          Aggregate bidirectional bandwidth in GB/s
- */
-static double benchmark_bidir(id<MTLDevice> device, size_t bytes)
+static BenchResult benchmark_bidir(id<MTLDevice> device, size_t bytes,
+                                    int num_iterations)
 {
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
-    // H2D buffers: shared source → private destination
+    /* H2D buffers: shared source → private destination. */
     id<MTLBuffer> h_src = [device newBufferWithLength:bytes
                                              options:MTLResourceStorageModeShared];
     id<MTLBuffer> d_h2d = [device newBufferWithLength:bytes
                                              options:MTLResourceStorageModePrivate];
 
-    // D2H buffers: private source → shared destination
+    /* D2H buffers: private source → shared destination. */
     id<MTLBuffer> d_src = [device newBufferWithLength:bytes
                                              options:MTLResourceStorageModePrivate];
     id<MTLBuffer> h_dst = [device newBufferWithLength:bytes
                                              options:MTLResourceStorageModeShared];
 
-    // Initialize shared source
     memset(h_src.contents, 0xAB, bytes);
 
-    // Seed d_src via staging blit
+    /* Seed d_src via staging blit. */
     {
         id<MTLBuffer> stage = [device newBufferWithLength:bytes
                                                   options:MTLResourceStorageModeShared];
@@ -247,7 +214,7 @@ static double benchmark_bidir(id<MTLDevice> device, size_t bytes)
         [cb waitUntilCompleted];
     }
 
-    // Warm-up: one combined blit (H2D + D2H in a single command buffer)
+    /* Warm-up. */
     {
         id<MTLCommandBuffer> cb = [queue commandBuffer];
         id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
@@ -262,9 +229,8 @@ static double benchmark_bidir(id<MTLDevice> device, size_t bytes)
         [cb waitUntilCompleted];
     }
 
-    // Timed iterations
     uint64_t t0 = mach_absolute_time();
-    for (int i = 0; i < NUM_ITERATIONS; ++i) {
+    for (int i = 0; i < num_iterations; ++i) {
         id<MTLCommandBuffer> cb = [queue commandBuffer];
         id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
         [blit copyFromBuffer:h_src sourceOffset:0
@@ -280,8 +246,9 @@ static double benchmark_bidir(id<MTLDevice> device, size_t bytes)
     uint64_t t1 = mach_absolute_time();
 
     double elapsed_s = ticks_to_seconds(t1 - t0);
-    // Each iteration moves bytes in each direction → 2*bytes total
-    return (2.0 * (double)bytes * NUM_ITERATIONS) / elapsed_s / BYTES_PER_GB;
+    /* Each iteration moves bytes in each direction → 2*bytes total. */
+    double bw = (2.0 * (double)bytes * num_iterations) / elapsed_s / BYTES_PER_GB;
+    return {bw, elapsed_s * 1e3};
 }
 
 // ---------------------------------------------------------------------------
@@ -292,55 +259,123 @@ int main(int argc, char *argv[])
 {
     @autoreleasepool {
 
-    // Parse optional buffer size argument (in MiB)
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
+    const char* env_val;
+
     int buffer_mb = DEFAULT_BUFFER_MB;
-    if (argc >= 2) {
+    env_val = getenv("BENCH_PARAM_buffer_size_mb");
+    if (env_val) {
+        buffer_mb = atoi(env_val);
+    } else if (argc >= 2) {
         buffer_mb = atoi(argv[1]);
-        if (buffer_mb <= 0) {
-            fprintf(stderr, "Invalid buffer size: %s\n", argv[1]);
-            return EXIT_FAILURE;
-        }
     }
+    if (buffer_mb <= 0) {
+        fprintf(stderr, "Invalid buffer size\n");
+        return EXIT_FAILURE;
+    }
+
+    int num_iterations = DEFAULT_NUM_ITERATIONS;
+    env_val = getenv("BENCH_PARAM_num_iterations");
+    if (env_val) num_iterations = atoi(env_val);
+
+    const char* transfer_type = "all";
+    env_val = getenv("BENCH_PARAM_transfer_type");
+    if (env_val) transfer_type = env_val;
+
+    const char* use_pinned_memory = "true";
+    env_val = getenv("BENCH_PARAM_use_pinned_memory");
+    if (env_val) use_pinned_memory = env_val;
+
+    bool run_h2d   = (strcmp(transfer_type, "all") == 0 || strcmp(transfer_type, "h2d") == 0);
+    bool run_d2h   = (strcmp(transfer_type, "all") == 0 || strcmp(transfer_type, "d2h") == 0);
+    bool run_bidir = (strcmp(transfer_type, "all") == 0 || strcmp(transfer_type, "bidir") == 0);
 
     size_t bytes = static_cast<size_t>(buffer_mb) * 1024ULL * 1024ULL;
 
-    // Select GPU device
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
     if (!device) {
         fprintf(stderr, "Error: no Metal device found\n");
         return EXIT_FAILURE;
     }
 
-    printf("Device          : %s\n", device.name.UTF8String);
-    printf("Transfer size   : %d MiB (%zu bytes)\n", buffer_mb, bytes);
-    printf("Iterations/test : %d\n", NUM_ITERATIONS);
-    printf("Note            : Apple Silicon uses unified memory; H2D/D2H\n");
-    printf("                  measures shared↔private memory fabric copy overhead.\n\n");
+    fprintf(stderr, "Device          : %s\n", device.name.UTF8String);
+    fprintf(stderr, "Transfer size   : %d MiB (%zu bytes)\n", buffer_mb, bytes);
+    fprintf(stderr, "Iterations/test : %d\n", num_iterations);
+    fprintf(stderr, "Transfer type   : %s\n", transfer_type);
+    fprintf(stderr, "Pinned memory   : %s\n", use_pinned_memory);
+    fprintf(stderr, "Note            : Apple Silicon uses unified memory; H2D/D2H\n");
+    fprintf(stderr, "                  measures shared↔private memory fabric copy overhead.\n\n");
 
-    printf("%-30s", "H2D (unidirectional)");
-    fflush(stdout);
-    double h2d_bw = benchmark_h2d(device, bytes);
-    printf(": %8.2f GB/s\n", h2d_bw);
+    double total_time_ms = 0.0;
+    double h2d_bw = 0.0, d2h_bw = 0.0, bidir_bw = 0.0;
 
-    printf("%-30s", "D2H (unidirectional)");
-    fflush(stdout);
-    double d2h_bw = benchmark_d2h(device, bytes);
-    printf(": %8.2f GB/s\n", d2h_bw);
+    /* ----- H2D ----- */
+    if (run_h2d) {
+        fprintf(stderr, "%-30s", "H2D (unidirectional)");
+        BenchResult r = benchmark_h2d(device, bytes, num_iterations);
+        h2d_bw = r.bandwidth_gbps;
+        double avg_ms = r.total_ms / num_iterations;
+        total_time_ms += r.total_ms;
+        fprintf(stderr, ": %8.2f GB/s\n", h2d_bw);
 
-    printf("%-30s", "Bidirectional (H2D + D2H)");
-    fflush(stdout);
-    double bidir_bw = benchmark_bidir(device, bytes);
-    printf(": %8.2f GB/s  (aggregate)\n", bidir_bw);
+        printf("{\"type\":\"kernel\",\"name\":\"memcpy_h2d\",\"time_ms\":%.6f,"
+               "\"params\":{\"buffer_size_mb\":%d,\"num_iterations\":%d,"
+               "\"transfer_type\":\"%s\",\"use_pinned_memory\":\"%s\"}}\n",
+               avg_ms, buffer_mb, num_iterations, transfer_type, use_pinned_memory);
+    }
 
-    // CSV output (machine-parseable): benchmark_name,size_mb,time_ms,gbs
-    double h2d_time_ms   = ((double)bytes / (h2d_bw   * 1e9)) * 1e3;
-    double d2h_time_ms   = ((double)bytes / (d2h_bw   * 1e9)) * 1e3;
-    double bidir_time_ms = (2.0 * (double)bytes / (bidir_bw * 1e9)) * 1e3;
-    printf("pcie_bandwidth_h2d,%d,%.3f,%.2f\n",   buffer_mb, h2d_time_ms,   h2d_bw);
-    printf("pcie_bandwidth_d2h,%d,%.3f,%.2f\n",   buffer_mb, d2h_time_ms,   d2h_bw);
-    printf("pcie_bandwidth_bidir,%d,%.3f,%.2f\n", buffer_mb, bidir_time_ms, bidir_bw);
+    /* ----- D2H ----- */
+    if (run_d2h) {
+        fprintf(stderr, "%-30s", "D2H (unidirectional)");
+        BenchResult r = benchmark_d2h(device, bytes, num_iterations);
+        d2h_bw = r.bandwidth_gbps;
+        double avg_ms = r.total_ms / num_iterations;
+        total_time_ms += r.total_ms;
+        fprintf(stderr, ": %8.2f GB/s\n", d2h_bw);
 
-    printf("\nDone.\n");
+        printf("{\"type\":\"kernel\",\"name\":\"memcpy_d2h\",\"time_ms\":%.6f,"
+               "\"params\":{\"buffer_size_mb\":%d,\"num_iterations\":%d,"
+               "\"transfer_type\":\"%s\",\"use_pinned_memory\":\"%s\"}}\n",
+               avg_ms, buffer_mb, num_iterations, transfer_type, use_pinned_memory);
+    }
+
+    /* ----- Bidirectional ----- */
+    if (run_bidir) {
+        fprintf(stderr, "%-30s", "Bidirectional (H2D + D2H)");
+        BenchResult r = benchmark_bidir(device, bytes, num_iterations);
+        bidir_bw = r.bandwidth_gbps;
+        double avg_ms = r.total_ms / num_iterations;
+        total_time_ms += r.total_ms;
+        fprintf(stderr, ": %8.2f GB/s  (aggregate)\n", bidir_bw);
+
+        printf("{\"type\":\"kernel\",\"name\":\"memcpy_bidir\",\"time_ms\":%.6f,"
+               "\"params\":{\"buffer_size_mb\":%d,\"num_iterations\":%d,"
+               "\"transfer_type\":\"%s\",\"use_pinned_memory\":\"%s\"}}\n",
+               avg_ms, buffer_mb, num_iterations, transfer_type, use_pinned_memory);
+    }
+
+    /* Summary. */
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,\"metrics\":[", total_time_ms);
+    bool first_metric = true;
+    if (run_h2d) {
+        if (!first_metric) printf(",");
+        printf("{\"name\":\"h2d_bandwidth_gbps\",\"value\":%.2f}", h2d_bw);
+        first_metric = false;
+    }
+    if (run_d2h) {
+        if (!first_metric) printf(",");
+        printf("{\"name\":\"d2h_bandwidth_gbps\",\"value\":%.2f}", d2h_bw);
+        first_metric = false;
+    }
+    if (run_bidir) {
+        if (!first_metric) printf(",");
+        printf("{\"name\":\"bidir_bandwidth_gbps\",\"value\":%.2f}", bidir_bw);
+        first_metric = false;
+    }
+    printf("]}\n");
+
+    fprintf(stderr, "\nDone.\n");
 
     } // @autoreleasepool
     return EXIT_SUCCESS;

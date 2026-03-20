@@ -25,6 +25,12 @@
  *   fmas_per_thread  – optional number of FMA iterations per thread
  *                      (default 4096).  Increase if the kernel finishes in
  *                      under ~5 ms on a fast GPU.
+ *
+ * Environment variables (override argv):
+ *   BENCH_PARAM_fmas_per_thread
+ *   BENCH_PARAM_num_blocks
+ *   BENCH_PARAM_threads_per_block
+ *   BENCH_PARAM_num_iterations
  */
 
 #include <cstdio>
@@ -47,24 +53,24 @@
     } while (0)
 
 // ---------------------------------------------------------------------------
-// Tuning constants
+// Tuning constants (defaults)
 // ---------------------------------------------------------------------------
 
 /** Default number of FMA operations per thread per kernel invocation. */
 static const int DEFAULT_FMAS_PER_THREAD = 4096;
 
 /** Number of threads per block (multiple of 64, fills a typical CU well). */
-static const int THREADS_PER_BLOCK = 256;
+static const int DEFAULT_THREADS_PER_BLOCK = 256;
 
 /**
  * Number of thread blocks.
  * 1024 blocks × 256 threads = 262 144 concurrent threads — enough to
  * saturate even high-end GPUs with hundreds of CUs.
  */
-static const int NUM_BLOCKS = 1024;
+static const int DEFAULT_NUM_BLOCKS = 1024;
 
 /** How many times to repeat the kernel for a stable average. */
-static const int NUM_ITERATIONS = 10;
+static const int DEFAULT_NUM_ITERATIONS = 10;
 
 // ---------------------------------------------------------------------------
 // FP32 FMA kernel
@@ -120,32 +126,52 @@ __global__ void fp32_fma_kernel(float *out, int fmas_per_thread)
 
 int main(int argc, char *argv[])
 {
-    /* Parse optional argument. */
-    int fmas_per_thread = DEFAULT_FMAS_PER_THREAD;
-    if (argc >= 2) {
-        fmas_per_thread = atoi(argv[1]);
-        if (fmas_per_thread <= 0) {
-            fprintf(stderr, "Invalid fmas_per_thread: %s\n", argv[1]);
-            return EXIT_FAILURE;
-        }
-        /* Round down to nearest multiple of 4 to match the loop unroll. */
-        fmas_per_thread = (fmas_per_thread / 4) * 4;
-        if (fmas_per_thread == 0) fmas_per_thread = 4;
-    }
+    /* Line-buffer stdout so JSON lines are flushed promptly. */
+    setvbuf(stdout, NULL, _IOLBF, 0);
 
-    /* Print device information. */
+    const char* env_val;
+
+    /* Read parameters: env vars take priority, then argv, then defaults. */
+    int fmas_per_thread = DEFAULT_FMAS_PER_THREAD;
+    env_val = getenv("BENCH_PARAM_fmas_per_thread");
+    if (env_val) {
+        fmas_per_thread = atoi(env_val);
+    } else if (argc >= 2) {
+        fmas_per_thread = atoi(argv[1]);
+    }
+    if (fmas_per_thread <= 0) {
+        fprintf(stderr, "Invalid fmas_per_thread\n");
+        return EXIT_FAILURE;
+    }
+    /* Round down to nearest multiple of 4 to match the loop unroll. */
+    fmas_per_thread = (fmas_per_thread / 4) * 4;
+    if (fmas_per_thread == 0) fmas_per_thread = 4;
+
+    int num_blocks = DEFAULT_NUM_BLOCKS;
+    env_val = getenv("BENCH_PARAM_num_blocks");
+    if (env_val) num_blocks = atoi(env_val);
+
+    int threads_per_block = DEFAULT_THREADS_PER_BLOCK;
+    env_val = getenv("BENCH_PARAM_threads_per_block");
+    if (env_val) threads_per_block = atoi(env_val);
+
+    int num_iterations = DEFAULT_NUM_ITERATIONS;
+    env_val = getenv("BENCH_PARAM_num_iterations");
+    if (env_val) num_iterations = atoi(env_val);
+
+    /* Print device information to stderr. */
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
 
-    printf("Device          : %s (id=%d)\n", prop.name, device_id);
-    printf("CUs             : %d\n", prop.multiProcessorCount);
-    printf("Grid            : %d blocks × %d threads = %d total threads\n",
-           NUM_BLOCKS, THREADS_PER_BLOCK,
-           NUM_BLOCKS * THREADS_PER_BLOCK);
-    printf("FMAs / thread   : %d\n", fmas_per_thread);
-    printf("Kernel repeats  : %d\n\n", NUM_ITERATIONS);
+    fprintf(stderr, "Device          : %s (id=%d)\n", prop.name, device_id);
+    fprintf(stderr, "CUs             : %d\n", prop.multiProcessorCount);
+    fprintf(stderr, "Grid            : %d blocks × %d threads = %d total threads\n",
+           num_blocks, threads_per_block,
+           num_blocks * threads_per_block);
+    fprintf(stderr, "FMAs / thread   : %d\n", fmas_per_thread);
+    fprintf(stderr, "Kernel repeats  : %d\n\n", num_iterations);
 
     /* Allocate a single float on the device to receive the checksum. */
     float *d_out = nullptr;
@@ -157,14 +183,14 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipEventCreate(&ev_stop));
 
     /* Warm-up launch — not timed. */
-    hipLaunchKernelGGL(fp32_fma_kernel, dim3(NUM_BLOCKS), dim3(THREADS_PER_BLOCK),
+    hipLaunchKernelGGL(fp32_fma_kernel, dim3(num_blocks), dim3(threads_per_block),
                        0, 0, d_out, fmas_per_thread);
     HIP_CHECK(hipDeviceSynchronize());
 
     /* Timed benchmark loop. */
     HIP_CHECK(hipEventRecord(ev_start, 0));
-    for (int iter = 0; iter < NUM_ITERATIONS; ++iter) {
-        hipLaunchKernelGGL(fp32_fma_kernel, dim3(NUM_BLOCKS), dim3(THREADS_PER_BLOCK),
+    for (int iter = 0; iter < num_iterations; ++iter) {
+        hipLaunchKernelGGL(fp32_fma_kernel, dim3(num_blocks), dim3(threads_per_block),
                            0, 0, d_out, fmas_per_thread);
     }
     HIP_CHECK(hipEventRecord(ev_stop, 0));
@@ -177,28 +203,37 @@ int main(int argc, char *argv[])
      *   total_flops = iterations × num_threads × fmas_per_thread × 2
      *   (factor of 2: each FMA is 1 multiply + 1 add)
      */
-    long long num_threads  = static_cast<long long>(NUM_BLOCKS)
-                             * THREADS_PER_BLOCK;
-    long long total_flops  = static_cast<long long>(NUM_ITERATIONS)
+    long long num_threads  = static_cast<long long>(num_blocks)
+                             * threads_per_block;
+    long long total_flops  = static_cast<long long>(num_iterations)
                              * num_threads
                              * static_cast<long long>(fmas_per_thread)
                              * 2LL;
     double elapsed_s       = static_cast<double>(elapsed_ms) * 1e-3;
     double gflops          = static_cast<double>(total_flops) / elapsed_s / 1e9;
+    double avg_time_ms     = static_cast<double>(elapsed_ms) / num_iterations;
 
-    printf("Elapsed time    : %.3f ms (%.3f ms / kernel)\n",
-           elapsed_ms, elapsed_ms / NUM_ITERATIONS);
-    printf("Total FLOPs     : %lld\n", total_flops);
-    printf("FP32 Throughput : %.2f GFLOPS\n", gflops);
+    fprintf(stderr, "Elapsed time    : %.3f ms (%.3f ms / kernel)\n",
+           elapsed_ms, avg_time_ms);
+    fprintf(stderr, "Total FLOPs     : %lld\n", total_flops);
+    fprintf(stderr, "FP32 Throughput : %.2f GFLOPS\n", gflops);
 
-    // CSV output (machine-parseable): benchmark_name,n_ops,time_ms,gflops
-    printf("fp32_throughput,%lld,%.3f,%.2f\n", total_flops, (double)elapsed_ms, gflops);
+    /* JSON-lines output to stdout. */
+    printf("{\"type\":\"kernel\",\"name\":\"fp32_fma_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"fmas_per_thread\":%d,\"num_blocks\":%d,"
+           "\"threads_per_block\":%d,\"num_iterations\":%d}}\n",
+           avg_time_ms, fmas_per_thread, num_blocks, threads_per_block,
+           num_iterations);
+
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
+           (double)elapsed_ms, gflops);
 
     /* Clean up. */
     HIP_CHECK(hipEventDestroy(ev_start));
     HIP_CHECK(hipEventDestroy(ev_stop));
     HIP_CHECK(hipFree(d_out));
 
-    printf("\nDone.\n");
+    fprintf(stderr, "\nDone.\n");
     return EXIT_SUCCESS;
 }

@@ -15,15 +15,17 @@
  *     GB/s = (num_threads × ops_per_thread × sizeof(int))
  *            / elapsed_seconds / 1e9
  *
- * Timing:
- *   Elapsed time is measured using mach_absolute_time() wall-clock timing
- *   around serialised command buffer executions (waitUntilCompleted).
- *
  * Usage:
  *   ./warp_shuffle [ops_per_thread]
  *
  *   ops_per_thread  – optional number of shuffle iterations per thread
  *                     (default 4096).
+ *
+ * Environment variables (override argv):
+ *   BENCH_PARAM_ops_per_thread
+ *   BENCH_PARAM_num_blocks
+ *   BENCH_PARAM_threads_per_block
+ *   BENCH_PARAM_shuffle_variant   ("all", "shfl_xor", "shfl_up", "shfl_down", "shfl")
  *
  * Build:
  *   make PLATFORM=metal
@@ -34,28 +36,19 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <mach/mach_time.h>
 
 // ---------------------------------------------------------------------------
-// Constants
+// Constants (defaults)
 // ---------------------------------------------------------------------------
 
-/** Default number of shuffle operations per thread per kernel invocation. */
-static const int DEFAULT_OPS_PER_THREAD = 4096;
-
-/** Thread-group / grid configuration (matches HIP version). */
-static const int NUM_BLOCKS        = 1024;
-static const int THREADS_PER_BLOCK = 256;
-static const int TOTAL_THREADS     = NUM_BLOCKS * THREADS_PER_BLOCK;
-
-/** Metal SIMD width on Apple GPUs. */
-static const int SIMD_WIDTH = 32;
-
-/** Number of warm-up iterations. */
-static const int NUM_WARMUP = 5;
-
-/** Number of timed iterations. */
-static const int NUM_ITERATIONS = 5;
+static const int DEFAULT_OPS_PER_THREAD  = 4096;
+static const int DEFAULT_NUM_BLOCKS      = 1024;
+static const int DEFAULT_THREADS_PER_BLK = 256;
+static const int SIMD_WIDTH              = 32;
+static const int NUM_WARMUP              = 5;
+static const int NUM_ITERATIONS          = 5;
 
 // ---------------------------------------------------------------------------
 // Timing helper
@@ -75,25 +68,15 @@ static double ticks_to_seconds(uint64_t ticks)
 // Benchmark helper
 // ---------------------------------------------------------------------------
 
-/**
- * Run a single shuffle benchmark: warmup + timed iterations.
- *
- * @param name          Human-readable name of the variant.
- * @param csv_variant   Short name for CSV output.
- * @param fn_name       Name of the Metal kernel function.
- * @param device        Metal device.
- * @param library       Compiled Metal library.
- * @param queue         Command queue.
- * @param d_out         Device buffer for the output int (prevents DCE).
- * @param ops_per_thread Number of shuffle ops per thread.
- */
-static int run_benchmark(const char *name, const char *csv_variant,
+static int run_benchmark(const char *kernel_name,
                          const char *fn_name,
                          id<MTLDevice> device,
                          id<MTLLibrary> library,
                          id<MTLCommandQueue> queue,
                          id<MTLBuffer> d_out,
-                         int ops_per_thread)
+                         int ops_per_thread, int num_blocks,
+                         int threads_per_block, const char *shuffle_variant,
+                         double *out_avg_ms, double *out_gops)
 {
     NSError *err = nil;
 
@@ -115,10 +98,11 @@ static int run_benchmark(const char *name, const char *csv_variant,
     }
 
     /* Thread-group configuration. */
-    NSUInteger tg_size = (NSUInteger)THREADS_PER_BLOCK;
+    NSUInteger tg_size = (NSUInteger)threads_per_block;
     if (tg_size > pso.maxTotalThreadsPerThreadgroup)
         tg_size = pso.maxTotalThreadsPerThreadgroup;
 
+    int total_threads = num_blocks * threads_per_block;
     uint32_t opt_u32 = (uint32_t)ops_per_thread;
 
     /* Helper lambda: dispatch one kernel invocation. */
@@ -128,7 +112,7 @@ static int run_benchmark(const char *name, const char *csv_variant,
         [enc setComputePipelineState:pso];
         [enc setBuffer:d_out offset:0 atIndex:0];
         [enc setBytes:&opt_u32 length:sizeof(opt_u32) atIndex:1];
-        [enc dispatchThreads:MTLSizeMake((NSUInteger)TOTAL_THREADS, 1, 1)
+        [enc dispatchThreads:MTLSizeMake((NSUInteger)total_threads, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(tg_size, 1, 1)];
         [enc endEncoding];
         [cb commit];
@@ -150,25 +134,27 @@ static int run_benchmark(const char *name, const char *csv_variant,
     double elapsed_s  = ticks_to_seconds(t1 - t0);
     double elapsed_ms = elapsed_s * 1e3;
 
-    /* Compute throughput.
-     *   data_moved = iterations * num_threads * ops_per_thread * sizeof(int)
-     *   GB/s       = data_moved / elapsed_s / 1e9
-     */
-    long long num_threads = (long long)TOTAL_THREADS;
+    long long num_threads_ll = (long long)total_threads;
     long long total_ops   = (long long)NUM_ITERATIONS
-                            * num_threads
+                            * num_threads_ll
                             * (long long)ops_per_thread;
-    double data_bytes     = (double)total_ops * sizeof(int);
-    double gbs            = data_bytes / elapsed_s / 1e9;
+    double gops            = (double)total_ops / elapsed_s / 1e9;
 
     double avg_ms = elapsed_ms / NUM_ITERATIONS;
 
     /* Human-readable output to stderr. */
-    fprintf(stderr, "%-12s : %.3f ms total, %.3f ms/kernel, %.2f GB/s\n",
-            name, elapsed_ms, avg_ms, gbs);
+    fprintf(stderr, "%-12s : %.3f ms total, %.3f ms/kernel, %.2f Gops/s\n",
+            kernel_name, elapsed_ms, avg_ms, gops);
 
-    /* CSV output to stdout: warp_shuffle,<variant>,<time_ms>,<GBs> */
-    printf("warp_shuffle,%s,%.3f,%.2f\n", csv_variant, avg_ms, gbs);
+    /* JSON-lines output to stdout: kernel event */
+    printf("{\"type\":\"kernel\",\"name\":\"%s\",\"time_ms\":%.6f,"
+           "\"params\":{\"ops_per_thread\":%d,\"num_blocks\":%d,"
+           "\"threads_per_block\":%d,\"shuffle_variant\":\"%s\"}}\n",
+           kernel_name, avg_ms, ops_per_thread, num_blocks,
+           threads_per_block, shuffle_variant);
+
+    *out_avg_ms = avg_ms;
+    *out_gops   = gops;
 
     return EXIT_SUCCESS;
 }
@@ -181,15 +167,35 @@ int main(int argc, char *argv[])
 {
     @autoreleasepool {
 
-    /* Parse optional argument. */
+    /* Line-buffer stdout so JSON lines are flushed promptly. */
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
+    const char* env_val;
+
+    /* Read parameters: env vars take priority, then argv, then defaults. */
     int ops_per_thread = DEFAULT_OPS_PER_THREAD;
-    if (argc >= 2) {
+    env_val = getenv("BENCH_PARAM_ops_per_thread");
+    if (env_val) {
+        ops_per_thread = atoi(env_val);
+    } else if (argc >= 2) {
         ops_per_thread = atoi(argv[1]);
-        if (ops_per_thread <= 0) {
-            fprintf(stderr, "Invalid ops_per_thread: %s\n", argv[1]);
-            return EXIT_FAILURE;
-        }
     }
+    if (ops_per_thread <= 0) {
+        fprintf(stderr, "Invalid ops_per_thread\n");
+        return EXIT_FAILURE;
+    }
+
+    int num_blocks = DEFAULT_NUM_BLOCKS;
+    env_val = getenv("BENCH_PARAM_num_blocks");
+    if (env_val) num_blocks = atoi(env_val);
+
+    int threads_per_block = DEFAULT_THREADS_PER_BLK;
+    env_val = getenv("BENCH_PARAM_threads_per_block");
+    if (env_val) threads_per_block = atoi(env_val);
+
+    const char* shuffle_variant = "all";
+    env_val = getenv("BENCH_PARAM_shuffle_variant");
+    if (env_val) shuffle_variant = env_val;
 
     /* Select the default Metal GPU device. */
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -198,11 +204,14 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
+    int total_threads = num_blocks * threads_per_block;
+
     fprintf(stderr, "Device          : %s\n", device.name.UTF8String);
     fprintf(stderr, "Grid            : %d blocks × %d threads = %d total threads\n",
-            NUM_BLOCKS, THREADS_PER_BLOCK, TOTAL_THREADS);
+            num_blocks, threads_per_block, total_threads);
     fprintf(stderr, "SIMD width      : %d\n", SIMD_WIDTH);
     fprintf(stderr, "Ops / thread    : %d\n", ops_per_thread);
+    fprintf(stderr, "Shuffle variant : %s\n", shuffle_variant);
     fprintf(stderr, "Warmup iters    : %d\n", NUM_WARMUP);
     fprintf(stderr, "Timed iters     : %d\n\n", NUM_ITERATIONS);
 
@@ -246,23 +255,64 @@ int main(int argc, char *argv[])
         [device newBufferWithLength:sizeof(int)
                             options:MTLResourceStorageModeShared];
 
-    /* Run each shuffle variant benchmark. */
+    double total_time_ms = 0.0;
+    double max_gops = 0.0;
+
+    bool run_xor   = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "shfl_xor") == 0);
+    bool run_basic = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "shfl") == 0);
+    bool run_up    = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "shfl_up") == 0);
+    bool run_down  = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "shfl_down") == 0);
+
     int rc;
-    rc = run_benchmark("shfl_xor", "shfl_xor", "shfl_xor_kern",
-                       device, library, queue, d_out, ops_per_thread);
-    if (rc != EXIT_SUCCESS) return rc;
 
-    rc = run_benchmark("shfl", "shfl", "shfl_kern",
-                       device, library, queue, d_out, ops_per_thread);
-    if (rc != EXIT_SUCCESS) return rc;
+    if (run_xor) {
+        double avg_ms, gops;
+        rc = run_benchmark("shfl_xor_kernel", "shfl_xor_kern",
+                           device, library, queue, d_out,
+                           ops_per_thread, num_blocks, threads_per_block,
+                           shuffle_variant, &avg_ms, &gops);
+        if (rc != EXIT_SUCCESS) return rc;
+        total_time_ms += avg_ms;
+        if (gops > max_gops) max_gops = gops;
+    }
 
-    rc = run_benchmark("shfl_up", "shfl_up", "shfl_up_kern",
-                       device, library, queue, d_out, ops_per_thread);
-    if (rc != EXIT_SUCCESS) return rc;
+    if (run_basic) {
+        double avg_ms, gops;
+        rc = run_benchmark("shfl_kernel", "shfl_kern",
+                           device, library, queue, d_out,
+                           ops_per_thread, num_blocks, threads_per_block,
+                           shuffle_variant, &avg_ms, &gops);
+        if (rc != EXIT_SUCCESS) return rc;
+        total_time_ms += avg_ms;
+        if (gops > max_gops) max_gops = gops;
+    }
 
-    rc = run_benchmark("shfl_down", "shfl_down", "shfl_down_kern",
-                       device, library, queue, d_out, ops_per_thread);
-    if (rc != EXIT_SUCCESS) return rc;
+    if (run_up) {
+        double avg_ms, gops;
+        rc = run_benchmark("shfl_up_kernel", "shfl_up_kern",
+                           device, library, queue, d_out,
+                           ops_per_thread, num_blocks, threads_per_block,
+                           shuffle_variant, &avg_ms, &gops);
+        if (rc != EXIT_SUCCESS) return rc;
+        total_time_ms += avg_ms;
+        if (gops > max_gops) max_gops = gops;
+    }
+
+    if (run_down) {
+        double avg_ms, gops;
+        rc = run_benchmark("shfl_down_kernel", "shfl_down_kern",
+                           device, library, queue, d_out,
+                           ops_per_thread, num_blocks, threads_per_block,
+                           shuffle_variant, &avg_ms, &gops);
+        if (rc != EXIT_SUCCESS) return rc;
+        total_time_ms += avg_ms;
+        if (gops > max_gops) max_gops = gops;
+    }
+
+    /* Summary */
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"giga_ops_per_sec\",\"value\":%.2f}]}\n",
+           total_time_ms, max_gops);
 
     fprintf(stderr, "\nDone.\n");
 

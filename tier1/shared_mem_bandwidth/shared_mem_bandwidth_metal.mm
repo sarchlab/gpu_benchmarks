@@ -14,6 +14,12 @@
  * Usage:
  *   ./shared_mem_bandwidth
  *
+ * Environment variables (override defaults):
+ *   BENCH_PARAM_inner_iters
+ *   BENCH_PARAM_block_size
+ *   BENCH_PARAM_num_blocks
+ *   BENCH_PARAM_access_pattern   ("no_conflict", "conflict", or "both")
+ *
  * Build:
  *   make PLATFORM=metal
  */
@@ -23,19 +29,20 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <mach/mach_time.h>
 
 // ---------------------------------------------------------------------------
-// Constants
+// Constants (defaults)
 // ---------------------------------------------------------------------------
 
-static const int BLOCK_SIZE    = 256;           // threads per threadgroup
-static const int NUM_GROUPS    = 128;           // threadgroup count
-static const int INNER_ITERS   = 1000;          // inner-loop iterations
-static const int WARMUP_ITERS  = 5;             // outer warmup dispatches
-static const int TIMED_ITERS   = 5;             // outer timed dispatches
-static const int SMEM_FLOATS   = 12288;         // 48 KB / 4 bytes
-static const double BYTES_PER_GB = 1e9;
+static const int DEFAULT_BLOCK_SIZE   = 256;
+static const int DEFAULT_NUM_GROUPS   = 128;
+static const int DEFAULT_INNER_ITERS  = 1000;
+static const int WARMUP_ITERS         = 5;
+static const int TIMED_ITERS          = 5;
+static const int SMEM_FLOATS          = 12288;         // 48 KB / 4 bytes
+static const double BYTES_PER_GB      = 1e9;
 
 // Parameter struct — must match the Metal shader layout
 struct Params {
@@ -63,17 +70,14 @@ static double ticks_to_seconds(uint64_t ticks)
 
 /**
  * Dispatch a named kernel, time it, and return the average time in ms.
- *
- * @param device     MTLDevice to use
- * @param library    Compiled MTLLibrary containing the kernel
- * @param kernelName Kernel function name (e.g. "smem_bw_no_conflict")
- * @param label      Human-readable label for printing
- * @return           Average dispatch time in milliseconds
  */
 static double run_benchmark(id<MTLDevice>  device,
                             id<MTLLibrary> library,
                             NSString      *kernelName,
-                            const char    *label)
+                            int            block_size,
+                            int            num_groups,
+                            int            inner_iters,
+                            double        *out_bw_GBs)
 {
     NSError *err = nil;
     id<MTLFunction> fn = [library newFunctionWithName:kernelName];
@@ -95,18 +99,18 @@ static double run_benchmark(id<MTLDevice>  device,
 
     // Buffers
     id<MTLBuffer> sinkBuf =
-        [device newBufferWithLength:NUM_GROUPS * sizeof(float)
+        [device newBufferWithLength:num_groups * sizeof(float)
                             options:MTLResourceStorageModeShared];
 
     Params params;
-    params.inner_iters     = INNER_ITERS;
+    params.inner_iters     = inner_iters;
     params.smem_floats     = SMEM_FLOATS;
-    params.threads_per_group = BLOCK_SIZE;
+    params.threads_per_group = block_size;
 
     NSUInteger smem_bytes = SMEM_FLOATS * sizeof(float);
 
-    NSUInteger tg_size  = BLOCK_SIZE;
-    NSUInteger grid_threads = (NSUInteger)NUM_GROUPS * tg_size;
+    NSUInteger tg_size  = block_size;
+    NSUInteger grid_threads = (NSUInteger)num_groups * tg_size;
 
     // Helper block to dispatch one kernel invocation
     void (^dispatch)(void) = ^{
@@ -138,10 +142,10 @@ static double run_benchmark(id<MTLDevice>  device,
 
     // Bandwidth
     double bytes_per_launch = 2.0 * SMEM_FLOATS * sizeof(float)
-                              * (double)INNER_ITERS * NUM_GROUPS;
+                              * (double)inner_iters * num_groups;
     double bw_GBs = bytes_per_launch / (avg_ms * 1e-3) / BYTES_PER_GB;
 
-    printf("%-14s : %8.3f ms  %8.2f GB/s\n", label, avg_ms, bw_GBs);
+    if (out_bw_GBs) *out_bw_GBs = bw_GBs;
     return avg_ms;
 }
 
@@ -153,6 +157,28 @@ int main(int argc, char *argv[])
 {
     @autoreleasepool {
 
+    /* Line-buffer stdout so JSON lines are flushed promptly. */
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
+    const char* env_val;
+
+    /* Read parameters from env vars with defaults. */
+    int inner_iters = DEFAULT_INNER_ITERS;
+    env_val = getenv("BENCH_PARAM_inner_iters");
+    if (env_val) inner_iters = atoi(env_val);
+
+    int block_size = DEFAULT_BLOCK_SIZE;
+    env_val = getenv("BENCH_PARAM_block_size");
+    if (env_val) block_size = atoi(env_val);
+
+    int num_groups = DEFAULT_NUM_GROUPS;
+    env_val = getenv("BENCH_PARAM_num_blocks");
+    if (env_val) num_groups = atoi(env_val);
+
+    const char* access_pattern = "both";
+    env_val = getenv("BENCH_PARAM_access_pattern");
+    if (env_val) access_pattern = env_val;
+
     // Select GPU device
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
     if (!device) {
@@ -160,14 +186,15 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    printf("Device        : %s\n", device.name.UTF8String);
-    printf("Block size    : %d threads\n", BLOCK_SIZE);
-    printf("Grid size     : %d groups\n", NUM_GROUPS);
-    printf("Shared mem    : %d bytes (%d floats)\n",
+    fprintf(stderr, "Device        : %s\n", device.name.UTF8String);
+    fprintf(stderr, "Block size    : %d threads\n", block_size);
+    fprintf(stderr, "Grid size     : %d groups\n", num_groups);
+    fprintf(stderr, "Shared mem    : %d bytes (%d floats)\n",
            SMEM_FLOATS * (int)sizeof(float), SMEM_FLOATS);
-    printf("Inner iters   : %d\n", INNER_ITERS);
-    printf("Warmup iters  : %d\n", WARMUP_ITERS);
-    printf("Timed iters   : %d\n\n", TIMED_ITERS);
+    fprintf(stderr, "Inner iters   : %d\n", inner_iters);
+    fprintf(stderr, "Access pattern: %s\n", access_pattern);
+    fprintf(stderr, "Warmup iters  : %d\n", WARMUP_ITERS);
+    fprintf(stderr, "Timed iters   : %d\n\n", TIMED_ITERS);
 
     // Compile Metal shader source at runtime
     NSError *err = nil;
@@ -203,25 +230,52 @@ int main(int argc, char *argv[])
         }
     }
 
+    double total_time_ms = 0.0;
+    double max_bw = 0.0;
+
+    bool run_no_conflict = (strcmp(access_pattern, "no_conflict") == 0 ||
+                            strcmp(access_pattern, "both") == 0);
+    bool run_conflict    = (strcmp(access_pattern, "conflict") == 0 ||
+                            strcmp(access_pattern, "both") == 0);
+
     // --- No-conflict ---
-    double nc_ms = run_benchmark(device, library,
-                                 @"smem_bw_no_conflict", "no_conflict");
+    if (run_no_conflict) {
+        double nc_bw = 0.0;
+        double nc_ms = run_benchmark(device, library,
+                                     @"smem_bw_no_conflict",
+                                     block_size, num_groups, inner_iters, &nc_bw);
+        fprintf(stderr, "no_conflict    : %.3f ms  %.2f GB/s\n", nc_ms, nc_bw);
+        total_time_ms += nc_ms;
+        if (nc_bw > max_bw) max_bw = nc_bw;
+
+        printf("{\"type\":\"kernel\",\"name\":\"smem_bw_no_conflict\",\"time_ms\":%.6f,"
+               "\"params\":{\"inner_iters\":%d,\"block_size\":%d,"
+               "\"num_blocks\":%d,\"access_pattern\":\"%s\"}}\n",
+               nc_ms, inner_iters, block_size, num_groups, access_pattern);
+    }
 
     // --- Conflict ---
-    double c_ms  = run_benchmark(device, library,
-                                 @"smem_bw_conflict", "conflict");
+    if (run_conflict) {
+        double c_bw = 0.0;
+        double c_ms = run_benchmark(device, library,
+                                    @"smem_bw_conflict",
+                                    block_size, num_groups, inner_iters, &c_bw);
+        fprintf(stderr, "conflict       : %.3f ms  %.2f GB/s\n", c_ms, c_bw);
+        total_time_ms += c_ms;
+        if (c_bw > max_bw) max_bw = c_bw;
 
-    // Bandwidth numbers (recomputed for CSV)
-    double bytes_per_launch = 2.0 * SMEM_FLOATS * sizeof(float)
-                              * (double)INNER_ITERS * NUM_GROUPS;
-    double nc_GBs = bytes_per_launch / (nc_ms * 1e-3) / BYTES_PER_GB;
-    double c_GBs  = bytes_per_launch / (c_ms  * 1e-3) / BYTES_PER_GB;
+        printf("{\"type\":\"kernel\",\"name\":\"smem_bw_conflict\",\"time_ms\":%.6f,"
+               "\"params\":{\"inner_iters\":%d,\"block_size\":%d,"
+               "\"num_blocks\":%d,\"access_pattern\":\"%s\"}}\n",
+               c_ms, inner_iters, block_size, num_groups, access_pattern);
+    }
 
-    // CSV output
-    printf("shared_mem_bw,no_conflict,%.3f,%.2f\n", nc_ms, nc_GBs);
-    printf("shared_mem_bw,conflict,%.3f,%.2f\n",    c_ms,  c_GBs);
+    /* Summary */
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
+           total_time_ms, max_bw);
 
-    printf("\nDone.\n");
+    fprintf(stderr, "\nDone.\n");
 
     } // @autoreleasepool
     return EXIT_SUCCESS;

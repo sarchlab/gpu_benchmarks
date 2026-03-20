@@ -29,6 +29,12 @@
  *                      (default 4096).  Increase if the kernel finishes in
  *                      under ~5 ms on a fast GPU.
  *
+ * Environment variables (override argv):
+ *   BENCH_PARAM_fmas_per_thread
+ *   BENCH_PARAM_num_blocks
+ *   BENCH_PARAM_threads_per_block
+ *   BENCH_PARAM_num_iterations
+ *
  * Build:
  *   make PLATFORM=metal
  */
@@ -41,19 +47,18 @@
 #include <mach/mach_time.h>
 
 // ---------------------------------------------------------------------------
-// Constants
+// Constants (defaults)
 // ---------------------------------------------------------------------------
 
 /** Default number of FMA operations per thread per kernel invocation. */
 static const int DEFAULT_FMAS_PER_THREAD = 4096;
 
-/** Number of threads to dispatch (matches the CUDA/HIP version). */
-static const int NUM_BLOCKS        = 1024;
-static const int THREADS_PER_BLOCK = 256;
-static const int TOTAL_THREADS     = NUM_BLOCKS * THREADS_PER_BLOCK;
+/** Default number of threads to dispatch (matches the CUDA/HIP version). */
+static const int DEFAULT_NUM_BLOCKS        = 1024;
+static const int DEFAULT_THREADS_PER_BLOCK = 256;
 
 /** How many times to repeat the kernel for a stable average. */
-static const int NUM_ITERATIONS = 10;
+static const int DEFAULT_NUM_ITERATIONS = 10;
 
 // ---------------------------------------------------------------------------
 // Timing helper
@@ -77,18 +82,40 @@ int main(int argc, char *argv[])
 {
     @autoreleasepool {
 
-    /* Parse optional argument. */
+    /* Line-buffer stdout so JSON lines are flushed promptly. */
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
+    const char* env_val;
+
+    /* Read parameters: env vars take priority, then argv, then defaults. */
     int fmas_per_thread = DEFAULT_FMAS_PER_THREAD;
-    if (argc >= 2) {
+    env_val = getenv("BENCH_PARAM_fmas_per_thread");
+    if (env_val) {
+        fmas_per_thread = atoi(env_val);
+    } else if (argc >= 2) {
         fmas_per_thread = atoi(argv[1]);
-        if (fmas_per_thread <= 0) {
-            fprintf(stderr, "Invalid fmas_per_thread: %s\n", argv[1]);
-            return EXIT_FAILURE;
-        }
-        /* Round down to nearest multiple of 4 to match the loop unroll. */
-        fmas_per_thread = (fmas_per_thread / 4) * 4;
-        if (fmas_per_thread == 0) fmas_per_thread = 4;
     }
+    if (fmas_per_thread <= 0) {
+        fprintf(stderr, "Invalid fmas_per_thread\n");
+        return EXIT_FAILURE;
+    }
+    /* Round down to nearest multiple of 4 to match the loop unroll. */
+    fmas_per_thread = (fmas_per_thread / 4) * 4;
+    if (fmas_per_thread == 0) fmas_per_thread = 4;
+
+    int num_blocks = DEFAULT_NUM_BLOCKS;
+    env_val = getenv("BENCH_PARAM_num_blocks");
+    if (env_val) num_blocks = atoi(env_val);
+
+    int threads_per_block = DEFAULT_THREADS_PER_BLOCK;
+    env_val = getenv("BENCH_PARAM_threads_per_block");
+    if (env_val) threads_per_block = atoi(env_val);
+
+    int num_iterations = DEFAULT_NUM_ITERATIONS;
+    env_val = getenv("BENCH_PARAM_num_iterations");
+    if (env_val) num_iterations = atoi(env_val);
+
+    int total_threads = num_blocks * threads_per_block;
 
     /* Select the default Metal GPU device. */
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -97,11 +124,11 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    printf("Device          : %s\n", device.name.UTF8String);
-    printf("Grid            : %d blocks × %d threads = %d total threads\n",
-           NUM_BLOCKS, THREADS_PER_BLOCK, TOTAL_THREADS);
-    printf("FMAs / thread   : %d\n", fmas_per_thread);
-    printf("Kernel repeats  : %d\n\n", NUM_ITERATIONS);
+    fprintf(stderr, "Device          : %s\n", device.name.UTF8String);
+    fprintf(stderr, "Grid            : %d blocks × %d threads = %d total threads\n",
+           num_blocks, threads_per_block, total_threads);
+    fprintf(stderr, "FMAs / thread   : %d\n", fmas_per_thread);
+    fprintf(stderr, "Kernel repeats  : %d\n\n", num_iterations);
 
     /* Load the Metal shader library from source (fp32_throughput.metal must
        be in the same directory as the executable). */
@@ -159,9 +186,9 @@ int main(int argc, char *argv[])
                                              options:MTLResourceStorageModeShared];
 
     /* Thread-group configuration.
-     * Use THREADS_PER_BLOCK as the threadgroup size (capped to hardware max),
-     * and dispatch exactly TOTAL_THREADS threads in the grid. */
-    NSUInteger tg_size = (NSUInteger)THREADS_PER_BLOCK;
+     * Use threads_per_block as the threadgroup size (capped to hardware max),
+     * and dispatch exactly total_threads threads in the grid. */
+    NSUInteger tg_size = (NSUInteger)threads_per_block;
     if (tg_size > pso.maxTotalThreadsPerThreadgroup)
         tg_size = pso.maxTotalThreadsPerThreadgroup;
 
@@ -175,8 +202,8 @@ int main(int argc, char *argv[])
         [enc setComputePipelineState:pso];
         [enc setBuffer:d_out    offset:0 atIndex:0];
         [enc setBytes:&fpt_u32  length:sizeof(fpt_u32) atIndex:1];
-        /* Dispatch a 1-D grid of TOTAL_THREADS threads. */
-        [enc dispatchThreads:MTLSizeMake((NSUInteger)TOTAL_THREADS, 1, 1)
+        /* Dispatch a 1-D grid of total_threads threads. */
+        [enc dispatchThreads:MTLSizeMake((NSUInteger)total_threads, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(tg_size, 1, 1)];
         [enc endEncoding];
         [cb commit];
@@ -188,7 +215,7 @@ int main(int argc, char *argv[])
 
     /* Timed benchmark loop. */
     uint64_t t0 = mach_absolute_time();
-    for (int iter = 0; iter < NUM_ITERATIONS; ++iter) {
+    for (int iter = 0; iter < num_iterations; ++iter) {
         dispatch_once();
     }
     uint64_t t1 = mach_absolute_time();
@@ -200,22 +227,31 @@ int main(int argc, char *argv[])
      *   total_flops = iterations × num_threads × fmas_per_thread × 2
      *   (factor of 2: each FMA is 1 multiply + 1 add)
      */
-    long long num_threads = (long long)TOTAL_THREADS;
-    long long total_flops = (long long)NUM_ITERATIONS
+    long long num_threads = (long long)total_threads;
+    long long total_flops = (long long)num_iterations
                             * num_threads
                             * (long long)fmas_per_thread
                             * 2LL;
     double gflops = (double)total_flops / elapsed_s / 1e9;
+    double avg_time_ms = elapsed_ms / num_iterations;
 
-    printf("Elapsed time    : %.3f ms (%.3f ms / kernel)\n",
-           elapsed_ms, elapsed_ms / NUM_ITERATIONS);
-    printf("Total FLOPs     : %lld\n", total_flops);
-    printf("FP32 Throughput : %.2f GFLOPS\n", gflops);
+    fprintf(stderr, "Elapsed time    : %.3f ms (%.3f ms / kernel)\n",
+           elapsed_ms, avg_time_ms);
+    fprintf(stderr, "Total FLOPs     : %lld\n", total_flops);
+    fprintf(stderr, "FP32 Throughput : %.2f GFLOPS\n", gflops);
 
-    // CSV output (machine-parseable): benchmark_name,n_ops,time_ms,gflops
-    printf("fp32_throughput,%lld,%.3f,%.2f\n", total_flops, elapsed_ms, gflops);
+    /* JSON-lines output to stdout. */
+    printf("{\"type\":\"kernel\",\"name\":\"fp32_fma_kernel\",\"time_ms\":%.6f,"
+           "\"params\":{\"fmas_per_thread\":%d,\"num_blocks\":%d,"
+           "\"threads_per_block\":%d,\"num_iterations\":%d}}\n",
+           avg_time_ms, fmas_per_thread, num_blocks, threads_per_block,
+           num_iterations);
 
-    printf("\nDone.\n");
+    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
+           "\"metrics\":[{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
+           elapsed_ms, gflops);
+
+    fprintf(stderr, "\nDone.\n");
 
     } // @autoreleasepool
     return EXIT_SUCCESS;

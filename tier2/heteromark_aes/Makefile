@@ -32,8 +32,8 @@ TARGET := heteromark_aes
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := heteromark_aes.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := heteromark_aes.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

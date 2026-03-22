@@ -32,8 +32,8 @@ TARGET := chai_hsto
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := chai_hsto.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := chai_hsto.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

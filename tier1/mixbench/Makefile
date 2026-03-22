@@ -32,8 +32,8 @@ TARGET := mixbench
 
 ifeq ($(PLATFORM),cuda)
   CC      := nvcc
-  SRC     := mixbench.hip
-  CFLAGS  := -O3 -std=c++14 -x cu -DUSE_CUDA
+  SRC     := mixbench.cu
+  CFLAGS  := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC      := hipcc

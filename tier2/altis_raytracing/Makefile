@@ -32,8 +32,8 @@ TARGET := altis_raytracing
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := altis_raytracing.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := altis_raytracing.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

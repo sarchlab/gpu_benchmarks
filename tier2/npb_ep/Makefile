@@ -32,8 +32,8 @@ TARGET := npb_ep
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := npb_ep.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := npb_ep.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

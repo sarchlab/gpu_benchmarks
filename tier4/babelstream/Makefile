@@ -12,8 +12,8 @@ TARGET := babelstream
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := babelstream.hip
-  CFLAGS := -O3 -x cu -DUSE_CUDA
+  SRC    := babelstream.cu
+  CFLAGS := -O3
   LIBS   :=
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

@@ -57,10 +57,42 @@ Build a CLI tool **implemented in Go** (from human, Issue #217) that:
 
 The CLI must be a Go program that compiles to a single binary. It must maintain full feature parity with the previous Python implementation: same commands (list, compile, run, info, validate), same flags, same SQLite schema, same JSON-lines output protocol parsing, same exit codes.
 
-## Compilation & Error Reporting (from human, Issue #221)
+## Compilation & Error Reporting (from human, Issue #221) ✅ RESOLVED
 
 1. **Compilation errors must always be visible.** When `gpubench compile` encounters a failure, it must show the full compiler error output (stderr from `make`) by default — not just a ✗ symbol. Users should not need `--verbose` to see why compilation failed.
-2. **All Tier 2 benchmarks must compile successfully** on all supported platforms (CUDA, ROCm, Metal). Currently, "pretty much all L2 compilation fails" per the human report. This must be investigated and fixed.
+2. **All Tier 2 benchmarks must compile successfully** on all supported platforms (CUDA, ROCm, Metal).
+
+## Native CUDA Source Files (from human, Issue #224)
+
+**Write CUDA programs, not only HIP.** Every C++ benchmark must have a native `.cu` source file using the CUDA API (`cudaMalloc`, `cudaMemcpy`, `#include <cuda_runtime.h>`, etc.) for NVIDIA compilation. HIP source (`.hip`) files continue to exist for AMD/ROCm compilation. Benchmarks must NOT rely on HIP-to-CUDA compatibility shims for NVIDIA builds — they must be proper CUDA programs.
+
+File convention per C++ benchmark:
+- `name.cu` — Native CUDA source (compiled with `nvcc` for NVIDIA)
+- `name.hip` — Native HIP source (compiled with `hipcc` for AMD)
+- `name_metal.mm` + `name.metal` — Metal source (for Apple)
+
+## Complete Benchmark Suites (from human, Issue #226)
+
+If we include a benchmark suite, we must include **all** its benchmarks — not just a selection. For any benchmarks we skip, we need a documented, clear reason.
+
+## MLPerf Benchmarks (from human, Issue #228)
+
+Investigate MLPerf benchmarks and include all relevant ones. What ML benchmarks do they have? Can we include all of them?
+
+## Result Persistence (from human, Issue #229)
+
+Design a mechanism for users to persist and share benchmark results with the community. Options include:
+- Contributing results to a GitHub repository
+- Using a shared database
+- Standardized result format for submission
+
+## Docker-Based CI (from human, Issue #223)
+
+We need Docker-based CI for NVIDIA/AMD/Apple compilation verification. At minimum:
+- Docker containers with NVIDIA CUDA toolkit
+- Docker containers with AMD ROCm
+- Apple compilation may require specific CI runners (Docker doesn't support macOS natively)
+The CI should verify that all benchmarks compile successfully on all platforms.
 
 ## Tier 5 — Modern ML Workloads (from human, Issue #100)
 

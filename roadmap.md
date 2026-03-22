@@ -450,6 +450,9 @@ clean:
 | 142 | Planning | Athena | New human request: Issue #217 (Go CLI). Updated spec, defined M27. |
 | 143–145 | Implementation+Verification | Ares+Apollo | M27 implemented: Go CLI at cmd/gpubench/ with 7 source files. PR #25 merged. |
 | 146 | Planning | Athena | M27 verified complete. All issues closed. **PROJECT COMPLETE.** |
+| 147 | Planning | Athena | New human issue #221 (compilation failures). Defined M28. |
+| 148–150 | Implementation+Verification | Ares+Apollo | M28 implemented (CLI error logging + CUDA compat block). Merged PR #26. |
+| 151 | Planning | Athena | M28 complete. New human issues #223-#229. Updated spec/roadmap. Defining M29. |
 
 ---
 
@@ -575,29 +578,60 @@ All benchmarks support 3 platforms (NVIDIA/CUDA, AMD/ROCm, Apple/Metal), use Mak
 - **Phase 1 (M1–M20):** 107 benchmarks across 5 tiers completed in ~60 cycles. Scaling workers helps — parallel benchmark implementation was effective.
 - **Phase 2 (M21–M26):** Parameterization and CLI took ~30 cycles. Clear output protocols (JSON-lines) made integration smooth.
 - **Phase 3 (M27):** CLI rewrite in Go completed in ~4 cycles. Well-documented existing Python implementation made the Go rewrite straightforward. PR #25 merged.
+- **Phase 4 (M28):** Compilation fixes completed in ~3 cycles. CUDA compatibility shim approach (HIP→CUDA macros) was a quick fix, but human wants proper CUDA source files (Issue #224). The shim was a temporary measure; M29 will provide native .cu files.
 
 ---
 
 ## Phase 4 — Compilation Fixes (from human, Issue #221)
 
-### M28 — Fix Compilation Failures & CLI Error Logging
+### M28 — Fix Compilation Failures & CLI Error Logging ✅ COMPLETE (cycles used: ~3)
 **Goal:** Fix two issues reported by human:
 1. CLI `gpubench compile` suppresses error output — users can't see why compilation failed
 2. Tier 2 (and likely all tiers) compilation fails on some platforms
 
-**Root cause analysis:**
-- CLI: `cmdCompile()` in `commands.go` only shows stderr with `--verbose` flag
-- Compilation: All 75 C++ benchmark files use `#include <hip/hip_runtime.h>`, which requires HIP headers. On CUDA-only systems without HIP SDK, this include fails.
+**Deliverables (completed):**
+- CLI: Always print stderr on compilation failure (Kai, commit 1d101b8)
+- Compilation: Added CUDA compatibility block to all 60 unguarded .hip files (Max, commit 8c9114a)
+- Merged via PR #26
 
-**Budget:** 4 cycles
+---
+
+## Phase 5 — CUDA Native Source + Suite Completeness + CI (from human, Issues #224, #226, #228, #223, #229)
+
+New batch of human requirements:
+1. **#224**: Write CUDA programs, not only HIP — provide native .cu source files
+2. **#226**: Complete benchmark suites — include ALL benchmarks from each suite
+3. **#228**: Learn from MLPerf — include MLPerf benchmarks
+4. **#223**: Docker-based CI for compilation testing
+5. **#229**: Result persistence — community result sharing mechanism
+
+### M29 — Native CUDA Source Files for All C++ Benchmarks
+**Goal:** Create native `.cu` source files with CUDA API for every C++ benchmark. Currently, NVIDIA compilation uses `.hip` files with compatibility shims. The human explicitly requested proper CUDA programs.
+
+**Scope:** 67 new .cu files needed:
+- Tier 1: 4 benchmarks (atomic_operations, mixbench, tensor_core_throughput, warp_shuffle)
+- Tier 2: 51 benchmarks (all)
+- Tier 3: 11 benchmarks (all)
+- Tier 4: 1 benchmark (babelstream)
+Plus: 67 Makefile updates to use .cu for CUDA platform
+
+**Approach:**
+- Each .cu file uses native CUDA API: `#include <cuda_runtime.h>`, `cudaMalloc`, `cudaMemcpy`, etc.
+- Existing .hip files retained for AMD/ROCm compilation
+- Metal files unchanged
+- Makefiles updated: CUDA uses `name.cu` (no `-x cu` flag), ROCm uses `name.hip`
+
+**Budget:** 6 cycles
 
 ---
 
 ## Current Status
 
-**IN PROGRESS.** New human issue #221 (compilation failures).
+**PLANNING.** Defining M29 (native CUDA source files) to address Issue #224.
 - 107 benchmarks across 5 tiers (M1–M20)
 - Full parameterization with params.json for all benchmarks (M21)
 - Go CLI tool (gpubench) with list, compile, run, info, validate commands (M22–M27)
-- SQLite output with platform info, kernel-level timing, computed metrics (M22–M26)
-- All human issues (#10, #18, #100, #101, #142, #143, #144, #217) closed
+- Compilation fixes and CUDA compatibility (M28)
+- SQLite output with platform info, kernel-level timing, computed metrics
+- All previous human issues (#10, #18, #100, #101, #142, #143, #144, #217, #221) closed
+- New human issues pending: #223 (Docker CI), #224 (CUDA programs), #226 (complete suites), #228 (MLPerf), #229 (result persistence)

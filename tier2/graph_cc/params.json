@@ -1,0 +1,90 @@
+{
+  "benchmark": "graph_cc",
+  "tier": 2,
+  "suite": "graph",
+  "description": "Connected Components via label propagation on a random undirected sparse graph in CSR format. Each vertex starts with its own ID as label and iteratively updates to the minimum label among itself and its neighbors until convergence.",
+  "scaling_param": {
+    "name": "num_vertices",
+    "description": "Number of vertices in the graph",
+    "type": "int",
+    "values": [
+      1000,
+      2000,
+      3000,
+      5000,
+      8000,
+      10000,
+      15000,
+      20000,
+      30000,
+      40000,
+      50000,
+      75000,
+      100000,
+      150000,
+      200000,
+      250000,
+      300000,
+      400000,
+      500000,
+      600000,
+      750000,
+      850000,
+      1000000
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "avg_degree",
+      "description": "Average degree per vertex",
+      "type": "int",
+      "default": 16,
+      "values": [
+        4,
+        8,
+        16,
+        32,
+        64
+      ]
+    },
+    {
+      "name": "max_iterations",
+      "description": "Maximum label propagation iterations per run",
+      "type": "int",
+      "default": 100,
+      "values": [
+        20,
+        50,
+        100,
+        200,
+        500
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
+    },
+    {
+      "name": "iterations",
+      "description": "Timed benchmark iterations",
+      "type": "int",
+      "default": 5,
+      "values": [
+        3,
+        5,
+        10
+      ]
+    }
+  ],
+  "kernels": [
+    "cc_propagate_kernel"
+  ]
+}

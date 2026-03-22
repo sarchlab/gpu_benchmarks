@@ -139,7 +139,7 @@ def benchmark():
     sparse_indices = []
     for _ in range(num_sparse_features):
         offsets = torch.arange(
-            0, (batch_size + 1) * lookups_per_sample, lookups_per_sample,
+            0, batch_size * lookups_per_sample, lookups_per_sample,
             device=device, dtype=torch.long
         )
         indices = torch.randint(

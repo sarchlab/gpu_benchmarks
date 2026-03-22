@@ -459,6 +459,8 @@ clean:
 | 169 | Planning | Athena | M30 complete. 120 benchmarks. Defining M31 (MLPerf). |
 | 170–177 | Implementation+Verification | Ares+Apollo | M31 implemented (5 MLPerf-inspired Tier 5 benchmarks). Fix rounds for DLRM offsets + UNet3D params. Merged PR #29. |
 | 178 | Planning | Athena | M31 complete. 125 benchmarks. Issue #228 closed. Defining M32 (Docker CI + Result Persistence). |
+| 179–183 | Implementation+Verification | Ares+Apollo | M32 implemented (Docker CI + Result Persistence + README). PR #31 merged. |
+| 184 | Planning | Athena | M32 complete. All 32 milestones done. All 14 human issues closed. **PROJECT COMPLETE.** |
 
 ---
 
@@ -629,25 +631,26 @@ New batch of human requirements:
 **Branch:** `ares/m31-mlperf-tier5` (merged to main via PR #29)
 **Note:** Issue #228 closed. Total benchmark count now 125.
 
-### M32 — Docker CI + Result Persistence + README Update (Issues #223, #229)
+### M32 — Docker CI + Result Persistence + README Update (Issues #223, #229) ✅ COMPLETE (cycles used: ~3)
 **Goal:** Set up Docker-based CI for compilation verification, design a result persistence/sharing mechanism, and update README to reflect current 125 benchmarks.
 
-**Deliverables:**
-1. **Docker CI**: Dockerfiles for NVIDIA CUDA and AMD ROCm environments. GitHub Actions workflow to compile all C++ benchmarks (tiers 1-4). Apple Metal compilation may need macOS CI runners.
-2. **Result persistence**: Design and implement a mechanism for users to submit benchmark results. Options: standardized export format (`gpubench export`), contributing results via GitHub PR to a `results/` directory, or a shared results format spec in `docs/`.
-3. **README update**: Update benchmark counts, add M30+M31 benchmarks to listings, update directory layout.
+**Deliverables (completed):**
+1. **Docker CI** (Issue #223): `.github/workflows/compile.yml` — CUDA job (nvidia/cuda:12.6.3-devel-ubuntu22.04) + ROCm job (rocm/dev-ubuntu-22.04:6.0). Each installs Go, builds gpubench, compiles tiers 1-4.
+2. **Result persistence** (Issue #229): `gpubench export` command (cmd/gpubench/export.go), `docs/result_sharing.md` spec, `community_results/` directory for community submissions.
+3. **README update**: Updated to reflect 125 benchmarks, all tier tables complete, directory layout current.
 
-**Budget:** 5 cycles
+**Branch:** `ares/m32-ci-persistence-readme` (merged to main via PR #31)
 
 ---
 
 ## Current Status
 
-**PLANNING.** M31 complete (PR #29 merged). 125 benchmarks across 5 tiers. Defining M32 (Docker CI + Result Persistence).
+**PROJECT COMPLETE.** All 32 milestones achieved. All 14 human issues closed.
 - 125 benchmarks across 5 tiers (12 Tier 1, 64 Tier 2, 11 Tier 3, 7 Tier 4, 31 Tier 5)
 - Full parameterization with params.json for all benchmarks (M21)
-- Go CLI tool (gpubench) with list, compile, run, info, validate commands (M22–M27)
-- Native CUDA .cu files for all C++ benchmarks (M29)
+- Go CLI tool (gpubench) with list, compile, run, info, validate, export commands (M22–M27, M32)
+- Native CUDA .cu files for all 88 C++ benchmarks (M29)
 - SQLite output with platform info, kernel-level timing, computed metrics
-- All previous human issues (#10, #18, #100, #101, #142, #143, #144, #217, #221, #224, #228) closed
-- Open human issues: #223 (Docker CI), #226 (complete suites — mostly addressed by M30), #229 (result persistence)
+- Docker CI for CUDA + ROCm compilation verification (M32)
+- Result persistence with export command and community results mechanism (M32)
+- All human issues closed: #10, #18, #100, #101, #142, #143, #144, #217, #221, #223, #224, #226, #228, #229

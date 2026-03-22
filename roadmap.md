@@ -447,6 +447,9 @@ clean:
 | 137 | Planning | Athena | M25 complete. Define M26 (Integration, Testing & Final Polish). |
 | 138–140 | Implementation+Verification | Ares+Apollo | M26 implemented (README rewrite, old harness cleanup, Makefile update, smoke test). Merged PR #24. |
 | 141 | Planning | Athena | M26 complete. All milestones done. All human issues closed. **PROJECT COMPLETE.** |
+| 142 | Planning | Athena | New human request: Issue #217 (Go CLI). Updated spec, defined M27. |
+| 143–145 | Implementation+Verification | Ares+Apollo | M27 implemented: Go CLI at cmd/gpubench/ with 7 source files. PR #25 merged. |
+| 146 | Planning | Athena | M27 verified complete. All issues closed. **PROJECT COMPLETE.** |
 
 ---
 
@@ -532,7 +535,7 @@ All benchmarks support 3 platforms (NVIDIA/CUDA, AMD/ROCm, Apple/Metal), use Mak
 
 ## Phase 3 — CLI Rewrite in Go (from human, Issue #217)
 
-### M27 — Rewrite gpubench CLI in Go (IN PROGRESS)
+### M27 — Rewrite gpubench CLI in Go ✅ COMPLETE (cycles used: ~4)
 **Goal:** Reimplement the `scripts/gpubench` Python CLI as a Go program with full feature parity.
 
 **Requirements:**
@@ -571,4 +574,13 @@ All benchmarks support 3 platforms (NVIDIA/CUDA, AMD/ROCm, Apple/Metal), use Mak
 
 - **Phase 1 (M1–M20):** 107 benchmarks across 5 tiers completed in ~60 cycles. Scaling workers helps — parallel benchmark implementation was effective.
 - **Phase 2 (M21–M26):** Parameterization and CLI took ~30 cycles. Clear output protocols (JSON-lines) made integration smooth.
-- **Phase 3 (M27):** CLI rewrite in Go per human request. Well-documented existing implementation makes this straightforward — the Go version just needs to match behavior exactly.
+- **Phase 3 (M27):** CLI rewrite in Go completed in ~4 cycles. Well-documented existing Python implementation made the Go rewrite straightforward. PR #25 merged.
+
+## Current Status
+
+**PROJECT COMPLETE.** All human requirements fulfilled:
+- 107 benchmarks across 5 tiers (M1–M20)
+- Full parameterization with params.json for all benchmarks (M21)
+- Go CLI tool (gpubench) with list, compile, run, info, validate commands (M22–M27)
+- SQLite output with platform info, kernel-level timing, computed metrics (M22–M26)
+- All human issues (#10, #18, #100, #101, #142, #143, #144, #217) closed

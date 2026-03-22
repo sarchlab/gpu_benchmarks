@@ -455,6 +455,8 @@ clean:
 | 151 | Planning | Athena | M28 complete. New human issues #223-#229. Updated spec/roadmap. Defining M29. |
 | 152–157 | Implementation+Verification | Ares+Apollo | M29 implemented (75 native .cu files + Makefile updates). Merged PR #27. |
 | 158 | Planning | Athena | M29 complete. Issue #224 closed. Defining M30 (complete suites). |
+| 159–168 | Implementation+Verification | Ares+Apollo | M30 implemented (13 Tier 2 benchmarks) + fix rounds. Merged PR #28. |
+| 169 | Planning | Athena | M30 complete. 120 benchmarks. Defining M31 (MLPerf). |
 
 ---
 
@@ -613,40 +615,11 @@ New batch of human requirements:
 **Deliverables (completed):** 75 native .cu files created for all C++ benchmarks (12 Tier 1, 51 Tier 2, 11 Tier 3, 1 Tier 4). All Makefiles updated to use .cu for CUDA platform. Merged via PR #27.
 **Note:** Issue #224 closed.
 
-### M30 — Complete Benchmark Suites: Highest-Priority Gaps (Issue #226)
-**Goal:** Add the 9 highest-priority missing benchmarks from existing suites, plus 4 medium-priority ones. This addresses Issue #226 (include all benchmarks from each suite). Based on Iris's research (workspace/iris/research_suites_mlperf.md).
-
-**Tier 2 (13 new benchmarks):**
-
-*Highest Priority (9):*
-1. `tier2/npb_cg/` — NPB Conjugate Gradient: Sparse iterative solver (SpMV + dot products + AXPY). Fundamental HPC workload.
-2. `tier2/npb_mg/` — NPB Multi-Grid: V-cycle multigrid solver with restrict/prolong/smooth operations. Multi-resolution HPC pattern.
-3. `tier2/parboil_cutcp/` — Parboil Coulombic Potential with cutoff: Direct summation of charge interactions within cutoff radius.
-4. `tier2/parboil_lbm/` — Parboil Lattice Boltzmann Method: D3Q19 fluid simulation on regular 3D grid.
-5. `tier2/rodinia_hotspot3d/` — Rodinia HotSpot3D: 3D thermal simulation extending HotSpot to 3 dimensions.
-6. `tier2/rodinia_lavamd/` — Rodinia LavaMD: Short-range molecular dynamics with cell-list decomposition.
-7. `tier2/altis_gups/` — Altis GUPS (Giga Updates Per Second): Random memory access throughput benchmark.
-8. `tier2/graph_cc/` — Graph Connected Components: Label propagation / hook-based CC on sparse graphs.
-9. `tier2/lonestar_dmr/` — Lonestar Delaunay Mesh Refinement: Irregular computation with worklist-based mesh refinement.
-
-*Medium Priority (4):*
-10. `tier2/polybench_2mm/` — PolyBench 2MM: Two matrix multiplications (D = A*B, E = C*D).
-11. `tier2/polybench_3dconv/` — PolyBench 3D Convolution: 3D stencil convolution kernel.
-12. `tier2/polybench_correlation/` — PolyBench Correlation: Statistical correlation matrix computation.
-13. `tier2/polybench_syr2k/` — PolyBench SYR2K: Symmetric rank-2k update (BLAS Level 3).
-
-**Per-benchmark deliverables (same as existing conventions):**
-- `name.cu` — Native CUDA source (compiled with `nvcc`)
-- `name.hip` — Native HIP source (compiled with `hipcc`)
-- `name_metal.mm` + `name.metal` — Metal source (Apple)
-- `Makefile` — PLATFORM auto-detect (Darwin→metal, /opt/rocm→rocm, else→cuda)
-- `README.md` — Algorithm, build/run for all 3 platforms, output format
-- `params.json` — Scaling + non-scaling parameters per project conventions
-- JSON-lines output protocol (kernel events + summary) to stdout
-- 5 warmup + 5 timed iterations, report average
-- Self-contained, no shared dependencies
-
-**Budget:** 6 cycles
+### M30 — Complete Benchmark Suites: Highest-Priority Gaps (Issue #226) ✅ COMPLETE (cycles used: ~6)
+**Goal:** Add the 9 highest-priority missing benchmarks from existing suites, plus 4 medium-priority ones. Addresses Issue #226 (include all benchmarks from each suite).
+**Deliverables (completed):** 13 new Tier 2 benchmarks: npb_cg, npb_mg, parboil_cutcp, parboil_lbm, rodinia_hotspot3d, rodinia_lavamd, altis_gups, graph_cc, lonestar_dmr, polybench_2mm, polybench_3dconv, polybench_correlation, polybench_syr2k. All with .cu + .hip + Metal + Makefile + README + params.json + JSON-lines protocol.
+**Branch:** `ares/m30-complete-suites` (merged to main via PR #28)
+**Note:** Total benchmark count now 120. Issue #226 partially addressed — highest-priority gaps filled; remaining gaps in each suite are Low priority or covered by other tiers/suites.
 
 ### M31 — MLPerf Benchmarks for Tier 5 (Issue #228)
 **Goal:** Add 5 MLPerf-inspired benchmarks to fill gaps in Tier 5 ML coverage.
@@ -673,11 +646,11 @@ New batch of human requirements:
 
 ## Current Status
 
-**PLANNING.** M29 complete. Defining M30 (complete benchmark suites) to address Issue #226.
-- 107 benchmarks across 5 tiers (M1–M20)
+**PLANNING.** M30 complete (PR #28 merged). 120 benchmarks across 5 tiers. Defining M31 (MLPerf benchmarks).
+- 120 benchmarks across 5 tiers (12 Tier 1, 64 Tier 2, 11 Tier 3, 7 Tier 4, 26 Tier 5)
 - Full parameterization with params.json for all benchmarks (M21)
 - Go CLI tool (gpubench) with list, compile, run, info, validate commands (M22–M27)
-- Compilation fixes (M28) + native CUDA source files for all C++ benchmarks (M29)
+- Native CUDA .cu files for all C++ benchmarks (M29)
 - SQLite output with platform info, kernel-level timing, computed metrics
 - All previous human issues (#10, #18, #100, #101, #142, #143, #144, #217, #221, #224) closed
-- Open human issues: #223 (Docker CI), #226 (complete suites), #228 (MLPerf), #229 (result persistence)
+- Open human issues: #223 (Docker CI), #226 (complete suites — partially addressed by M30), #228 (MLPerf), #229 (result persistence)

@@ -205,8 +205,8 @@ int main(int argc, char** argv) {
         id<MTLCommandBuffer> cmd = [queue commandBuffer];
         id<MTLComputeCommandEncoder> enc = [cmd computeCommandEncoder];
         [enc setComputePipelineState:pso];
-        for (auto& [buf, idx] : bufs) {
-            [enc setBuffer:buf offset:0 atIndex:idx];
+        for (size_t bi = 0; bi < bufs.size(); ++bi) {
+            [enc setBuffer:bufs[bi].first offset:0 atIndex:bufs[bi].second];
         }
         [enc dispatchThreads:grid threadsPerThreadgroup:tgSize];
         [enc endEncoding];

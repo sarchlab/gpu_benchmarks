@@ -2,9 +2,9 @@
 
 ## Overview
 
-`gpubench` is a Python CLI tool (no external dependencies beyond stdlib + sqlite3) that compiles, runs, and collects results from the GPU benchmark suite. It discovers benchmarks by walking `tier*/*/params.json`, drives parameterized execution, and stores all results in an SQLite database.
+`gpubench` is a Go CLI tool that compiles, runs, and collects results from the GPU benchmark suite. It discovers benchmarks by walking `tier*/*/params.json`, drives parameterized execution, and stores all results in an SQLite database.
 
-**Location:** `scripts/gpubench` (executable Python script)
+**Location:** `cmd/gpubench/` (Go package, build with `go build -o gpubench ./cmd/gpubench`)
 
 ## Commands
 
@@ -161,7 +161,6 @@ Platform Information
   CPU:         AMD EPYC 7763 64-Core (128 cores)
   RAM:         512 GiB
   Hostname:    gpu-node-01
-  Python:      3.11.5
 ```
 
 ### `gpubench validate`
@@ -190,13 +189,16 @@ Examples:
 
 The CLI auto-detects the platform using the following logic:
 
-```python
-def detect_platform():
-    if sys.platform == "darwin":
+```go
+func detectPlatform() string {
+    if runtime.GOOS == "darwin" {
         return "metal"
-    if os.path.isdir("/opt/rocm"):
+    }
+    if _, err := os.Stat("/opt/rocm"); err == nil {
         return "rocm"
+    }
     return "cuda"
+}
 ```
 
 ### Platform Info Collection
@@ -220,22 +222,11 @@ If any detection fails, the field is stored as `null` — the tool should not cr
 
 Benchmarks are discovered by walking the repository directory tree:
 
-```python
-def discover_benchmarks(repo_root, tier=None, suite=None, benchmark=None):
-    results = []
-    for params_path in sorted(glob.glob(f"{repo_root}/tier*/*/params.json")):
-        with open(params_path) as f:
-            params = json.load(f)
-        # Apply filters
-        if tier and params["tier"] != tier:
-            continue
-        if suite and params["suite"] != suite:
-            continue
-        if benchmark and params["benchmark"] != benchmark:
-            continue
-        params["_dir"] = os.path.dirname(params_path)
-        results.append(params)
-    return results
+```go
+func discoverBenchmarks(repoRoot string, tier int, suite, benchmark string) []Benchmark {
+    // Walks tier*/*/params.json, parses each, applies filters,
+    // returns sorted list of discovered benchmarks.
+}
 ```
 
 ## Benchmark Execution
@@ -272,9 +263,9 @@ For Metal platform, use `bench_mps.py` if it exists, otherwise `bench.py`.
 For each run, the CLI:
 
 1. Sets `BENCH_PARAM_*` environment variables
-2. Starts the process with `subprocess.Popen(stdout=PIPE, stderr=PIPE)`
+2. Starts the process with `exec.Command` (stdout and stderr piped)
 3. Reads stdout line-by-line, parsing JSON events
-4. Enforces `--timeout` with `SIGTERM` then `SIGKILL`
+4. Enforces `--timeout` via `context.WithTimeout` and process kill
 5. Captures exit code
 6. Writes results to database within a transaction
 
@@ -393,8 +384,15 @@ This is **not required for the initial implementation** but the CLI should be st
 ## File Layout
 
 ```
-scripts/
-  gpubench              # main CLI entry point (#!/usr/bin/env python3)
+cmd/
+  gpubench/
+    main.go             # CLI entry point and argument parsing
+    commands.go         # Command implementations (list, compile, run, info, validate)
+    database.go         # SQLite database helpers
+    discover.go         # Benchmark discovery from params.json
+    platform.go         # Platform detection and info collection
+    protocol.go         # JSON-lines output protocol parsing
+    schema.go           # Embedded SQLite schema
 docs/
   cli_design.md         # this document
   output_protocol.md    # stdout JSON-lines protocol
@@ -404,14 +402,14 @@ docs/
 
 ## Implementation Notes
 
-1. **Single file preferred.** The CLI should be a single Python file (`scripts/gpubench`) for simplicity. If it grows beyond ~1000 lines, split into a `scripts/gpubench_lib/` package.
+1. **Go package layout.** The CLI lives in `cmd/gpubench/` as a Go package. Build with `go build -o gpubench ./cmd/gpubench`.
 
-2. **No pip dependencies.** Only Python stdlib + sqlite3. This ensures the tool works on any system with Python 3.7+.
+2. **Uses go-sqlite3.** SQLite access via the `github.com/mattn/go-sqlite3` driver (requires CGO). The schema is embedded in the binary.
 
 3. **Idempotent platform detection.** Cache platform info for the session — don't re-detect for every benchmark.
 
-4. **Graceful interruption.** Handle SIGINT (Ctrl+C): finish current run, write partial results, update session status to "interrupted", exit 130.
+4. **Graceful interruption.** Handle SIGINT (Ctrl+C) via `os/signal`: finish current run, write partial results, update session status to "interrupted", exit 130.
 
-5. **Dry-run support.** `--dry-run` should print the full execution plan (benchmarks, parameter configs, total run counts) without executing anything.
+5. **Dry-run support.** `--dry-run` prints the full execution plan (benchmarks, parameter configs, total run counts) without executing anything.
 
-6. **Logging.** Use Python `logging` module. Default level: INFO. `--verbose` sets DEBUG. `--quiet` sets WARNING.
+6. **Build with `go build`.** The binary is self-contained; no runtime dependencies beyond the OS. Add `gpubench` to `.gitignore`.

@@ -35,9 +35,14 @@ endif
 
 export PLATFORM
 
-.PHONY: all tier1 tier2 tier3 tier4 tier5 clean list validate run info
+GPUBENCH = ./gpubench
+
+.PHONY: all tier1 tier2 tier3 tier4 tier5 clean list validate run info gpubench
 
 all: tier1 tier2 tier3 tier4 tier5
+
+gpubench:
+	go build -o gpubench ./cmd/gpubench
 
 tier1:
 	$(MAKE) -C tier1 PLATFORM=$(PLATFORM)
@@ -60,15 +65,16 @@ clean:
 	$(MAKE) -C tier3 clean PLATFORM=$(PLATFORM)
 	$(MAKE) -C tier4 clean PLATFORM=$(PLATFORM)
 	$(MAKE) -C tier5 clean PLATFORM=$(PLATFORM)
+	rm -f gpubench
 
-list:
-	python3 scripts/gpubench list
+list: gpubench
+	$(GPUBENCH) list
 
-validate:
-	python3 scripts/gpubench validate
+validate: gpubench
+	$(GPUBENCH) validate
 
-run:
-	python3 scripts/gpubench run
+run: gpubench
+	$(GPUBENCH) run
 
-info:
-	python3 scripts/gpubench info
+info: gpubench
+	$(GPUBENCH) info

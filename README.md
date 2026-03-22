@@ -145,8 +145,8 @@ gpu_benchmarks/
 │   ├── multi_agent_bench/
 │   ├── sdxl_inference/
 │   └── gptneox_train/
-├── scripts/                        # CLI tool
-│   └── gpubench                    # gpubench CLI (Python, no dependencies)
+├── cmd/
+│   └── gpubench/                   # gpubench CLI (Go)
 └── docs/                          # Detailed specifications
     ├── cli_design.md
     ├── output_protocol.md
@@ -346,11 +346,14 @@ make clean
 
 ## gpubench CLI
 
-The suite ships with `gpubench`, a single-file Python CLI (no pip dependencies) that discovers, compiles, runs, and validates all benchmarks. Results are stored in an SQLite database.
+The suite ships with `gpubench`, a Go CLI tool that discovers, compiles, runs, and validates all benchmarks. Results are stored in an SQLite database.
 
 ```bash
-# Location
-scripts/gpubench
+# Build the CLI
+go build -o gpubench ./cmd/gpubench
+
+# Or use Make (builds automatically when needed)
+make list
 ```
 
 ### Commands
@@ -366,47 +369,50 @@ scripts/gpubench
 ### Quick Start
 
 ```bash
+# Build the CLI binary
+go build -o gpubench ./cmd/gpubench
+
 # List all benchmarks
-python3 scripts/gpubench list
+./gpubench list
 
 # List benchmarks in a specific tier
-python3 scripts/gpubench list --tier 1
+./gpubench list --tier 1
 
 # Show detected platform info
-python3 scripts/gpubench info
+./gpubench info
 
 # Compile all C++ benchmarks (auto-detect platform)
-python3 scripts/gpubench compile
+./gpubench compile
 
 # Validate every params.json
-python3 scripts/gpubench validate
+./gpubench validate
 
 # Run all benchmarks (7 reps, results → results.db)
-python3 scripts/gpubench run
+./gpubench run
 
 # Run a single benchmark with 3 reps
-python3 scripts/gpubench run --benchmark shoc_gemm --reps 3
+./gpubench run --benchmark shoc_gemm --reps 3
 
 # Run only Tier 1 benchmarks
-python3 scripts/gpubench run --tier 1
+./gpubench run --tier 1
 
 # Preview the execution plan without running
-python3 scripts/gpubench run --dry-run
+./gpubench run --dry-run
 
 # Override scaling parameter values
-python3 scripts/gpubench run --benchmark fp32_throughput --scaling-values 64,256,1024
+./gpubench run --benchmark fp32_throughput --scaling-values 64,256,1024
 
 # Full parameter sweep (scaling × non-scaling Cartesian product)
-python3 scripts/gpubench run --sweep-non-scaling
+./gpubench run --sweep-non-scaling
 ```
 
 ### Makefile Shortcuts
 
 ```bash
-make list       # python3 scripts/gpubench list
-make validate   # python3 scripts/gpubench validate
-make run        # python3 scripts/gpubench run
-make info       # python3 scripts/gpubench info
+make list       # ./gpubench list
+make validate   # ./gpubench validate
+make run        # ./gpubench run
+make info       # ./gpubench info
 ```
 
 ### JSON-Lines Output Protocol

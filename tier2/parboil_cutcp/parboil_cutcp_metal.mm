@@ -260,9 +260,9 @@ int main(int argc, char* argv[]) {
     double ginteractions_per_sec = interactions / (avg_ms * 1e-3) / 1e9;
 
     printf("{\"type\":\"kernel\",\"name\":\"cutcp_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_atoms\":%d,\"block_size\":%d,"
+           "\"params\":{\"num_atoms\":%d,\"iterations\":%d,\"block_size\":%d,"
            "\"grid_spacing\":%.2f,\"cutoff_radius\":%.1f}}\n",
-           avg_ms, num_atoms, block_size, grid_spacing, cutoff);
+           avg_ms, num_atoms, iters, block_size, grid_spacing, cutoff);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"ginteractions_per_sec\",\"value\":%.4f}]}\n",

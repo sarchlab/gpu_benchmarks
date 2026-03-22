@@ -311,9 +311,9 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"lbm_collide_stream_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"grid_dim\":%d,\"block_size\":%d,"
+           "\"params\":{\"grid_dim\":%d,\"iterations\":%d,\"block_size\":%d,"
            "\"num_timesteps\":%d,\"tau\":%.2f}}\n",
-           avg_ms, grid_dim, block_size, num_timesteps, tau);
+           avg_ms, grid_dim, iters, block_size, num_timesteps, tau);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"mlups\",\"value\":%.2f}]}\n",

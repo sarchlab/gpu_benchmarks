@@ -59,6 +59,17 @@
         256,
         512
       ]
+    },
+    {
+      "name": "precision",
+      "description": "Floating-point precision for computation",
+      "type": "enum",
+      "default": "float",
+      "values": [
+        "half",
+        "float",
+        "double"
+      ]
     }
   ],
   "kernels": [

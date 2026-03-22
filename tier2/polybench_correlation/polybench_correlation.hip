@@ -197,6 +197,7 @@ int main(int argc, char** argv) {
     int N          = parseIntParam(argc, argv, "--size", 1024);
     int iters      = parseIntParam(argc, argv, "--iterations", 5);
     int block_size = parseIntParam(argc, argv, "--block_size", 256);
+    const char* precision = "float";
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
@@ -205,6 +206,8 @@ int main(int argc, char** argv) {
     if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_precision");
+    if (env_val) precision = env_val;
 
     int M = N;
 
@@ -304,17 +307,21 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"mean_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
-           avg_mean, N, iters, block_size);
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_mean, N, iters, block_size, precision);
     printf("{\"type\":\"kernel\",\"name\":\"stddev_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
-           avg_stddev, N, iters, block_size);
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_stddev, N, iters, block_size, precision);
     printf("{\"type\":\"kernel\",\"name\":\"normalize_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
-           avg_norm, N, iters, block_size);
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_norm, N, iters, block_size, precision);
     printf("{\"type\":\"kernel\",\"name\":\"correlation_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
-           avg_corr, N, iters, block_size);
+           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"precision\":\"%s\"}}\n",
+           avg_corr, N, iters, block_size, precision);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[]}\n",
            total_ms);

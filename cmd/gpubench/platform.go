@@ -1,0 +1,218 @@
+package main
+
+import (
+	"math"
+	"os"
+	"os/exec"
+	"runtime"
+	"strconv"
+	"strings"
+	"sync"
+)
+
+// PlatformInfo holds detected platform information.
+type PlatformInfo struct {
+	PlatformType   string   `json:"platform_type"`
+	Hostname       string   `json:"hostname"`
+	OS             string   `json:"os"`
+	CPUModel       *string  `json:"cpu_model"`
+	CPUCores       *int     `json:"cpu_cores"`
+	RAMGB          *float64 `json:"ram_gb"`
+	GPUModel       string   `json:"gpu_model"`
+	GPUVramGB      *float64 `json:"gpu_vram_gb"`
+	GPUCount       int      `json:"gpu_count"`
+	DriverVersion  *string  `json:"driver_version"`
+	RuntimeVersion *string  `json:"runtime_version"`
+	Compiler       *string  `json:"compiler"`
+	PythonVersion  string   `json:"python_version"` // stores Go version for schema compat
+}
+
+var (
+	platformCache *PlatformInfo
+	platformOnce  sync.Once
+)
+
+// detectPlatform returns "metal", "rocm", or "cuda".
+func detectPlatform() string {
+	if runtime.GOOS == "darwin" {
+		return "metal"
+	}
+	if info, err := os.Stat("/opt/rocm"); err == nil && info.IsDir() {
+		return "rocm"
+	}
+	return "cuda"
+}
+
+// runCmd runs a shell command and returns stdout stripped, or empty string on failure.
+func runCmd(cmd string) string {
+	out, err := exec.Command("sh", "-c", cmd).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func strPtr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func intPtr(i int) *int {
+	return &i
+}
+
+func floatPtr(f float64) *float64 {
+	return &f
+}
+
+// collectPlatformInfo gathers platform info. Caches result.
+func collectPlatformInfo(platformType string) *PlatformInfo {
+	platformOnce.Do(func() {
+		if platformType == "" {
+			platformType = detectPlatform()
+		}
+
+		hostname, _ := os.Hostname()
+
+		info := &PlatformInfo{
+			PlatformType:  platformType,
+			Hostname:      hostname,
+			GPUModel:      "Unknown GPU",
+			GPUCount:      1,
+			PythonVersion: runtime.Version(), // Go version stored in python_version field
+		}
+
+		// OS detection
+		osStr := runCmd("uname -srm")
+		if osStr == "" {
+			osStr = runtime.GOOS + " " + runtime.GOARCH
+		}
+		info.OS = osStr
+
+		// CPU/RAM detection
+		if runtime.GOOS == "darwin" {
+			cpuModel := runCmd("sysctl -n machdep.cpu.brand_string")
+			if cpuModel == "" {
+				cpuModel = runCmd("/usr/sbin/sysctl -n machdep.cpu.brand_string")
+			}
+			info.CPUModel = strPtr(cpuModel)
+
+			coresStr := runCmd("sysctl -n hw.logicalcpu")
+			if coresStr == "" {
+				coresStr = runCmd("/usr/sbin/sysctl -n hw.logicalcpu")
+			}
+			if cores, err := strconv.Atoi(coresStr); err == nil {
+				info.CPUCores = intPtr(cores)
+			}
+
+			memStr := runCmd("sysctl -n hw.memsize")
+			if memStr == "" {
+				memStr = runCmd("/usr/sbin/sysctl -n hw.memsize")
+			}
+			if mem, err := strconv.ParseInt(memStr, 10, 64); err == nil {
+				gb := math.Round(float64(mem)/(1024*1024*1024)*10) / 10
+				info.RAMGB = floatPtr(gb)
+			}
+		} else {
+			cpu := runCmd("grep -m1 'model name' /proc/cpuinfo | sed 's/model name.*: //'")
+			info.CPUModel = strPtr(cpu)
+
+			coresStr := runCmd("nproc 2>/dev/null")
+			if cores, err := strconv.Atoi(coresStr); err == nil {
+				info.CPUCores = intPtr(cores)
+			}
+
+			memStr := runCmd("grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}'")
+			if mem, err := strconv.ParseInt(memStr, 10, 64); err == nil {
+				gb := math.Round(float64(mem)/(1024*1024)*10) / 10
+				info.RAMGB = floatPtr(gb)
+			}
+		}
+
+		// GPU detection
+		switch platformType {
+		case "cuda":
+			gpu := runCmd("nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1")
+			if gpu != "" {
+				info.GPUModel = gpu
+			}
+			vram := runCmd("nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1")
+			if vram != "" {
+				if v, err := strconv.ParseFloat(strings.TrimSpace(vram), 64); err == nil {
+					gb := math.Round(v/1024*10) / 10
+					info.GPUVramGB = floatPtr(gb)
+				}
+			}
+			drv := runCmd("nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1")
+			info.DriverVersion = strPtr(drv)
+			nvcc := runCmd("nvcc --version 2>/dev/null | grep 'release'")
+			if nvcc != "" {
+				info.RuntimeVersion = strPtr(strings.TrimSpace(nvcc))
+				info.Compiler = strPtr(strings.TrimSpace(nvcc))
+			}
+			cnt := runCmd("nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l")
+			if cnt != "" {
+				if c, err := strconv.Atoi(strings.TrimSpace(cnt)); err == nil {
+					info.GPUCount = c
+				}
+			}
+
+		case "rocm":
+			gpu := runCmd("rocm-smi --showproductname 2>/dev/null | grep 'Card series' | head -1 | sed 's/.*: //'")
+			if gpu != "" {
+				info.GPUModel = gpu
+			}
+			drv := runCmd("cat /opt/rocm/.info/version 2>/dev/null")
+			info.DriverVersion = strPtr(drv)
+			hipcc := runCmd("hipcc --version 2>/dev/null | head -1")
+			if hipcc != "" {
+				info.RuntimeVersion = strPtr(hipcc)
+				info.Compiler = strPtr(hipcc)
+			}
+
+		case "metal":
+			sp := runCmd("system_profiler SPDisplaysDataType 2>/dev/null")
+			if sp != "" {
+				for _, line := range strings.Split(sp, "\n") {
+					ls := strings.TrimSpace(line)
+					if strings.HasPrefix(ls, "Chipset Model:") {
+						parts := strings.SplitN(ls, ":", 2)
+						if len(parts) == 2 {
+							info.GPUModel = strings.TrimSpace(parts[1])
+						}
+					} else if strings.Contains(ls, "VRAM") && strings.Contains(ls, ":") {
+						parts := strings.SplitN(ls, ":", 2)
+						if len(parts) == 2 {
+							fields := strings.Fields(strings.TrimSpace(parts[1]))
+							if len(fields) > 0 {
+								if v, err := strconv.ParseFloat(fields[0], 64); err == nil {
+									info.GPUVramGB = floatPtr(v)
+								}
+							}
+						}
+					} else if strings.Contains(ls, "Metal") && strings.Contains(ls, ":") {
+						parts := strings.SplitN(ls, ":", 2)
+						if len(parts) == 2 {
+							info.DriverVersion = strPtr(strings.TrimSpace(parts[1]))
+						}
+					}
+				}
+			}
+			if info.GPUModel == "Unknown GPU" && info.CPUModel != nil {
+				info.GPUModel = *info.CPUModel
+			}
+			macVer := runCmd("sw_vers -productVersion 2>/dev/null")
+			if macVer != "" {
+				s := "macOS " + macVer
+				info.RuntimeVersion = &s
+			}
+			clang := runCmd("clang++ --version 2>/dev/null | head -1")
+			info.Compiler = strPtr(clang)
+		}
+
+		platformCache = info
+	})
+	return platformCache
+}

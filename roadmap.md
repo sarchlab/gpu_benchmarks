@@ -457,6 +457,8 @@ clean:
 | 158 | Planning | Athena | M29 complete. Issue #224 closed. Defining M30 (complete suites). |
 | 159–168 | Implementation+Verification | Ares+Apollo | M30 implemented (13 Tier 2 benchmarks) + fix rounds. Merged PR #28. |
 | 169 | Planning | Athena | M30 complete. 120 benchmarks. Defining M31 (MLPerf). |
+| 170–177 | Implementation+Verification | Ares+Apollo | M31 implemented (5 MLPerf-inspired Tier 5 benchmarks). Fix rounds for DLRM offsets + UNet3D params. Merged PR #29. |
+| 178 | Planning | Athena | M31 complete. 125 benchmarks. Issue #228 closed. Defining M32 (Docker CI + Result Persistence). |
 
 ---
 
@@ -621,36 +623,31 @@ New batch of human requirements:
 **Branch:** `ares/m30-complete-suites` (merged to main via PR #28)
 **Note:** Total benchmark count now 120. Issue #226 partially addressed — highest-priority gaps filled; remaining gaps in each suite are Low priority or covered by other tiers/suites.
 
-### M31 — MLPerf Benchmarks for Tier 5 (Issue #228)
+### M31 — MLPerf Benchmarks for Tier 5 (Issue #228) ✅ COMPLETE (cycles used: ~3)
 **Goal:** Add 5 MLPerf-inspired benchmarks to fill gaps in Tier 5 ML coverage.
+**Deliverables (completed):** dlrm_inference, unet3d_inference, retinanet_inference, gnn_inference, gptj_inference — all with bench.py + bench_mps.py + Makefile + README + params.json. All verified on MPS.
+**Branch:** `ares/m31-mlperf-tier5` (merged to main via PR #29)
+**Note:** Issue #228 closed. Total benchmark count now 125.
 
-**Tier 5 (5 new benchmarks):**
-1. `tier5/dlrm_inference/` — DLRM (Deep Learning Recommendation Model) inference with synthetic tabular data. Embedding tables + MLP.
-2. `tier5/unet3d_inference/` — 3D U-Net inference for medical image segmentation. Synthetic 3D volumes.
-3. `tier5/retinanet_inference/` — RetinaNet object detection inference. Synthetic images.
-4. `tier5/gnn_inference/` — Graph Neural Network (R-GAT proxy) inference on synthetic graphs. PyG/DGL.
-5. `tier5/gptj_inference/` — GPT-J 6B inference (or proxy). Text generation benchmark.
-
-**Budget:** 4 cycles
-
-### M32 — Docker CI + Result Persistence (Issues #223, #229)
-**Goal:** Set up Docker-based CI for compilation verification and design a result persistence/sharing mechanism.
+### M32 — Docker CI + Result Persistence + README Update (Issues #223, #229)
+**Goal:** Set up Docker-based CI for compilation verification, design a result persistence/sharing mechanism, and update README to reflect current 125 benchmarks.
 
 **Deliverables:**
-1. Docker CI: Dockerfiles for NVIDIA CUDA and AMD ROCm environments. GitHub Actions workflow to compile all benchmarks.
-2. Result persistence: Design and implement a mechanism for users to submit benchmark results (e.g., via GitHub PR to a results repository, or a standardized export format).
+1. **Docker CI**: Dockerfiles for NVIDIA CUDA and AMD ROCm environments. GitHub Actions workflow to compile all C++ benchmarks (tiers 1-4). Apple Metal compilation may need macOS CI runners.
+2. **Result persistence**: Design and implement a mechanism for users to submit benchmark results. Options: standardized export format (`gpubench export`), contributing results via GitHub PR to a `results/` directory, or a shared results format spec in `docs/`.
+3. **README update**: Update benchmark counts, add M30+M31 benchmarks to listings, update directory layout.
 
-**Budget:** 4 cycles
+**Budget:** 5 cycles
 
 ---
 
 ## Current Status
 
-**PLANNING.** M30 complete (PR #28 merged). 120 benchmarks across 5 tiers. Defining M31 (MLPerf benchmarks).
-- 120 benchmarks across 5 tiers (12 Tier 1, 64 Tier 2, 11 Tier 3, 7 Tier 4, 26 Tier 5)
+**PLANNING.** M31 complete (PR #29 merged). 125 benchmarks across 5 tiers. Defining M32 (Docker CI + Result Persistence).
+- 125 benchmarks across 5 tiers (12 Tier 1, 64 Tier 2, 11 Tier 3, 7 Tier 4, 31 Tier 5)
 - Full parameterization with params.json for all benchmarks (M21)
 - Go CLI tool (gpubench) with list, compile, run, info, validate commands (M22–M27)
 - Native CUDA .cu files for all C++ benchmarks (M29)
 - SQLite output with platform info, kernel-level timing, computed metrics
-- All previous human issues (#10, #18, #100, #101, #142, #143, #144, #217, #221, #224) closed
-- Open human issues: #223 (Docker CI), #226 (complete suites — partially addressed by M30), #228 (MLPerf), #229 (result persistence)
+- All previous human issues (#10, #18, #100, #101, #142, #143, #144, #217, #221, #224, #228) closed
+- Open human issues: #223 (Docker CI), #226 (complete suites — mostly addressed by M30), #229 (result persistence)

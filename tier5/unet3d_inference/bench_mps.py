@@ -85,15 +85,13 @@ def benchmark():
 
     # Read parameters from environment variables
     batch_size = int(os.environ.get('BENCH_PARAM_batch_size', '2'))
-    volume_depth = int(os.environ.get('BENCH_PARAM_volume_depth', '128'))
-    volume_height = int(os.environ.get('BENCH_PARAM_volume_height', '128'))
-    volume_width = int(os.environ.get('BENCH_PARAM_volume_width', '128'))
+    volume_size = int(os.environ.get('BENCH_PARAM_volume_size', '128'))
     in_channels = int(os.environ.get('BENCH_PARAM_in_channels', '1'))
     num_classes = int(os.environ.get('BENCH_PARAM_num_classes', '3'))
     precision = os.environ.get('BENCH_PARAM_precision', 'fp32')
 
     print(f"Running unet3d_inference (MPS) with batch_size={batch_size}, "
-          f"volume={volume_depth}x{volume_height}x{volume_width}, "
+          f"volume_size={volume_size}, "
           f"in_channels={in_channels}, num_classes={num_classes}, "
           f"precision={precision}", file=sys.stderr)
 
@@ -103,8 +101,8 @@ def benchmark():
     if precision == 'fp16':
         model = model.half()
 
-    x = torch.randn(batch_size, in_channels, volume_depth, volume_height,
-                     volume_width, device=device)
+    x = torch.randn(batch_size, in_channels, volume_size, volume_size,
+                     volume_size, device=device)
     if precision == 'fp16':
         x = x.half()
 
@@ -139,9 +137,7 @@ def benchmark():
 
     params = {
         "batch_size": batch_size,
-        "volume_depth": volume_depth,
-        "volume_height": volume_height,
-        "volume_width": volume_width,
+        "volume_size": volume_size,
         "in_channels": in_channels,
         "num_classes": num_classes,
         "precision": precision,

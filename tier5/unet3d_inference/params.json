@@ -39,34 +39,8 @@
   },
   "non_scaling_params": [
     {
-      "name": "volume_depth",
-      "description": "Depth (D) of the input 3D volume",
-      "type": "int",
-      "default": 128,
-      "values": [
-        32,
-        64,
-        128,
-        192,
-        256
-      ]
-    },
-    {
-      "name": "volume_height",
-      "description": "Height (H) of the input 3D volume",
-      "type": "int",
-      "default": 128,
-      "values": [
-        32,
-        64,
-        128,
-        192,
-        256
-      ]
-    },
-    {
-      "name": "volume_width",
-      "description": "Width (W) of the input 3D volume",
+      "name": "volume_size",
+      "description": "Size of each spatial dimension (D=H=W) of the input 3D volume",
       "type": "int",
       "default": 128,
       "values": [

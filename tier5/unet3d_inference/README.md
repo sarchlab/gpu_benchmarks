@@ -33,9 +33,7 @@ make run PLATFORM=metal
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `BENCH_PARAM_batch_size` | 2 | Number of 3D volumes per batch |
-| `BENCH_PARAM_volume_depth` | 128 | Depth of input volume |
-| `BENCH_PARAM_volume_height` | 128 | Height of input volume |
-| `BENCH_PARAM_volume_width` | 128 | Width of input volume |
+| `BENCH_PARAM_volume_size` | 128 | Size of each spatial dimension (D=H=W) of the input 3D volume |
 | `BENCH_PARAM_in_channels` | 1 | Number of input channels |
 | `BENCH_PARAM_num_classes` | 3 | Number of segmentation classes |
 | `BENCH_PARAM_precision` | fp32 | Precision mode (fp32, fp16, amp) |

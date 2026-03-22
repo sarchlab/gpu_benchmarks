@@ -32,8 +32,8 @@ TARGET := shoc_devicememory
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := shoc_devicememory.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := shoc_devicememory.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

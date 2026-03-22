@@ -32,8 +32,8 @@ TARGET := parboil_spmv
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := parboil_spmv.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := parboil_spmv.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

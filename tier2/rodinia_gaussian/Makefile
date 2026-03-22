@@ -32,8 +32,8 @@ TARGET := rodinia_gaussian
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := rodinia_gaussian.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := rodinia_gaussian.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

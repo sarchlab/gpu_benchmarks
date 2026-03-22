@@ -528,13 +528,47 @@ All benchmarks support 3 platforms (NVIDIA/CUDA, AMD/ROCm, Apple/Metal), use Mak
 
 **Phase 2 complete (M21–M26).** All 107 benchmarks parameterized with params.json. gpubench CLI tool built (list, compile, run, validate, info). SQLite output with platform info, session tracking, per-kernel timing, computed metrics. All human issues (#142, #143, #144) closed.
 
-## 🎉 PROJECT COMPLETE
+---
 
-**Final stats:**
-- **107 benchmarks** across 5 tiers (12 T1 + 51 T2 + 11 T3 + 7 T4 + 26 T5)
-- **26 milestones** completed over ~141 cycles
-- **24 pull requests** merged
-- **3 platforms** supported: NVIDIA/CUDA, AMD/ROCm, Apple/Metal
-- **gpubench CLI** for automated compilation, execution, and result collection
-- **SQLite database** with platform info, kernel-level timing, parameterized sweeps
-- All human requirements fulfilled
+## Phase 3 — CLI Rewrite in Go (from human, Issue #217)
+
+### M27 — Rewrite gpubench CLI in Go (IN PROGRESS)
+**Goal:** Reimplement the `scripts/gpubench` Python CLI as a Go program with full feature parity.
+
+**Requirements:**
+- Go module at `cmd/gpubench/` with `go.mod` and `go.sum`
+- Single binary output: `gpubench`
+- Same 5 commands: `list`, `compile`, `run`, `info`, `validate`
+- Same flags per command (exact same CLI interface)
+- Same SQLite schema (from `docs/schema.sql`)
+- Same JSON-lines output protocol parsing
+- Same exit codes (0, 1, 2, 3, 4, 130)
+- Same platform detection logic (Darwin→metal, /opt/rocm→rocm, else→cuda)
+- Same benchmark discovery (walk `tier*/*/params.json`)
+- Same parameter sweeping (scaling × non-scaling defaults, or full Cartesian with `--sweep-non-scaling`)
+- Same BENCH_PARAM_* environment variable passing
+- Graceful SIGINT handling (finish current run, save partial results)
+- Update Makefile targets (`make list`, `make run`, etc.) to use Go binary
+- Update README.md CLI section to reflect Go implementation
+- Remove old Python `scripts/gpubench`
+- Update `docs/cli_design.md` to reflect Go implementation
+
+**Acceptance criteria:**
+1. `go build ./cmd/gpubench` produces a working binary
+2. `gpubench list` output matches Python version (same format, same benchmarks)
+3. `gpubench validate` passes all 107 benchmarks
+4. `gpubench info` shows correct platform info
+5. `gpubench compile --tier 1 --platform metal` compiles tier 1 (on macOS)
+6. `gpubench run --dry-run` shows correct execution plan
+7. SQLite database schema matches `docs/schema.sql`
+8. All exit codes match specification
+
+**Budget:** 6 cycles
+
+---
+
+## Lessons Learned
+
+- **Phase 1 (M1–M20):** 107 benchmarks across 5 tiers completed in ~60 cycles. Scaling workers helps — parallel benchmark implementation was effective.
+- **Phase 2 (M21–M26):** Parameterization and CLI took ~30 cycles. Clear output protocols (JSON-lines) made integration smooth.
+- **Phase 3 (M27):** CLI rewrite in Go per human request. Well-documented existing implementation makes this straightforward — the Go version just needs to match behavior exactly.

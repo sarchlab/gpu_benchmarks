@@ -44,9 +44,9 @@ For every benchmark:
 3. **Identify parameter values.** For non-scaling factors, select 3–5 values per parameter. For scaling factors, select 20–30 values.
 4. **Document the parameter selection.**
 
-## CLI Requirements (from human, Issue #144)
+## CLI Requirements (from human, Issues #144 and #217)
 
-Build a CLI tool that:
+Build a CLI tool **implemented in Go** (from human, Issue #217) that:
 1. **Compiles everything** — or a specific suite/benchmark.
 2. **Runs benchmarks with repetitions** — default 7 repetitions per configuration.
 3. **Supports filtering** — run one suite or one benchmark.
@@ -54,6 +54,8 @@ Build a CLI tool that:
    - Platform information (as detailed as possible: GPU model, driver version, OS, etc.)
    - Execution results: tier, suite, benchmark, scaling parameter value, non-scaling parameter values, execution time
    - Kernel-level execution times (one kernel per entry)
+
+The CLI must be a Go program that compiles to a single binary. It must maintain full feature parity with the previous Python implementation: same commands (list, compile, run, info, validate), same flags, same SQLite schema, same JSON-lines output protocol parsing, same exit codes.
 
 ## Tier 5 — Modern ML Workloads (from human, Issue #100)
 

@@ -32,8 +32,8 @@ TARGET := cudnn_batchnorm
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := cudnn_batchnorm.hip
-  CFLAGS := -O3 -std=c++14 -x cu -DUSE_CUDNN
+  SRC    := cudnn_batchnorm.cu
+  CFLAGS := -O3 -std=c++14
   LIBS   := -lcudnn
 
 else ifeq ($(PLATFORM),rocm)

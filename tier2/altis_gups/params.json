@@ -1,0 +1,93 @@
+{
+  "benchmark": "altis_gups",
+  "tier": 2,
+  "suite": "altis",
+  "description": "GUPS (Giga Updates Per Second) random memory access throughput benchmark. Performs random read-modify-write (XOR) operations on a large table of 64-bit entries using xorshift64 PRNG for index generation.",
+  "scaling_param": {
+    "name": "table_size",
+    "description": "Number of 64-bit entries in the table",
+    "type": "int",
+    "values": [
+      65536,
+      81920,
+      98304,
+      131072,
+      163840,
+      196608,
+      262144,
+      327680,
+      393216,
+      524288,
+      655360,
+      786432,
+      1048576,
+      1310720,
+      1572864,
+      2097152,
+      3145728,
+      4194304,
+      6291456,
+      8388608,
+      12582912,
+      16777216,
+      25165824,
+      33554432,
+      50331648,
+      67108864
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
+    },
+    {
+      "name": "num_updates",
+      "description": "Number of random updates per thread",
+      "type": "int",
+      "default": 128,
+      "values": [
+        32,
+        64,
+        128,
+        256,
+        512
+      ]
+    },
+    {
+      "name": "num_threads",
+      "description": "Total number of threads launched",
+      "type": "int",
+      "default": 65536,
+      "values": [
+        16384,
+        32768,
+        65536,
+        131072,
+        262144
+      ]
+    },
+    {
+      "name": "iterations",
+      "description": "Timed benchmark iterations",
+      "type": "int",
+      "default": 5,
+      "values": [
+        3,
+        5,
+        10
+      ]
+    }
+  ],
+  "kernels": [
+    "gups_kernel"
+  ]
+}

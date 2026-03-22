@@ -179,7 +179,23 @@ func main() {
 	validateCmd.Flags().String("suite", "", "Filter by suite")
 	validateCmd.Flags().String("benchmark", "", "Filter by benchmark name")
 
-	rootCmd.AddCommand(listCmd, compileCmd, runCmd, infoCmd, validateCmd)
+	// --- export command ---
+	exportCmd := &cobra.Command{
+		Use:   "export",
+		Short: "Export benchmark results as JSON",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			db, _ := cmd.Flags().GetString("db")
+			format, _ := cmd.Flags().GetString("format")
+			session, _ := cmd.Flags().GetString("session")
+			os.Exit(cmdExport(db, format, session))
+			return nil
+		},
+	}
+	exportCmd.Flags().String("db", DefaultDB, "SQLite database file")
+	exportCmd.Flags().String("format", "json", "Output format (json)")
+	exportCmd.Flags().String("session", "", "Export specific session ID")
+
+	rootCmd.AddCommand(listCmd, compileCmd, runCmd, infoCmd, validateCmd, exportCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(ExitUsage)

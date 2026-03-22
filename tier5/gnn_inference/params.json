@@ -1,0 +1,102 @@
+{
+  "benchmark": "gnn_inference",
+  "tier": 5,
+  "suite": "ml_inference",
+  "description": "Graph Neural Network inference benchmark using an R-GAT (Relational Graph Attention) proxy model. Multi-head attention over edges with scatter-based aggregation on synthetic random graphs. Pure PyTorch implementation without PyG or DGL. Reports nodes/sec throughput.",
+  "language": "python",
+  "scaling_param": {
+    "name": "num_nodes",
+    "description": "Number of nodes in the synthetic graph",
+    "type": "int",
+    "values": [
+      100,
+      200,
+      500,
+      1000,
+      1500,
+      2000,
+      3000,
+      4000,
+      5000,
+      6000,
+      8000,
+      10000,
+      12000,
+      15000,
+      20000,
+      25000,
+      30000,
+      40000,
+      50000,
+      60000,
+      80000,
+      100000,
+      150000,
+      200000
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "num_edges",
+      "description": "Number of directed edges in the synthetic graph",
+      "type": "int",
+      "default": 50000,
+      "values": [
+        10000,
+        50000,
+        200000,
+        500000
+      ]
+    },
+    {
+      "name": "hidden_dim",
+      "description": "Hidden feature dimension per node",
+      "type": "int",
+      "default": 128,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
+    },
+    {
+      "name": "num_heads",
+      "description": "Number of attention heads per GAT layer",
+      "type": "int",
+      "default": 4,
+      "values": [
+        1,
+        2,
+        4,
+        8
+      ]
+    },
+    {
+      "name": "num_layers",
+      "description": "Number of GAT layers in the model",
+      "type": "int",
+      "default": 3,
+      "values": [
+        1,
+        2,
+        3,
+        5
+      ]
+    },
+    {
+      "name": "precision",
+      "description": "Floating-point precision mode for inference",
+      "type": "enum",
+      "default": "fp32",
+      "values": [
+        "fp32",
+        "fp16",
+        "amp"
+      ]
+    }
+  ],
+  "kernels": [
+    "forward"
+  ]
+}

@@ -1,0 +1,101 @@
+name: Compile Benchmarks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  compile-cuda:
+    name: Compile (CUDA)
+    runs-on: ubuntu-latest
+    container: nvidia/cuda:12.6.3-devel-ubuntu22.04
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y git wget make gcc g++
+
+      - name: Install Go
+        run: |
+          wget -q https://go.dev/dl/go1.23.4.linux-amd64.tar.gz
+          tar -C /usr/local -xzf go1.23.4.linux-amd64.tar.gz
+          rm go1.23.4.linux-amd64.tar.gz
+          echo "/usr/local/go/bin" >> "$GITHUB_PATH"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build gpubench
+        run: go build -o gpubench ./cmd/gpubench
+
+      - name: Compile Tier 1 (CUDA)
+        run: ./gpubench compile --tier 1 --platform cuda
+
+      - name: Compile Tier 2 (CUDA)
+        run: ./gpubench compile --tier 2 --platform cuda
+
+      - name: Compile Tier 3 (CUDA)
+        run: ./gpubench compile --tier 3 --platform cuda
+
+      - name: Compile Tier 4 (CUDA)
+        run: ./gpubench compile --tier 4 --platform cuda
+
+  compile-rocm:
+    name: Compile (ROCm)
+    runs-on: ubuntu-latest
+    container: rocm/dev-ubuntu-22.04:6.0
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y git wget make gcc g++
+
+      - name: Install Go
+        run: |
+          wget -q https://go.dev/dl/go1.23.4.linux-amd64.tar.gz
+          tar -C /usr/local -xzf go1.23.4.linux-amd64.tar.gz
+          rm go1.23.4.linux-amd64.tar.gz
+          echo "/usr/local/go/bin" >> "$GITHUB_PATH"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build gpubench
+        run: go build -o gpubench ./cmd/gpubench
+
+      - name: Compile Tier 1 (ROCm)
+        run: ./gpubench compile --tier 1 --platform rocm
+
+      - name: Compile Tier 2 (ROCm)
+        run: ./gpubench compile --tier 2 --platform rocm
+
+      - name: Compile Tier 3 (ROCm)
+        run: ./gpubench compile --tier 3 --platform rocm
+
+      - name: Compile Tier 4 (ROCm)
+        run: ./gpubench compile --tier 4 --platform rocm
+
+  # compile-metal:
+  #   name: Compile (Metal)
+  #   runs-on: macos-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Set up Go
+  #       uses: actions/setup-go@v5
+  #       with:
+  #         go-version: '1.23'
+  #
+  #     - name: Build gpubench
+  #       run: go build -o gpubench ./cmd/gpubench
+  #
+  #     - name: Compile Tier 1 (Metal)
+  #       run: ./gpubench compile --tier 1 --platform metal
+  #
+  #     - name: Compile Tier 2 (Metal)
+  #       run: ./gpubench compile --tier 2 --platform metal
+  #
+  #     - name: Compile Tier 3 (Metal)
+  #       run: ./gpubench compile --tier 3 --platform metal

@@ -6,7 +6,7 @@ A comprehensive GPGPU benchmark suite covering microbenchmarks, application work
 
 ## Overview
 
-This suite is organized into five tiers of increasing complexity and scope, allowing researchers and engineers to evaluate GPU hardware and software stacks at every level — from raw memory bandwidth to end-to-end ML training throughput.
+This suite contains **125 benchmarks across five tiers** of increasing complexity and scope, allowing researchers and engineers to evaluate GPU hardware and software stacks at every level — from raw memory bandwidth to end-to-end ML training throughput.
 
 ---
 
@@ -18,7 +18,7 @@ This suite is organized into five tiers of increasing complexity and scope, allo
 | **Tier 2** | Application Benchmarks | Classic GPU benchmark suites: SHOC, PolyBench-GPU, Rodinia, Parboil, HeteroMark, CUDA SDK Extended, Tango, NPB-GPU, Altis, Lonestar GPU, Graph Analytics, Chai |
 | **Tier 3** | Library Benchmarks | Vendor and third-party library kernels: cuBLAS, CUTLASS, cuFFT, cuSPARSE, cuDNN |
 | **Tier 4** | Alternative Languages | Non-CUDA implementations: Triton, BabelStream |
-| **Tier 5** | ML Workloads | End-to-end machine learning training/inference and LLM benchmarks: ResNet-50, BERT, GPT-2, ViT, NanoGPT, SDPA, torch.compile, vLLM, llama.cpp, Ollama, LLaMA, DeepSeek, Qwen, GLM, Phi, Mistral, BERT fine-tune, Whisper, Stable Diffusion, MoE, RAG, CoT, Multi-Agent, SDXL, GPT-NeoX |
+| **Tier 5** | ML Workloads | End-to-end machine learning training/inference and LLM benchmarks: ResNet-50, BERT, GPT-2, ViT, NanoGPT, SDPA, torch.compile, vLLM, llama.cpp, Ollama, LLaMA, DeepSeek, Qwen, GLM, Phi, Mistral, BERT fine-tune, Whisper, Stable Diffusion, MoE, RAG, CoT, Multi-Agent, SDXL, GPT-NeoX, DLRM, GNN, GPT-J, RetinaNet, UNet3D |
 
 ---
 
@@ -42,7 +42,7 @@ gpu_benchmarks/
 │   ├── shared_mem_bandwidth/
 │   ├── atomic_operations/
 │   └── warp_shuffle/
-├── tier2/                          # Application benchmarks (51)
+├── tier2/                          # Application benchmarks (64)
 │   ├── Makefile
 │   ├── shoc_devicememory/
 │   ├── shoc_fft/
@@ -54,24 +54,32 @@ gpu_benchmarks/
 │   ├── shoc_stencil2d/
 │   ├── shoc_triad/
 │   ├── polybench_2dconv/
+│   ├── polybench_2mm/
+│   ├── polybench_3dconv/
 │   ├── polybench_3mm/
 │   ├── polybench_atax/
 │   ├── polybench_bicg/
+│   ├── polybench_correlation/
 │   ├── polybench_fdtd2d/
 │   ├── polybench_gemm/
 │   ├── polybench_gramschmidt/
 │   ├── polybench_jacobi2d/
 │   ├── polybench_mvt/
+│   ├── polybench_syr2k/
 │   ├── rodinia_backprop/
 │   ├── rodinia_bfs/
 │   ├── rodinia_gaussian/
 │   ├── rodinia_hotspot/
+│   ├── rodinia_hotspot3d/
 │   ├── rodinia_kmeans/
+│   ├── rodinia_lavamd/
 │   ├── rodinia_lud/
 │   ├── rodinia_nw/
 │   ├── rodinia_pathfinder/
 │   ├── rodinia_srad/
+│   ├── parboil_cutcp/
 │   ├── parboil_histogram/
+│   ├── parboil_lbm/
 │   ├── parboil_sgemm/
 │   ├── parboil_spmv/
 │   ├── parboil_stencil/
@@ -84,13 +92,18 @@ gpu_benchmarks/
 │   ├── cuda_scan_large/
 │   ├── tango_blackscholes/
 │   ├── tango_binomial_options/
+│   ├── npb_cg/
 │   ├── npb_ep/
 │   ├── npb_is/
+│   ├── npb_mg/
 │   ├── altis_cfd/
+│   ├── altis_gups/
 │   ├── altis_particlefilter/
 │   ├── altis_raytracing/
-│   ├── lonestar_sssp/
 │   ├── lonestar_bh/
+│   ├── lonestar_dmr/
+│   ├── lonestar_sssp/
+│   ├── graph_cc/
 │   ├── graph_pr/
 │   ├── graph_tc/
 │   ├── chai_hsto/
@@ -117,7 +130,7 @@ gpu_benchmarks/
 │   ├── triton_layer_norm/
 │   ├── triton_dropout/
 │   └── triton_flash_attention/
-├── tier5/                          # ML workloads (26)
+├── tier5/                          # ML workloads (31)
 │   ├── Makefile
 │   ├── resnet50_train/
 │   ├── resnet50_infer/
@@ -144,13 +157,21 @@ gpu_benchmarks/
 │   ├── cot_reasoning/
 │   ├── multi_agent_bench/
 │   ├── sdxl_inference/
-│   └── gptneox_train/
+│   ├── gptneox_train/
+│   ├── dlrm_inference/
+│   ├── gnn_inference/
+│   ├── gptj_inference/
+│   ├── retinanet_inference/
+│   └── unet3d_inference/
+├── community_results/              # Community-submitted benchmark results
+│   └── README.md
 ├── cmd/
 │   └── gpubench/                   # gpubench CLI (Go)
 └── docs/                          # Detailed specifications
     ├── cli_design.md
     ├── output_protocol.md
     ├── params_format.md
+    ├── result_sharing.md
     └── schema.sql
 ```
 
@@ -197,6 +218,10 @@ gpu_benchmarks/
 | PolyBench | `polybench_gramschmidt` | Gram-Schmidt decomposition |
 | PolyBench | `polybench_jacobi2d` | 2D Jacobi stencil |
 | PolyBench | `polybench_mvt` | Matrix-vector product and transpose |
+| PolyBench | `polybench_2mm` | Two matrix multiplications |
+| PolyBench | `polybench_3dconv` | 3D convolution |
+| PolyBench | `polybench_correlation` | Correlation computation |
+| PolyBench | `polybench_syr2k` | Symmetric rank-2k update |
 | Rodinia | `rodinia_backprop` | Back-propagation training |
 | Rodinia | `rodinia_bfs` | Breadth-first search |
 | Rodinia | `rodinia_gaussian` | Gaussian elimination |
@@ -206,10 +231,14 @@ gpu_benchmarks/
 | Rodinia | `rodinia_nw` | Needleman-Wunsch sequence alignment |
 | Rodinia | `rodinia_pathfinder` | Dynamic programming pathfinder |
 | Rodinia | `rodinia_srad` | Speckle Reducing Anisotropic Diffusion |
+| Rodinia | `rodinia_hotspot3d` | 3D thermal simulation |
+| Rodinia | `rodinia_lavamd` | Molecular dynamics (Lennard-Jones) |
 | Parboil | `parboil_histogram` | Histogram computation |
 | Parboil | `parboil_sgemm` | Single-precision GEMM |
 | Parboil | `parboil_spmv` | Sparse matrix-vector multiply |
 | Parboil | `parboil_stencil` | 3D stencil computation |
+| Parboil | `parboil_cutcp` | Coulombic potential (cutoff) |
+| Parboil | `parboil_lbm` | Lattice-Boltzmann method fluid simulation |
 | Other | `cuda_transpose` | Optimized matrix transpose |
 | HeteroMark | `heteromark_aes` | AES-256 encryption |
 | HeteroMark | `heteromark_fir` | FIR (Finite Impulse Response) filter |
@@ -221,13 +250,18 @@ gpu_benchmarks/
 | Tango | `tango_binomial_options` | Binomial option pricing |
 | NPB-GPU | `npb_ep` | Embarrassingly Parallel (EP) |
 | NPB-GPU | `npb_is` | Integer Sort (IS) |
+| NPB-GPU | `npb_cg` | Conjugate Gradient (CG) |
+| NPB-GPU | `npb_mg` | Multigrid (MG) |
 | Altis | `altis_cfd` | Computational Fluid Dynamics (Euler solver) |
 | Altis | `altis_particlefilter` | Particle Filter (SIR Monte Carlo localization) |
 | Altis | `altis_raytracing` | Simple ray tracing (Phong shading) |
+| Altis | `altis_gups` | Giga Updates Per Second (random memory access) |
 | Lonestar GPU | `lonestar_sssp` | Single-Source Shortest Path (Bellman-Ford) |
 | Lonestar GPU | `lonestar_bh` | Barnes-Hut N-body (2D quadtree approximation) |
+| Lonestar GPU | `lonestar_dmr` | Delaunay Mesh Refinement |
 | Graph Analytics | `graph_pr` | PageRank (pull-based iterative) |
 | Graph Analytics | `graph_tc` | Triangle Counting (sorted adjacency intersection) |
+| Graph Analytics | `graph_cc` | Connected Components (label propagation) |
 | Chai | `chai_hsto` | Histogram (shared memory privatization) |
 | Chai | `chai_cedd` | Canny Edge Detection (5-stage pipeline) |
 
@@ -295,6 +329,11 @@ gpu_benchmarks/
 | `multi_agent_bench` | PyTorch | Multi-agent LLM pipeline (3 agents, sequential) |
 | `sdxl_inference` | PyTorch/Diffusers | SDXL-style UNet denoising loop (20 steps) |
 | `gptneox_train` | PyTorch/Transformers | GPT-NeoX training (forward + backward + optimizer) |
+| `dlrm_inference` | PyTorch | DLRM (Deep Learning Recommendation Model) inference |
+| `gnn_inference` | PyTorch | GNN (Graph Neural Network) inference with R-GAT proxy |
+| `gptj_inference` | PyTorch | GPT-J architecture autoregressive generation |
+| `retinanet_inference` | PyTorch | RetinaNet object detection inference |
+| `unet3d_inference` | PyTorch | 3D U-Net medical image segmentation inference |
 
 ---
 
@@ -484,6 +523,7 @@ BENCH_PARAM_matrix_size=1024 BENCH_PARAM_block_size=16 ./benchmark
 - [`docs/cli_design.md`](docs/cli_design.md) — Full CLI command reference
 - [`docs/output_protocol.md`](docs/output_protocol.md) — JSON-lines output protocol specification
 - [`docs/params_format.md`](docs/params_format.md) — `params.json` format specification
+- [`docs/result_sharing.md`](docs/result_sharing.md) — Result export and community sharing guide
 - [`docs/schema.sql`](docs/schema.sql) — SQLite results database schema
 - [`spec.md`](spec.md) — Project specification
 - [`roadmap.md`](roadmap.md) — Development roadmap and milestones

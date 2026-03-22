@@ -32,8 +32,8 @@ TARGET := parboil_stencil
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := parboil_stencil.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := parboil_stencil.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

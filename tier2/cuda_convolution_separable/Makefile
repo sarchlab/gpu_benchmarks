@@ -32,8 +32,8 @@ TARGET := cuda_convolution_separable
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := cuda_convolution_separable.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := cuda_convolution_separable.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

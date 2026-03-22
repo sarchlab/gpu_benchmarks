@@ -32,8 +32,8 @@ TARGET := polybench_jacobi2d
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := polybench_jacobi2d.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := polybench_jacobi2d.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

@@ -32,8 +32,8 @@ TARGET := cublas_sgemm
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := cublas_sgemm.hip
-  CFLAGS := -O3 -std=c++14 -x cu -DUSE_CUBLAS
+  SRC    := cublas_sgemm.cu
+  CFLAGS := -O3 -std=c++14
   LIBS   := -lcublas
 
 else ifeq ($(PLATFORM),rocm)

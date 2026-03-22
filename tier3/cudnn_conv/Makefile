@@ -32,8 +32,8 @@ TARGET := cudnn_conv
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := cudnn_conv.hip
-  CFLAGS := -O3 -std=c++14 -x cu -DUSE_CUDNN
+  SRC    := cudnn_conv.cu
+  CFLAGS := -O3 -std=c++14
   LIBS   := -lcudnn
 
 else ifeq ($(PLATFORM),rocm)

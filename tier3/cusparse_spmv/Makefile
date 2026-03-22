@@ -32,8 +32,8 @@ TARGET := cusparse_spmv
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := cusparse_spmv.hip
-  CFLAGS := -O3 -std=c++14 -x cu -DUSE_CUSPARSE
+  SRC    := cusparse_spmv.cu
+  CFLAGS := -O3 -std=c++14
   LIBS   := -lcusparse
 
 else ifeq ($(PLATFORM),rocm)

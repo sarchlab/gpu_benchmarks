@@ -32,8 +32,8 @@ TARGET := cufft_1d
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := cufft_1d.hip
-  CFLAGS := -O3 -std=c++14 -x cu -DUSE_CUFFT
+  SRC    := cufft_1d.cu
+  CFLAGS := -O3 -std=c++14
   LIBS   := -lcufft
 
 else ifeq ($(PLATFORM),rocm)

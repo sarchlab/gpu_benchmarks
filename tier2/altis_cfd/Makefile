@@ -32,8 +32,8 @@ TARGET := altis_cfd
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := altis_cfd.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := altis_cfd.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

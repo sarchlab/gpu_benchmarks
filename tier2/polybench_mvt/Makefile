@@ -32,8 +32,8 @@ TARGET := polybench_mvt
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := polybench_mvt.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := polybench_mvt.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

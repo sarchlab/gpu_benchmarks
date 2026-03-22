@@ -32,8 +32,8 @@ TARGET := cuda_scan_large
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := cuda_scan_large.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := cuda_scan_large.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

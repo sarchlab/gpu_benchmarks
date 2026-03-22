@@ -32,8 +32,8 @@ TARGET := shoc_triad
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := shoc_triad.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := shoc_triad.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

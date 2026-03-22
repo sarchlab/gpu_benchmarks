@@ -32,8 +32,8 @@ TARGET := tango_binomial_options
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := tango_binomial_options.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := tango_binomial_options.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

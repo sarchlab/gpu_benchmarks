@@ -32,8 +32,8 @@ TARGET := lonestar_sssp
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := lonestar_sssp.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := lonestar_sssp.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

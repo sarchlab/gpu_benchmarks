@@ -32,8 +32,8 @@ TARGET := graph_pr
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := graph_pr.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := graph_pr.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

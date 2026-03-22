@@ -32,8 +32,8 @@ TARGET := rodinia_lud
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := rodinia_lud.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := rodinia_lud.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

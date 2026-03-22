@@ -32,8 +32,8 @@ TARGET := polybench_bicg
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := polybench_bicg.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := polybench_bicg.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

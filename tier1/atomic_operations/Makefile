@@ -32,8 +32,8 @@ TARGET := atomic_operations
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := atomic_operations.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := atomic_operations.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

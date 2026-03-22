@@ -32,8 +32,8 @@ TARGET := polybench_gemm
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := polybench_gemm.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := polybench_gemm.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

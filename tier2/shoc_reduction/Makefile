@@ -32,8 +32,8 @@ TARGET := shoc_reduction
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := shoc_reduction.hip
-  CFLAGS := -O3 -std=c++14 -x cu
+  SRC    := shoc_reduction.cu
+  CFLAGS := -O3 -std=c++14
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

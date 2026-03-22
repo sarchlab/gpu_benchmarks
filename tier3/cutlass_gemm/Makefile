@@ -35,8 +35,8 @@ TARGET := cutlass_gemm
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := cutlass_gemm.hip
-  CFLAGS := -O3 -std=c++14 -x cu -DUSE_CUDA
+  SRC    := cutlass_gemm.cu
+  CFLAGS := -O3 -std=c++14
   LIBS   :=
 
 else ifeq ($(PLATFORM),rocm)

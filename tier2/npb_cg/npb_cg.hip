@@ -328,18 +328,18 @@ int main(int argc, char** argv) {
 
     printf("{\"type\":\"kernel\",\"name\":\"spmv_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"matrix_size\":%d,\"block_size\":%d,"
-           "\"max_cg_iterations\":%d,\"nonzeros_per_row\":%d}}\n",
-           avg_ms, N, block_size, max_cg_iters, nonzeros_per_row);
+           "\"max_cg_iterations\":%d,\"nonzeros_per_row\":%d,\"iterations\":%d}}\n",
+           avg_ms, N, block_size, max_cg_iters, nonzeros_per_row, iters);
 
     printf("{\"type\":\"kernel\",\"name\":\"dot_product_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"matrix_size\":%d,\"block_size\":%d,"
-           "\"max_cg_iterations\":%d,\"nonzeros_per_row\":%d}}\n",
-           avg_ms, N, block_size, max_cg_iters, nonzeros_per_row);
+           "\"max_cg_iterations\":%d,\"nonzeros_per_row\":%d,\"iterations\":%d}}\n",
+           avg_ms, N, block_size, max_cg_iters, nonzeros_per_row, iters);
 
     printf("{\"type\":\"kernel\",\"name\":\"axpy_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"matrix_size\":%d,\"block_size\":%d,"
-           "\"max_cg_iterations\":%d,\"nonzeros_per_row\":%d}}\n",
-           avg_ms, N, block_size, max_cg_iters, nonzeros_per_row);
+           "\"max_cg_iterations\":%d,\"nonzeros_per_row\":%d,\"iterations\":%d}}\n",
+           avg_ms, N, block_size, max_cg_iters, nonzeros_per_row, iters);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"avg_iter_ms\",\"value\":%.4f},"

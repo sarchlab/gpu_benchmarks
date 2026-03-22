@@ -59,17 +59,6 @@
         256,
         512
       ]
-    },
-    {
-      "name": "float_type",
-      "description": "Floating-point type for computation",
-      "type": "enum",
-      "default": "float",
-      "values": [
-        "half",
-        "float",
-        "double"
-      ]
     }
   ],
   "kernels": [

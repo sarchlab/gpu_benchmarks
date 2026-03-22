@@ -450,18 +450,18 @@ int main(int argc, char** argv) {
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"smooth_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"grid_size\":%d,\"block_size\":%d,"
-           "\"num_vcycles\":%d,\"num_smooth_steps\":%d}}\n",
-           avg_ms, N, block_size, num_vcycles, num_smooth);
+           "\"num_vcycles\":%d,\"num_smooth_steps\":%d,\"iterations\":%d}}\n",
+           avg_ms, N, block_size, num_vcycles, num_smooth, iters);
 
     printf("{\"type\":\"kernel\",\"name\":\"restrict_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"grid_size\":%d,\"block_size\":%d,"
-           "\"num_vcycles\":%d,\"num_smooth_steps\":%d}}\n",
-           avg_ms, N, block_size, num_vcycles, num_smooth);
+           "\"num_vcycles\":%d,\"num_smooth_steps\":%d,\"iterations\":%d}}\n",
+           avg_ms, N, block_size, num_vcycles, num_smooth, iters);
 
     printf("{\"type\":\"kernel\",\"name\":\"prolong_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"grid_size\":%d,\"block_size\":%d,"
-           "\"num_vcycles\":%d,\"num_smooth_steps\":%d}}\n",
-           avg_ms, N, block_size, num_vcycles, num_smooth);
+           "\"num_vcycles\":%d,\"num_smooth_steps\":%d,\"iterations\":%d}}\n",
+           avg_ms, N, block_size, num_vcycles, num_smooth, iters);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"avg_iter_ms\",\"value\":%.4f},"

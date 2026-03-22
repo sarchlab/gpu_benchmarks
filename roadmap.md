@@ -576,9 +576,26 @@ All benchmarks support 3 platforms (NVIDIA/CUDA, AMD/ROCm, Apple/Metal), use Mak
 - **Phase 2 (M21–M26):** Parameterization and CLI took ~30 cycles. Clear output protocols (JSON-lines) made integration smooth.
 - **Phase 3 (M27):** CLI rewrite in Go completed in ~4 cycles. Well-documented existing Python implementation made the Go rewrite straightforward. PR #25 merged.
 
+---
+
+## Phase 4 — Compilation Fixes (from human, Issue #221)
+
+### M28 — Fix Compilation Failures & CLI Error Logging
+**Goal:** Fix two issues reported by human:
+1. CLI `gpubench compile` suppresses error output — users can't see why compilation failed
+2. Tier 2 (and likely all tiers) compilation fails on some platforms
+
+**Root cause analysis:**
+- CLI: `cmdCompile()` in `commands.go` only shows stderr with `--verbose` flag
+- Compilation: All 75 C++ benchmark files use `#include <hip/hip_runtime.h>`, which requires HIP headers. On CUDA-only systems without HIP SDK, this include fails.
+
+**Budget:** 4 cycles
+
+---
+
 ## Current Status
 
-**PROJECT COMPLETE.** All human requirements fulfilled:
+**IN PROGRESS.** New human issue #221 (compilation failures).
 - 107 benchmarks across 5 tiers (M1–M20)
 - Full parameterization with params.json for all benchmarks (M21)
 - Go CLI tool (gpubench) with list, compile, run, info, validate commands (M22–M27)

@@ -1,0 +1,55 @@
+{
+  "benchmark": "gptj_inference",
+  "tier": 5,
+  "suite": "ml_inference",
+  "description": "GPT-J style autoregressive inference benchmark. Uses a proxy GPT-J transformer with parallel attention+MLP blocks. Generates tokens one at a time from a random prompt using greedy decoding (argmax). Reports tokens/sec throughput.",
+  "language": "python",
+  "scaling_param": {
+    "name": "seq_len",
+    "description": "Input sequence length (prompt length)",
+    "type": "int",
+    "values": [
+      8, 16, 24, 32, 48, 64, 96, 128, 160, 192,
+      224, 256, 320, 384, 448, 512, 640, 768, 896, 1024,
+      1152, 1280, 1408, 1536, 1792, 2048
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "n_layer",
+      "description": "Number of transformer blocks",
+      "type": "int",
+      "default": 12,
+      "values": [6, 8, 12, 16, 24]
+    },
+    {
+      "name": "n_head",
+      "description": "Number of attention heads",
+      "type": "int",
+      "default": 16,
+      "values": [8, 12, 16, 24]
+    },
+    {
+      "name": "n_embd",
+      "description": "Embedding dimension (model width)",
+      "type": "int",
+      "default": 4096,
+      "values": [2048, 3072, 4096]
+    },
+    {
+      "name": "gen_tokens",
+      "description": "Number of tokens to generate autoregressively",
+      "type": "int",
+      "default": 64,
+      "values": [32, 64, 128, 256]
+    },
+    {
+      "name": "precision",
+      "description": "Floating-point precision mode for inference",
+      "type": "enum",
+      "default": "fp32",
+      "values": ["fp32", "fp16", "amp"]
+    }
+  ],
+  "kernels": ["forward"]
+}

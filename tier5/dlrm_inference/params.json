@@ -1,0 +1,100 @@
+{
+  "benchmark": "dlrm_inference",
+  "tier": 5,
+  "suite": "ml_inference",
+  "description": "DLRM (Deep Learning Recommendation Model) inference benchmark. Embedding tables (EmbeddingBag) + bottom MLP + feature interaction (dot product) + top MLP. Runs forward pass in eval mode with no_grad. Reports samples/sec throughput.",
+  "language": "python",
+  "scaling_param": {
+    "name": "batch_size",
+    "description": "Number of samples per inference batch",
+    "type": "int",
+    "values": [
+      1,
+      2,
+      4,
+      8,
+      12,
+      16,
+      24,
+      32,
+      48,
+      64,
+      96,
+      128,
+      192,
+      256,
+      384,
+      512,
+      768,
+      1024,
+      1536,
+      2048,
+      3072,
+      4096,
+      6144,
+      8192
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "num_embeddings",
+      "description": "Number of rows in each embedding table (vocabulary size)",
+      "type": "int",
+      "default": 100000,
+      "values": [
+        10000,
+        100000,
+        1000000,
+        10000000
+      ]
+    },
+    {
+      "name": "embedding_dim",
+      "description": "Dimension of each embedding vector",
+      "type": "int",
+      "default": 64,
+      "values": [
+        16,
+        32,
+        64,
+        128
+      ]
+    },
+    {
+      "name": "num_dense_features",
+      "description": "Number of continuous/dense input features",
+      "type": "int",
+      "default": 13,
+      "values": [
+        13,
+        26,
+        52
+      ]
+    },
+    {
+      "name": "num_sparse_features",
+      "description": "Number of categorical/sparse embedding tables",
+      "type": "int",
+      "default": 26,
+      "values": [
+        13,
+        26,
+        52
+      ]
+    },
+    {
+      "name": "precision",
+      "description": "Floating-point precision mode for inference",
+      "type": "enum",
+      "default": "fp32",
+      "values": [
+        "fp32",
+        "fp16",
+        "amp"
+      ]
+    }
+  ],
+  "kernels": [
+    "forward"
+  ]
+}

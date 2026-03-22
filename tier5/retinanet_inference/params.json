@@ -1,0 +1,80 @@
+{
+  "benchmark": "retinanet_inference",
+  "tier": 5,
+  "suite": "ml_inference",
+  "description": "RetinaNet object detection inference benchmark. Uses RetinaNet with ResNet-50-FPN-v2 backbone in eval mode with no_grad. Processes synthetic RGB images and reports images/sec throughput.",
+  "language": "python",
+  "scaling_param": {
+    "name": "batch_size",
+    "description": "Number of images per inference batch",
+    "type": "int",
+    "values": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      8,
+      10,
+      12,
+      14,
+      16,
+      20,
+      24,
+      28,
+      32,
+      36,
+      40,
+      48,
+      56,
+      64,
+      72,
+      80,
+      96,
+      112,
+      128
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "image_size",
+      "description": "Spatial resolution of input images (height and width)",
+      "type": "int",
+      "default": 640,
+      "values": [
+        320,
+        480,
+        640,
+        800,
+        1024
+      ]
+    },
+    {
+      "name": "num_classes",
+      "description": "Number of object detection classes",
+      "type": "int",
+      "default": 91,
+      "values": [
+        21,
+        91,
+        200,
+        365
+      ]
+    },
+    {
+      "name": "precision",
+      "description": "Floating-point precision mode for inference",
+      "type": "enum",
+      "default": "fp32",
+      "values": [
+        "fp32",
+        "fp16",
+        "amp"
+      ]
+    }
+  ],
+  "kernels": [
+    "forward"
+  ]
+}

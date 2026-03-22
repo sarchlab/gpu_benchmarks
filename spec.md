@@ -57,6 +57,11 @@ Build a CLI tool **implemented in Go** (from human, Issue #217) that:
 
 The CLI must be a Go program that compiles to a single binary. It must maintain full feature parity with the previous Python implementation: same commands (list, compile, run, info, validate), same flags, same SQLite schema, same JSON-lines output protocol parsing, same exit codes.
 
+## Compilation & Error Reporting (from human, Issue #221)
+
+1. **Compilation errors must always be visible.** When `gpubench compile` encounters a failure, it must show the full compiler error output (stderr from `make`) by default — not just a ✗ symbol. Users should not need `--verbose` to see why compilation failed.
+2. **All Tier 2 benchmarks must compile successfully** on all supported platforms (CUDA, ROCm, Metal). Currently, "pretty much all L2 compilation fails" per the human report. This must be investigated and fixed.
+
 ## Tier 5 — Modern ML Workloads (from human, Issue #100)
 
 The suite needs comprehensive modern ML workloads including:

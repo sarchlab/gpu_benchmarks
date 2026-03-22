@@ -38,6 +38,9 @@ jobs:
       - name: Compile Tier 3 (CUDA)
         run: ./gpubench compile --tier 3 --platform cuda
 
+      - name: Compile Tier 4 (CUDA)
+        run: ./gpubench compile --tier 4 --platform cuda
+
   compile-rocm:
     name: Compile (ROCm)
     runs-on: ubuntu-latest
@@ -69,6 +72,9 @@ jobs:
 
       - name: Compile Tier 3 (ROCm)
         run: ./gpubench compile --tier 3 --platform rocm
+
+      - name: Compile Tier 4 (ROCm)
+        run: ./gpubench compile --tier 4 --platform rocm
 
   # compile-metal:
   #   name: Compile (Metal)

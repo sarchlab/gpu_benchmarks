@@ -6,7 +6,7 @@ A comprehensive GPGPU benchmark suite covering microbenchmarks, application work
 
 ## Overview
 
-This suite is organized into five tiers of increasing complexity and scope, allowing researchers and engineers to evaluate GPU hardware and software stacks at every level — from raw memory bandwidth to end-to-end ML training throughput.
+This suite contains **125 benchmarks across five tiers** of increasing complexity and scope, allowing researchers and engineers to evaluate GPU hardware and software stacks at every level — from raw memory bandwidth to end-to-end ML training throughput.
 
 ---
 
@@ -163,12 +163,15 @@ gpu_benchmarks/
 │   ├── gptj_inference/
 │   ├── retinanet_inference/
 │   └── unet3d_inference/
+├── community_results/              # Community-submitted benchmark results
+│   └── README.md
 ├── cmd/
 │   └── gpubench/                   # gpubench CLI (Go)
 └── docs/                          # Detailed specifications
     ├── cli_design.md
     ├── output_protocol.md
     ├── params_format.md
+    ├── result_sharing.md
     └── schema.sql
 ```
 
@@ -520,6 +523,7 @@ BENCH_PARAM_matrix_size=1024 BENCH_PARAM_block_size=16 ./benchmark
 - [`docs/cli_design.md`](docs/cli_design.md) — Full CLI command reference
 - [`docs/output_protocol.md`](docs/output_protocol.md) — JSON-lines output protocol specification
 - [`docs/params_format.md`](docs/params_format.md) — `params.json` format specification
+- [`docs/result_sharing.md`](docs/result_sharing.md) — Result export and community sharing guide
 - [`docs/schema.sql`](docs/schema.sql) — SQLite results database schema
 - [`spec.md`](spec.md) — Project specification
 - [`roadmap.md`](roadmap.md) — Development roadmap and milestones

@@ -1,0 +1,77 @@
+{
+  "benchmark": "polybench_3dconv",
+  "tier": 2,
+  "suite": "polybench",
+  "description": "3D convolution over an NxNxN volume with a small 3D filter. Each output voxel is the weighted sum of its neighborhood. Measures compute throughput in GFLOPS.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Volume dimension N (NxNxN grid)",
+    "type": "int",
+    "values": [
+      16,
+      24,
+      32,
+      40,
+      48,
+      56,
+      64,
+      80,
+      96,
+      112,
+      128,
+      144,
+      160,
+      176,
+      192,
+      224,
+      256,
+      288,
+      320,
+      352,
+      384,
+      416,
+      448,
+      480,
+      512
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "iterations",
+      "description": "Number of timed iterations for averaging",
+      "type": "int",
+      "default": 5,
+      "values": [
+        3,
+        5,
+        10,
+        20
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Threads per block dimension (3D block of block_size^3)",
+      "type": "int",
+      "default": 8,
+      "values": [
+        4,
+        8,
+        16
+      ]
+    },
+    {
+      "name": "filter_size",
+      "description": "Filter dimension (filter_size^3 convolution kernel)",
+      "type": "int",
+      "default": 3,
+      "values": [
+        3,
+        5,
+        7
+      ]
+    }
+  ],
+  "kernels": [
+    "conv3d_kernel"
+  ]
+}

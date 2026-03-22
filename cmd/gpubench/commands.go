@@ -119,6 +119,15 @@ func cmdCompile(tierStr, suite, benchmark, platform string, jobs int, verbose bo
 	passed, failed := 0, 0
 	var failures []string
 
+	// Open log file for compilation errors
+	logFile, logErr := os.OpenFile("compile_errors.log",
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if logErr != nil {
+		eprintf("Warning: could not open compile_errors.log: %v\n", logErr)
+	} else {
+		defer logFile.Close()
+	}
+
 	for i, b := range cpp {
 		eprintf("[%3d/%d] %s ... ", i+1, len(cpp), b.Benchmark)
 
@@ -140,12 +149,19 @@ func cmdCompile(tierStr, suite, benchmark, platform string, jobs int, verbose bo
 			eprint("✗ (timeout)")
 			failed++
 			failures = append(failures, b.Benchmark)
+			if logFile != nil {
+				fmt.Fprintf(logFile, "=== %s (timeout) ===\n", b.Benchmark)
+			}
 		} else if err != nil {
 			eprint("✗")
 			failed++
 			failures = append(failures, b.Benchmark)
-			if verbose {
-				eprint(stderrBuf.String())
+			errOutput := stderrBuf.String()
+			if errOutput != "" {
+				eprint(errOutput)
+			}
+			if logFile != nil {
+				fmt.Fprintf(logFile, "=== %s ===\n%s\n", b.Benchmark, errOutput)
 			}
 		} else {
 			eprint("✓")

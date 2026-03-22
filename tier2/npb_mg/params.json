@@ -1,0 +1,90 @@
+{
+  "benchmark": "npb_mg",
+  "tier": 2,
+  "suite": "npb",
+  "description": "Multi-Grid solver from the NAS Parallel Benchmarks. Performs V-cycle multigrid with Jacobi smoothing, restriction, and prolongation on a synthetic 3D grid. Grid size is rounded up to the nearest power of 2.",
+  "scaling_param": {
+    "name": "grid_size",
+    "description": "Grid dimension N for NxNxN 3D grid (rounded to power of 2)",
+    "type": "int",
+    "values": [
+      16,
+      20,
+      24,
+      28,
+      32,
+      40,
+      48,
+      56,
+      64,
+      80,
+      96,
+      112,
+      128,
+      160,
+      192,
+      224,
+      256,
+      288,
+      320,
+      384,
+      448,
+      512
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
+    },
+    {
+      "name": "num_vcycles",
+      "description": "Number of V-cycles per solve",
+      "type": "int",
+      "default": 5,
+      "values": [
+        2,
+        5,
+        10,
+        20
+      ]
+    },
+    {
+      "name": "num_smooth_steps",
+      "description": "Number of Jacobi smoothing steps per level per direction",
+      "type": "int",
+      "default": 3,
+      "values": [
+        1,
+        2,
+        3,
+        5
+      ]
+    },
+    {
+      "name": "iterations",
+      "description": "Number of timed benchmark iterations",
+      "type": "int",
+      "default": 5,
+      "values": [
+        3,
+        5,
+        10,
+        20
+      ]
+    }
+  ],
+  "kernels": [
+    "smooth_kernel",
+    "restrict_kernel",
+    "prolong_kernel"
+  ]
+}

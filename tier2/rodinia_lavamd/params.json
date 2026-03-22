@@ -1,0 +1,36 @@
+{
+  "benchmark": "rodinia_lavamd",
+  "tier": 2,
+  "suite": "rodinia",
+  "description": "Short-range molecular dynamics with cell-list decomposition. Computes Lennard-Jones type particle interactions within neighboring cells (26 neighbors + self = 27 cells per box) on an NxNxN grid of boxes.",
+  "scaling_param": {
+    "name": "num_boxes",
+    "description": "Number of boxes per dimension (total boxes = N^3)",
+    "type": "int",
+    "values": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 26, 28, 30]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Threads per block (should be >= particles_per_box)",
+      "type": "int",
+      "default": 128,
+      "values": [64, 128, 256]
+    },
+    {
+      "name": "particles_per_box",
+      "description": "Number of particles in each box",
+      "type": "int",
+      "default": 100,
+      "values": [50, 100, 150, 200]
+    },
+    {
+      "name": "iterations",
+      "description": "Timed benchmark iterations",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10, 20]
+    }
+  ],
+  "kernels": ["lavamd_kernel"]
+}

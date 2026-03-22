@@ -1,0 +1,93 @@
+{
+  "benchmark": "parboil_lbm",
+  "tier": 2,
+  "suite": "parboil",
+  "description": "Lattice Boltzmann Method (D3Q19) fluid simulation on a regular 3D grid. Performs collide-stream operations with BGK collision operator and bounce-back boundary conditions.",
+  "scaling_param": {
+    "name": "grid_dim",
+    "description": "Grid dimension N for NxNxN lattice",
+    "type": "int",
+    "values": [
+      16,
+      20,
+      24,
+      28,
+      32,
+      36,
+      40,
+      48,
+      56,
+      64,
+      72,
+      80,
+      88,
+      96,
+      104,
+      112,
+      120,
+      128,
+      144,
+      160,
+      176,
+      192,
+      208,
+      224,
+      240,
+      256
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "iterations",
+      "description": "Number of timed iterations for averaging",
+      "type": "int",
+      "default": 5,
+      "values": [
+        3,
+        5,
+        10,
+        20
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 128,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
+    },
+    {
+      "name": "num_timesteps",
+      "description": "Number of LBM timesteps per iteration",
+      "type": "int",
+      "default": 100,
+      "values": [
+        10,
+        50,
+        100,
+        200,
+        500
+      ]
+    },
+    {
+      "name": "tau",
+      "description": "BGK relaxation time parameter",
+      "type": "float",
+      "default": 0.7,
+      "values": [
+        0.55,
+        0.7,
+        1.0,
+        1.5
+      ]
+    }
+  ],
+  "kernels": [
+    "lbm_collide_stream_kernel"
+  ]
+}

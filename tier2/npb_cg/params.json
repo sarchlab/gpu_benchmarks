@@ -1,0 +1,90 @@
+{
+  "benchmark": "npb_cg",
+  "tier": 2,
+  "suite": "npb",
+  "description": "Conjugate Gradient sparse iterative solver from the NAS Parallel Benchmarks. Performs SpMV in CSR format, dot products, and AXPY vector operations to solve Ax = b.",
+  "scaling_param": {
+    "name": "matrix_size",
+    "description": "Number of rows/columns in the sparse matrix",
+    "type": "int",
+    "values": [
+      1000,
+      2000,
+      3000,
+      5000,
+      7500,
+      10000,
+      15000,
+      20000,
+      30000,
+      40000,
+      50000,
+      75000,
+      100000,
+      125000,
+      150000,
+      200000,
+      250000,
+      300000,
+      350000,
+      400000,
+      450000,
+      500000
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
+    },
+    {
+      "name": "max_cg_iterations",
+      "description": "Maximum number of CG iterations per solve",
+      "type": "int",
+      "default": 25,
+      "values": [
+        10,
+        25,
+        50,
+        100
+      ]
+    },
+    {
+      "name": "nonzeros_per_row",
+      "description": "Average number of nonzero entries per row in the sparse matrix",
+      "type": "int",
+      "default": 7,
+      "values": [
+        5,
+        7,
+        11,
+        15
+      ]
+    },
+    {
+      "name": "iterations",
+      "description": "Number of timed benchmark iterations",
+      "type": "int",
+      "default": 5,
+      "values": [
+        3,
+        5,
+        10,
+        20
+      ]
+    }
+  ],
+  "kernels": [
+    "spmv_kernel",
+    "dot_product_kernel",
+    "axpy_kernel"
+  ]
+}

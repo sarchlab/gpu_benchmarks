@@ -1,0 +1,43 @@
+{
+  "benchmark": "rodinia_hotspot3d",
+  "tier": 2,
+  "suite": "rodinia",
+  "description": "3D stencil thermal simulation extending the 2D HotSpot benchmark. Each cell temperature is updated based on 6 neighbors (±x,±y,±z), local power density, and thermal resistances in an NxNxN grid.",
+  "scaling_param": {
+    "name": "grid_size",
+    "description": "Grid dimension per axis (NxNxN temperature grid)",
+    "type": "int",
+    "values": [16, 24, 32, 40, 48, 56, 64, 72, 80, 96, 112, 128, 144, 160, 192, 224, 256, 288, 320, 384, 448, 512]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Thread-block dimension (BxBxB or 1D block)",
+      "type": "int",
+      "default": 8,
+      "values": [4, 8, 16]
+    },
+    {
+      "name": "num_iterations",
+      "description": "Stencil time-steps per timed launch",
+      "type": "int",
+      "default": 10,
+      "values": [1, 5, 10, 20, 50]
+    },
+    {
+      "name": "amb_temp",
+      "description": "Ambient temperature (°C)",
+      "type": "float",
+      "default": 80.0,
+      "values": [60.0, 80.0, 100.0]
+    },
+    {
+      "name": "iterations",
+      "description": "Timed benchmark iterations",
+      "type": "int",
+      "default": 5,
+      "values": [3, 5, 10, 20]
+    }
+  ],
+  "kernels": ["hotspot3d_kernel"]
+}

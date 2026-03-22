@@ -1,0 +1,100 @@
+{
+  "benchmark": "polybench_2mm",
+  "tier": 2,
+  "suite": "polybench",
+  "description": "Two consecutive matrix multiplications: D = alpha*A*B + beta*D, then E = alpha*C*D + beta*E for NxN single-precision matrices. Measures total compute throughput in GFLOPS.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Square matrix dimension N (NxN matrices)",
+    "type": "int",
+    "values": [
+      64,
+      96,
+      128,
+      192,
+      256,
+      384,
+      512,
+      640,
+      768,
+      896,
+      1024,
+      1152,
+      1280,
+      1536,
+      1792,
+      2048,
+      2304,
+      2560,
+      2816,
+      3072,
+      3328,
+      3584,
+      3840,
+      4096
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
+    },
+    {
+      "name": "alpha",
+      "description": "Scaling factor alpha for matrix multiply",
+      "type": "float",
+      "default": 1.5,
+      "values": [
+        1.0,
+        1.5,
+        2.0
+      ]
+    },
+    {
+      "name": "beta",
+      "description": "Scaling factor beta for accumulation",
+      "type": "float",
+      "default": 1.2,
+      "values": [
+        0.0,
+        1.0,
+        1.2
+      ]
+    },
+    {
+      "name": "precision",
+      "description": "Floating-point precision for computation",
+      "type": "enum",
+      "default": "float",
+      "values": [
+        "half",
+        "float",
+        "double"
+      ]
+    },
+    {
+      "name": "iterations",
+      "description": "Number of timed iterations for averaging",
+      "type": "int",
+      "default": 5,
+      "values": [
+        3,
+        5,
+        10,
+        20
+      ]
+    }
+  ],
+  "kernels": [
+    "mm_kernel_1",
+    "mm_kernel_2"
+  ]
+}

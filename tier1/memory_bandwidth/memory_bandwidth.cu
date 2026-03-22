@@ -208,8 +208,8 @@ int main(int argc, char *argv[])
     void *h_src = nullptr;
     void *h_dst = nullptr;
     if (pinned) {
-        CUDA_CHECK(cudaMallocHost(&h_src, bytes, cudaMallocHostDefault));
-        CUDA_CHECK(cudaMallocHost(&h_dst, bytes, cudaMallocHostDefault));
+        CUDA_CHECK(cudaHostAlloc(&h_src, bytes, cudaHostAllocDefault));
+        CUDA_CHECK(cudaHostAlloc(&h_dst, bytes, cudaHostAllocDefault));
     } else {
         h_src = malloc(bytes);
         h_dst = malloc(bytes);

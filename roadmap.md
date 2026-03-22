@@ -453,6 +453,8 @@ clean:
 | 147 | Planning | Athena | New human issue #221 (compilation failures). Defined M28. |
 | 148–150 | Implementation+Verification | Ares+Apollo | M28 implemented (CLI error logging + CUDA compat block). Merged PR #26. |
 | 151 | Planning | Athena | M28 complete. New human issues #223-#229. Updated spec/roadmap. Defining M29. |
+| 152–157 | Implementation+Verification | Ares+Apollo | M29 implemented (75 native .cu files + Makefile updates). Merged PR #27. |
+| 158 | Planning | Athena | M29 complete. Issue #224 closed. Defining M30 (complete suites). |
 
 ---
 
@@ -578,7 +580,8 @@ All benchmarks support 3 platforms (NVIDIA/CUDA, AMD/ROCm, Apple/Metal), use Mak
 - **Phase 1 (M1–M20):** 107 benchmarks across 5 tiers completed in ~60 cycles. Scaling workers helps — parallel benchmark implementation was effective.
 - **Phase 2 (M21–M26):** Parameterization and CLI took ~30 cycles. Clear output protocols (JSON-lines) made integration smooth.
 - **Phase 3 (M27):** CLI rewrite in Go completed in ~4 cycles. Well-documented existing Python implementation made the Go rewrite straightforward. PR #25 merged.
-- **Phase 4 (M28):** Compilation fixes completed in ~3 cycles. CUDA compatibility shim approach (HIP→CUDA macros) was a quick fix, but human wants proper CUDA source files (Issue #224). The shim was a temporary measure; M29 will provide native .cu files.
+- **Phase 4 (M28):** Compilation fixes completed in ~3 cycles. CUDA compatibility shim approach (HIP→CUDA macros) was a quick fix.
+- **Phase 5 (M29):** Native CUDA .cu files for all 75 C++ benchmarks completed in ~5 cycles. Workers split across tiers worked efficiently. Multiple workers (Max, Kai, Leo) each handled a subset.
 
 ---
 
@@ -605,33 +608,76 @@ New batch of human requirements:
 4. **#223**: Docker-based CI for compilation testing
 5. **#229**: Result persistence — community result sharing mechanism
 
-### M29 — Native CUDA Source Files for All C++ Benchmarks
-**Goal:** Create native `.cu` source files with CUDA API for every C++ benchmark. Currently, NVIDIA compilation uses `.hip` files with compatibility shims. The human explicitly requested proper CUDA programs.
+### M29 — Native CUDA Source Files for All C++ Benchmarks ✅ COMPLETE (cycles used: ~5)
+**Goal:** Create native `.cu` source files with CUDA API for every C++ benchmark.
+**Deliverables (completed):** 75 native .cu files created for all C++ benchmarks (12 Tier 1, 51 Tier 2, 11 Tier 3, 1 Tier 4). All Makefiles updated to use .cu for CUDA platform. Merged via PR #27.
+**Note:** Issue #224 closed.
 
-**Scope:** 67 new .cu files needed:
-- Tier 1: 4 benchmarks (atomic_operations, mixbench, tensor_core_throughput, warp_shuffle)
-- Tier 2: 51 benchmarks (all)
-- Tier 3: 11 benchmarks (all)
-- Tier 4: 1 benchmark (babelstream)
-Plus: 67 Makefile updates to use .cu for CUDA platform
+### M30 — Complete Benchmark Suites: Highest-Priority Gaps (Issue #226)
+**Goal:** Add the 9 highest-priority missing benchmarks from existing suites, plus 4 medium-priority ones. This addresses Issue #226 (include all benchmarks from each suite). Based on Iris's research (workspace/iris/research_suites_mlperf.md).
 
-**Approach:**
-- Each .cu file uses native CUDA API: `#include <cuda_runtime.h>`, `cudaMalloc`, `cudaMemcpy`, etc.
-- Existing .hip files retained for AMD/ROCm compilation
-- Metal files unchanged
-- Makefiles updated: CUDA uses `name.cu` (no `-x cu` flag), ROCm uses `name.hip`
+**Tier 2 (13 new benchmarks):**
+
+*Highest Priority (9):*
+1. `tier2/npb_cg/` — NPB Conjugate Gradient: Sparse iterative solver (SpMV + dot products + AXPY). Fundamental HPC workload.
+2. `tier2/npb_mg/` — NPB Multi-Grid: V-cycle multigrid solver with restrict/prolong/smooth operations. Multi-resolution HPC pattern.
+3. `tier2/parboil_cutcp/` — Parboil Coulombic Potential with cutoff: Direct summation of charge interactions within cutoff radius.
+4. `tier2/parboil_lbm/` — Parboil Lattice Boltzmann Method: D3Q19 fluid simulation on regular 3D grid.
+5. `tier2/rodinia_hotspot3d/` — Rodinia HotSpot3D: 3D thermal simulation extending HotSpot to 3 dimensions.
+6. `tier2/rodinia_lavamd/` — Rodinia LavaMD: Short-range molecular dynamics with cell-list decomposition.
+7. `tier2/altis_gups/` — Altis GUPS (Giga Updates Per Second): Random memory access throughput benchmark.
+8. `tier2/graph_cc/` — Graph Connected Components: Label propagation / hook-based CC on sparse graphs.
+9. `tier2/lonestar_dmr/` — Lonestar Delaunay Mesh Refinement: Irregular computation with worklist-based mesh refinement.
+
+*Medium Priority (4):*
+10. `tier2/polybench_2mm/` — PolyBench 2MM: Two matrix multiplications (D = A*B, E = C*D).
+11. `tier2/polybench_3dconv/` — PolyBench 3D Convolution: 3D stencil convolution kernel.
+12. `tier2/polybench_correlation/` — PolyBench Correlation: Statistical correlation matrix computation.
+13. `tier2/polybench_syr2k/` — PolyBench SYR2K: Symmetric rank-2k update (BLAS Level 3).
+
+**Per-benchmark deliverables (same as existing conventions):**
+- `name.cu` — Native CUDA source (compiled with `nvcc`)
+- `name.hip` — Native HIP source (compiled with `hipcc`)
+- `name_metal.mm` + `name.metal` — Metal source (Apple)
+- `Makefile` — PLATFORM auto-detect (Darwin→metal, /opt/rocm→rocm, else→cuda)
+- `README.md` — Algorithm, build/run for all 3 platforms, output format
+- `params.json` — Scaling + non-scaling parameters per project conventions
+- JSON-lines output protocol (kernel events + summary) to stdout
+- 5 warmup + 5 timed iterations, report average
+- Self-contained, no shared dependencies
 
 **Budget:** 6 cycles
+
+### M31 — MLPerf Benchmarks for Tier 5 (Issue #228)
+**Goal:** Add 5 MLPerf-inspired benchmarks to fill gaps in Tier 5 ML coverage.
+
+**Tier 5 (5 new benchmarks):**
+1. `tier5/dlrm_inference/` — DLRM (Deep Learning Recommendation Model) inference with synthetic tabular data. Embedding tables + MLP.
+2. `tier5/unet3d_inference/` — 3D U-Net inference for medical image segmentation. Synthetic 3D volumes.
+3. `tier5/retinanet_inference/` — RetinaNet object detection inference. Synthetic images.
+4. `tier5/gnn_inference/` — Graph Neural Network (R-GAT proxy) inference on synthetic graphs. PyG/DGL.
+5. `tier5/gptj_inference/` — GPT-J 6B inference (or proxy). Text generation benchmark.
+
+**Budget:** 4 cycles
+
+### M32 — Docker CI + Result Persistence (Issues #223, #229)
+**Goal:** Set up Docker-based CI for compilation verification and design a result persistence/sharing mechanism.
+
+**Deliverables:**
+1. Docker CI: Dockerfiles for NVIDIA CUDA and AMD ROCm environments. GitHub Actions workflow to compile all benchmarks.
+2. Result persistence: Design and implement a mechanism for users to submit benchmark results (e.g., via GitHub PR to a results repository, or a standardized export format).
+
+**Budget:** 4 cycles
 
 ---
 
 ## Current Status
 
-**PLANNING.** Defining M29 (native CUDA source files) to address Issue #224.
+**PLANNING.** M29 complete. Defining M30 (complete benchmark suites) to address Issue #226.
 - 107 benchmarks across 5 tiers (M1–M20)
 - Full parameterization with params.json for all benchmarks (M21)
 - Go CLI tool (gpubench) with list, compile, run, info, validate commands (M22–M27)
-- Compilation fixes and CUDA compatibility (M28)
+- Compilation fixes (M28) + native CUDA source files for all C++ benchmarks (M29)
 - SQLite output with platform info, kernel-level timing, computed metrics
-- All previous human issues (#10, #18, #100, #101, #142, #143, #144, #217, #221) closed
-- New human issues pending: #223 (Docker CI), #224 (CUDA programs), #226 (complete suites), #228 (MLPerf), #229 (result persistence)
+- All previous human issues (#10, #18, #100, #101, #142, #143, #144, #217, #221, #224) closed
+- Open human issues: #223 (Docker CI), #226 (complete suites), #228 (MLPerf), #229 (result persistence)

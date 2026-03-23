@@ -721,12 +721,40 @@ New batch of human requirements:
 
 ---
 
+## Phase 8 — Fix CI Pipeline (from human, Issue #276)
+
+### M35 — Fix CI to Pass on Self-Hosted Runners (Issue #276)
+**Goal:** Make the CI pipeline green. Two root causes discovered:
+
+1. **Docker container networking**: Self-hosted runners create isolated Docker networks. Containers can't reach the internet for `apt-get install`. The host can pull Docker images (so it has internet), but containers on the bridge network are isolated. Fix: add `options: --network host` to container configuration.
+
+2. **ARM64 architecture mismatch**: Self-hosted runners are ARM64 (`marin-5-linux`, `linux/arm64/v8`). The ROCm Docker image (`rocm/dev-ubuntu-22.04:6.0`) is x86_64 only — it crashes immediately on ARM64. ROCm does NOT support ARM64 at all. Fix: remove or conditionally skip the ROCm CI job on ARM64 runners.
+
+**Deliverables:**
+1. Update `.github/workflows/compile.yml`:
+   - CUDA job: add `options: --network host` to the container configuration so `apt-get` works
+   - ROCm job: remove entirely (or make conditional) since self-hosted runners are ARM64 and ROCm has no ARM64 support. Add a comment explaining why.
+   - Verify that the CUDA container image (`nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04`) has an ARM64 variant (it does: `NVARCH=sbsa`)
+2. Ensure the CI workflow runs to completion and passes on self-hosted ARM64 runners
+3. The overall workflow status must be GREEN
+
+**Acceptance criteria:**
+1. Push to main triggers CI
+2. CUDA compilation job completes successfully (all tiers 1-4 compile)
+3. No failing jobs in the workflow
+4. Overall CI status is green ✅
+
+**Branch:** `ares/m35-fix-ci`
+**Cycles budget:** 3
+
+---
+
 ## Current Status
 
-125 benchmarks across 5 tiers. 6 CUDA compilation failures remaining (Issue #273). CI needs self-hosted runners (Issue #272).
+125 benchmarks across 5 tiers. All code compiles. CI needs networking + architecture fixes on self-hosted runners.
 - 125 benchmarks: 12 Tier 1, 64 Tier 2, 11 Tier 3, 7 Tier 4, 31 Tier 5
 - Go CLI (`gpubench`) with list/compile/run/validate/info/export commands
 - 125/125 params.json valid, all parameterized
 - Native .cu + .hip + Metal sources for all C++ benchmarks
-- Docker CI workflow needs self-hosted runners
-- Open issues: #272 (CI self-hosted), #273 (compilation failures)
+- CI failing: Docker container networking broken + ROCm image architecture mismatch on ARM64 runners
+- Open issues: #276 (CI must pass)

@@ -19,6 +19,7 @@ A comprehensive, well-organized benchmark suite covering all 5 tiers with extens
 1. Full parameterization (scaling + non-scaling parameters with documented values)
 2. Kernel-level execution timing
 3. A CLI that can compile, run, and collect results into SQLite
+4. **CI must pass (green)** before any PR is merged or the project is declared complete (from human, Issue #276)
 
 ## Constraints
 
@@ -96,9 +97,17 @@ Root cause: Missing `#include <cstdint>` in .cu files that use `uint32_t`. cudnn
 
 All benchmarks must compile successfully on all supported platforms.
 
-## CI Must Pass — Use Self-Hosted Runners (from human, Issues #269, #272)
+## CI Must Pass — Use Self-Hosted Runners (from human, Issues #269, #272, #276)
 
 The CI pipeline must pass. GitHub Actions CI fails due to billing issues. **Use self-hosted CI runners** (Issue #272) instead of `ubuntu-latest`. The `sarchlab` org has self-hosted runners available. Ensure Docker containers have all required libraries (including cuDNN for Tier 3 DNN benchmarks).
+
+**CI must be green (all checks passing) before any PR can be merged or the project can be declared complete.** (from human, Issue #276)
+
+**Known CI infrastructure issues (discovered in M34):**
+- Self-hosted runners are ARM64 (`linux/arm64/v8`), runner name: `marin-5-linux`
+- Docker containers inside the runner have no internet access (container network bridge is isolated — host can pull images but containers can't run `apt-get`)
+- ROCm Docker images are x86_64 only — they crash immediately on ARM64 runners
+- Fix: Use `--network host` for Docker containers; handle ROCm gracefully on ARM64
 
 ## Docker-Based CI (from human, Issue #223)
 

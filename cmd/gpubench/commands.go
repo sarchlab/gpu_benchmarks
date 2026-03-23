@@ -629,13 +629,6 @@ func cmdRun(args runArgs) int {
 
 				ec, stdoutStr, stderrStr, timedOut := runBenchmarkProc(
 					cmd, env, timeoutSecs, args.verbose)
-				if args.verbose && stderrStr != "" {
-					for _, sl := range strings.Split(stderrStr, "\n") {
-						if sl != "" {
-							eprintf("      [stderr] %s\n", sl)
-						}
-					}
-				}
 
 				kernels, summary, protoErrors := parseOutput(stdoutStr)
 
@@ -652,6 +645,36 @@ func cmdRun(args runArgs) int {
 					}
 				} else {
 					status = "ok"
+				}
+
+				// Show stderr on any failure, or when verbose for any run
+				if (status != "ok" || args.verbose) && stderrStr != "" {
+					for _, sl := range strings.Split(stderrStr, "\n") {
+						if sl != "" {
+							eprintf("      [stderr] %s\n", sl)
+						}
+					}
+				}
+
+				// Diagnose common errors
+				if status != "ok" {
+					hint := diagnoseBenchError(stderrStr, b.Benchmark)
+					if hint != "" {
+						eprintf("    💡 %s\n", hint)
+					}
+				}
+
+				// Enrich error message with stderr for failed runs
+				if status != "ok" && stderrStr != "" {
+					truncatedStderr := stderrStr
+					if len(truncatedStderr) > 1000 {
+						truncatedStderr = truncatedStderr[:1000] + "... (truncated)"
+					}
+					if errMsg != "" {
+						errMsg = errMsg + "\n--- stderr ---\n" + truncatedStderr
+					} else {
+						errMsg = truncatedStderr
+					}
 				}
 
 				var totalTime sql.NullFloat64
@@ -740,6 +763,38 @@ func cmdRun(args runArgs) int {
 		return ExitSomeFailed
 	}
 	return ExitOK
+}
+
+// ── Diagnostics ──────────────────────────────────────────────────────────
+
+func diagnoseBenchError(stderrStr string, benchmark string) string {
+	lower := strings.ToLower(stderrStr)
+
+	// Binary not found
+	if strings.Contains(lower, "no such file or directory") ||
+		strings.Contains(lower, "executable file not found") ||
+		strings.Contains(lower, "not found") && strings.Contains(lower, "exec") {
+		return fmt.Sprintf("Binary not found. Run `gpubench compile --benchmark %s` first.", benchmark)
+	}
+
+	// Common CUDA/GPU errors
+	if strings.Contains(lower, "cuda error") || strings.Contains(lower, "cudaerror") {
+		return "CUDA error detected. Check GPU driver installation and compatibility."
+	}
+	if strings.Contains(lower, "no cuda-capable device") || strings.Contains(lower, "no cuda") {
+		return "No CUDA-capable GPU detected. Verify GPU is present and drivers are installed."
+	}
+	if strings.Contains(lower, "out of memory") || strings.Contains(lower, "alloc failed") {
+		return "GPU out of memory. Try reducing problem size or freeing GPU memory."
+	}
+	if strings.Contains(lower, "libcudnn not found") || strings.Contains(lower, "libcudnn") {
+		return "cuDNN library not found. Install cuDNN or check LD_LIBRARY_PATH."
+	}
+	if strings.Contains(lower, "libcublas") || strings.Contains(lower, "libcufft") {
+		return "CUDA library missing. Check CUDA toolkit installation."
+	}
+
+	return ""
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────

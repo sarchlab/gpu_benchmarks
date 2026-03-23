@@ -723,38 +723,40 @@ New batch of human requirements:
 
 ## Phase 8 — Fix CI Pipeline (from human, Issue #276)
 
-### M35 — Fix CI to Pass on Self-Hosted Runners (Issue #276)
-**Goal:** Make the CI pipeline green. Two root causes discovered:
+### M35 — Fix CI to Pass on Self-Hosted Runners (Issue #276) ❌ DEADLINE MISSED (3/3 cycles used)
+**Goal:** Make the CI pipeline green.
+**What happened:** Ares's team tried 3 approaches over 3 cycles:
+1. **Cycle 1**: Added `--network host` + arch-aware Go + commented ROCm. Failed: VCS error in `go build`.
+2. **Cycle 2**: Removed `--network host`. CI passed apt-get/Go/checkout (networking WORKED). Failed: same VCS error.
+3. **Cycle 3**: Re-added `--network host` + `-buildvcs=false`. Failed: Docker "conflicting network modes" error.
 
-1. **Docker container networking**: Self-hosted runners create isolated Docker networks. Containers can't reach the internet for `apt-get install`. The host can pull Docker images (so it has internet), but containers on the bridge network are isolated. Fix: add `options: --network host` to container configuration.
+**Key discovery:** Run 2 (no `--network host`) proved default Actions Docker network has internet. Only fix needed was `-buildvcs=false`.
 
-2. **ARM64 architecture mismatch**: Self-hosted runners are ARM64 (`marin-5-linux`, `linux/arm64/v8`). The ROCm Docker image (`rocm/dev-ubuntu-22.04:6.0`) is x86_64 only — it crashes immediately on ARM64. ROCm does NOT support ARM64 at all. Fix: remove or conditionally skip the ROCm CI job on ARM64 runners.
+### M35.1 — Fix CI: Remove --network host, keep -buildvcs=false
+**Goal:** Make CI green. One change to PR #34: revert container config from object form (with `--network host`) back to inline string.
 
-**Deliverables:**
-1. Update `.github/workflows/compile.yml`:
-   - CUDA job: add `options: --network host` to the container configuration so `apt-get` works
-   - ROCm job: remove entirely (or make conditional) since self-hosted runners are ARM64 and ROCm has no ARM64 support. Add a comment explaining why.
-   - Verify that the CUDA container image (`nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04`) has an ARM64 variant (it does: `NVARCH=sbsa`)
-2. Ensure the CI workflow runs to completion and passes on self-hosted ARM64 runners
-3. The overall workflow status must be GREEN
+**Exact change in `.github/workflows/compile.yml`:**
+```yaml
+# FROM (broken):
+    container:
+      image: nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04
+      options: --network host
 
-**Acceptance criteria:**
-1. Push to main triggers CI
-2. CUDA compilation job completes successfully (all tiers 1-4 compile)
-3. No failing jobs in the workflow
-4. Overall CI status is green ✅
+# TO (working):
+    container: nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04
+```
+Keep everything else: `-buildvcs=false`, arch-aware Go download, ROCm commented out.
 
-**Branch:** `ares/m35-fix-ci`
-**Cycles budget:** 3
+**Acceptance:** PR #34 CI green → merge to main → main CI green.
+**Cycles budget:** 2
 
 ---
 
 ## Current Status
 
-125 benchmarks across 5 tiers. All code compiles. CI needs networking + architecture fixes on self-hosted runners.
-- 125 benchmarks: 12 Tier 1, 64 Tier 2, 11 Tier 3, 7 Tier 4, 31 Tier 5
-- Go CLI (`gpubench`) with list/compile/run/validate/info/export commands
-- 125/125 params.json valid, all parameterized
-- Native .cu + .hip + Metal sources for all C++ benchmarks
-- CI failing: Docker container networking broken + ROCm image architecture mismatch on ARM64 runners
-- Open issues: #276 (CI must pass)
+125 benchmarks. CI needs `--network host` removed from PR #34, then merge.
+- Open issue: #276 (CI must pass)
+
+## Lessons Learned (Phase 8)
+- Default GitHub Actions Docker networking works on self-hosted runners. `--network host` conflicts with Actions' managed network.
+- Always check what WORKED in a failed CI run, not just the error.

@@ -33,7 +33,7 @@ TARGET := lonestar_sssp
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := lonestar_sssp.cu
-  CFLAGS := -O3 -std=c++14
+  CFLAGS := -O3 -std=c++14 --expt-relaxed-constexpr --expt-extended-lambda
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

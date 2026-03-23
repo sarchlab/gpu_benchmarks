@@ -9,9 +9,7 @@ jobs:
   compile-cuda:
     name: Compile (CUDA)
     runs-on: self-hosted
-    container:
-      image: nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04
-      options: --network host
+    container: nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04
     steps:
       - name: Install dependencies
         run: |

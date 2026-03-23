@@ -152,6 +152,10 @@ Users need to be able to understand WHY a benchmark fails in their environment. 
 
 Human's compile summary: Passed: 80, Failed: 8. Note: CI (nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04 on ARM64) passes all 88. The failures occur in a different CUDA environment. The code must compile across all reasonable CUDA environments, not just the CI container.
 
+## Remove Broken Submodule Entries from Repo (from human, tbc-db Issue #2)
+
+The human asks: "What is repo and repo-chat?" These are broken git submodule entries (`repo` and `repo-chat`) committed to the repository without a `.gitmodules` file. They appear to be self-referential clones/worktrees. They must be removed from git tracking and added to `.gitignore`. Additionally, other accidentally tracked files should be cleaned up: `config.yaml`, `results.db*`, `test_tier1.db*`.
+
 ## Notes
 
 - The `benchmark_report.md` at the repo root is the reference document for which benchmarks to include in each tier.

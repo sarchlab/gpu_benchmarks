@@ -461,6 +461,8 @@ clean:
 | 178 | Planning | Athena | M31 complete. 125 benchmarks. Issue #228 closed. Defining M32 (Docker CI + Result Persistence). |
 | 179–183 | Implementation+Verification | Ares+Apollo | M32 implemented (Docker CI + Result Persistence + README). PR #31 merged. |
 | 184 | Planning | Athena | M32 complete. All 32 milestones done. All 14 human issues closed. **PROJECT COMPLETE.** |
+| ... | Various | Various | Phases 8-10: CI fixes (M33-M35.1), repo cleanup (M36), compilation fixes (M37). See detailed milestone entries. |
+| current | Planning | Athena | M37 complete (PR #37 merged, CI green). Human issue #2 (subrepository). Defining M38 (repo cleanup). |
 
 ---
 
@@ -749,33 +751,44 @@ New batch of human requirements:
 
 ---
 
-## Current Status — IN PROGRESS (Phase 10)
+## Current Status — Phase 11 (Repo Cleanup)
 
-New human issue received via tbc-db #1: 8 benchmarks still fail to compile in the human's environment (not the CI Docker container). Project reopened.
+M37 complete (PR #37 merged, CI green). New human issue: tbc-db #2 asks about broken `repo` and `repo-chat` submodule entries.
 
 ---
 
 ## Phase 10 — Fix Persistent Compilation Failures (from human, tbc-db Issue #1)
 
-### M37 — Fix 8 Compilation Failures Across CUDA Environments
-**Goal:** Investigate and fix 8 benchmarks that fail to compile in the human's CUDA environment despite passing in CI (nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04 on ARM64).
-
-**Failing benchmarks:**
-- **Tier 2 (6):** cuda_nbody, graph_cc, graph_pr, heteromark_pagerank, lonestar_bh, lonestar_sssp
-- **Tier 3 (2):** cudnn_batchnorm, cudnn_conv
-
-**Key observations:**
-- The 6 Tier 2 failures are the ONLY benchmarks with `--expt-relaxed-constexpr --expt-extended-lambda` Makefile flags
-- The 2 Tier 3 failures require cuDNN (which may not be installed in the human's environment)
-- All 8 pass in CI with CUDA 12.6.3 + cuDNN Docker container
-
-**Investigation approach:** Under investigation by Iris (tbc-db issue #3).
-
-**Cycles budget:** 3
+### M37 — Fix 8 Compilation Failures Across CUDA Environments ✅ COMPLETE (cycles used: 1)
+**Goal:** Fix 8 benchmarks that fail to compile in the human's CUDA environment.
+**Root cause:** 6 Tier 2 Makefiles had unnecessary `--expt-relaxed-constexpr --expt-extended-lambda` flags. 2 Tier 3 benchmarks needed cuDNN detection.
+**Fix:** Removed unnecessary flags from 6 Tier 2 Makefiles, added cuDNN availability checks to 2 Tier 3 Makefiles.
+**Branch:** `ares/fix-compilation-flags` (merged to main via PR #37). CI green.
 
 ---
 
-## Previous Status — All Milestones Through M36 COMPLETE ✅
+## Phase 11 — Repo Cleanup (from human, tbc-db Issue #2)
+
+### M38 — Remove Broken Submodule Entries + Clean Tracked Files
+**Goal:** Fix broken `repo` and `repo-chat` submodule entries and remove accidentally tracked files.
+
+**Issues:**
+1. `repo` and `repo-chat` are tracked as git submodule entries (type `160000`) with no `.gitmodules` file — broken state
+2. `config.yaml` (bot configuration) is tracked in git
+3. `results.db`, `results.db-shm`, `results.db-wal` (SQLite results) are tracked
+4. `test_tier1.db-shm`, `test_tier1.db-wal` (test database) are tracked
+
+**Deliverables:**
+1. Remove `repo` and `repo-chat` from git tracking (`git rm --cached`)
+2. Remove `config.yaml`, `results.db*`, `test_tier1.db*` from git tracking
+3. Add all above to `.gitignore`
+4. CI must still pass
+
+**Cycles budget:** 2
+
+---
+
+## Previous Status — All Milestones Through M37 COMPLETE ✅
 
 **125 benchmarks** across 5 tiers:
 - **Tier 1:** 12 microbenchmarks

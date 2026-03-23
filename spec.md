@@ -86,6 +86,19 @@ Design a mechanism for users to persist and share benchmark results with the com
 - Using a shared database
 - Standardized result format for submission
 
+## Fix Compilation Errors (from human, Issue #268)
+
+11 benchmarks fail to compile on CUDA:
+- **Tier 1:** fp16_throughput, tensor_core_throughput
+- **Tier 2:** cuda_nbody, graph_cc, graph_pr, heteromark_pagerank, lonestar_bh, lonestar_sssp, rodinia_backprop
+- **Tier 3:** cudnn_batchnorm, cudnn_conv
+
+All benchmarks must compile successfully on all supported platforms.
+
+## CI Must Pass (from human, Issue #269)
+
+The CI pipeline must pass. GitHub Actions CI was failing due to billing issues, but the compile workflow itself must work correctly when CI is available. Ensure Docker containers have all required libraries (including cuDNN for Tier 3 DNN benchmarks).
+
 ## Docker-Based CI (from human, Issue #223)
 
 We need Docker-based CI for NVIDIA/AMD/Apple compilation verification. At minimum:

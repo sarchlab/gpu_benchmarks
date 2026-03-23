@@ -643,14 +643,43 @@ New batch of human requirements:
 
 ---
 
+---
+
+## Phase 6 — Fix Compilation & CI (from human, Issues #268, #269)
+
+### M33 — Fix 11 Compilation Failures + CI Pipeline (Issues #268, #269)
+**Goal:** Fix all 11 benchmarks that fail to compile on CUDA, and ensure the CI pipeline works correctly.
+
+**Failing benchmarks (from Issue #268):**
+1. `tier1/fp16_throughput` — Likely needs `-arch=sm_53` or higher in CUDA CFLAGS for half-precision intrinsics
+2. `tier1/tensor_core_throughput` — Already has `-arch=sm_70`; investigate compile error
+3. `tier2/cuda_nbody` — Standard CUDA; investigate compile error
+4. `tier2/graph_cc` — Standard CUDA; investigate compile error
+5. `tier2/graph_pr` — Standard CUDA; investigate compile error
+6. `tier2/heteromark_pagerank` — Standard CUDA; investigate compile error
+7. `tier2/lonestar_bh` — Standard CUDA; investigate compile error
+8. `tier2/lonestar_sssp` — Standard CUDA; investigate compile error
+9. `tier2/rodinia_backprop` — Has `#ifdef 0` (invalid preprocessor; should be `#if 0`)
+10. `tier3/cudnn_batchnorm` — Needs cuDNN library; CI Docker container needs cuDNN
+11. `tier3/cudnn_conv` — Needs cuDNN library; CI Docker container needs cuDNN
+
+**Deliverables:**
+1. Fix all 11 .cu files so they compile with `nvcc` on CUDA 12.6
+2. Fix all 11 .hip files if corresponding issues exist
+3. Update CI Docker container to use `nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04` (includes cuDNN) or add cuDNN installation step
+4. Verify `gpubench compile --tier 1 --platform cuda` passes
+5. Verify `gpubench compile --tier 2 --platform cuda` passes
+6. Verify `gpubench compile --tier 3 --platform cuda` passes
+
+**Branch:** `ares/m33-fix-compilation`
+**Cycles budget:** 4
+
+---
+
 ## Current Status
 
-**PROJECT COMPLETE.** All 32 milestones achieved. All 14 human issues closed.
+**IN PROGRESS.** New human issues #268 (compilation errors) and #269 (CI failing) require M33.
 - 125 benchmarks across 5 tiers (12 Tier 1, 64 Tier 2, 11 Tier 3, 7 Tier 4, 31 Tier 5)
-- Full parameterization with params.json for all benchmarks (M21)
-- Go CLI tool (gpubench) with list, compile, run, info, validate, export commands (M22–M27, M32)
-- Native CUDA .cu files for all 88 C++ benchmarks (M29)
-- SQLite output with platform info, kernel-level timing, computed metrics
-- Docker CI for CUDA + ROCm compilation verification (M32)
-- Result persistence with export command and community results mechanism (M32)
-- All human issues closed: #10, #18, #100, #101, #142, #143, #144, #217, #221, #223, #224, #226, #228, #229
+- 11 benchmarks fail to compile on CUDA (Issue #268)
+- CI pipeline not running due to GitHub billing (Issue #269)
+- All other human issues closed: #10, #18, #100, #101, #142, #143, #144, #217, #221, #223, #224, #226, #228, #229

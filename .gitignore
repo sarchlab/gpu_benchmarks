@@ -46,3 +46,16 @@ gpubench
 
 # Workspace (agent workspace, not tracked)
 workspace/
+
+# Bot infrastructure (not part of project)
+repo/
+repo-chat/
+config.yaml
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Compile logs
+compile_errors.log

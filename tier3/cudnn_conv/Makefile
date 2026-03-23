@@ -56,6 +56,16 @@ else
 endif
 
 # ---------------------------------------------------------------------------
+# cuDNN availability check (CUDA platform only)
+# ---------------------------------------------------------------------------
+ifeq ($(PLATFORM),cuda)
+  CUDNN_FOUND := $(or $(wildcard /usr/include/cudnn.h),$(wildcard /usr/local/cuda/include/cudnn.h),$(wildcard $(CUDA_HOME)/include/cudnn.h))
+  ifeq ($(CUDNN_FOUND),)
+    $(error cuDNN not found. Install nvidia-cuda-toolkit with cuDNN support or set CUDA_HOME/CUDNN_PATH to your cuDNN installation)
+  endif
+endif
+
+# ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
 .PHONY: all clean

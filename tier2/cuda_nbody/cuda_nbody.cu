@@ -72,7 +72,7 @@ __global__ void nbody_kernel(float4* __restrict__ pos,
     float4 myPos;
     if (i < N) myPos = pos[i];
 
-    float3 acc = {0.0f, 0.0f, 0.0f};
+    float3 acc = make_float3(0.0f, 0.0f, 0.0f);
 
     __shared__ float4 shPos[TILE_SIZE];
 
@@ -125,7 +125,8 @@ __global__ void nbody_kernel(float4* __restrict__ pos,
 // ---------------------------------------------------------------------------
 
 static void nbody_cpu(float4* pos, float4* vel, int N) {
-    std::vector<float3> acc(N, {0.0f, 0.0f, 0.0f});
+    std::vector<float3> acc(N);
+    for (int ii = 0; ii < N; ++ii) acc[ii] = make_float3(0.0f, 0.0f, 0.0f);
 
     for (int i = 0; i < N; ++i) {
         for (int j = 0; j < N; ++j) {

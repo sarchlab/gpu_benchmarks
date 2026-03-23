@@ -9,7 +9,7 @@ jobs:
   compile-cuda:
     name: Compile (CUDA)
     runs-on: ubuntu-latest
-    container: nvidia/cuda:12.6.3-devel-ubuntu22.04
+    container: nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04
     steps:
       - name: Install dependencies
         run: |
@@ -50,6 +50,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y git wget make gcc g++
+          apt-get install -y miopen-hip
 
       - name: Install Go
         run: |

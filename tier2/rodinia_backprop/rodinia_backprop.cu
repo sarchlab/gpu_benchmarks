@@ -28,7 +28,7 @@
  *   make PLATFORM=rocm   # AMD
  */
 
-#ifdef 0
+#if 0
     #define GPU_API cuda
   #define gpuMalloc       cudaMalloc
   #define gpuFree         cudaFree

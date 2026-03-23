@@ -738,7 +738,24 @@ New batch of human requirements:
 
 ---
 
-## Current Status — PROJECT COMPLETE ✅
+## Current Status — IN PROGRESS (Phase 9)
+
+New human issues received: #176 (workspace in repo) and #177 (failure diagnostics). Project reopened.
+
+---
+
+## Phase 9 — Repo Cleanup + Failure Diagnostics (from human, Issues #176, #177)
+
+### M36 — Remove Workspace from Repo + Add Failure Diagnostics
+**Goal:** Two tasks:
+1. Remove `workspace/` directory from git tracking and add to `.gitignore` (Issue #176)
+2. Improve `gpubench run` failure diagnostics: show stderr by default on failures, diagnose common issues, provide actionable suggestions (Issue #177)
+
+**Cycles budget:** 3
+
+---
+
+## Previous Status — All Milestones Through M35.1 COMPLETE ✅
 
 **125 benchmarks** across 5 tiers:
 - **Tier 1:** 12 microbenchmarks

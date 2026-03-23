@@ -133,6 +133,17 @@ The suite needs comprehensive modern ML workloads including:
 
 Add at least 8 more distinct benchmark suites beyond the existing ones (SHOC, Rodinia, PolyBench, Parboil, CUDA Samples). Each suite should include representative benchmarks.
 
+## Workspace Files Must Not Be in Repo (from human, Issue #176)
+
+The `workspace/` directory (containing agent skill files, project state DB, workspace notes, etc.) has been accidentally committed to the git repository. It must be removed from git tracking and added to `.gitignore`. The workspace directory should only exist at the filesystem level under `.thebotcompany`, not in the project repo.
+
+## Benchmark Failure Diagnostics (from human, Issue #177)
+
+Users need to be able to understand WHY a benchmark fails in their environment. Currently, when `gpubench run` encounters a failure, the error reporting is minimal — stderr is only shown with `--verbose`. The CLI must provide clear, actionable diagnostic information by default when benchmarks fail. This includes:
+1. **Always show stderr** on benchmark failure (not just with `--verbose`)
+2. **Common failure diagnosis** — identify and report common causes like: missing compilation (binary not found), missing GPU/driver, missing libraries, unsupported platform, out of memory, etc.
+3. **Actionable suggestions** — tell the user what to do next (e.g., "Run `gpubench compile --benchmark X` first", "Install CUDA toolkit", etc.)
+
 ## Notes
 
 - The `benchmark_report.md` at the repo root is the reference document for which benchmarks to include in each tier.

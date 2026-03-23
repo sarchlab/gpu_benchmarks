@@ -86,18 +86,19 @@ Design a mechanism for users to persist and share benchmark results with the com
 - Using a shared database
 - Standardized result format for submission
 
-## Fix Compilation Errors (from human, Issue #268)
+## Fix Compilation Errors (from human, Issues #268, #273)
 
-11 benchmarks fail to compile on CUDA:
-- **Tier 1:** fp16_throughput, tensor_core_throughput
-- **Tier 2:** cuda_nbody, graph_cc, graph_pr, heteromark_pagerank, lonestar_bh, lonestar_sssp, rodinia_backprop
+8 benchmarks still fail to compile on CUDA (Issue #273):
+- **Tier 2:** cuda_nbody, graph_cc, graph_pr, heteromark_pagerank, lonestar_bh, lonestar_sssp
 - **Tier 3:** cudnn_batchnorm, cudnn_conv
+
+Root cause: Missing `#include <cstdint>` in .cu files that use `uint32_t`. cudnn_batchnorm and cudnn_conv actually compile fine in cuDNN container — may be a re-test issue.
 
 All benchmarks must compile successfully on all supported platforms.
 
-## CI Must Pass (from human, Issue #269)
+## CI Must Pass — Use Self-Hosted Runners (from human, Issues #269, #272)
 
-The CI pipeline must pass. GitHub Actions CI was failing due to billing issues, but the compile workflow itself must work correctly when CI is available. Ensure Docker containers have all required libraries (including cuDNN for Tier 3 DNN benchmarks).
+The CI pipeline must pass. GitHub Actions CI fails due to billing issues. **Use self-hosted CI runners** (Issue #272) instead of `ubuntu-latest`. The `sarchlab` org has self-hosted runners available. Ensure Docker containers have all required libraries (including cuDNN for Tier 3 DNN benchmarks).
 
 ## Docker-Based CI (from human, Issue #223)
 

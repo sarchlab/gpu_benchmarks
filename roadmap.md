@@ -685,14 +685,48 @@ New batch of human requirements:
 
 ---
 
+## Phase 7 — Fix Remaining Compilation Failures + Self-Hosted CI (from human, Issues #272, #273)
+
+### M34 — Fix 6 CUDA Compilation Failures + Self-Hosted CI Runners
+**Goal:** Fix 6 .cu files that fail to compile due to missing `#include <cstdint>`, and switch CI to self-hosted runners.
+
+**Root cause (verified via Docker):** All 6 failing Tier 2 .cu files use `uint32_t` without including `<cstdint>`. nvcc 12.6 does not provide `uint32_t` transitively from other headers. Adding `#include <cstdint>` fixes all 6 files (verified in nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04 Docker container).
+
+**Note:** cudnn_batchnorm and cudnn_conv from Issue #273 actually compile fine in the cuDNN container — they were false positives (likely the human tested without cuDNN installed).
+
+**Files to fix (add `#include <cstdint>`):**
+1. `tier2/cuda_nbody/cuda_nbody.cu`
+2. `tier2/graph_cc/graph_cc.cu`
+3. `tier2/graph_pr/graph_pr.cu`
+4. `tier2/heteromark_pagerank/heteromark_pagerank.cu`
+5. `tier2/lonestar_bh/lonestar_bh.cu`
+6. `tier2/lonestar_sssp/lonestar_sssp.cu`
+
+**Preventive fixes (also missing `<cstdint>` but currently compile by luck):**
+7. `tier1/cache_latency/cache_latency.cu`
+8. `tier1/int32_throughput/int32_throughput.cu`
+9. `tier3/cusparse_spmv/cusparse_spmv.cu`
+
+**CI fix:** Update `.github/workflows/compile.yml` to use `runs-on: self-hosted` instead of `runs-on: ubuntu-latest` for both CUDA and ROCm jobs. The sarchlab org has self-hosted runners available.
+
+**Acceptance criteria:**
+1. All 9 .cu files include `<cstdint>`
+2. `gpubench compile --tier 1 --platform cuda` passes (0 failures)
+3. `gpubench compile --tier 2 --platform cuda` passes (0 failures)
+4. `gpubench compile --tier 3 --platform cuda` passes (0 failures)
+5. CI workflow uses self-hosted runners
+6. CI passes (or at least runs — runner availability may be an issue)
+
+**Cycles budget:** 3
+
+---
+
 ## Current Status
 
-**PROJECT COMPLETE.** All 33 milestones achieved. All 16 human issues closed.
-- 125 benchmarks across 5 tiers (12 Tier 1, 64 Tier 2, 11 Tier 3, 7 Tier 4, 31 Tier 5)
+125 benchmarks across 5 tiers. 6 CUDA compilation failures remaining (Issue #273). CI needs self-hosted runners (Issue #272).
+- 125 benchmarks: 12 Tier 1, 64 Tier 2, 11 Tier 3, 7 Tier 4, 31 Tier 5
 - Go CLI (`gpubench`) with list/compile/run/validate/info/export commands
-- 125/125 params.json valid, all parameterized with scaling + non-scaling parameters
-- SQLite output with platform info, kernel-level timing, computed metrics
+- 125/125 params.json valid, all parameterized
 - Native .cu + .hip + Metal sources for all C++ benchmarks
-- Docker CI workflow for CUDA + ROCm
-- Community result sharing mechanism
-- All human issues closed: #10, #18, #100, #101, #142, #143, #144, #217, #221, #223, #224, #226, #228, #229, #268, #269
+- Docker CI workflow needs self-hosted runners
+- Open issues: #272 (CI self-hosted), #273 (compilation failures)

@@ -732,30 +732,38 @@ New batch of human requirements:
 
 **Key discovery:** Run 2 (no `--network host`) proved default Actions Docker network has internet. Only fix needed was `-buildvcs=false`.
 
-### M35.1 — Fix CI: Remove --network host, keep -buildvcs=false
+### M35.1 — Fix CI: Remove --network host, keep -buildvcs=false ✅ COMPLETE (cycles used: 1)
 **Goal:** Make CI green. One change to PR #34: revert container config from object form (with `--network host`) back to inline string.
-
-**Exact change in `.github/workflows/compile.yml`:**
-```yaml
-# FROM (broken):
-    container:
-      image: nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04
-      options: --network host
-
-# TO (working):
-    container: nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04
-```
-Keep everything else: `-buildvcs=false`, arch-aware Go download, ROCm commented out.
-
-**Acceptance:** PR #34 CI green → merge to main → main CI green.
-**Cycles budget:** 2
+**Deliverables (completed):** PR #34 merged, main branch CI green (run 23445239783, success).
 
 ---
 
-## Current Status
+## Current Status — PROJECT COMPLETE ✅
 
-125 benchmarks. CI needs `--network host` removed from PR #34, then merge.
-- Open issue: #276 (CI must pass)
+**125 benchmarks** across 5 tiers:
+- **Tier 1:** 12 microbenchmarks
+- **Tier 2:** 64 application benchmarks from 12+ suites (SHOC, PolyBench, Rodinia, Parboil, CUDA SDK, HeteroMark, Tango, NPB-GPU, Altis, Lonestar, Graph Analytics, Chai)
+- **Tier 3:** 11 library benchmarks (cuBLAS, cuFFT, cuSPARSE, cuDNN, CUTLASS)
+- **Tier 4:** 7 alternative-language benchmarks (6 Triton + BabelStream)
+- **Tier 5:** 31 ML workloads (ResNet, BERT, GPT-2, ViT, SDPA, torch.compile, vLLM, llama.cpp, Ollama, LLaMA, DeepSeek, Qwen, GLM, Phi, Mistral, BERT fine-tune, Whisper, Stable Diffusion, MoE, RAG, CoT, Multi-Agent, SDXL, GPT-NeoX, DLRM, UNet3D, RetinaNet, GNN, GPT-J)
+
+**All requirements fulfilled:**
+- ✅ Make-only build system
+- ✅ Multi-GPU platform support (CUDA, ROCm, Metal)
+- ✅ Self-contained benchmarks
+- ✅ Complete benchmark suites
+- ✅ Full parameterization (125/125 params.json validated)
+- ✅ Kernel-level execution timing (JSON-lines protocol)
+- ✅ Go CLI tool (`gpubench` — list, compile, run, validate, info, export)
+- ✅ SQLite results database with platform info
+- ✅ Native .cu source files (88 C++ benchmarks)
+- ✅ Docker-based CI (green on self-hosted runners)
+- ✅ Result persistence mechanism (community_results/)
+- ✅ MLPerf benchmarks included
+- ✅ 12+ Tier 2 benchmark suites (beyond 8 required)
+- ✅ All human issues closed (#100, #101, #142, #143, #144, #217, #221, #223, #224, #226, #228, #229, #268, #269, #272, #273, #276)
+
+**No open issues. No open PRs. CI green.**
 
 ## Lessons Learned (Phase 8)
 - Default GitHub Actions Docker networking works on self-hosted runners. `--network host` conflicts with Actions' managed network.

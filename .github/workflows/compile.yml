@@ -14,8 +14,11 @@ jobs:
     steps:
       - name: Install dependencies
         run: |
-          apt-get update
-          apt-get install -y git wget make gcc g++
+          for i in 1 2 3; do
+            apt-get update && apt-get install -y git wget make gcc g++ && break
+            echo "Retry $i/3 failed, waiting 30s..."
+            sleep 30
+          done
 
       - name: Install Go
         run: |
@@ -42,67 +45,3 @@ jobs:
 
       - name: Compile Tier 4 (CUDA)
         run: ./gpubench compile --tier 4 --platform cuda
-
-  # compile-rocm:
-  #   NOTE: ROCm only supports x86_64. Self-hosted runners are ARM64.
-  #   Re-enable when x86_64 runners are available.
-  #
-  #   name: Compile (ROCm)
-  #   runs-on: self-hosted
-  #   container: rocm/dev-ubuntu-22.04:6.0
-  #   steps:
-  #     - name: Install dependencies
-  #       run: |
-  #         apt-get update
-  #         apt-get install -y git wget make gcc g++
-  #         apt-get install -y miopen-hip
-  #
-  #     - name: Install Go
-  #       run: |
-  #         wget -q https://go.dev/dl/go1.23.4.linux-amd64.tar.gz
-  #         tar -C /usr/local -xzf go1.23.4.linux-amd64.tar.gz
-  #         rm go1.23.4.linux-amd64.tar.gz
-  #         echo "/usr/local/go/bin" >> "$GITHUB_PATH"
-  #
-  #     - name: Checkout
-  #       uses: actions/checkout@v4
-  #
-  #     - name: Build gpubench
-  #       run: go build -o gpubench ./cmd/gpubench
-  #
-  #     - name: Compile Tier 1 (ROCm)
-  #       run: ./gpubench compile --tier 1 --platform rocm
-  #
-  #     - name: Compile Tier 2 (ROCm)
-  #       run: ./gpubench compile --tier 2 --platform rocm
-  #
-  #     - name: Compile Tier 3 (ROCm)
-  #       run: ./gpubench compile --tier 3 --platform rocm
-  #
-  #     - name: Compile Tier 4 (ROCm)
-  #       run: ./gpubench compile --tier 4 --platform rocm
-
-  # compile-metal:
-  #   name: Compile (Metal)
-  #   runs-on: macos-latest
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@v4
-  #
-  #     - name: Set up Go
-  #       uses: actions/setup-go@v5
-  #       with:
-  #         go-version: '1.23'
-  #
-  #     - name: Build gpubench
-  #       run: go build -o gpubench ./cmd/gpubench
-  #
-  #     - name: Compile Tier 1 (Metal)
-  #       run: ./gpubench compile --tier 1 --platform metal
-  #
-  #     - name: Compile Tier 2 (Metal)
-  #       run: ./gpubench compile --tier 2 --platform metal
-  #
-  #     - name: Compile Tier 3 (Metal)
-  #       run: ./gpubench compile --tier 3 --platform metal
-# CI trigger

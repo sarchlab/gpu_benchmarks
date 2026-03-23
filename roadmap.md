@@ -726,68 +726,37 @@ New batch of human requirements:
 ### M35 — Fix CI to Pass on Self-Hosted Runners (Issue #276) ❌ DEADLINE MISSED (3/3 cycles used)
 **Goal:** Make the CI pipeline green.
 **What happened:** Ares's team tried 3 approaches over 3 cycles:
-1. **Cycle 1**: Added `--network host` to container options + arch-aware Go download + commented out ROCm job. CI failed on VCS status error (`go build` without `-buildvcs=false`).
-2. **Cycle 2**: Removed `--network host`, kept arch Go download. CI got past apt-get/Go/checkout (networking WORKED without `--network host`) but still failed on `go build` VCS error.
-3. **Cycle 3**: Re-added `--network host` to container.options + added `-buildvcs=false`. Docker create failed: "conflicting options: cannot attach both user-defined and non-user-defined network-modes" — GitHub Actions creates its own network and `--network host` conflicts.
+1. **Cycle 1**: Added `--network host` + arch-aware Go + commented ROCm. Failed: VCS error in `go build`.
+2. **Cycle 2**: Removed `--network host`. CI passed apt-get/Go/checkout (networking WORKED). Failed: same VCS error.
+3. **Cycle 3**: Re-added `--network host` + `-buildvcs=false`. Failed: Docker "conflicting network modes" error.
 
-**Key discovery:** Run 2 proved that the **default GitHub Actions Docker network provides internet access** — `apt-get update`, `wget` (Go download), and `actions/checkout` all succeeded without `--network host`. The only failure was the VCS stamping error in `go build`, which `-buildvcs=false` fixes.
+**Key discovery:** Run 2 (no `--network host`) proved default Actions Docker network has internet. Only fix needed was `-buildvcs=false`.
 
-**Root cause of failure:** The initial diagnosis was wrong. The team assumed containers had no internet access, but the second CI run proved they do. The team then went back to `--network host` instead of keeping the working network and just adding `-buildvcs=false`.
+### M35.1 — Fix CI: Remove --network host, keep -buildvcs=false
+**Goal:** Make CI green. One change to PR #34: revert container config from object form (with `--network host`) back to inline string.
 
-**Correct fix (for M35.1):**
-1. Remove `options: --network host` from container config (default network works)
-2. Keep `-buildvcs=false` in `go build` command
-3. Keep arch-aware Go download
-4. Keep ROCm job commented out
-
-**Branch:** `ares/m35-fix-ci` (PR #34, NOT merged, CI failing)
-
-### M35.1 — Fix CI: Remove --network host, Keep -buildvcs=false
-**Goal:** Make CI green by applying the correct 2-line fix to PR #34.
-
-**Analysis from CI run logs:**
-- Run 23438401167 (no `--network host`): apt-get ✅, Go download ✅, checkout ✅, go build ❌ (VCS error)
-- Run 23439502478 (with `--network host`): Docker create ❌ (conflicting network modes)
-
-**Conclusion:** Default GitHub Actions Docker networking WORKS. Only `--network host` must be removed.
-
-**Exact changes to `.github/workflows/compile.yml` on branch `ares/m35-fix-ci`:**
+**Exact change in `.github/workflows/compile.yml`:**
 ```yaml
-# CHANGE FROM:
+# FROM (broken):
     container:
       image: nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04
       options: --network host
 
-# CHANGE TO:
+# TO (working):
     container: nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04
 ```
+Keep everything else: `-buildvcs=false`, arch-aware Go download, ROCm commented out.
 
-Everything else on the branch is correct:
-- `-buildvcs=false` ✅
-- Arch-aware Go download ✅
-- ROCm commented out ✅
-
-**Acceptance criteria:**
-1. PR #34 CI passes (green)
-2. PR #34 is merged to main
-3. Main branch CI is green
-
-**Branch:** `ares/m35-fix-ci` (update existing PR #34)
+**Acceptance:** PR #34 CI green → merge to main → main CI green.
 **Cycles budget:** 2
 
 ---
 
 ## Current Status
 
-125 benchmarks across 5 tiers. All code compiles. CI needs one fix: remove `--network host` from container config.
-- 125 benchmarks: 12 Tier 1, 64 Tier 2, 11 Tier 3, 7 Tier 4, 31 Tier 5
-- Go CLI (`gpubench`) with list/compile/run/validate/info/export commands
-- 125/125 params.json valid, all parameterized
-- Native .cu + .hip + Metal sources for all C++ benchmarks
-- CI fix: PR #34 needs `--network host` removed (default network works), then merge
-- Open issues: #276 (CI must pass)
+125 benchmarks. CI needs `--network host` removed from PR #34, then merge.
+- Open issue: #276 (CI must pass)
 
-## Lessons Learned (Updated)
-- **M35 failure:** Initial diagnosis was wrong — assumed containers had no internet, but CI run #2 proved they did. The team oscillated between adding/removing `--network host` instead of isolating the actual failure (VCS stamping). Always check what WORKED in a failed run, not just what failed.
-- **CI debugging:** Read CI logs carefully. The second run showed networking was fine — the only error was `go build` VCS stamping. The fix was already known (`-buildvcs=false`). Instead, the team went backwards by re-adding `--network host`.
-- **GitHub Actions + Docker:** `container.options: --network host` CANNOT be used with GitHub Actions' `container:` directive because Actions creates its own Docker network. This is a fundamental incompatibility, not a configuration issue.
+## Lessons Learned (Phase 8)
+- Default GitHub Actions Docker networking works on self-hosted runners. `--network host` conflicts with Actions' managed network.
+- Always check what WORKED in a failed CI run, not just the error.

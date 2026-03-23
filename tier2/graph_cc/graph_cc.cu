@@ -11,6 +11,7 @@
 // Output (stderr): human-readable results
 
 #include <cstdio>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>

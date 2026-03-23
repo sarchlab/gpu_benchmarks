@@ -144,6 +144,14 @@ Users need to be able to understand WHY a benchmark fails in their environment. 
 2. **Common failure diagnosis** — identify and report common causes like: missing compilation (binary not found), missing GPU/driver, missing libraries, unsupported platform, out of memory, etc.
 3. **Actionable suggestions** — tell the user what to do next (e.g., "Run `gpubench compile --benchmark X` first", "Install CUDA toolkit", etc.)
 
+## Persistent Compilation Failures (from human, tbc-db Issue #1)
+
+8 benchmarks still fail to compile in the human's CUDA environment (different from CI):
+- **Tier 2:** cuda_nbody, graph_cc, graph_pr, heteromark_pagerank, lonestar_bh, lonestar_sssp
+- **Tier 3:** cudnn_batchnorm, cudnn_conv
+
+Human's compile summary: Passed: 80, Failed: 8. Note: CI (nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04 on ARM64) passes all 88. The failures occur in a different CUDA environment. The code must compile across all reasonable CUDA environments, not just the CI container.
+
 ## Notes
 
 - The `benchmark_report.md` at the repo root is the reference document for which benchmarks to include in each tier.

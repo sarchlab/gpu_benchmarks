@@ -738,24 +738,44 @@ New batch of human requirements:
 
 ---
 
-## Current Status — IN PROGRESS (Phase 9)
-
-New human issues received: #176 (workspace in repo) and #177 (failure diagnostics). Project reopened.
-
----
-
 ## Phase 9 — Repo Cleanup + Failure Diagnostics (from human, Issues #176, #177)
 
-### M36 — Remove Workspace from Repo + Add Failure Diagnostics
+### M36 — Remove Workspace from Repo + Add Failure Diagnostics ✅ COMPLETE
 **Goal:** Two tasks:
 1. Remove `workspace/` directory from git tracking and add to `.gitignore` (Issue #176)
 2. Improve `gpubench run` failure diagnostics: show stderr by default on failures, diagnose common issues, provide actionable suggestions (Issue #177)
+
+**Deliverables (completed):** workspace removed from git, .gitignore updated, failure diagnostics improved. Merged via PRs #35 and #36.
+
+---
+
+## Current Status — IN PROGRESS (Phase 10)
+
+New human issue received via tbc-db #1: 8 benchmarks still fail to compile in the human's environment (not the CI Docker container). Project reopened.
+
+---
+
+## Phase 10 — Fix Persistent Compilation Failures (from human, tbc-db Issue #1)
+
+### M37 — Fix 8 Compilation Failures Across CUDA Environments
+**Goal:** Investigate and fix 8 benchmarks that fail to compile in the human's CUDA environment despite passing in CI (nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04 on ARM64).
+
+**Failing benchmarks:**
+- **Tier 2 (6):** cuda_nbody, graph_cc, graph_pr, heteromark_pagerank, lonestar_bh, lonestar_sssp
+- **Tier 3 (2):** cudnn_batchnorm, cudnn_conv
+
+**Key observations:**
+- The 6 Tier 2 failures are the ONLY benchmarks with `--expt-relaxed-constexpr --expt-extended-lambda` Makefile flags
+- The 2 Tier 3 failures require cuDNN (which may not be installed in the human's environment)
+- All 8 pass in CI with CUDA 12.6.3 + cuDNN Docker container
+
+**Investigation approach:** Under investigation by Iris (tbc-db issue #3).
 
 **Cycles budget:** 3
 
 ---
 
-## Previous Status — All Milestones Through M35.1 COMPLETE ✅
+## Previous Status — All Milestones Through M36 COMPLETE ✅
 
 **125 benchmarks** across 5 tiers:
 - **Tier 1:** 12 microbenchmarks

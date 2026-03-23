@@ -9,7 +9,9 @@ jobs:
   compile-cuda:
     name: Compile (CUDA)
     runs-on: self-hosted
-    container: nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04
+    container:
+      image: nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04
+      options: --network host
     steps:
       - name: Install dependencies
         run: |
@@ -28,7 +30,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build gpubench
-        run: go build -o gpubench ./cmd/gpubench
+        run: go build -buildvcs=false -o gpubench ./cmd/gpubench
 
       - name: Compile Tier 1 (CUDA)
         run: ./gpubench compile --tier 1 --platform cuda

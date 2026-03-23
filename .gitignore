@@ -43,3 +43,6 @@ gpubench
 
 # macOS
 .DS_Store
+
+# Workspace (agent workspace, not tracked)
+workspace/

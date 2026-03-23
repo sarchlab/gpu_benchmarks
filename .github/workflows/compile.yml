@@ -8,7 +8,7 @@ on:
 jobs:
   compile-cuda:
     name: Compile (CUDA)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     container: nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04
     steps:
       - name: Install dependencies
@@ -43,7 +43,7 @@ jobs:
 
   compile-rocm:
     name: Compile (ROCm)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     container: rocm/dev-ubuntu-22.04:6.0
     steps:
       - name: Install dependencies

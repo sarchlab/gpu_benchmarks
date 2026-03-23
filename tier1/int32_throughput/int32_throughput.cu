@@ -29,6 +29,7 @@
  */
 
 #include <cstdio>
+#include <cstdint>
 #include <cstdlib>
 #include <cuda_runtime.h>
 

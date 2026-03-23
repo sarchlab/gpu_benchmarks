@@ -21,6 +21,7 @@
 //   CUDA:  nvcc -O3 -std=c++14 cusparse_spmv.cu -lcusparse -o cusparse_spmv
 
 #include <stdio.h>
+#include <cstdint>
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>

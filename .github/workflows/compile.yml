@@ -104,3 +104,4 @@ jobs:
   #
   #     - name: Compile Tier 3 (Metal)
   #       run: ./gpubench compile --tier 3 --platform metal
+# CI trigger

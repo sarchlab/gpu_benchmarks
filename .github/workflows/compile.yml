@@ -34,6 +34,23 @@ jobs:
       - name: Build gpubench
         run: go build -buildvcs=false -o gpubench ./cmd/gpubench
 
+      - name: Regression check (cuDNN diagnostics)
+        run: |
+          set +e
+          conv_out=$(make -C tier3/cudnn_conv PLATFORM=cuda CUDNN_PATH=/tmp/does-not-exist-cudnn check-deps 2>&1)
+          conv_status=$?
+          bn_out=$(make -C tier3/cudnn_batchnorm PLATFORM=cuda CUDNN_PATH=/tmp/does-not-exist-cudnn check-deps 2>&1)
+          bn_status=$?
+          set -e
+
+          echo "$conv_out"
+          echo "$bn_out"
+
+          test "$conv_status" -ne 0
+          test "$bn_status" -ne 0
+          echo "$conv_out" | grep -q "requires cuDNN, but cudnn.h was not found"
+          echo "$bn_out" | grep -q "requires cuDNN, but cudnn.h was not found"
+
       - name: Compile Tier 1 (CUDA)
         run: ./gpubench compile --tier 1 --platform cuda
 

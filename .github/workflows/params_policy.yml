@@ -21,9 +21,15 @@ on:
 jobs:
   tier1-tier2-params-policy:
     runs-on: self-hosted
+    env:
+      CHECKOUT_PATH: _ci/params-policy-checkout
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          path: ${{ env.CHECKOUT_PATH }}
+          clean: false
 
       - name: Run Tier1/Tier2 params policy checker
+        working-directory: ${{ env.CHECKOUT_PATH }}
         run: python3 scripts/check_tier1_tier2_scaling_policy.py

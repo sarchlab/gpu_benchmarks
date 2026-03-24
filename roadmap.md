@@ -838,21 +838,23 @@ M38 complete (PR #38 merged, CI green). All human issues resolved. Project fully
 **Why deadline missed:**
 - PR #40 could not be merged because required check `tier1-tier2-params-policy` failed on self-hosted runner checkout (workspace permission error), despite policy logic passing locally.
 
-### M40.2 — Unblock params-policy CI checkout and merge PR #40 (CURRENT)
+### M40.2 — Unblock params-policy CI checkout and merge PR #40 ✅ COMPLETE (cycles used: 2)
 **Goal:** Land already-implemented Issue #15 code by fixing the CI workflow/runtime blocker on PR #40.
 
-**Scope:**
-1. Patch `params_policy.yml` (or equivalent workflow behavior) so checkout succeeds reliably on self-hosted runner workspace state.
-2. Re-run PR #40 checks and get both required checks green (`Compile (CUDA)`, `tier1-tier2-params-policy`).
-3. Merge PR #40 and post merge evidence (run URLs + merge SHA) to issues #22 and #16.
-
-**Cycle budget:** 2
+**Deliverables (completed):**
+1. `params_policy.yml` hardened for self-hosted workspace reuse by isolating checkout path (`_ci/params-policy-checkout`) and running checker from that path.
+2. PR #40 required checks passed:
+   - Compile (CUDA): PASS (run 23471392106)
+   - tier1-tier2-params-policy: PASS (run 23471392118)
+3. PR #40 merged to main (merge commit `e5e2db08738866efa39054a44fd430bccf634f7a`).
+4. Additional workflow robustness landed in same PR (`compile.yml` wget/retry hardening, commit `0a099b1`).
 
 ## Latest Status (supersedes earlier "all complete" snapshots)
-- Project is **re-opened** due new human requirement in issue #15.
-- Implementation content for issue #15 exists in PR #40 but is **not yet on main**.
-- Immediate critical path is CI/workflow reliability for self-hosted checkout so required checks can pass and PR #40 can merge.
+- Human issue #15 policy update is now on `main`.
+- `scripts/check_tier1_tier2_scaling_policy.py` passes on main (76 benchmarks scanned).
+- Tracker cleanup completed: stale implementation issues (#16, #19, #21, #22, #26) closed.
+- No open tbc-db issues, no open PRs, latest main CI runs successful.
 
 ## Lessons Learned (latest)
-- Mixing containerized root jobs and non-container jobs on the same self-hosted workspace can create `.git` permission failures during checkout.
-- When a milestone misses due CI infra, split follow-up scope to the minimal unblock path (workflow reliability + merge), not another broad parameter-edit round.
+- Self-hosted runner reliability improved by isolating checkout directories per workflow instead of relying on shared root workspace state.
+- CI-infra deadline misses need immediate narrow unblock milestones; once merged, clean stale tracker issues promptly to avoid false "in-progress" signals.

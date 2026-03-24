@@ -463,7 +463,9 @@ clean:
 | 184 | Planning | Athena | M32 complete. All 32 milestones done. All 14 human issues closed. **PROJECT COMPLETE.** |
 | ... | Various | Various | Phases 8-10: CI fixes (M33-M35.1), repo cleanup (M36), compilation fixes (M37). See detailed milestone entries. |
 | 92 prev | Planning | Athena | M37 complete (PR #37 merged, CI green). Human issue #2 (subrepository). Defining M38 (repo cleanup). |
-| current | Planning | Athena | M38 complete (PR #38 merged, CI green). All human issues closed. PROJECT COMPLETE. |
+| 224 | Planning | Athena | Human issue #10 reopened project (2 cuDNN benchmarks failing in external environment). Defined fix tracking issue #11 for Ares. |
+| 225–227 | Implementation | Ares+workers | cuDNN fallback/detection updates implemented and merged via PR #39 after initial CI failure/fix iteration. |
+| 228 | Planning | Athena | Independently verified cudnn_conv/cudnn_batchnorm compile success and non-failing diagnostics fallback; closed issues #10/#11/#14. Project complete again. |
 
 ---
 
@@ -754,7 +756,7 @@ New batch of human requirements:
 
 ## Current Status — ALL MILESTONES COMPLETE ✅
 
-M38 complete (PR #38 merged, CI green). All human issues resolved. Project fully complete.
+M39 complete (PR #39 merged, CI green). Latest human regression issue (#10) resolved and closed. Project fully complete.
 
 **Final State:**
 - 125 benchmarks across 5 tiers, all parameterized
@@ -792,6 +794,22 @@ M38 complete (PR #38 merged, CI green). All human issues resolved. Project fully
 
 ---
 
+## Phase 12 — cuDNN Compile Robustness Follow-up (from human, tbc-db Issue #10)
+
+### M39 — Resolve Remaining cuDNN Compile Failures ✅ COMPLETE (cycles used: 3)
+**Goal:** Ensure `cudnn_conv` and `cudnn_batchnorm` no longer fail in environments missing cuDNN and provide explicit diagnostics.
+
+**Deliverables (completed):**
+1. Deterministic cuDNN header/library search expanded for x86_64 + aarch64 in both Tier 3 Makefiles
+2. cuDNN-missing path now succeeds with a diagnostic fallback executable (no opaque linker/header hard-fail during compile sweep)
+3. CI regression check added for missing-cuDNN fallback behavior
+4. PR #39 merged; main branch CI green (run 23469378761)
+5. Athena independent verification: both benchmark-target compiles pass via `gpubench compile --benchmark ... --platform cuda`; human issue #10 closed
+
+**Branch:** `ares/issue11-cudnn-handling` (merged to main via PR #39)
+
+---
+
 ## Previous Status — All Milestones Through M37 COMPLETE ✅
 
 **125 benchmarks** across 5 tiers:
@@ -815,10 +833,12 @@ M38 complete (PR #38 merged, CI green). All human issues resolved. Project fully
 - ✅ Result persistence mechanism (community_results/)
 - ✅ MLPerf benchmarks included
 - ✅ 12+ Tier 2 benchmark suites (beyond 8 required)
-- ✅ All human issues closed (#100, #101, #142, #143, #144, #217, #221, #223, #224, #226, #228, #229, #268, #269, #272, #273, #276)
+- ✅ All tracked human issues closed (#2, #10, #100, #101, #142, #143, #144, #217, #221, #223, #224, #226, #228, #229, #268, #269, #272, #273, #276)
 
 **No open issues. No open PRs. CI green.**
 
-## Lessons Learned (Phase 8)
+## Lessons Learned (Recent Phases)
 - Default GitHub Actions Docker networking works on self-hosted runners. `--network host` conflicts with Actions' managed network.
 - Always check what WORKED in a failed CI run, not just the error.
+- For optional vendor libraries (cuDNN), compile sweeps should avoid hard-fail linker/header errors and provide deterministic, user-facing diagnostics plus recovery hints.
+- After deadline misses, tighten milestone scope to one regression surface area and require an explicit regression check in CI to prevent recurrence.

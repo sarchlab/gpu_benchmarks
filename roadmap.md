@@ -752,17 +752,23 @@ New batch of human requirements:
 
 ---
 
-## Current Status — ALL MILESTONES COMPLETE ✅
+## Current Status — REOPENED (2026-03-24)
 
-M38 complete (PR #38 merged, CI green). All human issues resolved. Project fully complete.
+A new human regression report is open in tbc-db issue #10:
+- `gpubench compile` still reports **2 failures**: `cudnn_batchnorm`, `cudnn_conv`.
 
-**Final State:**
+Current assessment:
+- Core project remains intact (125 benchmarks, CLI, CI, docs)
+- Remaining gap is CUDA compilation robustness for cuDNN-dependent Tier 3 benchmarks on environments without fully discoverable cuDNN headers/libs
+- Immediate next milestone is to make compilation behavior deterministic and pass/skip-clean for these two benchmarks with clear diagnostics
+
+**Working State:**
 - 125 benchmarks across 5 tiers, all parameterized
 - Go CLI tool (gpubench) with list, compile, run, validate, info, export
 - Docker-based CI green on self-hosted runners
 - Native .cu + .hip + Metal sources for all C++ benchmarks
 - Result persistence mechanism (community_results/)
-- No open issues. No open PRs. **CI GREEN.**
+- Open issue: #10 (compile regression)
 
 ---
 
@@ -822,3 +828,29 @@ M38 complete (PR #38 merged, CI green). All human issues resolved. Project fully
 ## Lessons Learned (Phase 8)
 - Default GitHub Actions Docker networking works on self-hosted runners. `--network host` conflicts with Actions' managed network.
 - Always check what WORKED in a failed CI run, not just the error.
+
+---
+
+## Phase 12 — cuDNN Compile Robustness Regression (from human, tbc-db issue #10)
+
+### M39 — Eliminate remaining compile failures for cudnn_* benchmarks (planned)
+**Goal:** Resolve the persistent compile failures in `tier3/cudnn_batchnorm` and `tier3/cudnn_conv` so `gpubench compile` no longer ends with 86 passed / 2 failed in CUDA environments.
+
+**Scope:**
+1. Reproduce issue #10 in a CUDA environment used by the human report
+2. Implement deterministic cuDNN detection for both benchmarks (headers + linker paths)
+3. Ensure behavior is explicit:
+   - compile succeeds when cuDNN is available, and
+   - compile path provides clear, actionable diagnostics when unavailable (without opaque compiler/linker errors)
+4. Keep ROCm (`-lMIOpen`) and Metal paths unchanged
+5. Add a lightweight regression check in CI/docs so this does not recur silently
+
+**Planned acceptance checks:**
+- `gpubench compile --benchmark cudnn_batchnorm --platform cuda`
+- `gpubench compile --benchmark cudnn_conv --platform cuda`
+- `gpubench compile --tier 3 --platform cuda` no longer reports these two as unexplained failures
+
+**Budget:** 3 cycles
+
+## Lessons Learned (Phase 12, initial)
+- Treat library-optional benchmarks (cuDNN/MIOpen) as first-class compatibility cases; encode detection rules in Makefiles explicitly rather than relying on implicit toolchain defaults.

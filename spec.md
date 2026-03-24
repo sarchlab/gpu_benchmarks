@@ -87,15 +87,21 @@ Design a mechanism for users to persist and share benchmark results with the com
 - Using a shared database
 - Standardized result format for submission
 
-## Fix Compilation Errors (from human, Issues #268, #273)
+## Fix Compilation Errors (from human, Issues #268, #273, #10)
 
-8 benchmarks still fail to compile on CUDA (Issue #273):
+8 benchmarks failed to compile on CUDA (Issue #273):
 - **Tier 2:** cuda_nbody, graph_cc, graph_pr, heteromark_pagerank, lonestar_bh, lonestar_sssp
 - **Tier 3:** cudnn_batchnorm, cudnn_conv
 
-Root cause: Missing `#include <cstdint>` in .cu files that use `uint32_t`. cudnn_batchnorm and cudnn_conv actually compile fine in cuDNN container — may be a re-test issue.
+Initial root cause for Tier 2 was missing `#include <cstdint>` in `.cu` files using `uint32_t`.
 
-All benchmarks must compile successfully on all supported platforms.
+**Current regression (human issue #10):** compile summary still reports two failures:
+- `cudnn_batchnorm`
+- `cudnn_conv`
+
+These two benchmarks must have robust CUDA/cuDNN detection and deterministic compile behavior with clear diagnostics (no opaque linker/header failures). The project is not considered complete until issue #10 is resolved.
+
+All benchmarks must compile successfully on all supported platforms, or fail with explicit dependency diagnostics that the CLI surfaces clearly.
 
 ## CI Must Pass — Use Self-Hosted Runners (from human, Issues #269, #272, #276)
 

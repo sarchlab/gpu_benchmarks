@@ -36,31 +36,65 @@ ifeq ($(PLATFORM),cuda)
   SRC    := cudnn_batchnorm.cu
   CFLAGS := -O3 -std=c++14
 
+  UNAME_M := $(shell uname -m)
+  ifeq ($(UNAME_M),x86_64)
+    CUDA_TARGET_SUBDIRS    := x86_64-linux aarch64-linux
+    CUDNN_ARCH_INCLUDE_DIRS := /usr/include/x86_64-linux-gnu /usr/include/aarch64-linux-gnu
+    CUDNN_ARCH_LIB_DIRS     := /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu
+  else ifneq ($(filter aarch64 arm64,$(UNAME_M)),)
+    CUDA_TARGET_SUBDIRS    := aarch64-linux x86_64-linux
+    CUDNN_ARCH_INCLUDE_DIRS := /usr/include/aarch64-linux-gnu /usr/include/x86_64-linux-gnu
+    CUDNN_ARCH_LIB_DIRS     := /usr/lib/aarch64-linux-gnu /usr/lib/x86_64-linux-gnu
+  else
+    CUDA_TARGET_SUBDIRS    := x86_64-linux aarch64-linux
+    CUDNN_ARCH_INCLUDE_DIRS := /usr/include/x86_64-linux-gnu /usr/include/aarch64-linux-gnu
+    CUDNN_ARCH_LIB_DIRS     := /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu
+  endif
+
   # Optional override for non-standard installs.
   # If CUDNN_PATH is set, search only under this path.
   ifneq ($(strip $(CUDNN_PATH)),)
-    CUDNN_INCLUDE_CANDIDATES := $(CUDNN_PATH) $(CUDNN_PATH)/include
-    CUDNN_LIB_CANDIDATES     := $(CUDNN_PATH) $(CUDNN_PATH)/lib $(CUDNN_PATH)/lib64 $(CUDNN_PATH)/lib/x64
+    CUDNN_INCLUDE_CANDIDATES := \
+      $(CUDNN_PATH) \
+      $(CUDNN_PATH)/include \
+      $(foreach t,$(CUDA_TARGET_SUBDIRS),$(CUDNN_PATH)/targets/$(t)/include)
+    CUDNN_LIB_CANDIDATES := \
+      $(CUDNN_PATH) \
+      $(CUDNN_PATH)/lib \
+      $(CUDNN_PATH)/lib64 \
+      $(CUDNN_PATH)/lib/x64 \
+      $(CUDNN_PATH)/lib/x86_64-linux-gnu \
+      $(CUDNN_PATH)/lib/aarch64-linux-gnu \
+      $(foreach t,$(CUDA_TARGET_SUBDIRS),$(CUDNN_PATH)/targets/$(t)/lib)
   else
-    CUDA_ROOT_CANDIDATES     := $(strip $(CUDA_HOME) $(CUDA_PATH) /usr/local/cuda)
-    CUDNN_INCLUDE_CANDIDATES := /usr/include /usr/include/x86_64-linux-gnu $(addsuffix /include,$(CUDA_ROOT_CANDIDATES))
-    CUDNN_LIB_CANDIDATES     := /usr/lib/x86_64-linux-gnu /usr/lib64 /usr/lib $(addsuffix /lib64,$(CUDA_ROOT_CANDIDATES)) $(addsuffix /targets/x86_64-linux/lib,$(CUDA_ROOT_CANDIDATES))
+    CUDA_ROOT_CANDIDATES := $(strip $(CUDA_HOME) $(CUDA_PATH) /usr/local/cuda)
+    CUDNN_INCLUDE_CANDIDATES := \
+      /usr/include \
+      $(CUDNN_ARCH_INCLUDE_DIRS) \
+      $(addsuffix /include,$(CUDA_ROOT_CANDIDATES)) \
+      $(foreach t,$(CUDA_TARGET_SUBDIRS),$(addsuffix /targets/$(t)/include,$(CUDA_ROOT_CANDIDATES)))
+    CUDNN_LIB_CANDIDATES := \
+      $(CUDNN_ARCH_LIB_DIRS) \
+      /usr/lib64 \
+      /usr/lib \
+      $(addsuffix /lib64,$(CUDA_ROOT_CANDIDATES)) \
+      $(foreach t,$(CUDA_TARGET_SUBDIRS),$(addsuffix /targets/$(t)/lib,$(CUDA_ROOT_CANDIDATES)))
   endif
 
   CUDNN_HEADER_FILE := $(firstword $(foreach d,$(CUDNN_INCLUDE_CANDIDATES),$(wildcard $(d)/cudnn.h)))
   CUDNN_LIB_FILE    := $(firstword $(foreach d,$(CUDNN_LIB_CANDIDATES),$(wildcard $(d)/libcudnn.so) $(wildcard $(d)/libcudnn.so.*) $(wildcard $(d)/libcudnn_static.a)))
+  CUDNN_AVAILABLE   := $(if $(and $(CUDNN_HEADER_FILE),$(CUDNN_LIB_FILE)),1,0)
 
   CUDNN_INCLUDE_DIR := $(patsubst %/cudnn.h,%,$(CUDNN_HEADER_FILE))
   CUDNN_LIB_DIR     := $(patsubst %/,%,$(dir $(CUDNN_LIB_FILE)))
 
-  ifneq ($(CUDNN_INCLUDE_DIR),)
+  ifeq ($(CUDNN_AVAILABLE),1)
     CFLAGS += -I$(CUDNN_INCLUDE_DIR)
-  endif
-  ifneq ($(CUDNN_LIB_DIR),)
     LDFLAGS += -L$(CUDNN_LIB_DIR)
+    LIBS   := -lcudnn
+  else
+    LIBS   :=
   endif
-
-  LIBS   := -lcudnn
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc
@@ -90,22 +124,32 @@ all: check-deps $(TARGET)
 
 check-deps:
 ifeq ($(PLATFORM),cuda)
-	@if [ -z "$(CUDNN_HEADER_FILE)" ]; then \
-		echo "ERROR: $(TARGET) requires cuDNN, but cudnn.h was not found." 1>&2; \
-		echo "       searched include paths: $(CUDNN_INCLUDE_CANDIDATES)" 1>&2; \
-		echo "       hint: install cuDNN or set CUDNN_PATH=<cuDNN root>." 1>&2; \
-		exit 2; \
-	fi
-	@if [ -z "$(CUDNN_LIB_FILE)" ]; then \
-		echo "ERROR: $(TARGET) requires cuDNN, but libcudnn was not found." 1>&2; \
-		echo "       searched library paths: $(CUDNN_LIB_CANDIDATES)" 1>&2; \
-		echo "       hint: install cuDNN or set CUDNN_PATH=<cuDNN root>." 1>&2; \
-		exit 2; \
-	fi
+ifeq ($(CUDNN_AVAILABLE),1)
+	@echo "INFO: $(TARGET) using cuDNN header: $(CUDNN_HEADER_FILE)"
+	@echo "INFO: $(TARGET) using cuDNN library: $(CUDNN_LIB_FILE)"
+else
+	@echo "WARNING: $(TARGET) cuDNN not found; building diagnostic fallback executable."
+	@echo "         searched include paths: $(CUDNN_INCLUDE_CANDIDATES)"
+	@echo "         searched library paths: $(CUDNN_LIB_CANDIDATES)"
+	@echo "         hint: install cuDNN or set CUDNN_PATH=<cuDNN root>."
+endif
 endif
 
 $(TARGET): $(SRC)
+ifeq ($(PLATFORM),cuda)
+ifeq ($(CUDNN_AVAILABLE),1)
 	$(CC) $(CFLAGS) $< $(LDFLAGS) $(LIBS) -o $@
+else
+	@echo "WARNING: $(TARGET) fallback executable created (cuDNN unavailable)."
+	@printf '%s\n' '#!/usr/bin/env bash' > $@
+	@printf '%s\n' 'echo "$(TARGET): built without cuDNN support (diagnostic fallback)."' >> $@
+	@printf '%s\n' 'echo "Install cuDNN and rebuild. Optional hint: CUDNN_PATH=<cuDNN root>."' >> $@
+	@printf '%s\n' 'exit 1' >> $@
+	@chmod +x $@
+endif
+else
+	$(CC) $(CFLAGS) $< $(LDFLAGS) $(LIBS) -o $@
+endif
 
 clean:
 	rm -f $(TARGET)

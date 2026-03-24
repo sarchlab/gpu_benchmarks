@@ -45,6 +45,13 @@ For every benchmark:
 3. **Identify parameter values.** For non-scaling factors, select 3–5 values per parameter. For scaling factors, select 20–30 values.
 4. **Document the parameter selection.**
 
+## Parameter Value Policy Update (from human, Issue #15)
+
+For non-ML workloads, parameter values should target practical execution time (around ~15s per run), not extreme stress-only sizes. Specifically:
+1. Include non-power-of-two points in scaling values (not power-of-two-only grids).
+2. For per-thread-op throughput style benchmarks (e.g., ops-per-thread style Tier 1 cases), cap maximum scaling value at **65536** unless there is a documented benchmark-specific exception.
+3. Re-evaluate Tier 1/Tier 2 scaling ranges to remove unnecessarily large values chosen only for stress testing.
+
 ## CLI Requirements (from human, Issues #144 and #217)
 
 Build a CLI tool **implemented in Go** (from human, Issue #217) that:

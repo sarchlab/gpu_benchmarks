@@ -822,3 +822,37 @@ M38 complete (PR #38 merged, CI green). All human issues resolved. Project fully
 ## Lessons Learned (Phase 8)
 - Default GitHub Actions Docker networking works on self-hosted runners. `--network host` conflicts with Actions' managed network.
 - Always check what WORKED in a failed CI run, not just the error.
+
+---
+
+## Phase 12 — Parameter Policy Normalization (from human, tbc-db Issue #15)
+
+### M40.1 — Normalize Tier1/Tier2 non-ML scaling params + policy CI ❌ DEADLINE MISSED (3/3 cycles used)
+**Goal:** Apply human Issue #15 policy updates (non-power-of-two points, practical non-ML ranges, Tier1 throughput cap at 65536) across Tier1/Tier2 and enforce with CI checker.
+
+**What completed:**
+- Parameter updates implemented on branch `ares/issue16-tier1-tier2-policy` (PR #40)
+- Static checker added: `scripts/check_tier1_tier2_scaling_policy.py`
+- Policy docs updated in `docs/params_format.md`
+
+**Why deadline missed:**
+- PR #40 could not be merged because required check `tier1-tier2-params-policy` failed on self-hosted runner checkout (workspace permission error), despite policy logic passing locally.
+
+### M40.2 — Unblock params-policy CI checkout and merge PR #40 (CURRENT)
+**Goal:** Land already-implemented Issue #15 code by fixing the CI workflow/runtime blocker on PR #40.
+
+**Scope:**
+1. Patch `params_policy.yml` (or equivalent workflow behavior) so checkout succeeds reliably on self-hosted runner workspace state.
+2. Re-run PR #40 checks and get both required checks green (`Compile (CUDA)`, `tier1-tier2-params-policy`).
+3. Merge PR #40 and post merge evidence (run URLs + merge SHA) to issues #22 and #16.
+
+**Cycle budget:** 2
+
+## Latest Status (supersedes earlier "all complete" snapshots)
+- Project is **re-opened** due new human requirement in issue #15.
+- Implementation content for issue #15 exists in PR #40 but is **not yet on main**.
+- Immediate critical path is CI/workflow reliability for self-hosted checkout so required checks can pass and PR #40 can merge.
+
+## Lessons Learned (latest)
+- Mixing containerized root jobs and non-container jobs on the same self-hosted workspace can create `.git` permission failures during checkout.
+- When a milestone misses due CI infra, split follow-up scope to the minimal unblock path (workflow reliability + merge), not another broad parameter-edit round.

@@ -7,7 +7,37 @@
     "name": "ops_per_thread",
     "description": "Number of shuffle operations each thread performs per kernel invocation",
     "type": "int",
-    "values": [4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152]
+    "values": [
+      4,
+      6,
+      8,
+      12,
+      16,
+      24,
+      32,
+      48,
+      64,
+      96,
+      128,
+      192,
+      256,
+      384,
+      512,
+      768,
+      1024,
+      1536,
+      2048,
+      3072,
+      4096,
+      6144,
+      8192,
+      12288,
+      16384,
+      24576,
+      32768,
+      49152,
+      65536
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,22 +45,44 @@
       "description": "Number of thread blocks in the grid",
       "type": "int",
       "default": 1024,
-      "values": [256, 512, 1024, 2048, 4096]
+      "values": [
+        256,
+        512,
+        1024,
+        2048,
+        4096
+      ]
     },
     {
       "name": "threads_per_block",
       "description": "Number of threads per block",
       "type": "int",
       "default": 256,
-      "values": [64, 128, 256, 512]
+      "values": [
+        64,
+        128,
+        256,
+        512
+      ]
     },
     {
       "name": "shuffle_variant",
       "description": "Which shuffle instruction variant to benchmark",
       "type": "enum",
       "default": "all",
-      "values": ["shfl_xor", "shfl", "shfl_up", "shfl_down", "all"]
+      "values": [
+        "shfl_xor",
+        "shfl",
+        "shfl_up",
+        "shfl_down",
+        "all"
+      ]
     }
   ],
-  "kernels": ["shfl_xor_kernel", "shfl_kernel", "shfl_up_kernel", "shfl_down_kernel"]
+  "kernels": [
+    "shfl_xor_kernel",
+    "shfl_kernel",
+    "shfl_up_kernel",
+    "shfl_down_kernel"
+  ]
 }

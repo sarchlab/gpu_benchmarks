@@ -56,6 +56,12 @@ The scaling parameter is the single parameter that controls the "size" of the be
 | `type` | string | **yes** | One of: `"int"`, `"float"`, `"string"`, `"enum"` |
 | `values` | array | **yes** | Ordered list of values to sweep. Should contain 20–30 values for scaling params |
 
+For **Tier 1 and Tier 2 non-ML benchmarks**, scaling arrays should prioritize practical coverage over stress-test extremes:
+
+- Include at least **3 non-power-of-two values** to avoid only alignment-friendly datapoints
+- Keep upper bounds within a **practical single-run target (~15s)** for non-ML workloads
+- For Tier 1 per-thread-op throughput microbenchmarks (`atomic_operations`, `warp_shuffle`, `fp16_throughput`, `fp32_throughput`, `fp64_throughput`, `int32_throughput`), cap scaling max at **65536**
+
 ### Non-Scaling Parameter Object
 
 Non-scaling parameters are configuration knobs that affect execution but are not the primary scaling axis.
@@ -132,7 +138,7 @@ BENCH_PARAM_matrix_size=1024 BENCH_PARAM_block_size=16 python3 bench.py
     "name": "fmas_per_thread",
     "description": "Number of FMA operations per thread per kernel invocation",
     "type": "int",
-    "values": [4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152]
+    "values": [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096, 6144, 8192, 12288, 16384, 24576, 32768, 49152, 65536]
   },
   "non_scaling_params": [
     {
@@ -258,3 +264,5 @@ A valid `params.json` must satisfy:
 6. All `kernels` entries are unique strings
 7. Parameter names are valid identifiers (`[a-z][a-z0-9_]*`)
 8. No duplicate parameter names across scaling + non-scaling params
+9. Tier 1 and Tier 2 benchmarks must include at least 3 non-power-of-two values in `scaling_param.values`
+10. Tier 1 per-thread-op throughput benchmarks (`atomic_operations`, `warp_shuffle`, `fp16_throughput`, `fp32_throughput`, `fp64_throughput`, `int32_throughput`) must use max scaling value `<= 65536`

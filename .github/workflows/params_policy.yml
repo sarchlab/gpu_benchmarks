@@ -1,0 +1,29 @@
+name: Params Policy Check
+
+on:
+  pull_request:
+    paths:
+      - "tier1/**/params.json"
+      - "tier2/**/params.json"
+      - "scripts/check_tier1_tier2_scaling_policy.py"
+      - "docs/params_format.md"
+      - ".github/workflows/params_policy.yml"
+  push:
+    branches: [main]
+    paths:
+      - "tier1/**/params.json"
+      - "tier2/**/params.json"
+      - "scripts/check_tier1_tier2_scaling_policy.py"
+      - "docs/params_format.md"
+      - ".github/workflows/params_policy.yml"
+  workflow_dispatch:
+
+jobs:
+  tier1-tier2-params-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Tier1/Tier2 params policy checker
+        run: python3 scripts/check_tier1_tier2_scaling_policy.py

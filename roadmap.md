@@ -752,7 +752,7 @@ New batch of human requirements:
 
 ---
 
-## Current Status — ALL MILESTONES COMPLETE ✅
+## Historical Status Snapshot (before Issue #15)
 
 M38 complete (PR #38 merged, CI green). All human issues resolved. Project fully complete.
 
@@ -822,3 +822,48 @@ M38 complete (PR #38 merged, CI green). All human issues resolved. Project fully
 ## Lessons Learned (Phase 8)
 - Default GitHub Actions Docker networking works on self-hosted runners. `--network host` conflicts with Actions' managed network.
 - Always check what WORKED in a failed CI run, not just the error.
+
+---
+
+## Phase 12 — cuDNN Compile Robustness Follow-up (from human, tbc-db Issue #10)
+
+### M39 — Resolve Remaining cuDNN Compile Failures ✅ COMPLETE (cycles used: 3)
+**Goal:** Ensure `cudnn_conv` and `cudnn_batchnorm` compile behavior is robust when cuDNN is missing and diagnostics are explicit.
+
+**Deliverables (completed):**
+1. Deterministic cuDNN header/library detection expanded for x86_64 + aarch64
+2. Missing-cuDNN path compiles to explicit diagnostic fallback binary instead of opaque linker/header failure
+3. CI regression check added for fallback behavior
+4. Merged via PR #39; main branch CI green
+
+---
+
+## Phase 13 — Parameter Selection Re-evaluation (from human, tbc-db Issue #15)
+
+Human feedback from real runs indicates many non-ML benchmarks still use oversized and power-of-two-only scaling ranges. Independent audit on main found:
+- 94 non-ML benchmarks (tiers 1–4)
+- 35 benchmarks with **all** scaling points as powers of two
+- 46 benchmarks with max scaling value **> 65536**
+- Tier 1 throughput-style params (`ops_per_thread`, `fmas_per_thread`, `mads_per_thread`) currently go up to 2,097,152
+
+### M40 — Re-evaluate parameter selection for non-ML benchmarks ❌ DEADLINE MISSED (3/3 cycles used)
+**What happened:** Scope was too broad for one milestone without tighter decomposition and explicit static acceptance checks.
+
+### M40.1 — Tier 1 throughput + Tier 2 scaling range normalization (next)
+**Goal:** Deliver a first verifiable slice of Issue #15 with strict, checkable constraints.
+
+**Planned deliverables:**
+1. Update Tier 1 throughput-like benchmarks (`atomic_operations`, `warp_shuffle`, `fp16_throughput`, `fp32_throughput`, `fp64_throughput`, `int32_throughput`) so scaling values include non-power-of-two points and upper bound is reduced to runtime-realistic levels (cap at 65536 for per-thread-op style params).
+2. Update all Tier 2 `params.json` scaling arrays so each benchmark includes non-power-of-two points and removes unnecessary extreme upper-bound values chosen only for stress testing.
+3. Add a lightweight static checker script for parameter policy (non-power-of-two coverage + upper-bound checks) and wire it into CI.
+4. Document the new parameter selection rationale in `docs/params_format.md` (runtime realism for non-ML runs, target around 15s).
+
+### M40.2 — Tier 3 + Tier 4 normalization (planned)
+Apply the same policy and checker enforcement to all Tier 3 and Tier 4 non-ML benchmarks.
+
+## Current Status
+Project remains functionally complete, but **human issue #15 is open** and parameter ranges require recalibration. Next implementation focus is M40.1.
+
+## Lessons Learned (Current)
+- After a deadline miss, split by tier and add machine-checkable acceptance criteria before reassigning.
+- Parameter quality must be treated as first-class correctness, not a post-hoc tuning task.

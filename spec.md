@@ -45,6 +45,15 @@ For every benchmark:
 3. **Identify parameter values.** For non-scaling factors, select 3–5 values per parameter. For scaling factors, select 20–30 values.
 4. **Document the parameter selection.**
 
+## Parameter Range Recalibration (from human, tbc-db Issue #15)
+
+Human feedback from real benchmark runs requires tighter and more realistic parameter choices:
+
+1. **Do not use only powers-of-two points** for scaling curves. Each non-ML benchmark (Tiers 1–4) must include non-power-of-two scaling points so interpolation/regression behavior is observable between canonical powers-of-two sizes.
+2. **Avoid unnecessarily large scaling ranges** for non-ML workloads. Parameter ranges should target practical run times (around 15s per run is sufficient for non-ML workloads) instead of very large stress-test values by default.
+3. **Per-thread operation parameters** (e.g., `ops_per_thread`, `fmas_per_thread`, `mads_per_thread`) should not use extreme upper bounds; values around **65536** are sufficient unless there is benchmark-specific justification.
+4. **Re-evaluate all benchmark parameter selections** and update `params.json` accordingly.
+
 ## CLI Requirements (from human, Issues #144 and #217)
 
 Build a CLI tool **implemented in Go** (from human, Issue #217) that:

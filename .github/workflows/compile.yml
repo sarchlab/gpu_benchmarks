@@ -14,11 +14,25 @@ jobs:
     steps:
       - name: Install dependencies
         run: |
+          install_ok=0
           for i in 1 2 3; do
-            apt-get update && apt-get install -y git wget make gcc g++ && break
-            echo "Retry $i/3 failed, waiting 30s..."
-            sleep 30
+            if apt-get update && apt-get install -y git wget make gcc g++; then
+              install_ok=1
+              break
+            fi
+            if [ "$i" -lt 3 ]; then
+              echo "Retry $i/3 failed, waiting 30s..."
+              sleep 30
+            fi
           done
+
+          if [ "$install_ok" -ne 1 ]; then
+            echo "Dependency installation failed after 3 attempts."
+            exit 1
+          fi
+
+      - name: Verify wget is available
+        run: command -v wget >/dev/null 2>&1
 
       - name: Install Go
         run: |

@@ -34,6 +34,23 @@ jobs:
       - name: Build gpubench
         run: go build -buildvcs=false -o gpubench ./cmd/gpubench
 
+      - name: Regression check (cuDNN fallback diagnostics)
+        run: |
+          conv_out=$(make -C tier3/cudnn_conv PLATFORM=cuda CUDNN_PATH=/tmp/does-not-exist-cudnn clean all 2>&1)
+          bn_out=$(make -C tier3/cudnn_batchnorm PLATFORM=cuda CUDNN_PATH=/tmp/does-not-exist-cudnn clean all 2>&1)
+
+          echo "$conv_out"
+          echo "$bn_out"
+
+          echo "$conv_out" | grep -q "WARNING: cudnn_conv cuDNN not found; building diagnostic fallback executable."
+          echo "$bn_out" | grep -q "WARNING: cudnn_batchnorm cuDNN not found; building diagnostic fallback executable."
+          echo "$conv_out" | grep -q "searched include paths:"
+          echo "$conv_out" | grep -q "searched library paths:"
+          echo "$bn_out" | grep -q "searched include paths:"
+          echo "$bn_out" | grep -q "searched library paths:"
+          test -x tier3/cudnn_conv/cudnn_conv
+          test -x tier3/cudnn_batchnorm/cudnn_batchnorm
+
       - name: Compile Tier 1 (CUDA)
         run: ./gpubench compile --tier 1 --platform cuda
 

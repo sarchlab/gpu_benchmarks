@@ -1,6 +1,18 @@
 # Compiled binaries (executables with no extension in benchmark dirs)
 tier1/*/bench
 tier1/*/bench_*
+tier1/atomic_operations/atomic_operations
+tier1/cache_latency/cache_latency
+tier1/fp16_throughput/fp16_throughput
+tier1/fp32_throughput/fp32_throughput
+tier1/fp64_throughput/fp64_throughput
+tier1/int32_throughput/int32_throughput
+tier1/memory_bandwidth/memory_bandwidth
+tier1/mixbench/mixbench
+tier1/pcie_bandwidth/pcie_bandwidth
+tier1/shared_mem_bandwidth/shared_mem_bandwidth
+tier1/tensor_core_throughput/tensor_core_throughput
+tier1/warp_shuffle/warp_shuffle
 tier2/*/*
 !tier2/*/Makefile
 !tier2/*/README.md
@@ -22,6 +34,7 @@ tier3/*/*
 !tier3/*/*.h
 !tier3/*/*.metal
 !tier3/*/*.mm
+tier4/babelstream/babelstream
 
 # Python cache
 __pycache__/
@@ -59,3 +72,6 @@ config.yaml
 
 # Compile logs
 compile_errors.log
+
+# Output logs
+*.out

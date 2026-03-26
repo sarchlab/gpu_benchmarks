@@ -51,8 +51,8 @@ __pycache__/
 # Results directory
 results/
 
-# Go binary
-gpubench
+# Go binary (root-level compiled binary only)
+/gpubench
 
 # macOS
 .DS_Store

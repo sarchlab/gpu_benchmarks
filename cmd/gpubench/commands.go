@@ -470,6 +470,9 @@ type runArgs struct {
 	dryRun          bool
 	continueOnError bool
 	verbose         bool
+	collectTrace    string
+	traceOutput     string
+	postProcess     string
 }
 
 func cmdRun(args runArgs) int {
@@ -574,6 +577,138 @@ func cmdRun(args runArgs) int {
 		return ExitOK
 	}
 
+	// Trace collection mode: skip SQLite, inject LD_PRELOAD env vars
+	if args.collectTrace != "" {
+		traceOutput := args.traceOutput
+		if traceOutput == "" {
+			traceOutput = "./traces"
+		}
+		eprint("=== Trace Collection Mode ===")
+		eprintf("Tracer:      %s\n", args.collectTrace)
+		eprintf("Output dir:  %s\n", traceOutput)
+		if args.postProcess != "" {
+			eprintf("Post-process: %s\n", args.postProcess)
+		}
+		eprint("NOTE: SQLite writes are disabled in trace collection mode.")
+
+		setupInterruptHandler()
+		totalPassed, totalFailed := 0, 0
+		startTime := time.Now()
+
+		for idx, b := range benchmarks {
+			if interrupted {
+				break
+			}
+			spName := b.ScalingParam.Name
+			configs := generateConfigs(b, args.sweepNonScaling, scalingOverride)
+			eprintf("[%3d/%d] tier%d/%s\n", idx+1, len(benchmarks), b.Tier, b.Benchmark)
+			eprintf("  Scaling: %s (%d configs x %d reps = %d runs)\n",
+				spName, len(configs), reps, len(configs)*reps)
+
+			benchTraceDir := filepath.Join(traceOutput, b.Benchmark)
+			if err := os.MkdirAll(benchTraceDir, 0755); err != nil {
+				eprintf("Error creating trace dir %s: %v\n", benchTraceDir, err)
+				return ExitDB
+			}
+
+			bp, bf := 0, 0
+			cmd := getBenchCommand(b, plat)
+
+			for _, cfg := range configs {
+				if interrupted {
+					break
+				}
+				for rep := 1; rep <= reps; rep++ {
+					if interrupted {
+						break
+					}
+					env := buildEnv(spName, cfg.ScalingValue, cfg.NSDict)
+					env = append(env,
+						fmt.Sprintf("LD_PRELOAD=%s", args.collectTrace),
+						"USER_DEFINED_FOLDERS=1",
+						fmt.Sprintf("TRACES_FOLDER=%s", benchTraceDir),
+					)
+					eprintf("    %s=%-12s rep %d/%d  ",
+						spName, formatValue(cfg.ScalingValue), rep, reps)
+
+					ec, _, stderrStr, timedOut := runBenchmarkProc(
+						cmd, env, timeoutSecs, args.verbose)
+
+					var status string
+					if timedOut {
+						status = "timeout"
+					} else if ec != 0 {
+						status = "error"
+					} else {
+						status = "ok"
+					}
+
+					if (status != "ok" || args.verbose) && stderrStr != "" {
+						for _, sl := range strings.Split(stderrStr, "\n") {
+							if sl != "" {
+								eprintf("      [stderr] %s\n", sl)
+							}
+						}
+					}
+
+					if status == "ok" {
+						eprint("trace captured")
+						bp++
+					} else if status == "timeout" {
+						eprintf("timeout after %ds\n", timeoutSecs)
+						bf++
+					} else {
+						eprintf("exit code %d\n", ec)
+						bf++
+					}
+
+					if !args.continueOnError && bf > 0 && status != "ok" {
+						break
+					}
+				}
+				if !args.continueOnError && bf > 0 {
+					break
+				}
+			}
+
+			if args.postProcess != "" && bp > 0 {
+				kernelsList := filepath.Join(benchTraceDir, "traces", "kernelslist")
+				eprintf("  Post-processing: %s %s\n", args.postProcess, kernelsList)
+				ppCtx, ppCancel := context.WithTimeout(context.Background(), 300*time.Second)
+				ppCmd := exec.CommandContext(ppCtx, args.postProcess, kernelsList)
+				ppCmd.Stdout = os.Stdout
+				ppCmd.Stderr = os.Stderr
+				if err := ppCmd.Run(); err != nil {
+					eprintf("  Post-process error: %v\n", err)
+				}
+				ppCancel()
+			}
+
+			totalPassed += bp
+			totalFailed += bf
+			sym := "ok"
+			if bf > 0 {
+				sym = "FAIL"
+			}
+			eprintf("  [%s] %d/%d passed  traces: %s\n\n", sym, bp, bp+bf, benchTraceDir)
+		}
+
+		eprint("=== Trace Collection Summary ===")
+		eprintf("  Total:   %d runs\n", totalPassed+totalFailed)
+		eprintf("  Passed:  %d\n", totalPassed)
+		eprintf("  Failed:  %d\n", totalFailed)
+		eprintf("  Time:    %s\n", formatDuration(time.Since(startTime).Seconds()))
+		eprintf("  Output:  %s\n", traceOutput)
+
+		if interrupted {
+			return ExitInt
+		}
+		if totalFailed > 0 {
+			return ExitSomeFailed
+		}
+		return ExitOK
+	}
+
 	// Open DB, create session
 	db := openDatabase(dbPath)
 	defer db.Close()
@@ -609,7 +744,7 @@ func cmdRun(args runArgs) int {
 		spName := b.ScalingParam.Name
 		configs := generateConfigs(b, args.sweepNonScaling, scalingOverride)
 		eprintf("[%3d/%d] tier%d/%s\n", idx+1, len(benchmarks), b.Tier, b.Benchmark)
-		eprintf("  Scaling: %s (%d configs × %d reps = %d runs)\n",
+		eprintf("  Scaling: %s (%d configs x %d reps = %d runs)\n",
 			spName, len(configs), reps, len(configs)*reps)
 
 		bp, bf := 0, 0
@@ -647,7 +782,6 @@ func cmdRun(args runArgs) int {
 					status = "ok"
 				}
 
-				// Show stderr on any failure, or when verbose for any run
 				if (status != "ok" || args.verbose) && stderrStr != "" {
 					for _, sl := range strings.Split(stderrStr, "\n") {
 						if sl != "" {
@@ -656,15 +790,13 @@ func cmdRun(args runArgs) int {
 					}
 				}
 
-				// Diagnose common errors
 				if status != "ok" {
 					hint := diagnoseBenchError(stderrStr, b.Benchmark)
 					if hint != "" {
-						eprintf("    💡 %s\n", hint)
+						eprintf("    hint: %s\n", hint)
 					}
 				}
 
-				// Enrich error message with stderr for failed runs
 				if status != "ok" && stderrStr != "" {
 					truncatedStderr := stderrStr
 					if len(truncatedStderr) > 1000 {
@@ -682,7 +814,6 @@ func cmdRun(args runArgs) int {
 					totalTime = sql.NullFloat64{Float64: *summary.TotalTimeMS, Valid: true}
 				}
 
-				// Insert into DB
 				func() {
 					res, err := db.Exec(
 						"INSERT INTO runs (session_id,tier,suite,benchmark,"+
@@ -721,19 +852,19 @@ func cmdRun(args runArgs) int {
 
 				if status == "ok" {
 					if totalTime.Valid {
-						eprintf("%.3fms  ✓\n", totalTime.Float64)
+						eprintf("%.3fms  ok\n", totalTime.Float64)
 					} else {
-						eprint("✓")
+						eprint("ok")
 					}
 					bp++
 				} else if status == "timeout" {
-					eprint("✗ (timeout)")
+					eprint("TIMEOUT")
 					bf++
 				} else {
 					if errMsg != "" {
-						eprintf("✗ (%s)\n", errMsg)
+						eprintf("FAIL (%s)\n", errMsg)
 					} else {
-						eprint("✗ (error)")
+						eprint("FAIL (error)")
 					}
 					bf++
 				}
@@ -749,11 +880,11 @@ func cmdRun(args runArgs) int {
 
 		totalPassed += bp
 		totalFailed += bf
-		sym := "✓"
+		sym := "ok"
 		if bf > 0 {
-			sym = "✗"
+			sym = "FAIL"
 		}
-		eprintf("  %s %d/%d passed (%d failed)\n\n", sym, bp, bp+bf, bf)
+		eprintf("  [%s] %d/%d passed (%d failed)\n\n", sym, bp, bp+bf, bf)
 	}
 
 	if interrupted {

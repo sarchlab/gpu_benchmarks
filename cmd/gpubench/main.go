@@ -120,6 +120,9 @@ func main() {
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
 			continueOnError, _ := cmd.Flags().GetBool("continue-on-error")
 			verbose, _ := cmd.Flags().GetBool("verbose")
+			collectTrace, _ := cmd.Flags().GetString("collect-trace")
+			traceOutput, _ := cmd.Flags().GetString("trace-output")
+			postProcess, _ := cmd.Flags().GetString("post-process")
 
 			os.Exit(cmdRun(runArgs{
 				tier:            tier,
@@ -134,6 +137,9 @@ func main() {
 				dryRun:          dryRun,
 				continueOnError: continueOnError,
 				verbose:         verbose,
+				collectTrace:    collectTrace,
+				traceOutput:     traceOutput,
+				postProcess:     postProcess,
 			}))
 			return nil
 		},
@@ -150,6 +156,9 @@ func main() {
 	runCmd.Flags().Bool("dry-run", false, "Dry run")
 	runCmd.Flags().Bool("continue-on-error", false, "Continue on error")
 	runCmd.Flags().Bool("verbose", false, "Verbose output")
+	runCmd.Flags().String("collect-trace", "", "Path to NVBit tracer_tool.so for instruction trace collection")
+	runCmd.Flags().String("trace-output", "./traces", "Output directory for collected traces (default: ./traces)")
+	runCmd.Flags().String("post-process", "", "Optional post-processing binary to run after trace collection")
 
 	// --- info command ---
 	infoCmd := &cobra.Command{

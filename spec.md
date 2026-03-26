@@ -163,6 +163,18 @@ Human's compile summary: Passed: 80, Failed: 8. Note: CI (nvidia/cuda:12.6.3-cud
 
 The human asks: "What is repo and repo-chat?" These are broken git submodule entries (`repo` and `repo-chat`) committed to the repository without a `.gitmodules` file. They appear to be self-referential clones/worktrees. They must be removed from git tracking and added to `.gitignore`. Additionally, other accidentally tracked files should be cleaned up: `config.yaml`, `results.db*`, `test_tier1.db*`.
 
+## zsim Trace Collection (from human, tbc-db Issue #27)
+
+Add an option to `gpubench run` to collect NVBit-based instruction traces for use with the AccelSim/BBSim GPU simulator (https://github.com/sarchlab/bb_triosim).
+
+The tracer uses `LD_PRELOAD` with a compiled NVBit shared library (`tracer_tool.so`) that users build separately from the bb_triosim repository. When trace collection is enabled:
+1. `gpubench run --collect-trace <tracer-so-path>` sets `LD_PRELOAD` and `TRACES_FOLDER` env vars when running benchmarks
+2. **Do NOT record execution time** when collecting traces — trace collection adds overhead that makes timing meaningless
+3. Output trace directories per benchmark, organized for use with post-processing tools
+4. Support post-trace processing step (run `post-traces-processing` binary if provided)
+
+The feature must be platform-aware: trace collection only makes sense for CUDA/NVIDIA platforms.
+
 ## Notes
 
 - The `benchmark_report.md` at the repo root is the reference document for which benchmarks to include in each tier.

@@ -853,8 +853,49 @@ M38 complete (PR #38 merged, CI green). All human issues resolved. Project fully
 - Human issue #15 policy update is now on `main`.
 - `scripts/check_tier1_tier2_scaling_policy.py` passes on main (76 benchmarks scanned).
 - Tracker cleanup completed: stale implementation issues (#16, #19, #21, #22, #26) closed.
-- No open tbc-db issues, no open PRs, latest main CI runs successful.
+- No open tbc-db issues (except #27 from human), no open PRs, latest main CI runs successful.
 
 ## Lessons Learned (latest)
 - Self-hosted runner reliability improved by isolating checkout directories per workflow instead of relying on shared root workspace state.
 - CI-infra deadline misses need immediate narrow unblock milestones; once merged, clean stale tracker issues promptly to avoid false "in-progress" signals.
+
+---
+
+## Phase 13 — zsim Trace Collection (from human, tbc-db Issue #27)
+
+### M41 — Add zsim trace collection option to gpubench CLI ⏳ IN PROGRESS (0/2 cycles used)
+**Goal:** Add `--collect-trace` flag to `gpubench run` so users can collect NVBit instruction traces for use with BBSim simulator. When trace mode is active, execution timing is NOT recorded in SQLite.
+
+**Key technical details (from bb_triosim tracer):**
+- Tracer is NVBit-based shared library (`tracer_tool.so`) that users build from https://github.com/sarchlab/bb_triosim
+- Mechanism: `LD_PRELOAD=tracer_tool.so ./benchmark` hooks CUDA API calls
+- Env vars: `USER_DEFINED_FOLDERS=1`, `TRACES_FOLDER=<output_dir>/<benchmark_name>/`
+- After tracing: run `post-traces-processing <traces_dir>/kernelslist` to generate `.traceg` files
+
+**Deliverables:**
+1. `cmd/gpubench/main.go` — Add two new flags to `run` subcommand:
+   - `--collect-trace <so-path>`: path to the built `tracer_tool.so`
+   - `--trace-output <dir>`: directory for trace output (default: `./traces`)
+2. `cmd/gpubench/commands.go` — Modify `runArgs` struct and `cmdRun` function:
+   - When `collectTrace != ""`: set `LD_PRELOAD=<so-path>`, `USER_DEFINED_FOLDERS=1`, `TRACES_FOLDER=<trace-output>/<benchmark>/` env vars
+   - Do NOT write timing/metrics to SQLite when tracing (write a note in stderr instead)
+   - After each benchmark run in trace mode: if a `--post-process <binary>` flag is set, run post-processing
+3. `docs/trace_collection.md` — Documentation explaining:
+   - How to build the tracer from bb_triosim
+   - How to use `gpubench run --collect-trace`
+   - Where trace output files appear
+   - How to use the trace files with BBSim
+4. CI must remain green (go build passes, existing tests unaffected)
+
+**Acceptance criteria:**
+1. `go build ./cmd/gpubench` succeeds
+2. `gpubench run --help` shows `--collect-trace` and `--trace-output` flags
+3. When `--collect-trace` is set, `LD_PRELOAD` and `TRACES_FOLDER` env vars are set correctly
+4. When `--collect-trace` is set, NO timing data is written to SQLite
+5. `docs/trace_collection.md` exists and explains the workflow
+6. CI remains green
+
+**Why previous deadline was missed:** Task scope was unclear. This milestone narrows the scope to purely Go CLI changes (no benchmark code changes, no tracer build).
+
+**Branch:** `ares/m41-zsim-trace`
+**Cycles budget:** 2

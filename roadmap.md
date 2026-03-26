@@ -850,10 +850,10 @@ M38 complete (PR #38 merged, CI green). All human issues resolved. Project fully
 4. Additional workflow robustness landed in same PR (`compile.yml` wget/retry hardening, commit `0a099b1`).
 
 ## Latest Status (supersedes earlier "all complete" snapshots)
-- Human issue #15 policy update is now on `main`.
-- `scripts/check_tier1_tier2_scaling_policy.py` passes on main (76 benchmarks scanned).
-- Tracker cleanup completed: stale implementation issues (#16, #19, #21, #22, #26) closed.
-- No open tbc-db issues (except #27 from human), no open PRs, latest main CI runs successful.
+- M41 (zsim trace collection) complete. PR #41 merged, CI green.
+- All human issues resolved. No open tbc-db issues. No open PRs.
+- 125 benchmarks across 5 tiers. All parameterized with Go CLI.
+- **PROJECT COMPLETE.**
 
 ## Lessons Learned (latest)
 - Self-hosted runner reliability improved by isolating checkout directories per workflow instead of relying on shared root workspace state.
@@ -863,7 +863,7 @@ M38 complete (PR #38 merged, CI green). All human issues resolved. Project fully
 
 ## Phase 13 — zsim Trace Collection (from human, tbc-db Issue #27)
 
-### M41 — Add zsim trace collection option to gpubench CLI ⏳ IN PROGRESS (0/2 cycles used)
+### M41 — Add zsim trace collection option to gpubench CLI ✅ COMPLETE (cycles used: 1)
 **Goal:** Add `--collect-trace` flag to `gpubench run` so users can collect NVBit instruction traces for use with BBSim simulator. When trace mode is active, execution timing is NOT recorded in SQLite.
 
 **Key technical details (from bb_triosim tracer):**
@@ -895,7 +895,12 @@ M38 complete (PR #38 merged, CI green). All human issues resolved. Project fully
 5. `docs/trace_collection.md` exists and explains the workflow
 6. CI remains green
 
-**Why previous deadline was missed:** Task scope was unclear. This milestone narrows the scope to purely Go CLI changes (no benchmark code changes, no tracer build).
+**Why previous deadline was missed:** Task scope was unclear. This milestone narrowed the scope to purely Go CLI changes (no benchmark code changes, no tracer build).
 
-**Branch:** `ares/m41-zsim-trace`
-**Cycles budget:** 2
+**Deliverables (completed):**
+1. `cmd/gpubench/main.go` — Added `--collect-trace`, `--trace-output`, `--post-process` flags
+2. `cmd/gpubench/commands.go` — Trace mode: LD_PRELOAD injection, TRACES_FOLDER env, skip SQLite writes
+3. `docs/trace_collection.md` — Full documentation for tracer building, usage, and BBSim integration
+4. `.gitignore` — Scoped gpubench pattern to root binary only
+
+**Branch:** `ares/m41-zsim-trace` (merged to main via PR #41). CI green.

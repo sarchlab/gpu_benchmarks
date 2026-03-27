@@ -11,10 +11,9 @@
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
 // Usage:
-//   ./cuda_scan_large [--size N] [--iterations I]
+//   ./cuda_scan_large [--size N]
 //
 //   --size N         Number of elements (default: 16777216 = 16M)
-//   --iterations I   Timed iterations (default: 5)
 //
 // Output (stdout): CSV row — cuda_scan_large,<N>,<time_ms>,<GBs>
 // Output (stderr): human-readable results
@@ -258,13 +257,11 @@ int main(int argc, char** argv) {
 
     // Defaults from params.json
     int size       = 16777216;
-    int iterations = 5;
     int block_size = 256;
     const char* verify = "true";
 
     // Command-line fallback
     size       = parseIntParam(argc, argv, "--size", size);
-    iterations = parseIntParam(argc, argv, "--iterations", iterations);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
     verify     = parseStrParam(argc, argv, "--verify", verify);
 
@@ -272,8 +269,6 @@ int main(int argc, char** argv) {
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_verify");
@@ -283,7 +278,6 @@ int main(int argc, char** argv) {
     if (env_val) num_warmup = atoi(env_val);
 
     int N     = size;
-    int iters = iterations;
 
     size_t bytes = (size_t)N * sizeof(unsigned int);
 
@@ -293,7 +287,7 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Scan size: %d  |  Iterations: %d warmup + %d timed\n\n", N, num_warmup, iters);
+    fprintf(stderr, "Scan size: %d warmup + %d timed\n\n", N, num_warmup);
 
     // Host allocation + initialization
     unsigned int* h_input  = (unsigned int*)malloc(bytes);
@@ -327,8 +321,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipEventCreate(&evStart));
     HIP_CHECK(hipEventCreate(&evStop));
 
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         HIP_CHECK(hipEventRecord(evStart, 0));
         run_scan();
         HIP_CHECK(hipEventRecord(evStop, 0));
@@ -344,8 +338,8 @@ int main(int argc, char** argv) {
 
     // Compute average time
     double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; ++i) sum += times[i];
+    double avg_ms = sum / 1;
 
     // GB/s = 2 * N * sizeof(uint) / time_s / 1e9
     double data_bytes = 2.0 * (double)N * sizeof(unsigned int);
@@ -355,12 +349,12 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel events
     printf("{\"type\":\"kernel\",\"name\":\"scan_block_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"verify\":\"%s\"}}\n",
            avg_ms, size, iterations, block_size, verify);
 
     printf("{\"type\":\"kernel\",\"name\":\"add_block_sums_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"verify\":\"%s\"}}\n",
            avg_ms, size, iterations, block_size, verify);
 

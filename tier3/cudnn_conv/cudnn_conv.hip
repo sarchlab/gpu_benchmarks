@@ -8,8 +8,8 @@
  *
  * Algorithm selection: auto-tune (choose fastest from available algorithms).
  *
- * Warmup: 5 iterations (not timed)
- * Timed:  5 iterations, report average
+ * Warmup: configurable iterations (not timed)
+ * Timed:  single iteration (repetition handled by CLI)
  *
  * Verification: compare a small patch of output against CPU reference
  * GFLOPS = 2 * N * K * H_out * W_out * C * R * S / time_s / 1e9
@@ -118,8 +118,6 @@ static const int PAD    = 3;
 static int OUT_H    = 112;   /* floor((IN_H + 2*PAD - FILT_R) / STRIDE) + 1 */
 static int OUT_W    = 112;
 static int WARMUP = 0;
-static int ITERS  = 5;
-
 /* =========================================================================
  * CPU reference convolution — only for a small patch
  * Input  layout: NCHW  — input[((n*C + c)*H + h)*W + w]
@@ -360,15 +358,13 @@ int main(void)
     GPU_EVENT_CREATE(ev_stop);
 
     GPU_EVENT_RECORD(ev_start);
-    for (int i = 0; i < ITERS; i++) {
-        RUN_CONV();
-    }
+    RUN_CONV();
     GPU_EVENT_RECORD(ev_stop);
     GPU_EVENT_SYNC(ev_stop);
 
     float total_ms = 0.0f;
     GPU_EVENT_ELAPSED(ev_start, ev_stop, total_ms);
-    float avg_ms = total_ms / (float)ITERS;
+    float avg_ms = total_ms;
 
     /* ------------------------------------------------------------------
      * Copy result back

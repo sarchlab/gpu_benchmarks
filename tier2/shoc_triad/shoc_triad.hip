@@ -164,13 +164,11 @@ int main(int argc, char** argv) {
     // Defaults
     int array_size  = 4194304;
     int block_size  = 256;
-    int iterations  = 20;
     const char* precision = "float";
 
     // Command-line fallback
     array_size = parseIntParam(argc, argv, "--array_size", array_size);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
-    iterations = parseIntParam(argc, argv, "--iterations", iterations);
     precision  = parseStrParam(argc, argv, "--precision", precision);
 
     // Environment variable overrides
@@ -179,8 +177,6 @@ int main(int argc, char** argv) {
     if (env_val) array_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
     int num_warmup = 0;
@@ -188,7 +184,6 @@ int main(int argc, char** argv) {
     if (env_val) num_warmup = atoi(env_val);
 
     int N = array_size;
-    int iters = iterations;
     size_t bytes  = (size_t)N * sizeof(float);
     float  scalar = 1.75f;
 
@@ -200,7 +195,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Array size: %d floats (%.1f MiB)\n",
             N, (double)bytes / (1024.0 * 1024.0));
-    fprintf(stderr, "Block size: %d  |  Iterations: %d\n\n", block_size, iters);
+    fprintf(stderr, "Block size: %d\n\n", block_size);
 
     // Host allocations
     float* h_a   = (float*)malloc(bytes);
@@ -234,8 +229,8 @@ int main(int argc, char** argv) {
 
     // Timed iterations
     BenchmarkTimer timer;
-    std::vector<double> times(iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         timer.record_start();
         hipLaunchKernelGGL(triad_kernel, dim3(grid), dim3(block_size),
                            0, 0, d_a, d_b, d_c, scalar, N);
@@ -245,12 +240,12 @@ int main(int argc, char** argv) {
 
     // Statistics
     double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg_ms = sum / iters;
+    double avg_ms = sum / 1;
 
     // Effective bandwidth: 2 reads (b, c) + 1 write (a) = 3 * N * sizeof(float)
     double bandwidth_gb = 3.0 * (double)N * sizeof(float)
@@ -259,7 +254,7 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"triad_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"array_size\":%d,\"block_size\":%d,\"iterations\":%d,"
+           "\"params\":{\"array_size\":%d,\"block_size\":%d"
            "\"precision\":\"%s\"}}\n",
            avg_ms, array_size, block_size, iterations, precision);
 

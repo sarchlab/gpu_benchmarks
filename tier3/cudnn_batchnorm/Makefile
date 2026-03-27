@@ -34,7 +34,7 @@ LDFLAGS :=
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := cudnn_batchnorm.cu
-  CFLAGS := -O3 -std=c++14
+  CFLAGS := -O3 -std=c++14 -arch=native
 
   UNAME_M := $(shell uname -m)
   ifeq ($(UNAME_M),x86_64)

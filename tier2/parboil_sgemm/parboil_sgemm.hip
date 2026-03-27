@@ -8,10 +8,9 @@
 // Compiles with hipcc (AMD ROCm) or nvcc (CUDA via HIP compat layer).
 //
 // Usage:
-//   ./parboil_sgemm [--size N] [--iterations I]
+//   ./parboil_sgemm [--size N]
 //
 //   --size N         Matrix dimension N (NxN)  (default: 1024)
-//   --iterations I   Timed iterations          (default: 5)
 //
 // Output (stdout): parboil_sgemm,<N>,<GFLOPS>
 
@@ -196,21 +195,17 @@ int main(int argc, char** argv)
 
     // Default values from params.json
     int N     = 1024;
-    int iters = 5;
     int block_size = 256;
     const char* precision = "float";
 
     // Command-line args as fallback
     N     = parseIntParam(argc, argv, "--size", N);
-    iters = parseIntParam(argc, argv, "--iterations", iters);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
 
     // Env vars override
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
@@ -230,8 +225,8 @@ int main(int argc, char** argv)
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Matrix size: %d×%d  |  alpha=%.1f  beta=%.1f  |  Iterations: %d\n\n",
-            N, N, alpha, beta, iters);
+    fprintf(stderr, "Matrix size: %d×%d  |  alpha=%.1f  beta=%.1f\n\n",
+            N, N, alpha, beta);
 
     // Host allocations
     float* h_A   = (float*)malloc(bytes);
@@ -272,9 +267,9 @@ int main(int argc, char** argv)
 
     // Timed iterations
     HipTimer timer;
-    std::vector<double> times((size_t)iters);
+    std::vector<double> times(1);
 
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         // Reset C to initial state so beta accumulation is consistent
         HIP_CHECK(hipMemcpy(d_C, h_C, bytes, hipMemcpyHostToDevice));
         timer.begin();
@@ -286,12 +281,12 @@ int main(int argc, char** argv)
 
     // Compute statistics
     double sum_t = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum_t += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg_ms = sum_t / iters;
+    double avg_ms = sum_t / 1;
 
     // GFLOPS: 2*N*N*N multiply-adds
     double gflops = 2.0 * (double)N * (double)N * (double)N
@@ -299,9 +294,9 @@ int main(int argc, char** argv)
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"sgemm_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_ms, N, iters, block_size, precision);
+           avg_ms, N, block_size, precision);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",

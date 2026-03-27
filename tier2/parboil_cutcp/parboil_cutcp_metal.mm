@@ -99,7 +99,6 @@ int main(int argc, char* argv[]) {
     int block_size   = 128;
     float grid_spacing = 0.5f;
     float cutoff     = 12.0f;
-    int iterations   = 5;
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_num_atoms");
@@ -110,13 +109,10 @@ int main(int argc, char* argv[]) {
     if (env_val) grid_spacing = (float)atof(env_val);
     env_val = getenv("BENCH_PARAM_cutoff_radius");
     if (env_val) cutoff = (float)atof(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     int num_warmup = 0;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
 
-    int iters = iterations;
     float cutoff2 = cutoff * cutoff;
     int grid_side = GRID_DIM_SIDE;
     int total_grid_points = grid_side * grid_side * grid_side;
@@ -133,7 +129,7 @@ int main(int argc, char* argv[]) {
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
     fprintf(stderr, "CUTCP  |  Atoms: %d  |  Grid: %d^3 = %d  |  Cutoff: %.1f  |  "
             "Spacing: %.2f  |  Iterations: 5 warmup + %d timed\n\n",
-            num_atoms, grid_side, total_grid_points, cutoff, grid_spacing, iters);
+            num_atoms, grid_side, total_grid_points, cutoff, grid_spacing);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -246,8 +242,8 @@ int main(int argc, char* argv[]) {
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         uint64_t t0 = mach_absolute_time();
         run_cutcp();
         uint64_t t1 = mach_absolute_time();
@@ -255,17 +251,17 @@ int main(int argc, char* argv[]) {
     }
 
     double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; ++i) sum += times[i];
+    double avg_ms = sum / 1;
     double total_ms = sum;
 
     double interactions = (double)num_atoms * (double)total_grid_points;
     double ginteractions_per_sec = interactions / (avg_ms * 1e-3) / 1e9;
 
     printf("{\"type\":\"kernel\",\"name\":\"cutcp_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_atoms\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"num_atoms\":%d\"block_size\":%d,"
            "\"grid_spacing\":%.2f,\"cutoff_radius\":%.1f}}\n",
-           avg_ms, num_atoms, iters, block_size, grid_spacing, cutoff);
+           avg_ms, num_atoms, block_size, grid_spacing, cutoff);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"ginteractions_per_sec\",\"value\":%.4f}]}\n",

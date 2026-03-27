@@ -7,10 +7,9 @@
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
 // Usage:
-//   ./npb_ep [--size N] [--iterations I]
+//   ./npb_ep [--size N]
 //
 //   --size N         Number of Gaussian pairs (default: 16777216 = 2^24)
-//   --iterations I   Timed iterations (default: 5)
 //
 // Output (stdout): CSV row — npb_ep,<N>,<time_ms>,<Gpairs_per_sec>
 // Output (stderr): human-readable results
@@ -203,20 +202,16 @@ int main(int argc, char** argv) {
 
     // Defaults from params.json
     int N          = 16777216;  // 2^24
-    int iterations = 5;
     int block_size = 256;
     int seed_param = 271828183;
 
     // Command-line fallback
     N          = parseIntParam(argc, argv, "--size", N);
-    iterations = parseIntParam(argc, argv, "--iterations", iterations);
 
     // Environment variable overrides
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_seed");
@@ -225,7 +220,6 @@ int main(int argc, char** argv) {
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
 
-    int iters = iterations;
 
     // Print device info
     int device_id = 0;
@@ -233,8 +227,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "EP pairs: %d (2^%.0f)  |  Iterations: %d warmup + %d timed\n\n",
-            N, log2((double)N), num_warmup, iters);
+    fprintf(stderr, "EP pairs: %d (2^%.0f) warmup + %d timed\n\n",
+            N, log2((double)N), num_warmup);
 
     // Device allocation for bins
     unsigned long long* d_bins;
@@ -266,8 +260,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipEventCreate(&evStart));
     HIP_CHECK(hipEventCreate(&evStop));
 
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         HIP_CHECK(hipEventRecord(evStart, 0));
         run_ep();
         HIP_CHECK(hipEventRecord(evStop, 0));
@@ -283,8 +277,8 @@ int main(int argc, char** argv) {
 
     // Compute average time
     double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; ++i) sum += times[i];
+    double avg_ms = sum / 1;
 
     // G pairs/sec = N / time_s / 1e9
     double gpairs_sec = (double)N / (avg_ms * 1e-3) / 1e9;
@@ -293,7 +287,7 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"ep_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"seed\":%d}}\n",
            avg_ms, N, iterations, block_size, seed_param);
 

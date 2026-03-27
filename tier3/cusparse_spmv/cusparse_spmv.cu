@@ -8,7 +8,6 @@
 //   num_rows    — number of rows (and columns) in the square sparse matrix
 //   nnz_per_row — non-zeros per row
 //   warmup      — warmup iterations
-//   iters       — timed iterations
 //
 // Metrics:
 //   GB/s   = NNZ * 12.0 / time_s / 1e9
@@ -84,8 +83,6 @@ int main(int argc, char **argv)
     int num_rows    = 16384;
     int nnz_per_row = 32;
     int warmup      = 0;
-    int iters       = 5;
-
     const char *env_val;
     env_val = getenv("BENCH_PARAM_num_rows");
     if (env_val) num_rows = atoi(env_val);
@@ -93,9 +90,6 @@ int main(int argc, char **argv)
     if (env_val) nnz_per_row = atoi(env_val);
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) warmup = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iters");
-    if (env_val) iters = atoi(env_val);
-
     const int num_cols = num_rows;
     const int nnz      = num_rows * nnz_per_row;
 
@@ -147,8 +141,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     }
     fprintf(stderr, "Rows: %d  |  NNZ_per_row: %d  |  Total NNZ: %d\n"
-                    "Warmup: %d  |  Iterations: %d\n\n",
-            num_rows, nnz_per_row, nnz, warmup, iters);
+                    "Warmup: %d\n\n",
+            num_rows, nnz_per_row, nnz, warmup);
 
     // Device allocations
     int   *d_row_ptr;
@@ -220,27 +214,18 @@ int main(int argc, char **argv)
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    // Timed iterations
-    double times[64];
-    double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int iter = 0; iter < iters; iter++) {
-        float ms_f = 0.0f;
-        CUDA_CHECK(cudaEventRecord(ev_start, 0));
-        SP_CHECK(cusparseSpMV(
-            sp_handle,
-            CUSPARSE_OPERATION_NON_TRANSPOSE,
-            &alpha, mat_A, vec_x, &beta, vec_y,
-            CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT,
-            d_buffer));
-        CUDA_CHECK(cudaEventRecord(ev_stop, 0));
-        CUDA_CHECK(cudaEventSynchronize(ev_stop));
-        CUDA_CHECK(cudaEventElapsedTime(&ms_f, ev_start, ev_stop));
-        times[iter] = (double)ms_f;
-        sum_ms += times[iter];
-        if (times[iter] < mn) mn = times[iter];
-        if (times[iter] > mx) mx = times[iter];
-        fprintf(stderr, "  iter %d: %.4f ms\n", iter, times[iter]);
-    }
+    // Timed iteration
+    float total_ms_f = 0.0f;
+    CUDA_CHECK(cudaEventRecord(ev_start, 0));
+    SP_CHECK(cusparseSpMV(
+        sp_handle,
+        CUSPARSE_OPERATION_NON_TRANSPOSE,
+        &alpha, mat_A, vec_x, &beta, vec_y,
+        CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT,
+        d_buffer));
+    CUDA_CHECK(cudaEventRecord(ev_stop, 0));
+    CUDA_CHECK(cudaEventSynchronize(ev_stop));
+    CUDA_CHECK(cudaEventElapsedTime(&total_ms_f, ev_start, ev_stop));
 
     // Copy result back
     CUDA_CHECK(cudaMemcpy(h_y, d_y, (size_t)num_rows * sizeof(float),
@@ -263,31 +248,24 @@ int main(int argc, char **argv)
             check_n, pass ? "PASS" : "FAIL");
 
     // Statistics
-    double avg_ms = sum_ms / iters;
-    double variance = 0.0;
-    for (int i = 0; i < iters; i++) {
-        double d = times[i] - avg_ms;
-        variance += d * d;
-    }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
+    double avg_ms = (double)total_ms_f;
     double time_s = avg_ms * 1e-3;
     double gbps   = (double)nnz * 12.0 / time_s / 1e9;
     double gflops = 2.0 * (double)nnz / time_s / 1e9;
 
     fprintf(stderr,
-            "GB/s: %.2f  GFLOPS: %.2f  "
-            "(avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
-            gbps, gflops, avg_ms, mn, mx, stddev);
+            "GB/s: %.2f  GFLOPS: %.2f  (%.4f ms)\n",
+            gbps, gflops, avg_ms);
 
     // JSON-lines: kernel event
     printf("{\"type\":\"kernel\",\"name\":\"%s\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_rows\":%d,\"nnz_per_row\":%d,\"warmup\":%d,\"iters\":%d}}\n",
-           KERNEL_NAME, avg_ms, num_rows, nnz_per_row, warmup, iters);
+           "\"params\":{\"num_rows\":%d,\"nnz_per_row\":%d,\"warmup\":%d}}\n",
+           KERNEL_NAME, avg_ms, num_rows, nnz_per_row, warmup);
 
     // JSON-lines: summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"GB/s\",\"value\":%.2f},{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
-           sum_ms, gbps, gflops);
+           avg_ms, gbps, gflops);
 
     // Cleanup
     if (d_buffer) cudaFree(d_buffer);

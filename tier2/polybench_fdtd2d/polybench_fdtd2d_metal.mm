@@ -6,7 +6,7 @@
  * Three kernels per time step: update_ex, update_ey, update_hz
  *
  * Usage:
- *   ./polybench_fdtd2d [--size N] [--tmax T] [--iterations I]
+ *   ./polybench_fdtd2d [--size N] [--tmax T]
  *
  *   --size N        Grid dimension (N×N)            (default: 512)
  *   --tmax T        Time steps per benchmark iter   (default: 50)
@@ -50,17 +50,6 @@ static double ticks_to_ms(uint64_t ticks)
 // Argument parsing
 // ---------------------------------------------------------------------------
 
-static int parseIterations(int argc, char** argv) {
-    int iters = 3;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -99,7 +88,6 @@ int main(int argc, char* argv[])
 
     int N     = parseIntParam(argc, argv, "--size", 512);
     int TMAX  = parseIntParam(argc, argv, "--tmax",  50);
-    int iters = parseIterations(argc, argv);
     int block_size = 256;
 
     const char* env_val;
@@ -107,8 +95,6 @@ int main(int argc, char* argv[])
     if (env_val) N = atoi(env_val);
     env_val = getenv("BENCH_PARAM_tmax");
     if (env_val) TMAX = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     int num_warmup = 0;
@@ -127,8 +113,8 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
-    fprintf(stderr, "Grid: %d×%d  |  TMAX: %d  |  Iterations: %d\n\n",
-            NX, NY, TMAX, iters);
+    fprintf(stderr, "Grid: %d×%d  |  TMAX: %d\n\n",
+            NX, NY, TMAX);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -268,9 +254,9 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
+    std::vector<double> times(1);
 
-    for (int iter = 0; iter < iters; ++iter) {
+    for (int iter = 0; iter < 1; ++iter) {
         // Reset arrays to initial state
         memcpy(h_ex, init_ex.data(), grid_bytes);
         memcpy(h_ey, init_ey.data(), grid_bytes);
@@ -291,18 +277,18 @@ int main(int argc, char* argv[])
 
     // Compute statistics
     double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg = sum / iters;
+    double avg = sum / 1;
     double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         double d = times[i] - avg;
         variance += d * d;
     }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
+    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
 
     char problemSize[64];
     snprintf(problemSize, sizeof(problemSize), "%dx%d", NX, NY);
@@ -310,7 +296,7 @@ int main(int argc, char* argv[])
     BenchResult r;
     r.kernel_name  = "polybench_fdtd2d";
     r.problem_size = problemSize;
-    r.iterations   = iters;
+    r.iterations = 1;
     r.avg_ms       = avg;
     r.min_ms       = mn;
     r.max_ms       = mx;
@@ -325,14 +311,14 @@ int main(int argc, char* argv[])
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"fdtd_update_ex\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"tmax\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
-           r.avg_ms, N, TMAX, iters, block_size);
+           "\"params\":{\"size\":%d,\"tmax\":%d\"block_size\":%d}}\n",
+           r.avg_ms, N, TMAX, block_size);
     printf("{\"type\":\"kernel\",\"name\":\"fdtd_update_ey\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"tmax\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
-           r.avg_ms, N, TMAX, iters, block_size);
+           "\"params\":{\"size\":%d,\"tmax\":%d\"block_size\":%d}}\n",
+           r.avg_ms, N, TMAX, block_size);
     printf("{\"type\":\"kernel\",\"name\":\"fdtd_update_hz\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"tmax\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
-           r.avg_ms, N, TMAX, iters, block_size);
+           "\"params\":{\"size\":%d,\"tmax\":%d\"block_size\":%d}}\n",
+           r.avg_ms, N, TMAX, block_size);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
            r.avg_ms, bw_gb);

@@ -8,8 +8,8 @@
  *   Complex single-precision input: N cufftComplex values
  *   Forward C2C FFT (CUFFT_FORWARD)
  *
- * Warmup: 5 iterations (not timed)
- * Timed:  5 iterations; report average
+ * Warmup: configurable iterations (not timed)
+ * Timed:  single iteration (repetition handled by CLI)
  *
  * Verification: sinusoidal input at frequency 3 → magnitude at bin 3 ≈ N/2
  *
@@ -76,7 +76,6 @@
  * ---------------------------------------------------------------------- */
 static int N      = (1 << 22);   /* 4194304 complex samples */
 static int WARMUP = 0;
-static int ITERS  = 5;
 static const char* DIRECTION = "forward";
 
 /* -------------------------------------------------------------------------
@@ -92,8 +91,6 @@ int main(void)
     if (env_val) N = atoi(env_val);
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) WARMUP = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iters");
-    if (env_val) ITERS = atoi(env_val);
     env_val = getenv("BENCH_PARAM_direction");
     if (env_val) DIRECTION = env_val;
 
@@ -146,15 +143,13 @@ int main(void)
     GPU_EVENT_CREATE(ev_stop);
 
     GPU_EVENT_RECORD(ev_start);
-    for (int i = 0; i < ITERS; i++) {
-        FFT_EXEC(plan, d_in, d_out);
-    }
+    FFT_EXEC(plan, d_in, d_out);
     GPU_EVENT_RECORD(ev_stop);
     GPU_EVENT_SYNC(ev_stop);
 
     float total_ms = 0.0f;
     GPU_EVENT_ELAPSED(ev_start, ev_stop, total_ms);
-    float avg_ms = total_ms / (float)ITERS;
+    float avg_ms = total_ms;
 
     /* ------------------------------------------------------------------ */
     /* Copy result back for verification                                   */
@@ -201,8 +196,8 @@ int main(void)
 
     /* JSON-lines output */
     printf("{\"type\":\"kernel\",\"name\":\"cufftExecC2C\",\"time_ms\":%.6f,"
-           "\"params\":{\"n\":%d,\"warmup\":%d,\"iters\":%d,\"direction\":\"%s\"}}\n",
-           (double)avg_ms, N, WARMUP, ITERS, DIRECTION);
+           "\"params\":{\"n\":%d,\"warmup\":%d,\"direction\":\"%s\"}}\n",
+           (double)avg_ms, N, WARMUP, DIRECTION);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"GB/s\",\"value\":%.2f}]}\n",
            (double)total_ms, GBs);

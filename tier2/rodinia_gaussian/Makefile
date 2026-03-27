@@ -33,7 +33,7 @@ TARGET := rodinia_gaussian
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := rodinia_gaussian.cu
-  CFLAGS := -O3 -std=c++14
+  CFLAGS := -O3 -std=c++14 -arch=native
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

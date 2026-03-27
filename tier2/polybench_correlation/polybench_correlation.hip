@@ -195,15 +195,12 @@ int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     int N          = parseIntParam(argc, argv, "--size", 1024);
-    int iters      = parseIntParam(argc, argv, "--iterations", 5);
     int block_size = parseIntParam(argc, argv, "--block_size", 256);
     const char* precision = "float";
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
@@ -224,7 +221,7 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Data matrix: %dx%d  |  Iterations: %d\n\n", M, N, iters);
+    fprintf(stderr, "Data matrix: %dx%d\n\n", M, N);
 
     // Host allocations
     float* h_data = (float*)malloc(data_bytes);
@@ -264,9 +261,9 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipDeviceSynchronize());
 
     // Timed iterations
-    std::vector<double> t_mean(iters), t_stddev(iters), t_norm(iters), t_corr(iters);
+    std::vector<double> t_mean(1), t_stddev(1), t_norm(1), t_corr(1);
 
-    for (int it = 0; it < iters; ++it) {
+    for (int it = 0; it < 1; ++it) {
         HIP_CHECK(hipMemcpy(d_data, h_data, data_bytes, hipMemcpyHostToDevice));
 
         timer.record_start();
@@ -310,21 +307,21 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"mean_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_mean, N, iters, block_size, precision);
+           avg_mean, N, block_size, precision);
     printf("{\"type\":\"kernel\",\"name\":\"stddev_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_stddev, N, iters, block_size, precision);
+           avg_stddev, N, block_size, precision);
     printf("{\"type\":\"kernel\",\"name\":\"normalize_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_norm, N, iters, block_size, precision);
+           avg_norm, N, block_size, precision);
     printf("{\"type\":\"kernel\",\"name\":\"correlation_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_corr, N, iters, block_size, precision);
+           avg_corr, N, block_size, precision);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[]}\n",
            total_ms);

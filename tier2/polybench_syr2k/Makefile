@@ -33,7 +33,7 @@ TARGET := polybench_syr2k
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := polybench_syr2k.cu
-  CFLAGS := -O3 -std=c++14
+  CFLAGS := -O3 -std=c++14 -arch=native
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

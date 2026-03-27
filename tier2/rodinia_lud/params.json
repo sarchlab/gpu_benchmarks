@@ -34,18 +34,6 @@
   },
   "non_scaling_params": [
     {
-      "name": "iterations",
-      "description": "Timed benchmark iterations",
-      "type": "int",
-      "default": 3,
-      "values": [
-        1,
-        3,
-        5,
-        10
-      ]
-    },
-    {
       "name": "block_size",
       "description": "Number of threads per block",
       "type": "int",

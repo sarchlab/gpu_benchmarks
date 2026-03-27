@@ -185,13 +185,11 @@ int main(int argc, char* argv[])
     // Defaults
     int array_size = 1048576;
     int block_size = 256;
-    int iterations = 20;
     const char* precision = "float";
 
     // Command-line fallback
     array_size = parseIntParam(argc, argv, "--array_size", array_size);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
-    iterations = parseIntParam(argc, argv, "--iterations", iterations);
     precision  = parseStrParam(argc, argv, "--precision", precision);
 
     // Environment variable overrides
@@ -200,8 +198,6 @@ int main(int argc, char* argv[])
     if (env_val) array_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
     int num_warmup = 0;
@@ -209,7 +205,6 @@ int main(int argc, char* argv[])
     if (env_val) num_warmup = atoi(env_val);
 
     int N     = array_size;
-    int iters = iterations;
 
     // -------------------------------------------------------------------
     // Metal device setup
@@ -294,8 +289,8 @@ int main(int argc, char* argv[])
 
     fprintf(stderr, "Array size: %d floats (%.1f MiB, padded to %lu)\n",
             N, (double)bytes_orig / (1024.0 * 1024.0), (unsigned long)N_padded);
-    fprintf(stderr, "Threadgroup size: %lu  |  Iterations: %d\n\n",
-            (unsigned long)tg_size, iters);
+    fprintf(stderr, "Threadgroup size: %lu\n\n",
+            (unsigned long)tg_size);
 
     // -------------------------------------------------------------------
     // Allocate GPU buffers
@@ -321,8 +316,8 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         uint64_t t0 = mach_absolute_time();
         scan_recursive_metal(queue, pso_scan, pso_add, device, tg_size,
                              buf_input, buf_output, N_padded);
@@ -332,12 +327,12 @@ int main(int argc, char* argv[])
 
     // Compute statistics
     double sum_t = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum_t += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg_ms = sum_t / iters;
+    double avg_ms = sum_t / 1;
     double total_ms = sum_t;
 
     // Effective bandwidth
@@ -346,12 +341,12 @@ int main(int argc, char* argv[])
 
     // JSON-lines: one event per kernel listed in params.json
     printf("{\"type\":\"kernel\",\"name\":\"scan_block_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"array_size\":%d,\"block_size\":%d,\"iterations\":%d,"
+           "\"params\":{\"array_size\":%d,\"block_size\":%d"
            "\"precision\":\"%s\"}}\n",
            avg_ms, array_size, block_size, iterations, precision);
 
     printf("{\"type\":\"kernel\",\"name\":\"add_block_sums_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"array_size\":%d,\"block_size\":%d,\"iterations\":%d,"
+           "\"params\":{\"array_size\":%d,\"block_size\":%d"
            "\"precision\":\"%s\"}}\n",
            avg_ms, array_size, block_size, iterations, precision);
 

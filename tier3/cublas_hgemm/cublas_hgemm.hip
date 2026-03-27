@@ -10,8 +10,8 @@
  *   cublasHgemm / rocblas_hgemm with op_none, op_none, dims (N, M, K)
  *   and leading dimensions: ldB=N, ldA=K, ldC=N
  *
- * Warmup: 5 iterations (not timed)
- * Timed:  5 iterations, report average
+ * Warmup: configurable iterations (not timed)
+ * Timed:  single iteration (repetition handled by CLI)
  *
  * Verification: compare first 8×8 corner of C against CPU GEMM
  * TFLOPS = 2 * M * N * K / time_s / 1e12
@@ -142,7 +142,6 @@ int main(void)
     int N = 4096;
     int K = 4096;
     int WARMUP = 0;
-    int ITERS = 5;
     float alpha_param = 1.0f;
 
     const char* env_val;
@@ -150,8 +149,6 @@ int main(void)
     if (env_val) { M = atoi(env_val); N = M; K = M; }
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) WARMUP = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iters");
-    if (env_val) ITERS = atoi(env_val);
     env_val = getenv("BENCH_PARAM_alpha");
     if (env_val) alpha_param = (float)atof(env_val);
 
@@ -251,15 +248,13 @@ int main(void)
     GPU_EVENT_CREATE(ev_stop);
 
     GPU_EVENT_RECORD(ev_start);
-    for (int i = 0; i < ITERS; i++) {
-        RUN_HGEMM();
-    }
+    RUN_HGEMM();
     GPU_EVENT_RECORD(ev_stop);
     GPU_EVENT_SYNC(ev_stop);
 
     float total_ms = 0.0f;
     GPU_EVENT_ELAPSED(ev_start, ev_stop, total_ms);
-    float avg_ms = total_ms / (float)ITERS;
+    float avg_ms = total_ms;
 
     /* ------------------------------------------------------------------ */
     /* Copy result back                                                    */
@@ -309,12 +304,12 @@ int main(void)
     /* JSON-lines kernel event */
 #ifdef USE_CUBLAS
     printf("{\"type\":\"kernel\",\"name\":\"cublasHgemm\",\"time_ms\":%.6f,"
-           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"alpha\":%.6f}}\n",
-           avg_ms, M, WARMUP, ITERS, alpha_param);
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"alpha\":%.6f}}\n",
+           avg_ms, M, WARMUP, alpha_param);
 #elif defined(USE_ROCBLAS)
     printf("{\"type\":\"kernel\",\"name\":\"rocblas_hgemm\",\"time_ms\":%.6f,"
-           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"alpha\":%.6f}}\n",
-           avg_ms, M, WARMUP, ITERS, alpha_param);
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"alpha\":%.6f}}\n",
+           avg_ms, M, WARMUP, alpha_param);
 #endif
     /* JSON-lines summary event */
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

@@ -33,7 +33,7 @@ TARGET := cublas_batched_gemm
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := cublas_batched_gemm.cu
-  CFLAGS := -O3 -std=c++14
+  CFLAGS := -O3 -std=c++14 -arch=native
   LIBS   := -lcublas
 
 else ifeq ($(PLATFORM),rocm)

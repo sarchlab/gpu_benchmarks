@@ -8,12 +8,11 @@
 // Native CUDA implementation.
 //
 // Usage:
-//   ./rodinia_nw [--sequence_length N] [--block_size B] [--penalty P] [--iterations I]
+//   ./rodinia_nw [--sequence_length N] [--block_size B] [--penalty P]
 //
 //   --sequence_length N  Sequence length (scoring matrix is NxN) (default: 2048)
 //   --block_size B       Block size (threads per block)          (default: 16)
 //   --penalty P          Gap penalty                             (default: 2)
-//   --iterations I       Timed benchmark iterations              (default: 3)
 //
 // Output (stdout): CSV — kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
 // Output (stderr): GCUPS and effective GB/s
@@ -50,17 +49,6 @@ struct BenchResult {
     double      stddev_ms;
 };
 
-static int parseIterations(int argc, char** argv) {
-    int iters = 3;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -112,8 +100,8 @@ static BenchResult runBenchmark(const char* kernel_name,
         CUDA_CHECK(cudaDeviceSynchronize());
     }
 
-    std::vector<double> times(iterations);
-    for (int i = 0; i < iterations; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         timer.record_start();
         func();
         timer.record_stop();
@@ -121,19 +109,19 @@ static BenchResult runBenchmark(const char* kernel_name,
     }
 
     double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iterations; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg = sum / iterations;
+    double avg = sum / 1;
 
     double variance = 0.0;
-    for (int i = 0; i < iterations; ++i) {
+    for (int i = 0; i < 1; ++i) {
         double d = times[i] - avg;
         variance += d * d;
     }
-    double stddev = (iterations > 1) ? sqrt(variance / (iterations - 1)) : 0.0;
+    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
 
     BenchResult r;
     r.kernel_name  = kernel_name;
@@ -334,13 +322,11 @@ int main(int argc, char** argv) {
     int seq_len    = 2048;
     int block_size = 16;
     int penalty    = 2;
-    int iters      = 3;
 
     // Command-line fallback
     seq_len    = parseIntParam(argc, argv, "--sequence_length", seq_len);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
     penalty    = parseIntParam(argc, argv, "--penalty", penalty);
-    iters      = parseIterations(argc, argv);
 
     // Environment variable overrides
     const char* env_val;
@@ -350,8 +336,6 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_penalty");
     if (env_val) penalty = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     int num_warmup = 0;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
@@ -389,8 +373,8 @@ int main(int argc, char** argv) {
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Sequence length: %d  |  Block size: %d  |  Penalty: %d  |  Iterations: %d\n\n",
-            seq_len, block_size, penalty, iters);
+    fprintf(stderr, "Sequence length: %d  |  Block size: %d  |  Penalty: %d\n\n",
+            seq_len, block_size, penalty);
 
     // Device allocations
     int *d_seq, *d_matrix;
@@ -407,7 +391,7 @@ int main(int argc, char** argv) {
     snprintf(problemSize, sizeof(problemSize), "%d", seq_len);
 
     BenchResult r = runBenchmark(
-        "rodinia_nw", problemSize, iters, num_warmup, [&]() {
+        "rodinia_nw", problemSize, 1, num_warmup, [&]() {
             // Reset matrix borders for each timed run
             CUDA_CHECK(cudaMemcpy(d_matrix, h_matrix,
                                 matrix_elems * sizeof(int),
@@ -432,16 +416,16 @@ int main(int argc, char** argv) {
     long cells     = (long)seq_len * seq_len;
     double gcups   = (double)cells / (r.avg_ms * 1e-3) / 1e9;
     double eff_bw  = (double)cells * 4 * sizeof(int) / (r.avg_ms * 1e-3) / 1e9;
-    double total_ms = r.avg_ms * iters;
+    double total_ms = r.avg_ms;
 
     // JSON-lines kernel events (one per kernel name in params.json)
     printf("{\"type\":\"kernel\",\"name\":\"nw_kernel1\",\"time_ms\":%.6f,"
-           "\"params\":{\"sequence_length\":%d,\"block_size\":%d,\"penalty\":%d,\"iterations\":%d}}\n",
-           r.avg_ms, seq_len, block_size, penalty, iters);
+           "\"params\":{\"sequence_length\":%d,\"block_size\":%d,\"penalty\":%d}}\n",
+           r.avg_ms, seq_len, block_size, penalty);
 
     printf("{\"type\":\"kernel\",\"name\":\"nw_kernel2\",\"time_ms\":%.6f,"
-           "\"params\":{\"sequence_length\":%d,\"block_size\":%d,\"penalty\":%d,\"iterations\":%d}}\n",
-           r.avg_ms, seq_len, block_size, penalty, iters);
+           "\"params\":{\"sequence_length\":%d,\"block_size\":%d,\"penalty\":%d}}\n",
+           r.avg_ms, seq_len, block_size, penalty);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

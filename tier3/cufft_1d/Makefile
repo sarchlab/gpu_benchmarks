@@ -33,7 +33,7 @@ TARGET := cufft_1d
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := cufft_1d.cu
-  CFLAGS := -O3 -std=c++14
+  CFLAGS := -O3 -std=c++14 -arch=native
   LIBS   := -lcufft
 
 else ifeq ($(PLATFORM),rocm)

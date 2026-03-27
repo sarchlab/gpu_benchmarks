@@ -41,7 +41,6 @@ static const int DEFAULT_OPS_PER_THREAD  = 1024;
 static const int DEFAULT_NUM_BLOCKS      = 1024;
 static const int DEFAULT_THREADS_PER_BLK = 256;
 static const int DEFAULT_NUM_WARMUP      = 0;
-static const int NUM_ITERATIONS          = 5;
 
 // ---------------------------------------------------------------------------
 // Timing helper
@@ -124,23 +123,20 @@ static int run_benchmark(const char *kernel_name,
     /* Reset counter before timed run. */
     memset(d_counter.contents, 0, sizeof(uint32_t));
 
-    /* Timed benchmark loop. */
+    /* Timed kernel launch. */
     uint64_t t0 = mach_absolute_time();
-    for (int iter = 0; iter < NUM_ITERATIONS; ++iter) {
-        dispatch_once();
-    }
+    dispatch_once();
     uint64_t t1 = mach_absolute_time();
 
     double elapsed_s  = ticks_to_seconds(t1 - t0);
     double elapsed_ms = elapsed_s * 1e3;
 
     long long num_threads = (long long)total_threads;
-    long long total_ops   = (long long)NUM_ITERATIONS
-                            * num_threads
+    long long total_ops   = num_threads
                             * (long long)ops_per_thread;
     double gops = (double)total_ops / elapsed_s / 1e9;
 
-    double avg_ms = elapsed_ms / NUM_ITERATIONS;
+    
 
     /* Human-readable output to stderr. */
     fprintf(stderr, "%-12s : %.3f ms total, %.3f ms/kernel, %.2f Gops/s\n",
@@ -150,10 +146,10 @@ static int run_benchmark(const char *kernel_name,
     printf("{\"type\":\"kernel\",\"name\":\"%s\",\"time_ms\":%.6f,"
            "\"params\":{\"ops_per_thread\":%d,\"num_blocks\":%d,"
            "\"threads_per_block\":%d,\"atomic_op\":\"%s\"}}\n",
-           kernel_name, avg_ms, ops_per_thread, num_blocks,
+           kernel_name, (double)elapsed_ms, ops_per_thread, num_blocks,
            threads_per_block, atomic_op);
 
-    *out_avg_ms = avg_ms;
+    *out_avg_ms = (double)elapsed_ms;
     *out_gops   = gops;
 
     return EXIT_SUCCESS;
@@ -215,8 +211,7 @@ int main(int argc, char *argv[])
             num_blocks, threads_per_block, total_threads);
     fprintf(stderr, "Ops / thread    : %d\n", ops_per_thread);
     fprintf(stderr, "Atomic op       : %s\n", atomic_op);
-    fprintf(stderr, "Warmup iters    : %d\n", num_warmup);
-    fprintf(stderr, "Timed iters     : %d\n\n", NUM_ITERATIONS);
+    fprintf(stderr, "Warmup iters    : %d\n\n", num_warmup);
 
     /* Load the Metal shader library from source. */
     NSError *err = nil;

@@ -5,7 +5,7 @@
  * double-buffered row sweeps on the GPU.
  *
  * Usage:
- *   ./rodinia_pathfinder [--rows R] [--cols C] [--iterations I]
+ *   ./rodinia_pathfinder [--rows R] [--cols C]
  *
  *   --rows R        Grid rows                  (default: 100000)
  *   --cols C        Grid columns               (default: 100)
@@ -86,13 +86,11 @@ int main(int argc, char* argv[])
     // Defaults
     int cols  = 100;
     int rows  = 100000;
-    int iters = 3;
     int block_size_param = 256;
 
     // Command-line fallback
     rows  = parseIntParam(argc, argv, "--rows", rows);
     cols  = parseIntParam(argc, argv, "--cols", cols);
-    iters = parseIntParam(argc, argv, "--iterations", iters);
 
     // Environment variable overrides
     const char* env_val;
@@ -100,8 +98,6 @@ int main(int argc, char* argv[])
     if (env_val) cols = atoi(env_val);
     env_val = getenv("BENCH_PARAM_rows");
     if (env_val) rows = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size_param = atoi(env_val);
     int num_warmup = 0;
@@ -117,8 +113,8 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
-    fprintf(stderr, "Grid: %d rows x %d cols  |  Iterations: %d\n\n",
-            rows, cols, iters);
+    fprintf(stderr, "Grid: %d rows x %d cols\n\n",
+            rows, cols);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -303,9 +299,9 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times(iters);
+    std::vector<double> times(1);
 
-    for (int iter = 0; iter < iters; iter++) {
+    for (int iter = 0; iter < 1; iter++) {
         memcpy(buf0.contents, h_wall, row_bytes); // reset src = row 0
         id<MTLBuffer> src_buf = buf0;
         id<MTLBuffer> dst_buf = buf1;
@@ -338,7 +334,7 @@ int main(int argc, char* argv[])
         times[iter] = ticks_to_ms(t1 - t0);
 
         // Report final row min on last iteration
-        if (iter == iters - 1) {
+        if (iter == 1 - 1) {
             int* final_row = (int*)src_buf.contents;
             int min_cost = final_row[0];
             for (int c = 1; c < cols; c++)
@@ -349,8 +345,8 @@ int main(int argc, char* argv[])
 
     // Compute stats
     double sum = 0.0;
-    for (int i = 0; i < iters; i++) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; i++) sum += times[i];
+    double avg_ms = sum / 1;
 
     // GB/s: ROWS * COLS * sizeof(int) * 3 (2 reads: src+wall, 1 write: dst)
     double total_bytes_accessed = (double)rows * cols * sizeof(int) * 3.0;
@@ -360,8 +356,8 @@ int main(int argc, char* argv[])
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"dynproc_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"cols\":%d,\"rows\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
-           avg_ms, cols, rows, iters, block_size_param);
+           "\"params\":{\"cols\":%d,\"rows\":%d\"block_size\":%d}}\n",
+           avg_ms, cols, rows, block_size_param);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

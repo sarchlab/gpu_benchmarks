@@ -33,7 +33,7 @@ TARGET := warp_shuffle
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := warp_shuffle.cu
-  CFLAGS := -O3 -std=c++14
+  CFLAGS := -O3 -std=c++14 -arch=native
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

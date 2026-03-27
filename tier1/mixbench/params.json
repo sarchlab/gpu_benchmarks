@@ -23,13 +23,6 @@
       "type": "int",
       "default": 256,
       "values": [64, 128, 256, 512]
-    },
-    {
-      "name": "timed_iterations",
-      "description": "Number of timed kernel launches for averaging",
-      "type": "int",
-      "default": 5,
-      "values": [3, 5, 10]
     }
   ],
   "kernels": ["mixbench_kernel"]

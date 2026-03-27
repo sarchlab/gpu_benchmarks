@@ -14,11 +14,10 @@
 // Native CUDA implementation.
 //
 // Usage:
-//   ./polybench_fdtd2d [--size N] [--tmax T] [--iterations I]
+//   ./polybench_fdtd2d [--size N] [--tmax T]
 //
 //   --size N        Grid dimension (N×N)            (default: 512)
 //   --tmax T        Time steps per benchmark iter   (default: 50)
-//   --iterations I  Timed benchmark iterations      (default: 3)
 //
 // Output (stdout): CSV — kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
 // Output (stderr): Effective bandwidth in GB/s
@@ -55,17 +54,6 @@ struct BenchResult {
     double      stddev_ms;
 };
 
-static int parseIterations(int argc, char** argv) {
-    int iters = 3;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -118,8 +106,8 @@ static BenchResult runBenchmark(const char* kernel_name,
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    std::vector<double> times(iterations);
-    for (int i = 0; i < iterations; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         timer.record_start();
         func();
         timer.record_stop();
@@ -127,19 +115,19 @@ static BenchResult runBenchmark(const char* kernel_name,
     }
 
     double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iterations; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg = sum / iterations;
+    double avg = sum / 1;
 
     double variance = 0.0;
-    for (int i = 0; i < iterations; ++i) {
+    for (int i = 0; i < 1; ++i) {
         double d = times[i] - avg;
         variance += d * d;
     }
-    double stddev = (iterations > 1) ? sqrt(variance / (iterations - 1)) : 0.0;
+    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
 
     BenchResult r;
     r.kernel_name  = kernel_name;
@@ -216,7 +204,6 @@ int main(int argc, char** argv) {
 
     int N    = parseIntParam(argc, argv, "--size", 512);
     int TMAX = parseIntParam(argc, argv, "--tmax",  50);
-    int iters = parseIterations(argc, argv);
     int block_size = parseIntParam(argc, argv, "--block_size", 256);
 
     const char* env_val;
@@ -224,8 +211,6 @@ int main(int argc, char** argv) {
     if (env_val) N = atoi(env_val);
     env_val = getenv("BENCH_PARAM_tmax");
     if (env_val) TMAX = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     int num_warmup = 0;
@@ -241,8 +226,8 @@ int main(int argc, char** argv) {
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Grid: %d×%d  |  TMAX: %d  |  Iterations: %d\n\n",
-            NX, NY, TMAX, iters);
+    fprintf(stderr, "Grid: %d×%d  |  TMAX: %d\n\n",
+            NX, NY, TMAX);
 
     // Host allocations and initialization
     float* h_ex = (float*)malloc(grid_bytes);
@@ -269,7 +254,7 @@ int main(int argc, char** argv) {
 
     g_num_warmup = num_warmup;
     BenchResult r = runBenchmark(
-        "polybench_fdtd2d", problemSize, iters, [&]() {
+        "polybench_fdtd2d", problemSize, 1, [&]() {
             // Reset device arrays from host for reproducibility
             CUDA_CHECK(cudaMemcpy(d_ex, h_ex, grid_bytes, cudaMemcpyHostToDevice));
             CUDA_CHECK(cudaMemcpy(d_ey, h_ey, grid_bytes, cudaMemcpyHostToDevice));
@@ -292,14 +277,14 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"fdtd_update_ex\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"tmax\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
-           r.avg_ms, N, TMAX, iters, block_size);
+           "\"params\":{\"size\":%d,\"tmax\":%d\"block_size\":%d}}\n",
+           r.avg_ms, N, TMAX, block_size);
     printf("{\"type\":\"kernel\",\"name\":\"fdtd_update_ey\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"tmax\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
-           r.avg_ms, N, TMAX, iters, block_size);
+           "\"params\":{\"size\":%d,\"tmax\":%d\"block_size\":%d}}\n",
+           r.avg_ms, N, TMAX, block_size);
     printf("{\"type\":\"kernel\",\"name\":\"fdtd_update_hz\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"tmax\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
-           r.avg_ms, N, TMAX, iters, block_size);
+           "\"params\":{\"size\":%d,\"tmax\":%d\"block_size\":%d}}\n",
+           r.avg_ms, N, TMAX, block_size);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
            r.avg_ms, bw_gb);

@@ -51,7 +51,6 @@ static const int DEFAULT_BLOCK_SIZE   = 256;
 static const int DEFAULT_NUM_BLOCKS   = 128;
 static const int DEFAULT_INNER_ITERS  = 1000;
 static const int DEFAULT_WARMUP_ITERS  = 0;
-static const int TIMED_ITERS          = 5;
 static const int SMEM_FLOATS          = 12288;         // 48 KB / 4 bytes
 static const double BYTES_PER_GB      = 1e9;
 
@@ -147,16 +146,14 @@ static double run_benchmark(KernelFn kernel, float *d_sink,
     CUDA_CHECK(cudaEventCreate(&stop));
 
     CUDA_CHECK(cudaEventRecord(start, 0));
-    for (int i = 0; i < TIMED_ITERS; ++i) {
-        kernel<<<dim3(num_blocks), dim3(block_size), 0, 0>>>(d_sink, inner_iters);
-        CUDA_CHECK(cudaGetLastError());
-    }
+    kernel<<<dim3(num_blocks), dim3(block_size), 0, 0>>>(d_sink, inner_iters);
+    CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaEventRecord(stop, 0));
     CUDA_CHECK(cudaEventSynchronize(stop));
 
     float total_ms = 0.0f;
     CUDA_CHECK(cudaEventElapsedTime(&total_ms, start, stop));
-    double avg_ms = total_ms / TIMED_ITERS;
+    double avg_ms = (double)total_ms;
 
     CUDA_CHECK(cudaEventDestroy(start));
     CUDA_CHECK(cudaEventDestroy(stop));
@@ -215,8 +212,7 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Grid size     : %d blocks\n", num_blocks);
     fprintf(stderr, "Inner iters   : %d\n", inner_iters);
     fprintf(stderr, "Access pattern: %s\n", access_pattern);
-    fprintf(stderr, "Warmup iters  : %d\n", num_warmup);
-    fprintf(stderr, "Timed iters   : %d\n\n", TIMED_ITERS);
+    fprintf(stderr, "Warmup iters  : %d\n\n", num_warmup);
 
     /* Allocate device sink buffer. */
     float *d_sink = nullptr;

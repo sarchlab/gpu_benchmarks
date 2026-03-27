@@ -7,7 +7,28 @@
     "name": "image_size",
     "description": "Image dimension (NxN pixel grid)",
     "type": "int",
-    "values": [64, 128, 192, 256, 384, 512, 640, 768, 1024, 1280, 1536, 2048, 2560, 3072, 3584, 4096, 5120, 6144, 7168, 8192]
+    "values": [
+      64,
+      128,
+      192,
+      256,
+      384,
+      512,
+      640,
+      768,
+      1024,
+      1280,
+      1536,
+      2048,
+      2560,
+      3072,
+      3584,
+      4096,
+      5120,
+      6144,
+      7168,
+      8192
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,22 +36,28 @@
       "description": "SRAD iterations per timed launch",
       "type": "int",
       "default": 50,
-      "values": [10, 25, 50, 100, 200]
+      "values": [
+        10,
+        25,
+        50,
+        100,
+        200
+      ]
     },
     {
       "name": "block_size",
       "description": "Thread-block dimension (BxB threads)",
       "type": "int",
       "default": 16,
-      "values": [8, 16, 32]
-    },
-    {
-      "name": "iterations",
-      "description": "Timed benchmark iterations",
-      "type": "int",
-      "default": 20,
-      "values": [5, 10, 20]
+      "values": [
+        8,
+        16,
+        32
+      ]
     }
   ],
-  "kernels": ["srad1", "srad2"]
+  "kernels": [
+    "srad1",
+    "srad2"
+  ]
 }

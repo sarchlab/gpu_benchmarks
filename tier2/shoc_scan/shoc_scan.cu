@@ -205,13 +205,11 @@ int main(int argc, char** argv) {
     // Defaults
     int array_size = 1048576;
     int block_size = 256;
-    int iterations = 20;
     const char* precision = "float";
 
     // Command-line fallback
     array_size = parseIntParam(argc, argv, "--array_size", array_size);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
-    iterations = parseIntParam(argc, argv, "--iterations", iterations);
     precision  = parseStrParam(argc, argv, "--precision", precision);
 
     // Environment variable overrides
@@ -220,8 +218,6 @@ int main(int argc, char** argv) {
     if (env_val) array_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
     int num_warmup = 0;
@@ -229,7 +225,6 @@ int main(int argc, char** argv) {
     if (env_val) num_warmup = atoi(env_val);
 
     int N     = array_size;
-    int iters = iterations;
 
     // Clamp block_size
     if (block_size > MAX_BLOCK_SIZE) block_size = MAX_BLOCK_SIZE;
@@ -250,7 +245,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Array size: %d floats (%.1f MiB, padded to %d)\n",
             N, (double)bytes_orig / (1024.0 * 1024.0), N_padded);
-    fprintf(stderr, "Block size: %d  |  Iterations: %d\n\n", block_size, iters);
+    fprintf(stderr, "Block size: %d\n\n", block_size);
 
     // Host allocations
     float* h_input  = (float*)calloc(N_padded, sizeof(float));
@@ -276,8 +271,8 @@ int main(int argc, char** argv) {
 
     // Timed iterations
     BenchmarkTimer timer;
-    std::vector<double> times(iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         timer.record_start();
         scan_recursive(d_output, d_input, N_padded, block_size);
         timer.record_stop();
@@ -286,12 +281,12 @@ int main(int argc, char** argv) {
 
     // Statistics
     double sum_t = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum_t += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg_ms = sum_t / iters;
+    double avg_ms = sum_t / 1;
     double total_ms = sum_t;
 
     // Effective bandwidth: 1 read + 1 write = 2 × N × sizeof(float)
@@ -300,12 +295,12 @@ int main(int argc, char** argv) {
 
     // JSON-lines: one event per kernel listed in params.json
     printf("{\"type\":\"kernel\",\"name\":\"scan_block_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"array_size\":%d,\"block_size\":%d,\"iterations\":%d,"
+           "\"params\":{\"array_size\":%d,\"block_size\":%d"
            "\"precision\":\"%s\"}}\n",
            avg_ms, array_size, block_size, iterations, precision);
 
     printf("{\"type\":\"kernel\",\"name\":\"add_block_sums_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"array_size\":%d,\"block_size\":%d,\"iterations\":%d,"
+           "\"params\":{\"array_size\":%d,\"block_size\":%d"
            "\"precision\":\"%s\"}}\n",
            avg_ms, array_size, block_size, iterations, precision);
 

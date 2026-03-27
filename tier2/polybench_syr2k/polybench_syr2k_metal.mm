@@ -7,7 +7,7 @@
  * Measures peak compute throughput in GFLOPS.
  *
  * Usage:
- *   ./polybench_syr2k [--size N] [--iterations I]
+ *   ./polybench_syr2k [--size N]
  *
  * Output (stdout): JSON-lines
  * Output (stderr): device info, timing details
@@ -79,7 +79,6 @@ int main(int argc, char* argv[])
 
     int N     = parseIntParam(argc, argv, "--size", 1024);
     int M     = parseIntParam(argc, argv, "--inner_size", 1024);
-    int iters = parseIntParam(argc, argv, "--iterations", 5);
     int block_size = 256;
     float alpha = parseFloatParam(argc, argv, "--alpha", 1.5f);
     float beta  = parseFloatParam(argc, argv, "--beta", 1.2f);
@@ -90,8 +89,6 @@ int main(int argc, char* argv[])
     if (env_val) N = atoi(env_val);
     env_val = getenv("BENCH_PARAM_inner_size");
     if (env_val) M = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_alpha");
@@ -114,8 +111,8 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
-    fprintf(stderr, "SYR2K: N=%d, M=%d  |  alpha=%.1f  beta=%.1f  |  Iterations: %d\n\n",
-            N, M, alpha, beta, iters);
+    fprintf(stderr, "SYR2K: N=%d, M=%d  |  alpha=%.1f  beta=%.1f\n\n",
+            N, M, alpha, beta);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -222,8 +219,8 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         // Restore C before each iteration
         memcpy(h_C, h_C_backup, bytes_C);
         uint64_t t0 = mach_absolute_time();
@@ -234,18 +231,18 @@ int main(int argc, char* argv[])
 
     // Compute statistics
     double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum_ms += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg_ms = sum_ms / iters;
+    double avg_ms = sum_ms / 1;
     double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         double d = times[i] - avg_ms;
         variance += d * d;
     }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
+    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
 
     // GFLOPS: 4*N*N*M (two rank-k products, each 2*N*N*M FLOPs)
     double gflops = 4.0 * (double)N * (double)N * (double)M
@@ -256,9 +253,9 @@ int main(int argc, char* argv[])
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"syr2k_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"matrix_size\":%d,\"inner_size\":%d,\"iterations\":%d,"
+           "\"params\":{\"matrix_size\":%d,\"inner_size\":%d"
            "\"block_size\":%d,\"alpha\":%.2f,\"beta\":%.2f}}\n",
-           avg_ms, N, M, iters, block_size, alpha, beta);
+           avg_ms, N, M, block_size, alpha, beta);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
            avg_ms, gflops);

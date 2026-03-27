@@ -37,7 +37,6 @@
  *   BENCH_PARAM_fmas_per_thread
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_threads_per_block
- *   BENCH_PARAM_num_iterations
  */
 
 #include <cstdio>
@@ -65,7 +64,6 @@
 static const int DEFAULT_FMAS_PER_THREAD = 4096;
 static const int DEFAULT_THREADS_PER_BLOCK = 256;
 static const int DEFAULT_NUM_BLOCKS = 1024;
-static const int DEFAULT_NUM_ITERATIONS = 10;
 static const int DEFAULT_NUM_WARMUP = 0;
 
 // ---------------------------------------------------------------------------
@@ -127,10 +125,6 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_threads_per_block");
     if (env_val) threads_per_block = atoi(env_val);
 
-    int num_iterations = DEFAULT_NUM_ITERATIONS;
-    env_val = getenv("BENCH_PARAM_num_iterations");
-    if (env_val) num_iterations = atoi(env_val);
-
     int num_warmup = DEFAULT_NUM_WARMUP;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
@@ -147,8 +141,7 @@ int main(int argc, char *argv[])
            num_blocks, threads_per_block,
            num_blocks * threads_per_block);
     fprintf(stderr, "FMAs / thread   : %d\n", fmas_per_thread);
-    fprintf(stderr, "Warmup iters    : %d\n", num_warmup);
-    fprintf(stderr, "Kernel repeats  : %d\n\n", num_iterations);
+    fprintf(stderr, "Warmup iters    : %d\n\n", num_warmup);
 
     double *d_out = nullptr;
     CUDA_CHECK(cudaMalloc(&d_out, sizeof(double)));
@@ -163,11 +156,9 @@ int main(int argc, char *argv[])
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    /* Timed benchmark loop. */
+    /* Timed kernel launch. */
     CUDA_CHECK(cudaEventRecord(ev_start, 0));
-    for (int iter = 0; iter < num_iterations; ++iter) {
         fp64_fma_kernel<<<dim3(num_blocks), dim3(threads_per_block), 0, 0>>>(d_out, fmas_per_thread);
-    }
     CUDA_CHECK(cudaEventRecord(ev_stop, 0));
     CUDA_CHECK(cudaEventSynchronize(ev_stop));
 
@@ -175,25 +166,21 @@ int main(int argc, char *argv[])
     CUDA_CHECK(cudaEventElapsedTime(&elapsed_ms, ev_start, ev_stop));
 
     long long num_threads  = static_cast<long long>(num_blocks) * threads_per_block;
-    long long total_flops  = static_cast<long long>(num_iterations)
-                             * num_threads
+    long long total_flops  = num_threads
                              * static_cast<long long>(fmas_per_thread)
                              * 2LL;
     double elapsed_s       = static_cast<double>(elapsed_ms) * 1e-3;
     double gflops          = static_cast<double>(total_flops) / elapsed_s / 1e9;
-    double avg_time_ms     = static_cast<double>(elapsed_ms) / num_iterations;
 
-    fprintf(stderr, "Elapsed time    : %.3f ms (%.3f ms / kernel)\n",
-           elapsed_ms, avg_time_ms);
+    fprintf(stderr, "Elapsed time    : %.3f ms\n", elapsed_ms);
     fprintf(stderr, "Total FLOPs     : %lld\n", total_flops);
     fprintf(stderr, "FP64 Throughput : %.2f GFLOPS\n", gflops);
 
     /* JSON-lines output to stdout. */
     printf("{\"type\":\"kernel\",\"name\":\"fp64_fma_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"fmas_per_thread\":%d,\"num_blocks\":%d,"
-           "\"threads_per_block\":%d,\"num_iterations\":%d}}\n",
-           avg_time_ms, fmas_per_thread, num_blocks, threads_per_block,
-           num_iterations);
+           "\"threads_per_block\":%d}}\n",
+           (double)elapsed_ms, fmas_per_thread, num_blocks, threads_per_block);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",

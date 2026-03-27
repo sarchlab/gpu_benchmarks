@@ -10,7 +10,6 @@
  * Parameters (from env vars BENCH_PARAM_*):
  *   grid_dim  — square grid dimension NX=NY for the 2D FFT
  *   warmup    — warmup iterations (not timed)
- *   iters     — timed iterations
  *   direction — FFT direction (forward/inverse/roundtrip)
  *
  * Verification: 2D sinusoidal input at (kx=3, ky=5)
@@ -130,7 +129,6 @@ int main(void)
     /* ------------------------------------------------------------------ */
     int grid_dim = 2048;
     int warmup   = 0;
-    int iters    = 5;
     const char *direction = "forward";
 
     const char *env_val;
@@ -138,8 +136,6 @@ int main(void)
     if (env_val) grid_dim = atoi(env_val);
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) warmup = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iters");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_direction");
     if (env_val) direction = env_val;
 
@@ -187,21 +183,18 @@ int main(void)
     /* Timed iterations (time only the FFT calls, not data init)          */
     /* ------------------------------------------------------------------ */
     uint64_t t0 = mach_absolute_time();
-    for (int iter = 0; iter < iters; iter++) {
-        fft_rows(setup, realp, imagp, NX, NY, log2NY);
-        fft_cols(setup, realp, imagp, NX, NY, log2NX);
-    }
+    fft_rows(setup, realp, imagp, NX, NY, log2NY);
+    fft_cols(setup, realp, imagp, NX, NY, log2NX);
     uint64_t t1 = mach_absolute_time();
 
     double total_ns = (double)(t1 - t0) * tb.numer / tb.denom;
-    double avg_ns   = total_ns / iters;
-    double avg_ms   = avg_ns / 1e6;
-    double total_ms = total_ns / 1e6;
+    double avg_ms   = total_ns / 1e6;
+    double total_ms = avg_ms;
 
     /* ------------------------------------------------------------------ */
     /* Verification: run one fresh 2D FFT on a clean sinusoidal input.    */
-    /* The timed loop applied ITERS consecutive in-place FFTs so we       */
-    /* cannot use that result directly.                                    */
+    /* The timed FFT is in-place, so we cannot use that result directly    */
+    /* for verification — run a fresh FFT instead.                         */
     /*                                                                     */
     /* Expected: |X[3][5]| = NX*NY/2 = 2097152                           */
     /* Derivation (by separability):                                       */
@@ -256,8 +249,8 @@ int main(void)
 
     /* JSON-lines: kernel event */
     printf("{\"type\":\"kernel\",\"name\":\"cufftExecC2C\",\"time_ms\":%.6f,"
-           "\"params\":{\"grid_dim\":%d,\"warmup\":%d,\"iters\":%d,\"direction\":\"%s\"}}\n",
-           avg_ms, grid_dim, warmup, iters, direction);
+           "\"params\":{\"grid_dim\":%d,\"warmup\":%d,\"direction\":\"%s\"}}\n",
+           avg_ms, grid_dim, warmup, direction);
 
     /* JSON-lines: summary event */
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

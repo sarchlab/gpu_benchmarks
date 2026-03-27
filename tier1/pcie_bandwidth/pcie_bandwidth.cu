@@ -14,7 +14,7 @@
  *
  * Pinned (page-locked) host memory is allocated with cudaMallocHost() to
  * bypass OS paging and saturate the PCIe link.  Each test is preceded by a
- * warm-up pass and then timed over num_iterations repetitions using CUDA
+ * warm-up pass and then timed using CUDA
  * events.  Results are reported in SI GB/s (1 GB = 10^9 bytes).
  *
  * Usage:
@@ -22,7 +22,6 @@
  *
  * Environment variables (override argv):
  *   BENCH_PARAM_buffer_size_mb
- *   BENCH_PARAM_num_iterations
  *   BENCH_PARAM_transfer_type     (h2d, d2h, bidir, all)
  *   BENCH_PARAM_use_pinned_memory (true, false)
  */
@@ -51,7 +50,6 @@
 // ---------------------------------------------------------------------------
 
 static const int    DEFAULT_BUFFER_MB      = 256;
-static const int    DEFAULT_NUM_ITERATIONS = 20;
 static const int    DEFAULT_NUM_WARMUP     = 0;
 static const double BYTES_PER_GB           = 1e9;
 
@@ -80,7 +78,7 @@ static float cuda_elapsed_ms(cudaEvent_t start, cudaEvent_t stop)
 // ---------------------------------------------------------------------------
 
 static BenchResult benchmark_h2d(const void *h_buf, void *d_buf,
-                                  size_t bytes, int num_iterations,
+                                  size_t bytes,
                                   int num_warmup)
 {
     cudaEvent_t start, stop;
@@ -93,14 +91,12 @@ static BenchResult benchmark_h2d(const void *h_buf, void *d_buf,
     CUDA_CHECK(cudaDeviceSynchronize());
 
     CUDA_CHECK(cudaEventRecord(start, 0));
-    for (int i = 0; i < num_iterations; ++i) {
-        CUDA_CHECK(cudaMemcpy(d_buf, h_buf, bytes, cudaMemcpyHostToDevice));
-    }
+    CUDA_CHECK(cudaMemcpy(d_buf, h_buf, bytes, cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaEventRecord(stop, 0));
     CUDA_CHECK(cudaEventSynchronize(stop));
 
     float  total_ms = cuda_elapsed_ms(start, stop);
-    double bw_GBs   = (static_cast<double>(bytes) * num_iterations)
+    double bw_GBs   = static_cast<double>(bytes)
                       / (total_ms * 1e-3) / BYTES_PER_GB;
 
     CUDA_CHECK(cudaEventDestroy(start));
@@ -113,7 +109,7 @@ static BenchResult benchmark_h2d(const void *h_buf, void *d_buf,
 // ---------------------------------------------------------------------------
 
 static BenchResult benchmark_d2h(const void *d_buf, void *h_buf,
-                                  size_t bytes, int num_iterations,
+                                  size_t bytes,
                                   int num_warmup)
 {
     cudaEvent_t start, stop;
@@ -126,14 +122,12 @@ static BenchResult benchmark_d2h(const void *d_buf, void *h_buf,
     CUDA_CHECK(cudaDeviceSynchronize());
 
     CUDA_CHECK(cudaEventRecord(start, 0));
-    for (int i = 0; i < num_iterations; ++i) {
-        CUDA_CHECK(cudaMemcpy(h_buf, d_buf, bytes, cudaMemcpyDeviceToHost));
-    }
+    CUDA_CHECK(cudaMemcpy(h_buf, d_buf, bytes, cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaEventRecord(stop, 0));
     CUDA_CHECK(cudaEventSynchronize(stop));
 
     float  total_ms = cuda_elapsed_ms(start, stop);
-    double bw_GBs   = (static_cast<double>(bytes) * num_iterations)
+    double bw_GBs   = static_cast<double>(bytes)
                       / (total_ms * 1e-3) / BYTES_PER_GB;
 
     CUDA_CHECK(cudaEventDestroy(start));
@@ -147,7 +141,7 @@ static BenchResult benchmark_d2h(const void *d_buf, void *h_buf,
 
 static BenchResult benchmark_bidir(const void *h_src, void *h_dst,
                                     const void *d_src, void *d_dst,
-                                    size_t bytes, int num_iterations,
+                                    size_t bytes,
                                     int num_warmup)
 {
     cudaStream_t stream_h2d, stream_d2h;
@@ -169,19 +163,17 @@ static BenchResult benchmark_bidir(const void *h_src, void *h_dst,
     }
 
     CUDA_CHECK(cudaEventRecord(start, 0));
-    for (int i = 0; i < num_iterations; ++i) {
-        CUDA_CHECK(cudaMemcpyAsync(d_dst, h_src, bytes,
-                                 cudaMemcpyHostToDevice, stream_h2d));
-        CUDA_CHECK(cudaMemcpyAsync(h_dst, d_src, bytes,
-                                 cudaMemcpyDeviceToHost, stream_d2h));
-    }
+    CUDA_CHECK(cudaMemcpyAsync(d_dst, h_src, bytes,
+                               cudaMemcpyHostToDevice, stream_h2d));
+    CUDA_CHECK(cudaMemcpyAsync(h_dst, d_src, bytes,
+                               cudaMemcpyDeviceToHost, stream_d2h));
     CUDA_CHECK(cudaStreamSynchronize(stream_h2d));
     CUDA_CHECK(cudaStreamSynchronize(stream_d2h));
     CUDA_CHECK(cudaEventRecord(stop, 0));
     CUDA_CHECK(cudaEventSynchronize(stop));
 
     float  total_ms    = cuda_elapsed_ms(start, stop);
-    double total_bytes = 2.0 * static_cast<double>(bytes) * num_iterations;
+    double total_bytes = 2.0 * static_cast<double>(bytes);
     double bw_GBs      = total_bytes / (total_ms * 1e-3) / BYTES_PER_GB;
 
     CUDA_CHECK(cudaEventDestroy(start));
@@ -213,9 +205,6 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    int num_iterations = DEFAULT_NUM_ITERATIONS;
-    env_val = getenv("BENCH_PARAM_num_iterations");
-    if (env_val) num_iterations = atoi(env_val);
 
     const char* transfer_type = "all";
     env_val = getenv("BENCH_PARAM_transfer_type");
@@ -243,7 +232,6 @@ int main(int argc, char *argv[])
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device          : %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Transfer size   : %d MiB (%zu bytes)\n", buffer_mb, bytes);
-    fprintf(stderr, "Iterations/test : %d\n", num_iterations);
     fprintf(stderr, "Transfer type   : %s\n", transfer_type);
     fprintf(stderr, "Pinned memory   : %s\n", use_pinned_memory);
     fprintf(stderr, "Warmup iters    : %d\n\n", num_warmup);
@@ -279,47 +267,47 @@ int main(int argc, char *argv[])
     /* ----- H2D ----- */
     if (run_h2d) {
         fprintf(stderr, "%-30s", "H2D (unidirectional)");
-        BenchResult r = benchmark_h2d(h_src, d_dst, bytes, num_iterations, num_warmup);
+        BenchResult r = benchmark_h2d(h_src, d_dst, bytes, num_warmup);
         h2d_bw = r.bandwidth_gbps;
-        double avg_ms = r.total_ms / num_iterations;
+        
         total_time_ms += r.total_ms;
         fprintf(stderr, ": %8.2f GB/s\n", h2d_bw);
 
         printf("{\"type\":\"kernel\",\"name\":\"memcpy_h2d\",\"time_ms\":%.6f,"
-               "\"params\":{\"buffer_size_mb\":%d,\"num_iterations\":%d,"
+               "\"params\":{\"buffer_size_mb\":%d,"
                "\"transfer_type\":\"%s\",\"use_pinned_memory\":\"%s\"}}\n",
-               avg_ms, buffer_mb, num_iterations, transfer_type, use_pinned_memory);
+               r.total_ms, buffer_mb, transfer_type, use_pinned_memory);
     }
 
     /* ----- D2H ----- */
     if (run_d2h) {
         fprintf(stderr, "%-30s", "D2H (unidirectional)");
-        BenchResult r = benchmark_d2h(d_src, h_dst, bytes, num_iterations, num_warmup);
+        BenchResult r = benchmark_d2h(d_src, h_dst, bytes, num_warmup);
         d2h_bw = r.bandwidth_gbps;
-        double avg_ms = r.total_ms / num_iterations;
+        
         total_time_ms += r.total_ms;
         fprintf(stderr, ": %8.2f GB/s\n", d2h_bw);
 
         printf("{\"type\":\"kernel\",\"name\":\"memcpy_d2h\",\"time_ms\":%.6f,"
-               "\"params\":{\"buffer_size_mb\":%d,\"num_iterations\":%d,"
+               "\"params\":{\"buffer_size_mb\":%d,"
                "\"transfer_type\":\"%s\",\"use_pinned_memory\":\"%s\"}}\n",
-               avg_ms, buffer_mb, num_iterations, transfer_type, use_pinned_memory);
+               r.total_ms, buffer_mb, transfer_type, use_pinned_memory);
     }
 
     /* ----- Bidirectional ----- */
     if (run_bidir) {
         fprintf(stderr, "%-30s", "Bidirectional (H2D + D2H)");
         BenchResult r = benchmark_bidir(h_src, h_dst, d_src, d_dst,
-                                         bytes, num_iterations, num_warmup);
+                                         bytes, num_warmup);
         bidir_bw = r.bandwidth_gbps;
-        double avg_ms = r.total_ms / num_iterations;
+        
         total_time_ms += r.total_ms;
         fprintf(stderr, ": %8.2f GB/s  (aggregate)\n", bidir_bw);
 
         printf("{\"type\":\"kernel\",\"name\":\"memcpy_bidir\",\"time_ms\":%.6f,"
-               "\"params\":{\"buffer_size_mb\":%d,\"num_iterations\":%d,"
+               "\"params\":{\"buffer_size_mb\":%d,"
                "\"transfer_type\":\"%s\",\"use_pinned_memory\":\"%s\"}}\n",
-               avg_ms, buffer_mb, num_iterations, transfer_type, use_pinned_memory);
+               r.total_ms, buffer_mb, transfer_type, use_pinned_memory);
     }
 
     /* Summary. */

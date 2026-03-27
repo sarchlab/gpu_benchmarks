@@ -7,11 +7,10 @@
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
 // Usage:
-//   ./tango_binomial_options [--options N] [--steps S] [--iterations I]
+//   ./tango_binomial_options [--options N] [--steps S]
 //
 //   --options N      Number of options (default: 512)
 //   --steps S        Steps per option (default: 1024)
-//   --iterations I   Timed iterations (default: 5)
 //
 // Output (stdout): CSV row — tango_binomial_options,<N>x<steps>,<time_ms>,<opts/sec>
 // Output (stderr): human-readable results
@@ -227,13 +226,11 @@ int main(int argc, char** argv) {
     // Defaults from params.json
     int numOptions = 512;
     int numSteps   = 1024;
-    int iterations = 5;
     const char* precision = "float";
 
     // Command-line fallback
     numOptions = parseIntParam(argc, argv, "--options", numOptions);
     numSteps   = parseIntParam(argc, argv, "--steps",   numSteps);
-    iterations = parseIntParam(argc, argv, "--iterations", iterations);
 
     // Environment variable overrides
     const char* env_val;
@@ -241,15 +238,12 @@ int main(int argc, char** argv) {
     if (env_val) numOptions = atoi(env_val);
     env_val = getenv("BENCH_PARAM_steps");
     if (env_val) numSteps = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
     int num_warmup = 0;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
 
-    int iters = iterations;
 
     // Shared memory must hold (numSteps+1) floats; clamp to reasonable limit
     if (numSteps > 4096) {
@@ -267,7 +261,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Options: %d  |  Steps: %d  |  Iterations: 5 warmup + %d timed\n\n",
-            numOptions, numSteps, iters);
+            numOptions, numSteps);
 
     // Host allocation + initialization
     OptionData* h_options = (OptionData*)malloc(optBytes);
@@ -311,8 +305,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipEventCreate(&evStart));
     HIP_CHECK(hipEventCreate(&evStop));
 
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         HIP_CHECK(hipEventRecord(evStart, 0));
         hipLaunchKernelGGL(binomial_kernel, dim3(gridSize), dim3(blockSize),
                            sharedBytes, 0, d_options, d_prices, numSteps);
@@ -329,8 +323,8 @@ int main(int argc, char** argv) {
 
     // Compute average time
     double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; ++i) sum += times[i];
+    double avg_ms = sum / 1;
 
     // options/sec = numOptions / time_s
     double opts_per_sec = (double)numOptions / (avg_ms * 1e-3);
@@ -339,7 +333,7 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"binomial_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"options\":%d,\"steps\":%d,\"iterations\":%d,"
+           "\"params\":{\"options\":%d,\"steps\":%d"
            "\"precision\":\"%s\"}}\n",
            avg_ms, numOptions, numSteps, iterations, precision);
 

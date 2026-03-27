@@ -46,18 +46,6 @@
       ]
     },
     {
-      "name": "iterations",
-      "description": "Number of timed iterations for averaging",
-      "type": "int",
-      "default": 20,
-      "values": [
-        5,
-        10,
-        20,
-        50
-      ]
-    },
-    {
       "name": "transfer_mode",
       "description": "Memory access pattern to benchmark",
       "type": "enum",

@@ -2,12 +2,37 @@
   "benchmark": "cublas_hgemm",
   "tier": 3,
   "suite": "vendor_library",
-  "description": "FP16 GEMM benchmark using cuBLAS (NVIDIA) or rocBLAS (AMD). Computes C = alpha * A * B + beta * C where A is M×K, B is K×N, C is M×N (row-major, FP16/__half). Leverages Tensor Cores when available. Reports TFLOPS.",
+  "description": "FP16 GEMM benchmark using cuBLAS (NVIDIA) or rocBLAS (AMD). Computes C = alpha * A * B + beta * C where A is M\u00d7K, B is K\u00d7N, C is M\u00d7N (row-major, FP16/__half). Leverages Tensor Cores when available. Reports TFLOPS.",
   "scaling_param": {
     "name": "matrix_dim",
     "description": "Square matrix dimension M=N=K; controls total FLOP count (2*M*N*K)",
     "type": "int",
-    "values": [128, 256, 384, 512, 640, 768, 1024, 1280, 1536, 2048, 2560, 3072, 3584, 4096, 4608, 5120, 6144, 7168, 8192, 9216, 10240, 12288, 14336, 16384]
+    "values": [
+      128,
+      256,
+      384,
+      512,
+      640,
+      768,
+      1024,
+      1280,
+      1536,
+      2048,
+      2560,
+      3072,
+      3584,
+      4096,
+      4608,
+      5120,
+      6144,
+      7168,
+      8192,
+      9216,
+      10240,
+      12288,
+      14336,
+      16384
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,22 +40,27 @@
       "description": "Number of warmup iterations before timing",
       "type": "int",
       "default": 0,
-      "values": [0, 3, 5, 10]
-    },
-    {
-      "name": "iters",
-      "description": "Number of timed iterations for averaging",
-      "type": "int",
-      "default": 5,
-      "values": [3, 5, 10, 20]
+      "values": [
+        0,
+        3,
+        5,
+        10
+      ]
     },
     {
       "name": "alpha",
       "description": "Scalar multiplier for A*B (FP16)",
       "type": "float",
       "default": 1.0,
-      "values": [0.5, 1.0, 2.0]
+      "values": [
+        0.5,
+        1.0,
+        2.0
+      ]
     }
   ],
-  "kernels": ["cublasHgemm", "rocblas_hgemm"]
+  "kernels": [
+    "cublasHgemm",
+    "rocblas_hgemm"
+  ]
 }

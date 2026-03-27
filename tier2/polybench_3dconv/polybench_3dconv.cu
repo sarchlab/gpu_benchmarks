@@ -7,7 +7,7 @@
 // Native CUDA implementation.
 //
 // Usage:
-//   ./polybench_3dconv [--size N] [--iterations I]
+//   ./polybench_3dconv [--size N]
 //
 // Output (stdout): JSON-lines
 // Output (stderr): device info, timing details
@@ -117,15 +117,12 @@ int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     int N           = parseIntParam(argc, argv, "--size", 128);
-    int iters       = parseIntParam(argc, argv, "--iterations", 5);
     int block_size  = parseIntParam(argc, argv, "--block_size", 8);
     int filter_size = parseIntParam(argc, argv, "--filter_size", 3);
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_filter_size");
@@ -145,8 +142,8 @@ int main(int argc, char** argv) {
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Volume: %dx%dx%d  |  Filter: %dx%dx%d  |  Iterations: %d\n\n",
-            N, N, N, filter_size, filter_size, filter_size, iters);
+    fprintf(stderr, "Volume: %dx%dx%d  |  Filter: %dx%dx%d\n\n",
+            N, N, N, filter_size, filter_size, filter_size);
 
     // Host allocations
     float* h_input  = (float*)malloc(vol_bytes);
@@ -189,8 +186,8 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaDeviceSynchronize());
 
     // Timed iterations
-    std::vector<double> times(iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         timer.record_start();
         conv3d_kernel<<<grid, block>>>(d_input, d_filter, d_output, N, filter_size);
         timer.record_stop();
@@ -199,19 +196,19 @@ int main(int argc, char** argv) {
 
     // Compute statistics
     double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum_ms += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg_ms = sum_ms / iters;
+    double avg_ms = sum_ms / 1;
 
     double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         double d = times[i] - avg_ms;
         variance += d * d;
     }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
+    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
 
     // GFLOPS: each output voxel does filter_size^3 multiply-adds = 2*filter_size^3 FLOPs
     double flops = 2.0 * (double)vol_elems * (double)filt_elems;
@@ -222,9 +219,9 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"conv3d_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"filter_size\":%d}}\n",
-           avg_ms, N, iters, block_size, filter_size);
+           avg_ms, N, block_size, filter_size);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
            avg_ms, gflops);

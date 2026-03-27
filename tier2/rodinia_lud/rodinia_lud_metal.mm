@@ -8,7 +8,7 @@
  *   3. lud_internal_kernel   — Schur-complement update for interior blocks
  *
  * Usage:
- *   ./rodinia_lud [--size N] [--iterations I]
+ *   ./rodinia_lud [--size N]
  *   N must be divisible by 16 (block size). Default: N=512, iterations=3.
  *
  * Output (stdout): CSV — lud,<N>,<time_ms>,<GFLOPS>
@@ -117,20 +117,16 @@ int main(int argc, char *argv[])
 
     // Defaults
     int N     = 512;
-    int iters = 3;
     int block_size_param = 256;
     const char* verify_mode = "true";
 
     // Command-line fallback
     N     = parseIntParam(argc, argv, "--size", N);
-    iters = parseIntParam(argc, argv, "--iterations", iters);
 
     // Environment variable overrides
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size_param = atoi(env_val);
     env_val = getenv("BENCH_PARAM_verify");
@@ -143,7 +139,6 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Error: N=%d must be divisible by BSIZE=%d\n", N, BSIZE);
         return EXIT_FAILURE;
     }
-    if (iters < 1) iters = 1;
 
     int    num_blocks = N / BSIZE;
     size_t bytes      = (size_t)N * N * sizeof(float);
@@ -157,8 +152,8 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
-    fprintf(stderr, "Matrix: %dx%d  BSIZE=%d  num_blocks=%d  Iterations: %d\n\n",
-            N, N, BSIZE, num_blocks, iters);
+    fprintf(stderr, "Matrix: %dx%d  BSIZE=%d  num_blocks=%d\n\n",
+            N, N, BSIZE, num_blocks);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -295,8 +290,8 @@ int main(int argc, char *argv[])
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times(iters);
-    for (int it = 0; it < iters; it++) {
+    std::vector<double> times(1);
+    for (int it = 0; it < 1; it++) {
         memcpy(buf_a.contents, h_a, bytes);
         uint64_t t0 = mach_absolute_time();
         run_lud();
@@ -308,7 +303,7 @@ int main(int argc, char *argv[])
     // Statistics
     double sum_ms = 0.0;
     for (double t : times) sum_ms += t;
-    double avg_ms = sum_ms / iters;
+    double avg_ms = sum_ms / 1;
     double gflops = (2.0 / 3.0) * (double)N * (double)N * (double)N
                     / (avg_ms * 1e-3) / 1e9;
 
@@ -316,16 +311,16 @@ int main(int argc, char *argv[])
 
     // JSON-lines kernel events
     printf("{\"type\":\"kernel\",\"name\":\"lud_diagonal\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
-           avg_ms, N, iters, block_size_param, verify_mode);
+           "\"params\":{\"size\":%d\"block_size\":%d,\"verify\":\"%s\"}}\n",
+           avg_ms, N, block_size_param, verify_mode);
 
     printf("{\"type\":\"kernel\",\"name\":\"lud_perimeter\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
-           avg_ms, N, iters, block_size_param, verify_mode);
+           "\"params\":{\"size\":%d\"block_size\":%d,\"verify\":\"%s\"}}\n",
+           avg_ms, N, block_size_param, verify_mode);
 
     printf("{\"type\":\"kernel\",\"name\":\"lud_internal\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
-           avg_ms, N, iters, block_size_param, verify_mode);
+           "\"params\":{\"size\":%d\"block_size\":%d,\"verify\":\"%s\"}}\n",
+           avg_ms, N, block_size_param, verify_mode);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

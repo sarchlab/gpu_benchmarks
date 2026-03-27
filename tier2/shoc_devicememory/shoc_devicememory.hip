@@ -185,8 +185,8 @@ static KernelResult benchKernel(int iters, Func func) {
     }
     HIP_CHECK(hipDeviceSynchronize());
 
-    std::vector<double> times(iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         timer.record_start();
         func();
         timer.record_stop();
@@ -194,8 +194,8 @@ static KernelResult benchKernel(int iters, Func func) {
     }
 
     double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg = sum / iters;
+    for (int i = 0; i < 1; ++i) sum += times[i];
+    double avg = sum / 1;
 
     KernelResult r;
     r.avg_ms = avg;
@@ -212,13 +212,11 @@ int main(int argc, char** argv) {
     // Defaults
     int array_size_mb = 64;
     int block_size    = 256;
-    int iterations    = 20;
     const char* transfer_mode = "readwrite";
 
     // Command-line fallback
     array_size_mb = parseIntParam(argc, argv, "--array_size_mb", array_size_mb);
     block_size    = parseIntParam(argc, argv, "--block_size", block_size);
-    iterations    = parseIntParam(argc, argv, "--iterations", iterations);
     transfer_mode = parseStrParam(argc, argv, "--transfer_mode", transfer_mode);
 
     // Environment variable overrides
@@ -227,15 +225,12 @@ int main(int argc, char** argv) {
     if (env_val) array_size_mb = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_transfer_mode");
     if (env_val) transfer_mode = env_val;
     int num_warmup = 0;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
 
-    int iters = iterations;
     size_t N     = (size_t)array_size_mb * 1024 * 1024 / sizeof(float);
     size_t bytes = N * sizeof(float);
 
@@ -245,8 +240,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Array size: %d MB (%zu floats)  |  Block size: %d  |  Iterations: %d\n\n",
-            array_size_mb, N, block_size, iters);
+    fprintf(stderr, "Array size: %d MB (%zu floats)  |  Block size: %d\n\n",
+            array_size_mb, N, block_size);
 
     // Device allocations
     float *d_input, *d_output;
@@ -273,7 +268,7 @@ int main(int argc, char** argv) {
 
     // --- Read-only bandwidth ---
     if (run_read || strcmp(transfer_mode, "readwrite") == 0) {
-        KernelResult kr = benchKernel(iters, [&]() {
+        KernelResult kr = benchKernel(1, [&]() {
             hipLaunchKernelGGL(readOnly_kernel, dim3(num_blocks), dim3(block_size),
                                0, 0, d_input, d_output, (int)N);
         });
@@ -281,7 +276,7 @@ int main(int argc, char** argv) {
         total_all_ms += kr.total_ms;
 
         printf("{\"type\":\"kernel\",\"name\":\"readOnly_kernel\",\"time_ms\":%.6f,"
-               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d,\"iterations\":%d,"
+               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d"
                "\"transfer_mode\":\"%s\"}}\n",
                kr.avg_ms, array_size_mb, block_size, iterations, transfer_mode);
 
@@ -290,7 +285,7 @@ int main(int argc, char** argv) {
 
     // --- Write-only bandwidth ---
     if (run_write || strcmp(transfer_mode, "readwrite") == 0) {
-        KernelResult kr = benchKernel(iters, [&]() {
+        KernelResult kr = benchKernel(1, [&]() {
             hipLaunchKernelGGL(writeOnly_kernel, dim3(num_blocks), dim3(block_size),
                                0, 0, d_output, (int)N);
         });
@@ -298,7 +293,7 @@ int main(int argc, char** argv) {
         total_all_ms += kr.total_ms;
 
         printf("{\"type\":\"kernel\",\"name\":\"writeOnly_kernel\",\"time_ms\":%.6f,"
-               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d,\"iterations\":%d,"
+               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d"
                "\"transfer_mode\":\"%s\"}}\n",
                kr.avg_ms, array_size_mb, block_size, iterations, transfer_mode);
 
@@ -314,7 +309,7 @@ int main(int argc, char** argv) {
             HIP_CHECK(hipMemcpy(d_input, h_rw, bytes, hipMemcpyHostToDevice));
             free(h_rw);
         }
-        KernelResult kr = benchKernel(iters, [&]() {
+        KernelResult kr = benchKernel(1, [&]() {
             hipLaunchKernelGGL(readWrite_kernel, dim3(num_blocks), dim3(block_size),
                                0, 0, d_input, (int)N);
         });
@@ -322,7 +317,7 @@ int main(int argc, char** argv) {
         total_all_ms += kr.total_ms;
 
         printf("{\"type\":\"kernel\",\"name\":\"readWrite_kernel\",\"time_ms\":%.6f,"
-               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d,\"iterations\":%d,"
+               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d"
                "\"transfer_mode\":\"%s\"}}\n",
                kr.avg_ms, array_size_mb, block_size, iterations, transfer_mode);
 

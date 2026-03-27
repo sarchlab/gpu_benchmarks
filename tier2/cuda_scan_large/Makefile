@@ -33,7 +33,7 @@ TARGET := cuda_scan_large
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := cuda_scan_large.cu
-  CFLAGS := -O3 -std=c++14
+  CFLAGS := -O3 -std=c++14 -arch=native
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

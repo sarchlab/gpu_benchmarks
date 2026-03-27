@@ -83,13 +83,11 @@ int main(int argc, char* argv[])
     // Defaults
     int array_size  = 4194304;
     int block_size  = 256;
-    int iterations  = 20;
     const char* precision = "float";
 
     // Command-line fallback
     array_size = parseIntParam(argc, argv, "--array_size", array_size);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
-    iterations = parseIntParam(argc, argv, "--iterations", iterations);
     precision  = parseStrParam(argc, argv, "--precision", precision);
 
     // Environment variable overrides
@@ -98,8 +96,6 @@ int main(int argc, char* argv[])
     if (env_val) array_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
     int num_warmup = 0;
@@ -107,7 +103,6 @@ int main(int argc, char* argv[])
     if (env_val) num_warmup = atoi(env_val);
 
     int N     = array_size;
-    int iters = iterations;
 
     size_t bytes  = (size_t)N * sizeof(float);
     float  scalar = 1.75f;
@@ -123,7 +118,7 @@ int main(int argc, char* argv[])
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
     fprintf(stderr, "Array size: %d floats (%.1f MiB)\n",
             N, (double)bytes / (1024.0 * 1024.0));
-    fprintf(stderr, "Iterations: %d\n\n", iters);
+    fprintf(stderr, "\n\n");
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -221,8 +216,8 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         uint64_t t0 = mach_absolute_time();
         dispatch_triad();
         uint64_t t1 = mach_absolute_time();
@@ -231,12 +226,12 @@ int main(int argc, char* argv[])
 
     // Compute statistics
     double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg_ms = sum / iters;
+    double avg_ms = sum / 1;
     double total_ms = sum;
 
     // Effective bandwidth: 3 arrays × N × 4 bytes / time
@@ -245,7 +240,7 @@ int main(int argc, char* argv[])
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"triad_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"array_size\":%d,\"block_size\":%d,\"iterations\":%d,"
+           "\"params\":{\"array_size\":%d,\"block_size\":%d"
            "\"precision\":\"%s\"}}\n",
            avg_ms, array_size, block_size, iterations, precision);
 

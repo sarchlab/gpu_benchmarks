@@ -16,7 +16,6 @@
  *
  * Environment variables (override argv):
  *   BENCH_PARAM_buffer_size_mb
- *   BENCH_PARAM_num_iterations
  *   BENCH_PARAM_transfer_type     (h2d, d2h, d2d, all)
  *   BENCH_PARAM_use_pinned_memory (true, false)
  *
@@ -37,7 +36,6 @@
 // ---------------------------------------------------------------------------
 
 static const int    DEFAULT_BUFFER_MB      = 256;
-static const int    DEFAULT_NUM_ITERATIONS = 20;
 static const int    DEFAULT_NUM_WARMUP     = 0;
 static const double BYTES_PER_GB           = 1e9;
 
@@ -68,7 +66,7 @@ static double ticks_to_seconds(uint64_t ticks)
 // ---------------------------------------------------------------------------
 
 static BenchResult benchmark_h2d(id<MTLDevice> device, size_t bytes,
-                                  int num_iterations, int num_warmup)
+                                  int num_warmup)
 {
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -91,7 +89,7 @@ static BenchResult benchmark_h2d(id<MTLDevice> device, size_t bytes,
     }
 
     uint64_t t0 = mach_absolute_time();
-    for (int i = 0; i < num_iterations; ++i) {
+    {
         id<MTLCommandBuffer> cb = [queue commandBuffer];
         id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
         [blit copyFromBuffer:src sourceOffset:0
@@ -104,7 +102,7 @@ static BenchResult benchmark_h2d(id<MTLDevice> device, size_t bytes,
     uint64_t t1 = mach_absolute_time();
 
     double elapsed_s = ticks_to_seconds(t1 - t0);
-    double bw = ((double)bytes * num_iterations) / elapsed_s / BYTES_PER_GB;
+    double bw = (double)bytes / elapsed_s / BYTES_PER_GB;
     return {bw, elapsed_s * 1e3};
 }
 
@@ -113,7 +111,7 @@ static BenchResult benchmark_h2d(id<MTLDevice> device, size_t bytes,
 // ---------------------------------------------------------------------------
 
 static BenchResult benchmark_d2h(id<MTLDevice> device, size_t bytes,
-                                  int num_iterations, int num_warmup)
+                                  int num_warmup)
 {
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -150,7 +148,7 @@ static BenchResult benchmark_d2h(id<MTLDevice> device, size_t bytes,
     }
 
     uint64_t t0 = mach_absolute_time();
-    for (int i = 0; i < num_iterations; ++i) {
+    {
         id<MTLCommandBuffer> cb = [queue commandBuffer];
         id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
         [blit copyFromBuffer:src sourceOffset:0
@@ -163,7 +161,7 @@ static BenchResult benchmark_d2h(id<MTLDevice> device, size_t bytes,
     uint64_t t1 = mach_absolute_time();
 
     double elapsed_s = ticks_to_seconds(t1 - t0);
-    double bw = ((double)bytes * num_iterations) / elapsed_s / BYTES_PER_GB;
+    double bw = (double)bytes / elapsed_s / BYTES_PER_GB;
     return {bw, elapsed_s * 1e3};
 }
 
@@ -173,7 +171,7 @@ static BenchResult benchmark_d2h(id<MTLDevice> device, size_t bytes,
 
 static BenchResult benchmark_d2d(id<MTLDevice> device,
                                   id<MTLLibrary> library,
-                                  size_t bytes, int num_iterations,
+                                  size_t bytes,
                                   int num_warmup)
 {
     id<MTLCommandQueue> queue = [device newCommandQueue];
@@ -233,7 +231,7 @@ static BenchResult benchmark_d2d(id<MTLDevice> device,
     }
 
     uint64_t t0 = mach_absolute_time();
-    for (int i = 0; i < num_iterations; ++i) {
+    {
         id<MTLCommandBuffer> cb = [queue commandBuffer];
         id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
         [enc setComputePipelineState:pso];
@@ -249,8 +247,8 @@ static BenchResult benchmark_d2d(id<MTLDevice> device,
     uint64_t t1 = mach_absolute_time();
 
     double elapsed_s = ticks_to_seconds(t1 - t0);
-    /* D2D touches both src (read) and dst (write) — 2× bytes per iteration. */
-    double bw = ((double)bytes * 2.0 * num_iterations) / elapsed_s / BYTES_PER_GB;
+    /* D2D touches both src (read) and dst (write) — 2× bytes. */
+    double bw = ((double)bytes * 2.0) / elapsed_s / BYTES_PER_GB;
     return {bw, elapsed_s * 1e3};
 }
 
@@ -278,9 +276,6 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    int num_iterations = DEFAULT_NUM_ITERATIONS;
-    env_val = getenv("BENCH_PARAM_num_iterations");
-    if (env_val) num_iterations = atoi(env_val);
 
     const char* transfer_type = "all";
     env_val = getenv("BENCH_PARAM_transfer_type");
@@ -310,7 +305,6 @@ int main(int argc, char *argv[])
 
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
     fprintf(stderr, "Transfer size: %d MiB (%zu bytes)\n", buffer_mb, bytes);
-    fprintf(stderr, "Iterations per test: %d\n", num_iterations);
     fprintf(stderr, "Transfer type: %s\n", transfer_type);
     fprintf(stderr, "Pinned memory: %s\n", use_pinned_memory);
     fprintf(stderr, "Warmup iters: %d\n\n", num_warmup);
@@ -352,44 +346,44 @@ int main(int argc, char *argv[])
 
     /* ----- H2D ----- */
     if (run_h2d) {
-        BenchResult r = benchmark_h2d(device, bytes, num_iterations, num_warmup);
+        BenchResult r = benchmark_h2d(device, bytes, num_warmup);
         h2d_bw = r.bandwidth_gbps;
-        double avg_ms = r.total_ms / num_iterations;
+        
         total_time_ms += r.total_ms;
         fprintf(stderr, "H2D bandwidth : %8.2f GB/s\n", h2d_bw);
 
         printf("{\"type\":\"kernel\",\"name\":\"memcpy_h2d\",\"time_ms\":%.6f,"
-               "\"params\":{\"buffer_size_mb\":%d,\"num_iterations\":%d,"
+               "\"params\":{\"buffer_size_mb\":%d,"
                "\"transfer_type\":\"%s\",\"use_pinned_memory\":\"%s\"}}\n",
-               avg_ms, buffer_mb, num_iterations, transfer_type, use_pinned_memory);
+               r.total_ms, buffer_mb, transfer_type, use_pinned_memory);
     }
 
     /* ----- D2H ----- */
     if (run_d2h) {
-        BenchResult r = benchmark_d2h(device, bytes, num_iterations, num_warmup);
+        BenchResult r = benchmark_d2h(device, bytes, num_warmup);
         d2h_bw = r.bandwidth_gbps;
-        double avg_ms = r.total_ms / num_iterations;
+        
         total_time_ms += r.total_ms;
         fprintf(stderr, "D2H bandwidth : %8.2f GB/s\n", d2h_bw);
 
         printf("{\"type\":\"kernel\",\"name\":\"memcpy_d2h\",\"time_ms\":%.6f,"
-               "\"params\":{\"buffer_size_mb\":%d,\"num_iterations\":%d,"
+               "\"params\":{\"buffer_size_mb\":%d,"
                "\"transfer_type\":\"%s\",\"use_pinned_memory\":\"%s\"}}\n",
-               avg_ms, buffer_mb, num_iterations, transfer_type, use_pinned_memory);
+               r.total_ms, buffer_mb, transfer_type, use_pinned_memory);
     }
 
     /* ----- D2D ----- */
     if (run_d2d) {
-        BenchResult r = benchmark_d2d(device, library, bytes, num_iterations, num_warmup);
+        BenchResult r = benchmark_d2d(device, library, bytes, num_warmup);
         d2d_bw = r.bandwidth_gbps;
-        double avg_ms = r.total_ms / num_iterations;
+        
         total_time_ms += r.total_ms;
         fprintf(stderr, "D2D bandwidth : %8.2f GB/s\n", d2d_bw);
 
         printf("{\"type\":\"kernel\",\"name\":\"memcpy_d2d\",\"time_ms\":%.6f,"
-               "\"params\":{\"buffer_size_mb\":%d,\"num_iterations\":%d,"
+               "\"params\":{\"buffer_size_mb\":%d,"
                "\"transfer_type\":\"%s\",\"use_pinned_memory\":\"%s\"}}\n",
-               avg_ms, buffer_mb, num_iterations, transfer_type, use_pinned_memory);
+               r.total_ms, buffer_mb, transfer_type, use_pinned_memory);
     }
 
     /* Summary. */

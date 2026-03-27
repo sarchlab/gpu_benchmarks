@@ -17,7 +17,6 @@
  *   num_rows    — number of rows (and columns) in the square sparse matrix
  *   nnz_per_row — non-zeros per row
  *   warmup      — warmup iterations
- *   iters       — timed iterations
  *
  * Metrics:
  *   GB/s   = NNZ * 12.0 / time_s / 1e9
@@ -116,8 +115,6 @@ int main(int argc, char* argv[])
     int num_rows    = 16384;
     int nnz_per_row = 32;
     int warmup      = 0;
-    int iters       = 5;
-
     const char *env_val;
     env_val = getenv("BENCH_PARAM_num_rows");
     if (env_val) num_rows = atoi(env_val);
@@ -125,9 +122,6 @@ int main(int argc, char* argv[])
     if (env_val) nnz_per_row = atoi(env_val);
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) warmup = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iters");
-    if (env_val) iters = atoi(env_val);
-
     const int num_cols = num_rows;
     const int nnz      = num_rows * nnz_per_row;
 
@@ -142,8 +136,8 @@ int main(int argc, char* argv[])
     fprintf(stderr, "Platform: Metal (custom CSR SpMV kernel — no cuSPARSE equivalent)\n");
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
     fprintf(stderr, "Rows: %d  |  NNZ_per_row: %d  |  Total NNZ: %d\n"
-                    "Warmup: %d  |  Iterations: %d\n\n",
-            num_rows, nnz_per_row, nnz, warmup, iters);
+                    "Warmup: %d\n\n",
+            num_rows, nnz_per_row, nnz, warmup);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -244,18 +238,10 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
-    double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
-        uint64_t t0 = mach_absolute_time();
-        dispatch_spmv();
-        uint64_t t1 = mach_absolute_time();
-        times[i] = ticks_to_ms(t1 - t0);
-        sum_ms += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-        fprintf(stderr, "  iter %d: %.4f ms\n", i, times[i]);
-    }
+    uint64_t t0 = mach_absolute_time();
+    dispatch_spmv();
+    uint64_t t1 = mach_absolute_time();
+    double total_ms = ticks_to_ms(t1 - t0);
 
     // -------------------------------------------------------------------
     // Correctness check: compare GPU y with CPU SpMV (first 32 elements)
@@ -281,32 +267,25 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Statistics
     // -------------------------------------------------------------------
-    double avg_ms = sum_ms / iters;
-    double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
-        double d = times[i] - avg_ms;
-        variance += d * d;
-    }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
+    double avg_ms = total_ms;
 
     double time_s = avg_ms * 1e-3;
     double gbps   = (double)nnz * 12.0 / time_s / 1e9;
     double gflops = 2.0 * (double)nnz / time_s / 1e9;
 
     fprintf(stderr,
-            "GB/s: %.2f  GFLOPS: %.2f  "
-            "(avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
-            gbps, gflops, avg_ms, mn, mx, stddev);
+            "GB/s: %.2f  GFLOPS: %.2f  (%.4f ms)\n",
+            gbps, gflops, avg_ms);
 
     // JSON-lines: kernel event
     printf("{\"type\":\"kernel\",\"name\":\"cusparseSpMV\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_rows\":%d,\"nnz_per_row\":%d,\"warmup\":%d,\"iters\":%d}}\n",
-           avg_ms, num_rows, nnz_per_row, warmup, iters);
+           "\"params\":{\"num_rows\":%d,\"nnz_per_row\":%d,\"warmup\":%d}}\n",
+           avg_ms, num_rows, nnz_per_row, warmup);
 
     // JSON-lines: summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"GB/s\",\"value\":%.2f},{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
-           sum_ms, gbps, gflops);
+           total_ms, gbps, gflops);
 
     return pass ? EXIT_SUCCESS : EXIT_FAILURE;
 

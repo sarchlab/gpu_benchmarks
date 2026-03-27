@@ -33,7 +33,7 @@ TARGET := shoc_stencil2d
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := shoc_stencil2d.cu
-  CFLAGS := -O3 -std=c++14
+  CFLAGS := -O3 -std=c++14 -arch=native
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

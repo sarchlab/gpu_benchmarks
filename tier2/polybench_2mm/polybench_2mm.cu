@@ -7,7 +7,7 @@
 // Native CUDA implementation.
 //
 // Usage:
-//   ./polybench_2mm [--size N] [--iterations I]
+//   ./polybench_2mm [--size N]
 
 #include <cstdio>
 #include <cstdlib>
@@ -106,7 +106,6 @@ int main(int argc, char** argv) {
 
     // Defaults
     int N          = 1024;
-    int iterations = 5;
     int block_size = 256;
     float alpha    = 1.5f;
     float beta     = 1.2f;
@@ -114,7 +113,6 @@ int main(int argc, char** argv) {
 
     // Command-line parsing
     N          = parseIntParam(argc, argv, "--size", N);
-    iterations = parseIntParam(argc, argv, "--iterations", iterations);
     alpha      = parseFloatParam(argc, argv, "--alpha", alpha);
     beta       = parseFloatParam(argc, argv, "--beta", beta);
 
@@ -122,8 +120,6 @@ int main(int argc, char** argv) {
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_alpha");
@@ -136,7 +132,6 @@ int main(int argc, char** argv) {
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
 
-    int iters = iterations;
     size_t bytes = (size_t)N * N * sizeof(float);
 
     // Print device info
@@ -146,8 +141,8 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "2MM: D=alpha*A*B+beta*D, E=alpha*C*D+beta*E  |  N=%d  |  "
-            "alpha=%.1f  beta=%.1f  |  Iterations: %d warmup + %d timed\n\n",
-            N, alpha, beta, num_warmup, iters);
+            "alpha=%.1f  beta=%.1f warmup + %d timed\n\n",
+            N, alpha, beta, num_warmup);
 
     // Host allocations: A, B, C, D, E — all NxN
     float* h_A = (float*)malloc(bytes);
@@ -205,8 +200,8 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaEventCreate(&evStart));
     CUDA_CHECK(cudaEventCreate(&evStop));
 
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         CUDA_CHECK(cudaEventRecord(evStart, 0));
         run_2mm();
         CUDA_CHECK(cudaEventRecord(evStop, 0));
@@ -222,12 +217,12 @@ int main(int argc, char** argv) {
 
     // Compute statistics
     double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum_ms += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg_ms = sum_ms / iters;
+    double avg_ms = sum_ms / 1;
 
     // GFLOPS: two matrix multiplies = 2 * (2*N^3) = 4*N^3 FLOPs
     double gflops = 4.0 * (double)N * (double)N * (double)N
@@ -238,14 +233,14 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"mm_kernel_1\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"alpha\":%.2f,\"beta\":%.2f,\"precision\":\"%s\"}}\n",
-           avg_ms * 0.5, N, iters, block_size, alpha, beta, precision);
+           avg_ms * 0.5, N, block_size, alpha, beta, precision);
 
     printf("{\"type\":\"kernel\",\"name\":\"mm_kernel_2\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"alpha\":%.2f,\"beta\":%.2f,\"precision\":\"%s\"}}\n",
-           avg_ms * 0.5, N, iters, block_size, alpha, beta, precision);
+           avg_ms * 0.5, N, block_size, alpha, beta, precision);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",

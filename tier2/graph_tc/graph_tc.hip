@@ -351,9 +351,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipEventCreate(&evStart));
     HIP_CHECK(hipEventCreate(&evStop));
 
-    int iters = 5;
-    std::vector<double> times(iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         HIP_CHECK(hipEventRecord(evStart, 0));
         run_tc();
         HIP_CHECK(hipEventRecord(evStop, 0));
@@ -388,8 +387,8 @@ int main(int argc, char** argv) {
 
     // Compute average time
     double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; ++i) sum += times[i];
+    double avg_ms = sum / 1;
 
     // triangles_per_sec = num_triangles / time_s
     double tri_per_sec = (double)num_triangles / (avg_ms * 1e-3);

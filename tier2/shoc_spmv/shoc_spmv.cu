@@ -125,13 +125,11 @@ int main(int argc, char** argv)
     // Defaults
     int num_rows    = 16384;
     int nnz_per_row = 32;
-    int iterations  = 5;
     const char* precision = "float";
 
     // Command-line fallback
     num_rows    = parseIntParam(argc, argv, "--num_rows", num_rows);
     nnz_per_row = parseIntParam(argc, argv, "--nnz_per_row", nnz_per_row);
-    iterations  = parseIntParam(argc, argv, "--iterations", iterations);
     precision   = parseStrParam(argc, argv, "--precision", precision);
 
     // Environment variable overrides
@@ -140,15 +138,12 @@ int main(int argc, char** argv)
     if (env_val) num_rows = atoi(env_val);
     env_val = getenv("BENCH_PARAM_nnz_per_row");
     if (env_val) nnz_per_row = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
     int num_warmup = 0;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
 
-    int iters      = iterations;
     int num_cols   = num_rows;
     int nnz        = num_rows * nnz_per_row;
     int BLOCK_SIZE = 256;
@@ -179,8 +174,8 @@ int main(int argc, char** argv)
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Rows: %d  |  NNZ_per_row: %d  |  Total NNZ: %d  |  Iterations: %d\n\n",
-            num_rows, nnz_per_row, nnz, iters);
+    fprintf(stderr, "Rows: %d  |  NNZ_per_row: %d  |  Total NNZ: %d\n\n",
+            num_rows, nnz_per_row, nnz);
 
     // Device allocations
     int*   d_row_ptr;
@@ -214,8 +209,8 @@ int main(int argc, char** argv)
     }
 
     // Timed iterations
-    std::vector<double> times(iters);
-    for (int iter = 0; iter < iters; ++iter) {
+    std::vector<double> times(1);
+    for (int iter = 0; iter < 1; ++iter) {
         timer.record_start();
         spmv_csr_kernel<<<grid_size, BLOCK_SIZE, 0, 0>>>(d_row_ptr, d_col_idx, d_values, d_x, d_y, num_rows);
         timer.record_stop();
@@ -245,12 +240,12 @@ int main(int argc, char** argv)
 
     // Statistics
     double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum_ms += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg_ms = sum_ms / iters;
+    double avg_ms = sum_ms / 1;
     double total_ms = sum_ms;
 
     // GB/s and GFLOPS
@@ -266,7 +261,7 @@ int main(int argc, char** argv)
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"spmv_csr_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_rows\":%d,\"nnz_per_row\":%d,\"iterations\":%d,"
+           "\"params\":{\"num_rows\":%d,\"nnz_per_row\":%d"
            "\"precision\":\"%s\"}}\n",
            avg_ms, num_rows, nnz_per_row, iterations, precision);
 

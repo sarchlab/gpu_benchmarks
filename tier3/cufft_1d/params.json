@@ -7,7 +7,28 @@
     "name": "n",
     "description": "Number of complex samples for the 1D FFT; should be a power of 2 for optimal performance",
     "type": "int",
-    "values": [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912]
+    "values": [
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768,
+      65536,
+      131072,
+      262144,
+      524288,
+      1048576,
+      2097152,
+      4194304,
+      8388608,
+      16777216,
+      33554432,
+      67108864,
+      134217728,
+      268435456,
+      536870912
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,22 +36,27 @@
       "description": "Number of warmup FFT executions before timing",
       "type": "int",
       "default": 0,
-      "values": [0, 3, 5, 10]
-    },
-    {
-      "name": "iters",
-      "description": "Number of timed FFT executions for averaging",
-      "type": "int",
-      "default": 5,
-      "values": [3, 5, 10, 20]
+      "values": [
+        0,
+        3,
+        5,
+        10
+      ]
     },
     {
       "name": "direction",
       "description": "FFT direction",
       "type": "enum",
       "default": "forward",
-      "values": ["forward", "inverse", "roundtrip"]
+      "values": [
+        "forward",
+        "inverse",
+        "roundtrip"
+      ]
     }
   ],
-  "kernels": ["cufftExecC2C", "hipfftExecC2C"]
+  "kernels": [
+    "cufftExecC2C",
+    "hipfftExecC2C"
+  ]
 }

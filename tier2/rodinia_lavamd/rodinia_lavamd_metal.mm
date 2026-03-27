@@ -78,13 +78,11 @@ int main(int argc, char* argv[])
     int num_boxes         = 10;
     int block_size        = 128;
     int particles_per_box = 100;
-    int iters             = 5;
 
     // Command-line fallback
     num_boxes         = parseIntParam(argc, argv, "--num_boxes", num_boxes);
     block_size        = parseIntParam(argc, argv, "--block_size", block_size);
     particles_per_box = parseIntParam(argc, argv, "--particles_per_box", particles_per_box);
-    iters             = parseIntParam(argc, argv, "--iterations", iters);
 
     // Environment variable overrides
     const char* env_val;
@@ -94,8 +92,6 @@ int main(int argc, char* argv[])
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_particles_per_box");
     if (env_val) particles_per_box = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     int num_warmup = 0;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
@@ -115,7 +111,7 @@ int main(int argc, char* argv[])
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
     fprintf(stderr, "Boxes: %d×%d×%d (%d total)  |  Particles/box: %d  |  "
             "Iterations: %d warmup + %d timed\n\n",
-            nb, nb, nb, total_boxes, particles_per_box, num_warmup, iters);
+            nb, nb, nb, total_boxes, particles_per_box, num_warmup);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -264,8 +260,8 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
-    for (int iter = 0; iter < iters; ++iter) {
+    std::vector<double> times(1);
+    for (int iter = 0; iter < 1; ++iter) {
         memset(buf_force_x.contents, 0, pos_bytes);
         memset(buf_force_y.contents, 0, pos_bytes);
         memset(buf_force_z.contents, 0, pos_bytes);
@@ -279,8 +275,8 @@ int main(int argc, char* argv[])
     }
 
     double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; ++i) sum += times[i];
+    double avg_ms = sum / 1;
     double total_ms = sum;
 
     // Compute GFLOPS
@@ -295,8 +291,8 @@ int main(int argc, char* argv[])
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"lavamd_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"num_boxes\":%d,\"block_size\":%d,"
-           "\"particles_per_box\":%d,\"iterations\":%d}}\n",
-           avg_ms, num_boxes, block_size, particles_per_box, iters);
+           "\"particles_per_box\":%d}}\n",
+           avg_ms, num_boxes, block_size, particles_per_box);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",

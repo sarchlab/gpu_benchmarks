@@ -56,7 +56,6 @@ static const int DEFAULT_OPS_PER_THREAD  = 1024;
 static const int DEFAULT_THREADS_PER_BLK = 256;
 static const int DEFAULT_NUM_BLOCKS      = 1024;
 static const int DEFAULT_NUM_WARMUP      = 0;
-static const int NUM_ITERATIONS          = 5;
 
 // ---------------------------------------------------------------------------
 // Atomic kernels
@@ -122,11 +121,9 @@ static void run_benchmark(const char *kernel_name,
     CUDA_CHECK(cudaEventCreate(&ev_start));
     CUDA_CHECK(cudaEventCreate(&ev_stop));
 
-    /* Timed benchmark loop. */
+    /* Timed kernel launch. */
     CUDA_CHECK(cudaEventRecord(ev_start, 0));
-    for (int iter = 0; iter < NUM_ITERATIONS; ++iter) {
         kernel<<<dim3(num_blocks), dim3(threads_per_block), 0, 0>>>(d_counter, ops_per_thread);
-    }
     CUDA_CHECK(cudaEventRecord(ev_stop, 0));
     CUDA_CHECK(cudaEventSynchronize(ev_stop));
 
@@ -135,26 +132,25 @@ static void run_benchmark(const char *kernel_name,
 
     long long num_threads = static_cast<long long>(num_blocks)
                             * threads_per_block;
-    long long total_ops   = static_cast<long long>(NUM_ITERATIONS)
-                            * num_threads
+    long long total_ops   = num_threads
                             * static_cast<long long>(ops_per_thread);
     double elapsed_s      = static_cast<double>(elapsed_ms) * 1e-3;
     double gops           = static_cast<double>(total_ops) / elapsed_s / 1e9;
 
-    double avg_ms = elapsed_ms / NUM_ITERATIONS;
+    
 
     /* Human-readable output to stderr. */
     fprintf(stderr, "%-12s : %.3f ms total, %.3f ms/kernel, %.2f Gops/s\n",
-            kernel_name, (double)elapsed_ms, avg_ms, gops);
+            kernel_name, (double)elapsed_ms, (double)elapsed_ms, gops);
 
     /* JSON-lines output to stdout: kernel event */
     printf("{\"type\":\"kernel\",\"name\":\"%s\",\"time_ms\":%.6f,"
            "\"params\":{\"ops_per_thread\":%d,\"num_blocks\":%d,"
            "\"threads_per_block\":%d,\"atomic_op\":\"%s\"}}\n",
-           kernel_name, avg_ms, ops_per_thread, num_blocks,
+           kernel_name, (double)elapsed_ms, ops_per_thread, num_blocks,
            threads_per_block, atomic_op);
 
-    *out_avg_ms = avg_ms;
+    *out_avg_ms = (double)elapsed_ms;
     *out_gops   = gops;
 
     /* Clean up events. */
@@ -202,6 +198,7 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
 
+
     /* Print device information to stderr. */
     int device_id = 0;
     CUDA_CHECK(cudaGetDevice(&device_id));
@@ -215,8 +212,7 @@ int main(int argc, char *argv[])
             num_blocks * threads_per_block);
     fprintf(stderr, "Ops / thread    : %d\n", ops_per_thread);
     fprintf(stderr, "Atomic op       : %s\n", atomic_op);
-    fprintf(stderr, "Warmup iters    : %d\n", num_warmup);
-    fprintf(stderr, "Timed iters     : %d\n\n", NUM_ITERATIONS);
+    fprintf(stderr, "Warmup iters    : %d\n\n", num_warmup);
 
     /* Allocate a single unsigned int on the device as the shared counter. */
     unsigned int *d_counter = nullptr;

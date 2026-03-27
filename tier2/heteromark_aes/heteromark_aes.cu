@@ -6,10 +6,9 @@
 // Native CUDA implementation.
 //
 // Usage:
-//   ./heteromark_aes [--size N] [--iterations I]
+//   ./heteromark_aes [--size N]
 //
 //   --size N         Number of 16-byte blocks (default: 1048576)
-//   --iterations I   Timed iterations (default: 5)
 //
 // Output (stdout): CSV row — heteromark_aes,<N>,<time_ms>,<GBs>
 // Output (stderr): human-readable results
@@ -285,13 +284,11 @@ int main(int argc, char** argv) {
 
     // Defaults from params.json
     int size       = 1048576;
-    int iterations = 5;
     int block_size = 256;
     const char* key_length = "256";
 
     // Command-line fallback
     size       = parseIntParam(argc, argv, "--size", size);
-    iterations = parseIntParam(argc, argv, "--iterations", iterations);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
     key_length = parseStrParam(argc, argv, "--key_length", key_length);
 
@@ -299,8 +296,6 @@ int main(int argc, char** argv) {
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_key_length");
@@ -310,7 +305,6 @@ int main(int argc, char** argv) {
     if (env_val) num_warmup = atoi(env_val);
 
     int N     = size;
-    int iters = iterations;
 
     size_t data_bytes = (size_t)N * 16;
     size_t key_bytes  = 240;  // 15 round keys * 16 bytes
@@ -323,7 +317,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "AES-256 ECB  |  Blocks: %d  |  Data: %.2f MB  |  "
             "Iterations: %d warmup + %d timed\n\n",
-            N, (double)data_bytes / (1024.0 * 1024.0), num_warmup, iters);
+            N, (double)data_bytes / (1024.0 * 1024.0), num_warmup);
 
     // Generate a fixed 256-bit key
     unsigned char key[32];
@@ -375,8 +369,8 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaEventCreate(&evStart));
     CUDA_CHECK(cudaEventCreate(&evStop));
 
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         CUDA_CHECK(cudaMemcpy(d_data, h_orig, data_bytes, cudaMemcpyHostToDevice));
 
         CUDA_CHECK(cudaEventRecord(evStart, 0));
@@ -394,8 +388,8 @@ int main(int argc, char** argv) {
 
     // Compute average time
     double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; ++i) sum += times[i];
+    double avg_ms = sum / 1;
 
     // GB/s = N * 16 / time_s / 1e9
     double gbs = (double)N * 16.0 / (avg_ms * 1e-3) / 1e9;
@@ -404,7 +398,7 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"aes256_encrypt_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"key_length\":\"%s\"}}\n",
            avg_ms, size, iterations, block_size, key_length);
 

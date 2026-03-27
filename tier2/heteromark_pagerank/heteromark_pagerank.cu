@@ -6,10 +6,9 @@
 // Native CUDA implementation.
 //
 // Usage:
-//   ./heteromark_pagerank [--vertices N] [--iterations I] [--pr-iterations P]
+//   ./heteromark_pagerank [--vertices N] [--pr-iterations P]
 //
 //   --vertices N       Number of vertices (default: 65536)
-//   --iterations I     Timed iterations (default: 5)
 //   --pr-iterations P  PageRank iterations per run (default: 20)
 //
 // Output (stdout): CSV row — heteromark_pagerank,<N_vertices>,<time_ms>,<edges_per_sec>
@@ -178,13 +177,11 @@ int main(int argc, char** argv) {
     // Defaults from params.json
     int vertices     = 65536;
     int pr_iterations = 20;
-    int iterations   = 5;
     double damping_factor = 0.85;
 
     // Command-line fallback
     vertices      = parseIntParam(argc, argv, "--vertices", vertices);
     pr_iterations = parseIntParam(argc, argv, "--pr-iterations", pr_iterations);
-    iterations    = parseIntParam(argc, argv, "--iterations", iterations);
     damping_factor = parseDoubleParam(argc, argv, "--damping_factor", damping_factor);
 
     // Environment variable overrides
@@ -193,8 +190,6 @@ int main(int argc, char** argv) {
     if (env_val) vertices = atoi(env_val);
     env_val = getenv("BENCH_PARAM_pr_iterations");
     if (env_val) pr_iterations = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_damping_factor");
     if (env_val) damping_factor = atof(env_val);
     int num_warmup = 0;
@@ -202,7 +197,6 @@ int main(int argc, char** argv) {
     if (env_val) num_warmup = atoi(env_val);
 
     int N       = vertices;
-    int iters   = iterations;
     int prIters = pr_iterations;
     float damping = (float)damping_factor;
 
@@ -213,7 +207,7 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Vertices: %d  |  PR iterations: %d  |  Timed iterations: %d warmup + %d timed\n\n",
-            N, prIters, num_warmup, iters);
+            N, prIters, num_warmup);
 
     // Generate synthetic graph
     std::vector<int> rowPtr, colIdx, outDegree;
@@ -275,8 +269,8 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaEventCreate(&evStart));
     CUDA_CHECK(cudaEventCreate(&evStop));
 
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         CUDA_CHECK(cudaEventRecord(evStart, 0));
         run_pagerank();
         CUDA_CHECK(cudaEventRecord(evStop, 0));
@@ -292,8 +286,8 @@ int main(int argc, char** argv) {
 
     // Compute average time
     double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; ++i) sum += times[i];
+    double avg_ms = sum / 1;
 
     // edges_per_sec = numEdges * prIters / time_s
     double edges_per_sec = (double)numEdges * (double)prIters / (avg_ms * 1e-3);
@@ -302,7 +296,7 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"pagerank_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"vertices\":%d,\"pr_iterations\":%d,\"iterations\":%d,"
+           "\"params\":{\"vertices\":%d,\"pr_iterations\":%d"
            "\"damping_factor\":%.6f}}\n",
            avg_ms, vertices, pr_iterations, iterations, damping_factor);
 

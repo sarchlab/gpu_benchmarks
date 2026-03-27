@@ -7,7 +7,30 @@
     "name": "width",
     "description": "Image width in pixels (also sets height when square)",
     "type": "int",
-    "values": [64, 128, 256, 384, 512, 640, 768, 1024, 1280, 1536, 2048, 2560, 3072, 3584, 4096, 5120, 6144, 7168, 8192, 10240, 12288, 16384]
+    "values": [
+      64,
+      128,
+      256,
+      384,
+      512,
+      640,
+      768,
+      1024,
+      1280,
+      1536,
+      2048,
+      2560,
+      3072,
+      3584,
+      4096,
+      5120,
+      6144,
+      7168,
+      8192,
+      10240,
+      12288,
+      16384
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,22 +38,28 @@
       "description": "Image height in pixels",
       "type": "int",
       "default": 4096,
-      "values": [1024, 2048, 4096, 8192]
+      "values": [
+        1024,
+        2048,
+        4096,
+        8192
+      ]
     },
     {
       "name": "radius",
       "description": "Filter kernel radius (filter width = 2*R+1)",
       "type": "int",
       "default": 8,
-      "values": [4, 8, 16, 32]
-    },
-    {
-      "name": "iterations",
-      "description": "Timed benchmark iterations",
-      "type": "int",
-      "default": 5,
-      "values": [3, 5, 10, 20]
+      "values": [
+        4,
+        8,
+        16,
+        32
+      ]
     }
   ],
-  "kernels": ["convolution_row_kernel", "convolution_col_kernel"]
+  "kernels": [
+    "convolution_row_kernel",
+    "convolution_col_kernel"
+  ]
 }

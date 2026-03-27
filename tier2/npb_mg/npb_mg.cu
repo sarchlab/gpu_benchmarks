@@ -232,7 +232,6 @@ int main(int argc, char** argv) {
     int block_size     = 256;
     int num_vcycles    = 5;
     int num_smooth     = 3;
-    int iterations     = 5;
 
     // Environment variable overrides
     const char* env_val;
@@ -244,8 +243,6 @@ int main(int argc, char** argv) {
     if (env_val) num_vcycles = atoi(env_val);
     env_val = getenv("BENCH_PARAM_num_smooth_steps");
     if (env_val) num_smooth = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     int num_warmup = 0;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
@@ -263,7 +260,6 @@ int main(int argc, char** argv) {
         N = p;
     }
 
-    int iters = iterations;
 
     // Print device info
     int device_id = 0;
@@ -273,7 +269,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "NPB MG  |  Grid: %d x %d x %d  |  V-cycles: %d  |  "
             "Smooth steps: %d  |  Timed runs: 5 warmup + %d timed\n\n",
-            N, N, N, num_vcycles, num_smooth, iters);
+            N, N, N, num_vcycles, num_smooth);
 
     // Compute multigrid levels: N, N/2, N/4, ... down to 4
     std::vector<int> levels;
@@ -426,8 +422,8 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaEventCreate(&evStart));
     CUDA_CHECK(cudaEventCreate(&evStop));
 
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         CUDA_CHECK(cudaEventRecord(evStart, 0));
         run_mg();
         CUDA_CHECK(cudaEventRecord(evStop, 0));
@@ -442,8 +438,8 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaEventDestroy(evStop));
 
     double tsum = 0.0;
-    for (int i = 0; i < iters; ++i) tsum += times[i];
-    double avg_ms = tsum / iters;
+    for (int i = 0; i < 1; ++i) tsum += times[i];
+    double avg_ms = tsum / 1;
     double total_ms = tsum;
 
     // Throughput: Mcells/sec on finest grid
@@ -453,18 +449,18 @@ int main(int argc, char** argv) {
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"smooth_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"grid_size\":%d,\"block_size\":%d,"
-           "\"num_vcycles\":%d,\"num_smooth_steps\":%d,\"iterations\":%d}}\n",
-           avg_ms, N, block_size, num_vcycles, num_smooth, iters);
+           "\"num_vcycles\":%d,\"num_smooth_steps\":%d}}\n",
+           avg_ms, N, block_size, num_vcycles, num_smooth);
 
     printf("{\"type\":\"kernel\",\"name\":\"restrict_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"grid_size\":%d,\"block_size\":%d,"
-           "\"num_vcycles\":%d,\"num_smooth_steps\":%d,\"iterations\":%d}}\n",
-           avg_ms, N, block_size, num_vcycles, num_smooth, iters);
+           "\"num_vcycles\":%d,\"num_smooth_steps\":%d}}\n",
+           avg_ms, N, block_size, num_vcycles, num_smooth);
 
     printf("{\"type\":\"kernel\",\"name\":\"prolong_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"grid_size\":%d,\"block_size\":%d,"
-           "\"num_vcycles\":%d,\"num_smooth_steps\":%d,\"iterations\":%d}}\n",
-           avg_ms, N, block_size, num_vcycles, num_smooth, iters);
+           "\"num_vcycles\":%d,\"num_smooth_steps\":%d}}\n",
+           avg_ms, N, block_size, num_vcycles, num_smooth);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"avg_iter_ms\",\"value\":%.4f},"

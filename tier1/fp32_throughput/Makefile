@@ -33,7 +33,7 @@ TARGET := fp32_throughput
 ifeq ($(PLATFORM),cuda)
   CC      := nvcc
   SRC     := fp32_throughput.cu
-  CFLAGS  := -O3 -std=c++14
+  CFLAGS  := -O3 -std=c++14 -arch=native
 
 else ifeq ($(PLATFORM),rocm)
   CC      := hipcc

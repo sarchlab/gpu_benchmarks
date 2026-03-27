@@ -29,7 +29,6 @@
  *   BENCH_PARAM_buffer_size_mb
  *   BENCH_PARAM_flops_per_byte
  *   BENCH_PARAM_threads_per_block
- *   BENCH_PARAM_timed_iterations
  */
 
 #include <cstdio>
@@ -111,7 +110,6 @@ typedef hipDeviceProp_t  gpuDeviceProp_t;
 static const int    DEFAULT_BUFFER_MB       = 256;
 static const double DEFAULT_FLOPS_PER_BYTE  = 4.0;
 static const int    DEFAULT_THREADS_PER_BLK = 256;
-static const int    DEFAULT_TIMED_ITERS     = 5;
 static const int    DEFAULT_WARMUP_ITERS     = 0;
 
 // ---------------------------------------------------------------------------
@@ -162,13 +160,12 @@ __global__ void mixbench_kernel(float *data, int num_elements, int num_fmas)
  * @param num_elements  Number of floats in the array
  * @param ratio         Target flops-per-byte ratio
  * @param threads_per_block Threads per block
- * @param timed_iters   Number of timed iterations
  * @param[out] time_ms  Average kernel time in milliseconds
  * @param[out] gflops   Achieved GFLOPS
  * @param[out] bw_gbps  Achieved bandwidth in GB/s
  */
 static void benchmark_ratio(float *d_data, int num_elements, double ratio,
-                            int threads_per_block, int timed_iters,
+                            int threads_per_block,
                             int warmup_iters,
                             double *time_ms, double *gflops, double *bw_gbps)
 {
@@ -191,12 +188,10 @@ static void benchmark_ratio(float *d_data, int num_elements, double ratio,
     }
     GPU_CHECK(gpuDeviceSynchronize());
 
-    /* Timed iterations. */
+    /* Timed kernel launch. */
     GPU_CHECK(gpuEventRecord(ev_start, 0));
-    for (int i = 0; i < timed_iters; ++i) {
         mixbench_kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(
             d_data, num_elements, num_fmas);
-    }
     GPU_CHECK(gpuEventRecord(ev_stop, 0));
     GPU_CHECK(gpuEventSynchronize(ev_stop));
 
@@ -204,19 +199,18 @@ static void benchmark_ratio(float *d_data, int num_elements, double ratio,
     GPU_CHECK(gpuEventElapsedTime(&elapsed_ms, ev_start, ev_stop));
 
     /* Average time per iteration. */
-    double avg_ms = (double)elapsed_ms / timed_iters;
+    double avg_ms = (double)elapsed_ms;
 
     /* Total FLOPs across all threads and all timed iterations:
-       total_flops = timed_iters * num_elements * num_fmas * 2 */
-    double total_flops = (double)timed_iters
-                         * (double)num_elements
+       total_flops = num_elements * num_fmas * 2 */
+    double total_flops = (double)num_elements
                          * (double)num_fmas
                          * 2.0;
     double elapsed_s = (double)elapsed_ms * 1e-3;
     double achieved_gflops = total_flops / elapsed_s / 1e9;
 
     /* Bandwidth: each element = 8 bytes (4 read + 4 write) */
-    double total_bytes = (double)timed_iters * (double)num_elements * 8.0;
+    double total_bytes = (double)num_elements * 8.0;
     double achieved_bw = total_bytes / elapsed_s / 1e9;
 
     *time_ms = avg_ms;
@@ -259,9 +253,6 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_threads_per_block");
     if (env_val) threads_per_block = atoi(env_val);
 
-    int timed_iterations = DEFAULT_TIMED_ITERS;
-    env_val = getenv("BENCH_PARAM_timed_iterations");
-    if (env_val) timed_iterations = atoi(env_val);
 
     int num_warmup = DEFAULT_WARMUP_ITERS;
     env_val = getenv("BENCH_PARAM_warmup");
@@ -281,8 +272,7 @@ int main(int argc, char *argv[])
            buffer_mb, num_elements, bytes);
     fprintf(stderr, "Flops/byte      : %.1f\n", flops_per_byte);
     fprintf(stderr, "Threads/block   : %d\n", threads_per_block);
-    fprintf(stderr, "Warmup iters    : %d\n", num_warmup);
-    fprintf(stderr, "Timed iters     : %d\n\n", timed_iterations);
+    fprintf(stderr, "Warmup iters    : %d\n\n", num_warmup);
 
     /* Allocate and initialize host data. */
     float *h_data = (float *)malloc(bytes);
@@ -308,7 +298,7 @@ int main(int argc, char *argv[])
     GPU_CHECK(gpuMemcpy(d_data, h_data, bytes, gpuMemcpyHostToDevice));
 
     benchmark_ratio(d_data, num_elements, flops_per_byte,
-                    threads_per_block, timed_iterations,
+                    threads_per_block,
                     num_warmup,
                     &avg_time_ms, &achieved_gflops, &achieved_bw);
 
@@ -318,15 +308,14 @@ int main(int argc, char *argv[])
     /* JSON-lines output to stdout: kernel event */
     printf("{\"type\":\"kernel\",\"name\":\"mixbench_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"buffer_size_mb\":%d,\"flops_per_byte\":%.1f,"
-           "\"threads_per_block\":%d,\"timed_iterations\":%d}}\n",
-           avg_time_ms, buffer_mb, flops_per_byte, threads_per_block,
-           timed_iterations);
+           "\"threads_per_block\":%d}}\n",
+           avg_time_ms, buffer_mb, flops_per_byte, threads_per_block);
 
     /* JSON-lines output to stdout: summary */
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"GFLOPS\",\"value\":%.2f},"
            "{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
-           avg_time_ms * timed_iterations, achieved_gflops, achieved_bw);
+           avg_time_ms, achieved_gflops, achieved_bw);
 
     /* Clean up. */
     GPU_CHECK(gpuFree(d_data));

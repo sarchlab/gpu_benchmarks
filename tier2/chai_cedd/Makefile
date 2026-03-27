@@ -33,7 +33,7 @@ TARGET := chai_cedd
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := chai_cedd.cu
-  CFLAGS := -O3 -std=c++14
+  CFLAGS := -O3 -std=c++14 -arch=native
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

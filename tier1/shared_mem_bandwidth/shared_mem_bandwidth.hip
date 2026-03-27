@@ -102,7 +102,6 @@ static const int DEFAULT_BLOCK_SIZE   = 256;
 static const int DEFAULT_NUM_BLOCKS   = 128;
 static const int DEFAULT_INNER_ITERS  = 1000;
 static const int DEFAULT_WARMUP_ITERS  = 0;
-static const int TIMED_ITERS          = 5;
 static const int SMEM_FLOATS          = 12288;         // 48 KB / 4 bytes
 static const double BYTES_PER_GB      = 1e9;
 
@@ -199,17 +198,15 @@ static double run_benchmark(KernelFn kernel, float *d_sink,
     HIP_CHECK(hipEventCreate(&stop));
 
     HIP_CHECK(hipEventRecord(start, 0));
-    for (int i = 0; i < TIMED_ITERS; ++i) {
-        hipLaunchKernelGGL(kernel, dim3(num_blocks), dim3(block_size),
-                           0, 0, d_sink, inner_iters);
-        HIP_CHECK(hipGetLastError());
-    }
+    hipLaunchKernelGGL(kernel, dim3(num_blocks), dim3(block_size),
+                       0, 0, d_sink, inner_iters);
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipEventRecord(stop, 0));
     HIP_CHECK(hipEventSynchronize(stop));
 
     float total_ms = 0.0f;
     HIP_CHECK(hipEventElapsedTime(&total_ms, start, stop));
-    double avg_ms = total_ms / TIMED_ITERS;
+    double avg_ms = (double)total_ms;
 
     HIP_CHECK(hipEventDestroy(start));
     HIP_CHECK(hipEventDestroy(stop));
@@ -268,8 +265,7 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Grid size     : %d blocks\n", num_blocks);
     fprintf(stderr, "Inner iters   : %d\n", inner_iters);
     fprintf(stderr, "Access pattern: %s\n", access_pattern);
-    fprintf(stderr, "Warmup iters  : %d\n", num_warmup);
-    fprintf(stderr, "Timed iters   : %d\n\n", TIMED_ITERS);
+    fprintf(stderr, "Warmup iters  : %d\n\n", num_warmup);
 
     /* Allocate device sink buffer. */
     float *d_sink = nullptr;

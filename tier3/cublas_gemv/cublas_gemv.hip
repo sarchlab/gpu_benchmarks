@@ -10,8 +10,8 @@
  *   y = A_rm * x  ↔  y = A_cm^T * x
  *   cublasSgemv / rocblas_sgemv with op=TRANSPOSE, m=N, n=M, lda=N
  *
- * Warmup: 5 iterations (not timed)
- * Timed:  5 iterations, report average
+ * Warmup: configurable iterations (not timed)
+ * Timed:  single iteration (repetition handled by CLI)
  *
  * Verification: compare all M elements of y against CPU GEMV, max rel error < 1e-4
  * GFLOPS = 2 * M * N / time_s / 1e9
@@ -126,7 +126,6 @@ int main(void)
     int M = 4096;
     int N = 4096;
     int WARMUP = 0;
-    int ITERS = 5;
     float alpha_param = 1.0f;
 
     const char* env_val;
@@ -134,8 +133,6 @@ int main(void)
     if (env_val) { M = atoi(env_val); N = M; }
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) WARMUP = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iters");
-    if (env_val) ITERS = atoi(env_val);
     env_val = getenv("BENCH_PARAM_alpha");
     if (env_val) alpha_param = (float)atof(env_val);
 
@@ -173,7 +170,7 @@ int main(void)
     GPU_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
 #endif
-    fprintf(stderr, "M=%d  N=%d  warmup=%d  iters=%d\n\n", M, N, WARMUP, ITERS);
+    fprintf(stderr, "M=%d  N=%d  warmup=%d\n\n", M, N, WARMUP);
 
     /* ------------------------------------------------------------------ */
     /* Device memory                                                        */
@@ -246,17 +243,13 @@ int main(void)
     GPU_EVENT_CREATE(ev_start);
     GPU_EVENT_CREATE(ev_stop);
 
-    double *times = (double *)malloc(ITERS * sizeof(double));
-    for (int i = 0; i < ITERS; i++) {
-        GPU_EVENT_RECORD(ev_start);
-        RUN_SGEMV();
-        GPU_EVENT_RECORD(ev_stop);
-        GPU_EVENT_SYNC(ev_stop);
-        float ms = 0.0f;
-        GPU_EVENT_ELAPSED(ev_start, ev_stop, ms);
-        times[i] = (double)ms;
-        fprintf(stderr, "  iter %d: %.4f ms\n", i, times[i]);
-    }
+    GPU_EVENT_RECORD(ev_start);
+    RUN_SGEMV();
+    GPU_EVENT_RECORD(ev_stop);
+    GPU_EVENT_SYNC(ev_stop);
+
+    float total_ms = 0.0f;
+    GPU_EVENT_ELAPSED(ev_start, ev_stop, total_ms);
 
     /* ------------------------------------------------------------------ */
     /* Copy result back                                                    */
@@ -293,9 +286,7 @@ int main(void)
     /* ------------------------------------------------------------------ */
     /* Statistics                                                          */
     /* ------------------------------------------------------------------ */
-    double sum_ms = 0.0;
-    for (int i = 0; i < ITERS; i++) sum_ms += times[i];
-    double avg_ms = sum_ms / ITERS;
+    double avg_ms = (double)total_ms;
 
     /* GFLOPS = 2 * M * N multiply-adds */
     double gflops = 2.0 * M * N / (avg_ms * 1e-3) / 1e9;
@@ -307,23 +298,22 @@ int main(void)
     /* JSON-lines kernel event */
 #ifdef USE_CUBLAS
     printf("{\"type\":\"kernel\",\"name\":\"cublasSgemv\",\"time_ms\":%.6f,"
-           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"alpha\":%.6f}}\n",
-           avg_ms, M, WARMUP, ITERS, alpha_param);
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"alpha\":%.6f}}\n",
+           avg_ms, M, WARMUP, alpha_param);
 #elif defined(USE_ROCBLAS)
     printf("{\"type\":\"kernel\",\"name\":\"rocblas_sgemv\",\"time_ms\":%.6f,"
-           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"alpha\":%.6f}}\n",
-           avg_ms, M, WARMUP, ITERS, alpha_param);
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"alpha\":%.6f}}\n",
+           avg_ms, M, WARMUP, alpha_param);
 #endif
     /* JSON-lines summary event */
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"GB/s\",\"value\":%.2f},{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
-           sum_ms, gbps, gflops);
+           (double)total_ms, gbps, gflops);
 
     /* Human-readable */
     fprintf(stderr, "cublas_gemv  M=%d N=%d  time_ms=%.4f  GB/s=%.2f  GFLOPS=%.2f\n",
             M, N, avg_ms, gbps, gflops);
 
-    free(times);
     free(hA); free(hx); free(hy); free(hy_ref);
     return pass ? 0 : 1;
 }

@@ -13,7 +13,7 @@ TARGET := babelstream
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := babelstream.cu
-  CFLAGS := -O3
+  CFLAGS := -O3 -arch=native
   LIBS   :=
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

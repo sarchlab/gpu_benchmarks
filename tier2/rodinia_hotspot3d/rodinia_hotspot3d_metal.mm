@@ -82,14 +82,12 @@ int main(int argc, char* argv[])
     int grid_size      = 64;
     int block_dim      = 8;
     int num_iterations = 10;
-    int iters          = 5;
     float amb_temp     = 80.0f;
 
     // Command-line fallback
     grid_size      = parseIntParam(argc, argv, "--grid_size", grid_size);
     block_dim      = parseIntParam(argc, argv, "--block_size", block_dim);
     num_iterations = parseIntParam(argc, argv, "--num_iterations", num_iterations);
-    iters          = parseIntParam(argc, argv, "--iterations", iters);
     amb_temp       = parseFloatParam(argc, argv, "--amb_temp", amb_temp);
 
     // Environment variable overrides
@@ -100,8 +98,6 @@ int main(int argc, char* argv[])
     if (env_val) block_dim = atoi(env_val);
     env_val = getenv("BENCH_PARAM_num_iterations");
     if (env_val) num_iterations = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_amb_temp");
     if (env_val) amb_temp = (float)atof(env_val);
     int num_warmup = 0;
@@ -139,8 +135,8 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
-    fprintf(stderr, "Grid: %d×%d×%d  |  Block: %d³  |  Steps/launch: %d  |  Iterations: %d\n\n",
-            nx, ny, nz, block_dim, num_iterations, iters);
+    fprintf(stderr, "Grid: %d×%d×%d  |  Block: %d³  |  Steps/launch: %d\n\n",
+            nx, ny, nz, block_dim, num_iterations);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -250,8 +246,8 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
-    for (int iter = 0; iter < iters; ++iter) {
+    std::vector<double> times(1);
+    for (int iter = 0; iter < 1; ++iter) {
         memcpy(buf_temp0.contents, h_temp_init.data(), bytes);
 
         uint64_t t0 = mach_absolute_time();
@@ -262,8 +258,8 @@ int main(int argc, char* argv[])
     }
 
     double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; ++i) sum += times[i];
+    double avg_ms = sum / 1;
     double total_ms = sum;
 
     // Effective bandwidth: 2 reads (temp_src, power) + 1 write (temp_dst) per step
@@ -277,8 +273,8 @@ int main(int argc, char* argv[])
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"hotspot3d_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"grid_size\":%d,\"block_size\":%d,\"num_iterations\":%d,"
-           "\"amb_temp\":%.1f,\"iterations\":%d}}\n",
-           avg_ms, grid_size, block_dim, num_iterations, amb_temp, iters);
+           "\"amb_temp\":%.1f}}\n",
+           avg_ms, grid_size, block_dim, num_iterations, amb_temp);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",

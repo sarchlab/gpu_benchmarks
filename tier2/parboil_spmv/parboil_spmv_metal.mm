@@ -8,7 +8,7 @@
  * runtime from source (loaded from the same directory as the binary).
  *
  * Usage:
- *   ./parboil_spmv [--num_rows N] [--avg_nnz_per_row K] [--iterations I]
+ *   ./parboil_spmv [--num_rows N] [--avg_nnz_per_row K]
  *
  *   --num_rows N         Number of matrix rows           (default: 65536)
  *   --avg_nnz_per_row K  Average non-zeros per row       (default: 10)
@@ -51,19 +51,6 @@ static double ticks_to_ms(uint64_t ticks)
 // ---------------------------------------------------------------------------
 // Argument parsing
 // ---------------------------------------------------------------------------
-
-static int parseIterations(int argc, char** argv)
-{
-    int iters = 10;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal)
 {
@@ -176,14 +163,12 @@ int main(int argc, char* argv[])
     int num_rows   = 65536;
     int avg_nnz    = 10;
     int block_size = 256;
-    int iters      = 10;
     int seed       = 42;
 
     // Command-line args as fallback
     num_rows = parseIntParam(argc, argv, "--num_rows",         num_rows);
     avg_nnz  = parseIntParam(argc, argv, "--avg_nnz_per_row",  avg_nnz);
     block_size = parseIntParam(argc, argv, "--block_size",     block_size);
-    iters    = parseIterations(argc, argv);
     seed     = parseIntParam(argc, argv, "--seed",             seed);
 
     // Env vars override
@@ -194,8 +179,6 @@ int main(int argc, char* argv[])
     if (env_val) avg_nnz = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     int num_warmup = 0;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
@@ -224,8 +207,8 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
-    fprintf(stderr, "Rows: %d  |  NNZ: %d  |  Iterations: %d\n\n",
-            num_rows, total_nnz, iters);
+    fprintf(stderr, "Rows: %d  |  NNZ: %d\n\n",
+            num_rows, total_nnz);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -329,8 +312,8 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         uint64_t t0 = mach_absolute_time();
         dispatch_spmv();
         uint64_t t1 = mach_absolute_time();
@@ -339,18 +322,18 @@ int main(int argc, char* argv[])
 
     // Compute statistics
     double sum_t = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum_t += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg = sum_t / iters;
+    double avg = sum_t / 1;
     double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         double d = times[i] - avg;
         variance += d * d;
     }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
+    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
 
     char size_str[64];
     snprintf(size_str, sizeof(size_str), "%d", num_rows);
@@ -358,7 +341,7 @@ int main(int argc, char* argv[])
     BenchResult r;
     r.kernel_name  = "parboil_spmv";
     r.problem_size = size_str;
-    r.iterations   = iters;
+    r.iterations   = 1;
     r.avg_ms       = avg;
     r.min_ms       = mn;
     r.max_ms       = mx;
@@ -369,12 +352,12 @@ int main(int argc, char* argv[])
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"spmv_csr\",\"time_ms\":%.6f,"
            "\"params\":{\"num_rows\":%d,\"avg_nnz_per_row\":%d,\"block_size\":%d,"
-           "\"iterations\":%d}}\n",
-           r.avg_ms, num_rows, avg_nnz, block_size, iters);
+           "}}\n",
+           r.avg_ms, num_rows, avg_nnz, block_size);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
-           r.avg_ms * iters, gflops);
+           r.avg_ms, gflops);
 
     fprintf(stderr, "GFLOPS: %.4f  (avg %.4f ms)\n", gflops, r.avg_ms);
 

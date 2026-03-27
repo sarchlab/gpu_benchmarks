@@ -11,12 +11,11 @@
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
 // Usage:
-//   ./rodinia_srad [--image_size N] [--num_iterations K] [--block_size B] [--iterations I]
+//   ./rodinia_srad [--image_size N] [--num_iterations K] [--block_size B]
 //
 //   --image_size N      Image dimension (N×N)              (default: 512)
 //   --num_iterations K  SRAD iterations per timed launch   (default: 50)
 //   --block_size B      Thread-block dimension (B×B)       (default: 16)
-//   --iterations I      Timed benchmark iterations         (default: 20)
 //
 // Output (stdout): CSV row — kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
 // Output (stderr): Effective bandwidth in GB/s
@@ -103,17 +102,6 @@ struct BenchResult {
     double      stddev_ms;
 };
 
-static int parseIterations(int argc, char** argv) {
-    int iters = 20;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -165,8 +153,8 @@ static BenchResult runBenchmark(const char* kernel_name,
         HIP_CHECK(hipDeviceSynchronize());
     }
 
-    std::vector<double> times(iterations);
-    for (int i = 0; i < iterations; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         timer.record_start();
         func();
         timer.record_stop();
@@ -174,19 +162,19 @@ static BenchResult runBenchmark(const char* kernel_name,
     }
 
     double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iterations; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg = sum / iterations;
+    double avg = sum / 1;
 
     double variance = 0.0;
-    for (int i = 0; i < iterations; ++i) {
+    for (int i = 0; i < 1; ++i) {
         double d = times[i] - avg;
         variance += d * d;
     }
-    double stddev = (iterations > 1) ? sqrt(variance / (iterations - 1)) : 0.0;
+    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
 
     BenchResult r;
     r.kernel_name  = kernel_name;
@@ -303,13 +291,11 @@ int main(int argc, char** argv) {
     int image_size  = 512;
     int num_iters   = 50;
     int block_dim   = 16;
-    int iters       = 20;
 
     // Command-line fallback
     image_size = parseIntParam(argc, argv, "--image_size", image_size);
     num_iters  = parseIntParam(argc, argv, "--num_iterations", num_iters);
     block_dim  = parseIntParam(argc, argv, "--block_size", block_dim);
-    iters      = parseIterations(argc, argv);
 
     float lambda = 0.25f;
     for (int i = 1; i < argc - 1; ++i) {
@@ -327,8 +313,6 @@ int main(int argc, char** argv) {
     if (env_val) num_iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_dim = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     int num_warmup = 0;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
@@ -346,8 +330,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Image: %d×%d  |  SRAD iters/launch: %d  |  Benchmark iters: %d\n\n",
-            rows, cols, num_iters, iters);
+    fprintf(stderr, "Image: %d×%d  |  SRAD iters/launch: %d\n\n",
+            rows, cols, num_iters);
 
     // Host allocation — random float image in [0, 1]
     float* h_J      = (float*)malloc(size * sizeof(float));
@@ -375,7 +359,7 @@ int main(int argc, char** argv) {
     snprintf(problemSize, sizeof(problemSize), "%dx%d", rows, cols);
 
     BenchResult r = runBenchmark(
-        "rodinia_srad", problemSize, iters, num_warmup, [&]() {
+        "rodinia_srad", problemSize, 1, num_warmup, [&]() {
             // Reset image to original before each timed run
             HIP_CHECK(hipMemcpy(d_J, h_J_orig, size * sizeof(float),
                                 hipMemcpyHostToDevice));
@@ -395,16 +379,16 @@ int main(int argc, char** argv) {
     double bytes_per_iter = 13.0 * (double)size * sizeof(float);
     double total_bytes    = bytes_per_iter * num_iters;
     double bw_gb = total_bytes / (r.avg_ms * 1e-3) / 1e9;
-    double total_ms = r.avg_ms * iters;
+    double total_ms = r.avg_ms;
 
     // JSON-lines kernel events
     printf("{\"type\":\"kernel\",\"name\":\"srad1\",\"time_ms\":%.6f,"
-           "\"params\":{\"image_size\":%d,\"num_iterations\":%d,\"block_size\":%d,\"iterations\":%d}}\n",
-           r.avg_ms, image_size, num_iters, block_dim, iters);
+           "\"params\":{\"image_size\":%d,\"num_iterations\":%d,\"block_size\":%d}}\n",
+           r.avg_ms, image_size, num_iters, block_dim);
 
     printf("{\"type\":\"kernel\",\"name\":\"srad2\",\"time_ms\":%.6f,"
-           "\"params\":{\"image_size\":%d,\"num_iterations\":%d,\"block_size\":%d,\"iterations\":%d}}\n",
-           r.avg_ms, image_size, num_iters, block_dim, iters);
+           "\"params\":{\"image_size\":%d,\"num_iterations\":%d,\"block_size\":%d}}\n",
+           r.avg_ms, image_size, num_iters, block_dim);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

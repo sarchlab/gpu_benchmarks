@@ -33,7 +33,7 @@ TARGET := parboil_histogram
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := parboil_histogram.cu
-  CFLAGS := -O3 -std=c++14
+  CFLAGS := -O3 -std=c++14 -arch=native
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

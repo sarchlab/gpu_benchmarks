@@ -7,7 +7,28 @@
     "name": "grid_size",
     "description": "Grid dimension (NxN temperature grid)",
     "type": "int",
-    "values": [64, 128, 192, 256, 384, 512, 640, 768, 1024, 1280, 1536, 2048, 2560, 3072, 3584, 4096, 5120, 6144, 7168, 8192]
+    "values": [
+      64,
+      128,
+      192,
+      256,
+      384,
+      512,
+      640,
+      768,
+      1024,
+      1280,
+      1536,
+      2048,
+      2560,
+      3072,
+      3584,
+      4096,
+      5120,
+      6144,
+      7168,
+      8192
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,22 +36,27 @@
       "description": "Thread-block dimension (BxB threads)",
       "type": "int",
       "default": 16,
-      "values": [8, 16, 32]
+      "values": [
+        8,
+        16,
+        32
+      ]
     },
     {
       "name": "num_iterations",
       "description": "Stencil time-steps per timed launch",
       "type": "int",
       "default": 10,
-      "values": [1, 5, 10, 20, 50]
-    },
-    {
-      "name": "iterations",
-      "description": "Timed benchmark iterations",
-      "type": "int",
-      "default": 20,
-      "values": [5, 10, 20]
+      "values": [
+        1,
+        5,
+        10,
+        20,
+        50
+      ]
     }
   ],
-  "kernels": ["hotspot_kernel"]
+  "kernels": [
+    "hotspot_kernel"
+  ]
 }

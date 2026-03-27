@@ -6,12 +6,11 @@
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
 // Usage:
-//   ./cuda_convolution_separable [--width W] [--height H] [--radius R] [--iterations I]
+//   ./cuda_convolution_separable [--width W] [--height H] [--radius R]
 //
 //   --width W         Image width  (default: 4096)
 //   --height H        Image height (default: 4096)
 //   --radius R        Kernel radius (default: 8, filter width = 2*R+1)
-//   --iterations I    Timed iterations (default: 5)
 //
 // Output (stdout): CSV row — cuda_convolution_separable,<WxH>,<time_ms>,<GBs>
 // Output (stderr): human-readable results
@@ -291,13 +290,11 @@ int main(int argc, char** argv) {
     int width  = 4096;
     int height = 4096;
     int radius = 8;
-    int iterations = 5;
 
     // Command-line fallback
     width  = parseIntParam(argc, argv, "--width",  width);
     height = parseIntParam(argc, argv, "--height", height);
     radius = parseIntParam(argc, argv, "--radius", radius);
-    iterations = parseIntParam(argc, argv, "--iterations", iterations);
 
     // Environment variable overrides
     const char* env_val;
@@ -307,13 +304,10 @@ int main(int argc, char** argv) {
     if (env_val) height = atoi(env_val);
     env_val = getenv("BENCH_PARAM_radius");
     if (env_val) radius = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     int num_warmup = 0;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
 
-    int iters = iterations;
 
     if (radius > MAX_KERNEL_RADIUS) {
         fprintf(stderr, "Error: radius=%d exceeds max=%d\n", radius, MAX_KERNEL_RADIUS);
@@ -331,7 +325,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Image: %dx%d  |  Kernel radius: %d (%d-tap)  |  "
                     "Iterations: 5 warmup + %d timed\n\n",
-            width, height, radius, klen, iters);
+            width, height, radius, klen);
 
     // Generate Gaussian-like kernel weights
     std::vector<float> h_kernel((size_t)klen);
@@ -402,8 +396,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipEventCreate(&evStart));
     HIP_CHECK(hipEventCreate(&evStop));
 
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         HIP_CHECK(hipEventRecord(evStart, 0));
         run_conv();
         HIP_CHECK(hipEventRecord(evStop, 0));
@@ -419,8 +413,8 @@ int main(int argc, char** argv) {
 
     // Compute average time
     double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; ++i) sum += times[i];
+    double avg_ms = sum / 1;
 
     // GB/s = 2 * W * H * sizeof(float) / time_s / 1e9
     double data_bytes = 2.0 * (double)width * (double)height * sizeof(float);
@@ -430,11 +424,11 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel events (one per kernel)
     printf("{\"type\":\"kernel\",\"name\":\"convolution_row_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"width\":%d,\"height\":%d,\"radius\":%d,\"iterations\":%d}}\n",
+           "\"params\":{\"width\":%d,\"height\":%d,\"radius\":%d}}\n",
            avg_ms, width, height, radius, iterations);
 
     printf("{\"type\":\"kernel\",\"name\":\"convolution_col_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"width\":%d,\"height\":%d,\"radius\":%d,\"iterations\":%d}}\n",
+           "\"params\":{\"width\":%d,\"height\":%d,\"radius\":%d}}\n",
            avg_ms, width, height, radius, iterations);
 
     // JSON-lines summary event

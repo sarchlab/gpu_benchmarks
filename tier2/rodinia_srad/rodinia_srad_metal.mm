@@ -9,7 +9,7 @@
  *   2. srad2_kernel — updates the image using the diffusion coefficients
  *
  * Usage:
- *   ./rodinia_srad [--image_size N] [--num_iterations K] [--iterations I]
+ *   ./rodinia_srad [--image_size N] [--num_iterations K]
  *
  *   --image_size N      Image dimension (N×N)               (default: 512)
  *   --num_iterations K  SRAD iterations per timed launch    (default: 50)
@@ -47,17 +47,6 @@ static double ticks_to_ms(uint64_t ticks) {
 // Argument parsing
 // ---------------------------------------------------------------------------
 
-static int parseIterations(int argc, char** argv) {
-    int iters = 20;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -159,12 +148,10 @@ int main(int argc, char* argv[])
     int image_size  = 512;
     int num_iters   = 50;
     int block_dim   = 16;
-    int iters       = 20;
 
     // Command-line fallback
     image_size = parseIntParam(argc, argv, "--image_size", image_size);
     num_iters  = parseIntParam(argc, argv, "--num_iterations", num_iters);
-    iters      = parseIterations(argc, argv);
 
     float lambda = 0.25f;
     for (int i = 1; i < argc - 1; ++i) {
@@ -182,8 +169,6 @@ int main(int argc, char* argv[])
     if (env_val) num_iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_dim = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     int num_warmup = 0;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
@@ -204,8 +189,8 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
-    fprintf(stderr, "Image: %d×%d  |  SRAD iters/launch: %d  |  Benchmark iters: %d\n\n",
-            rows, cols, num_iters, iters);
+    fprintf(stderr, "Image: %d×%d  |  SRAD iters/launch: %d\n\n",
+            rows, cols, num_iters);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -291,8 +276,8 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Timed benchmark iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
-    for (int iter = 0; iter < iters; ++iter) {
+    std::vector<double> times(1);
+    for (int iter = 0; iter < 1; ++iter) {
         // Reset image to initial state before each timed run
         memcpy(buf_J.contents, h_J_init, bytes);
 
@@ -308,18 +293,18 @@ int main(int argc, char* argv[])
     // Compute statistics and report
     // -------------------------------------------------------------------
     double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg = sum / iters;
+    double avg = sum / 1;
     double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         double d = times[i] - avg;
         variance += d * d;
     }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
+    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
 
     char problemSize[64];
     snprintf(problemSize, sizeof(problemSize), "%dx%d", rows, cols);
@@ -327,7 +312,7 @@ int main(int argc, char* argv[])
     BenchResult r;
     r.kernel_name  = "rodinia_srad";
     r.problem_size = problemSize;
-    r.iterations   = iters;
+    r.iterations = 1;
     r.avg_ms       = avg;
     r.min_ms       = mn;
     r.max_ms       = mx;
@@ -337,16 +322,16 @@ int main(int argc, char* argv[])
     double bytes_per_iter = 13.0 * (double)size * sizeof(float);
     double total_bytes    = bytes_per_iter * num_iters;
     double bw_gb = total_bytes / (r.avg_ms * 1e-3) / 1e9;
-    double total_ms = r.avg_ms * iters;
+    double total_ms = r.avg_ms;
 
     // JSON-lines kernel events
     printf("{\"type\":\"kernel\",\"name\":\"srad1\",\"time_ms\":%.6f,"
-           "\"params\":{\"image_size\":%d,\"num_iterations\":%d,\"block_size\":%d,\"iterations\":%d}}\n",
-           r.avg_ms, image_size, num_iters, block_dim, iters);
+           "\"params\":{\"image_size\":%d,\"num_iterations\":%d,\"block_size\":%d}}\n",
+           r.avg_ms, image_size, num_iters, block_dim);
 
     printf("{\"type\":\"kernel\",\"name\":\"srad2\",\"time_ms\":%.6f,"
-           "\"params\":{\"image_size\":%d,\"num_iterations\":%d,\"block_size\":%d,\"iterations\":%d}}\n",
-           r.avg_ms, image_size, num_iters, block_dim, iters);
+           "\"params\":{\"image_size\":%d,\"num_iterations\":%d,\"block_size\":%d}}\n",
+           r.avg_ms, image_size, num_iters, block_dim);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

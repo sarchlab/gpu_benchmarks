@@ -10,8 +10,8 @@
  *   cublasSgemmBatched / rocblas_sgemm_batched with op_none, op_none,
  *   dims (N, M, K) and leading dimensions: ldB=N, ldA=K, ldC=N
  *
- * Warmup: 5 iterations (not timed)
- * Timed:  5 iterations, report average
+ * Warmup: configurable iterations (not timed)
+ * Timed:  single iteration (repetition handled by CLI)
  *
  * Verification: compare first 8×8 corner of C[0] against CPU GEMM
  * GFLOPS = batch_count * 2 * M * N * K / time_s / 1e9
@@ -99,8 +99,6 @@ static int M           = 512;
 static int N           = 512;
 static int K           = 512;
 static int WARMUP      = 0;
-static int ITERS       = 5;
-
 /* -------------------------------------------------------------------------
  * CPU reference GEMM (only for a small corner — O(verify_m * verify_n * K))
  * A is vm×vk (row-major, stride K)
@@ -137,9 +135,6 @@ int main(void)
     if (env_val) BATCH_COUNT = atoi(env_val);
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) WARMUP = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iters");
-    if (env_val) ITERS = atoi(env_val);
-
     const size_t sizeA = (size_t)M * K;
     const size_t sizeB = (size_t)K * N;
     const size_t sizeC = (size_t)M * N;
@@ -272,15 +267,13 @@ int main(void)
     GPU_EVENT_CREATE(ev_stop);
 
     GPU_EVENT_RECORD(ev_start);
-    for (int i = 0; i < ITERS; i++) {
-        RUN_BATCHED_GEMM();
-    }
+    RUN_BATCHED_GEMM();
     GPU_EVENT_RECORD(ev_stop);
     GPU_EVENT_SYNC(ev_stop);
 
     float total_ms = 0.0f;
     GPU_EVENT_ELAPSED(ev_start, ev_stop, total_ms);
-    float avg_ms = total_ms / (float)ITERS;
+    float avg_ms = total_ms;
 
     /* ------------------------------------------------------------------ */
     /* Copy result back                                                    */
@@ -332,12 +325,12 @@ int main(void)
     /* JSON-lines output */
 #ifdef USE_CUBLAS
     printf("{\"type\":\"kernel\",\"name\":\"cublasSgemmBatched\",\"time_ms\":%.6f,"
-           "\"params\":{\"matrix_dim\":%d,\"batch_count\":%d,\"warmup\":%d,\"iters\":%d}}\n",
-           (double)avg_ms, M, BATCH_COUNT, WARMUP, ITERS);
+           "\"params\":{\"matrix_dim\":%d,\"batch_count\":%d,\"warmup\":%d}}\n",
+           (double)avg_ms, M, BATCH_COUNT, WARMUP);
 #elif defined(USE_ROCBLAS)
     printf("{\"type\":\"kernel\",\"name\":\"rocblas_sgemm_batched\",\"time_ms\":%.6f,"
-           "\"params\":{\"matrix_dim\":%d,\"batch_count\":%d,\"warmup\":%d,\"iters\":%d}}\n",
-           (double)avg_ms, M, BATCH_COUNT, WARMUP, ITERS);
+           "\"params\":{\"matrix_dim\":%d,\"batch_count\":%d,\"warmup\":%d}}\n",
+           (double)avg_ms, M, BATCH_COUNT, WARMUP);
 #endif
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",

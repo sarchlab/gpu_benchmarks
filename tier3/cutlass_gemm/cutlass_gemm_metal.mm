@@ -89,7 +89,6 @@ int main(int argc, char *argv[])
     int N = 4096;
     int K = 4096;
     int warmup = 0;
-    int iters = 5;
     int block_tile_m = BM;
 
     /* Read parameters from environment variables */
@@ -98,8 +97,6 @@ int main(int argc, char *argv[])
     if (env_val) { M = atoi(env_val); N = M; K = M; }
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) warmup = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iters");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_tile_m");
     if (env_val) block_tile_m = atoi(env_val);
 
@@ -114,8 +111,8 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
     fprintf(stderr, "M=%d  N=%d  K=%d  BM=%d BN=%d TM=%d TN=%d\n",
             M, N, K, BM, BN, TM, TN);
-    fprintf(stderr, "threads/group=%d  warmup=%d  iters=%d\n\n",
-            NUM_THREADS, warmup, iters);
+    fprintf(stderr, "threads/group=%d  warmup=%d\n\n",
+            NUM_THREADS, warmup);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -242,14 +239,10 @@ int main(int argc, char *argv[])
     /* ------------------------------------------------------------------ */
     /* Timed iterations                                                    */
     /* ------------------------------------------------------------------ */
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; i++) {
         uint64_t t0 = mach_absolute_time();
-        run_gemm();
-        uint64_t t1 = mach_absolute_time();
-        times[i] = ticks_to_ms(t1 - t0);
-        fprintf(stderr, "  iter %d: %.3f ms\n", i, times[i]);
-    }
+    run_gemm();
+    uint64_t t1 = mach_absolute_time();
+    double total_ms = ticks_to_ms(t1 - t0);
 
     /* ------------------------------------------------------------------ */
     /* Verify first 8×8 corner vs CPU GEMM                                */
@@ -277,10 +270,7 @@ int main(int argc, char *argv[])
     /* ------------------------------------------------------------------ */
     /* Statistics                                                          */
     /* ------------------------------------------------------------------ */
-    double sum_ms = 0.0;
-    for (int i = 0; i < iters; i++) sum_ms += times[i];
-    double avg_ms = sum_ms / iters;
-    double total_ms = sum_ms;
+    double avg_ms = total_ms;
 
     double gflops = 2.0 * M * N * K / (avg_ms / 1000.0) / 1e9;
 
@@ -290,8 +280,8 @@ int main(int argc, char *argv[])
 
     /* Kernel event */
     printf("{\"type\":\"kernel\",\"name\":\"tiled_gemm_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"block_tile_m\":%d}}\n",
-           avg_ms, M, warmup, iters, block_tile_m);
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"block_tile_m\":%d}}\n",
+           avg_ms, M, warmup, block_tile_m);
 
     /* Summary event */
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

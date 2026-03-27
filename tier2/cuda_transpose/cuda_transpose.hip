@@ -247,13 +247,11 @@ int main(int argc, char** argv) {
 
     // Default values from params.json
     int N          = 4096;
-    int iters      = 5;
     int block_size = 256;
     int tile_dim   = 32;
 
     // Command-line args as fallback
     N          = parseIntParam(argc, argv, "--size", N);
-    iters      = parseIntParam(argc, argv, "--iterations", iters);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
     tile_dim   = parseIntParam(argc, argv, "--tile_dim", tile_dim);
 
@@ -261,8 +259,6 @@ int main(int argc, char** argv) {
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_tile_dim");
@@ -373,14 +369,14 @@ int main(int argc, char** argv) {
     double total_ms = naive_ms * TIMED_ITERS + opt_ms * TIMED_ITERS;
 
     printf("{\"type\":\"kernel\",\"name\":\"transpose_naive\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"tile_dim\":%d}}\n",
-           naive_ms, N, iters, block_size, tile_dim);
+           naive_ms, N, block_size, tile_dim);
 
     printf("{\"type\":\"kernel\",\"name\":\"transpose_optimized\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"tile_dim\":%d}}\n",
-           opt_ms, N, iters, block_size, tile_dim);
+           opt_ms, N, block_size, tile_dim);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"naive_bandwidth_gbps\",\"value\":%.2f},"

@@ -13,11 +13,10 @@
 // Compiles with hipcc (AMD ROCm) or nvcc -x cu (CUDA).
 //
 // Usage:
-//   ./polybench_atax [--nx NX] [--ny NY] [--iterations I]
+//   ./polybench_atax [--nx NX] [--ny NY]
 //
 //   --nx NX          Number of rows    (default: 4096)
 //   --ny NY          Number of columns (default: 4096)
-//   --iterations I   Timed iterations  (default: 5)
 //
 // Output (stdout): JSON-lines protocol
 // Output (stderr): device info, timing details
@@ -188,7 +187,6 @@ int main(int argc, char** argv) {
 
     int nx    = parseIntParam(argc, argv, "--nx", 4096);
     int ny    = parseIntParam(argc, argv, "--ny", 4096);
-    int iters = parseIntParam(argc, argv, "--iterations", 5);
     int block_size = 256;
 
     const char* env_val;
@@ -196,8 +194,6 @@ int main(int argc, char** argv) {
     if (env_val) nx = atoi(env_val);
     env_val = getenv("BENCH_PARAM_ny");
     if (env_val) ny = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     int num_warmup = 0;
@@ -215,7 +211,7 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Matrix size: %d×%d  |  Iterations: %d\n\n", nx, ny, iters);
+    fprintf(stderr, "Matrix size: %d×%d\n\n", nx, ny);
 
     // Host allocations
     float* h_A = (float*)malloc(bytes_A);
@@ -252,8 +248,8 @@ int main(int argc, char** argv) {
     }
 
     // Timed iterations — time each kernel separately
-    std::vector<double> k1_times(iters), k2_times(iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> k1_times(1), k2_times(1);
+    for (int i = 0; i < 1; ++i) {
         timer.record_start();
         hipLaunchKernelGGL(atax_kernel1, grid1, block_size, 0, 0, d_A, d_x, d_tmp, nx, ny);
         timer.record_stop();
@@ -286,12 +282,12 @@ int main(int argc, char** argv) {
 
     // Compute statistics
     double k1_sum = 0.0, k2_sum = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         k1_sum += k1_times[i];
         k2_sum += k2_times[i];
     }
-    double k1_avg = k1_sum / iters;
-    double k2_avg = k2_sum / iters;
+    double k1_avg = k1_sum / 1;
+    double k2_avg = k2_sum / 1;
     double total_avg_ms = k1_avg + k2_avg;
 
     // GB/s: A is read twice (kernel1 + kernel2), each read is NX*NY*4 bytes
@@ -303,11 +299,11 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"atax_kernel1\",\"time_ms\":%.6f,"
-           "\"params\":{\"nx\":%d,\"ny\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
-           k1_avg, nx, ny, iters, block_size);
+           "\"params\":{\"nx\":%d,\"ny\":%d\"block_size\":%d}}\n",
+           k1_avg, nx, ny, block_size);
     printf("{\"type\":\"kernel\",\"name\":\"atax_kernel2\",\"time_ms\":%.6f,"
-           "\"params\":{\"nx\":%d,\"ny\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
-           k2_avg, nx, ny, iters, block_size);
+           "\"params\":{\"nx\":%d,\"ny\":%d\"block_size\":%d}}\n",
+           k2_avg, nx, ny, block_size);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
            total_avg_ms, gbps);

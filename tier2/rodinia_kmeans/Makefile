@@ -33,7 +33,7 @@ TARGET := rodinia_kmeans
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := rodinia_kmeans.cu
-  CFLAGS := -O3 -std=c++14
+  CFLAGS := -O3 -std=c++14 -arch=native
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

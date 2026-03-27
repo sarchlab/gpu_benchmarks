@@ -6,10 +6,9 @@
 // Native CUDA implementation.
 //
 // Usage:
-//   ./shoc_fft [--size N] [--iterations I]
+//   ./shoc_fft [--size N]
 //
 //   --size N         FFT size (must be power of 2, default: 1048576)
-//   --iterations I   Timed iterations (default: 5)
 //
 // Output (stdout): JSON-lines protocol
 // Output (stderr): human-readable results
@@ -179,15 +178,12 @@ int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     int N     = parseIntParam(argc, argv, "--size", 1048576);
-    int iters = parseIntParam(argc, argv, "--iterations", 5);
     const char* precision = "float";
     int batch_count = 1;
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
     env_val = getenv("BENCH_PARAM_batch_count");
@@ -211,8 +207,8 @@ int main(int argc, char** argv) {
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "FFT size: %d (2^%d)  |  Iterations: %d warmup + %d timed\n\n",
-            N, log2N, num_warmup, iters);
+    fprintf(stderr, "FFT size: %d (2^%d) warmup + %d timed\n\n",
+            N, log2N, num_warmup);
 
     // Host allocation + initialization
     float2* h_data = (float2*)malloc(bytes);
@@ -256,9 +252,9 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaEventCreate(&evStart));
     CUDA_CHECK(cudaEventCreate(&evStop));
 
-    std::vector<double> br_times((size_t)iters);
-    std::vector<double> bf_times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> br_times(1);
+    std::vector<double> bf_times(1);
+    for (int i = 0; i < 1; ++i) {
         CUDA_CHECK(cudaMemcpy(d_data, h_orig, bytes, cudaMemcpyHostToDevice));
 
         // Time bit-reverse kernel
@@ -286,12 +282,12 @@ int main(int argc, char** argv) {
 
     // Compute average times
     double br_sum = 0.0, bf_sum = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         br_sum += br_times[i];
         bf_sum += bf_times[i];
     }
-    double br_avg_ms = br_sum / iters;
-    double bf_avg_ms = bf_sum / iters;
+    double br_avg_ms = br_sum / 1;
+    double bf_avg_ms = bf_sum / 1;
     double total_avg_ms = br_avg_ms + bf_avg_ms;
 
     // GFLOPS = 5 * N * log2(N) / time_s / 1e9
@@ -300,11 +296,11 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"bit_reverse_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"precision\":\"%s\",\"batch_count\":%d}}\n",
-           br_avg_ms, N, iters, precision, batch_count);
+           "\"params\":{\"size\":%d\"precision\":\"%s\",\"batch_count\":%d}}\n",
+           br_avg_ms, N, precision, batch_count);
     printf("{\"type\":\"kernel\",\"name\":\"fft_butterfly_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"precision\":\"%s\",\"batch_count\":%d}}\n",
-           bf_avg_ms, N, iters, precision, batch_count);
+           "\"params\":{\"size\":%d\"precision\":\"%s\",\"batch_count\":%d}}\n",
+           bf_avg_ms, N, precision, batch_count);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"gflops\",\"value\":%.4f}]}\n",
            total_avg_ms, gflops);

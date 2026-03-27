@@ -11,10 +11,9 @@
 // Native CUDA implementation.
 //
 // Usage:
-//   ./rodinia_gaussian [--size N] [--iterations I]
+//   ./rodinia_gaussian [--size N]
 //
 //   --size N         Matrix dimension N (N×N)  (default: 512)
-//   --iterations I   Timed iterations          (default: 3)
 //
 // Output (stdout): CSV — gaussian,<N>,<time_ms>,<GFLOPS>
 // Output (stderr): device info, timing details, verification result
@@ -41,17 +40,6 @@
         }                                                                      \
     } while (0)
 
-static int parseIterations(int argc, char** argv) {
-    int iters = 3;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -155,20 +143,16 @@ int main(int argc, char** argv)
 
     // Defaults
     int N     = 512;
-    int iters = 3;
     int block_size_param = 256;
     const char* verify = "true";
 
     // Command-line fallback
     N     = parseIntParam(argc, argv, "--size", N);
-    iters = parseIterations(argc, argv);
 
     // Environment variable overrides
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size_param = atoi(env_val);
     env_val = getenv("BENCH_PARAM_verify");
@@ -186,7 +170,7 @@ int main(int argc, char** argv)
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Matrix size: %d×%d  |  Iterations: %d\n\n", N, N, iters);
+    fprintf(stderr, "Matrix size: %d×%d\n\n", N, N);
 
     // Host allocations
     float* h_a      = (float*)malloc(bytes_a);
@@ -244,10 +228,10 @@ int main(int argc, char** argv)
     }
 
     // Timed iterations
-    std::vector<double> times(iters);
+    std::vector<double> times(1);
     BenchmarkTimer timer;
 
-    for (int iter = 0; iter < iters; ++iter) {
+    for (int iter = 0; iter < 1; ++iter) {
         // Reset device data from original (outside timing)
         CUDA_CHECK(cudaMemcpy(d_a, h_a, bytes_a, cudaMemcpyHostToDevice));
         CUDA_CHECK(cudaMemcpy(d_b, h_b, bytes_b, cudaMemcpyHostToDevice));
@@ -294,19 +278,19 @@ int main(int argc, char** argv)
 
     // Compute statistics
     double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum_ms += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg_ms = sum_ms / iters;
+    double avg_ms = sum_ms / 1;
 
     double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         double d = times[i] - avg_ms;
         variance += d * d;
     }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
+    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
 
     // GFLOPS: 2/3 * N^3 floating-point ops for forward elimination
     double flops  = (2.0 / 3.0) * (double)N * (double)N * (double)N;
@@ -319,12 +303,12 @@ int main(int argc, char** argv)
 
     // JSON-lines kernel events
     printf("{\"type\":\"kernel\",\"name\":\"fan1\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
-           avg_ms, N, iters, block_size_param, verify);
+           "\"params\":{\"size\":%d\"block_size\":%d,\"verify\":\"%s\"}}\n",
+           avg_ms, N, block_size_param, verify);
 
     printf("{\"type\":\"kernel\",\"name\":\"fan2\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
-           avg_ms, N, iters, block_size_param, verify);
+           "\"params\":{\"size\":%d\"block_size\":%d,\"verify\":\"%s\"}}\n",
+           avg_ms, N, block_size_param, verify);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

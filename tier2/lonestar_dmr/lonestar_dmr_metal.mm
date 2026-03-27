@@ -5,7 +5,7 @@
  * triangulation, identifies "bad" triangles, and refines them.
  *
  * Usage:
- *   ./lonestar_dmr [--size N] [--iterations I]
+ *   ./lonestar_dmr [--size N]
  *
  * Build:
  *   make PLATFORM=metal
@@ -80,14 +80,12 @@ int main(int argc, char* argv[])
     setvbuf(stdout, NULL, _IONBF, 0);
 
     int num_triangles       = 100000;
-    int iterations          = 5;
     int block_size          = 256;
     float min_angle         = 30.0f;
     int max_refine_iters    = 5;
     const char* precision   = "float";
 
     num_triangles    = parseIntParam(argc, argv, "--size", num_triangles);
-    iterations       = parseIntParam(argc, argv, "--iterations", iterations);
     block_size       = parseIntParam(argc, argv, "--block_size", block_size);
     min_angle        = parseFloatParam(argc, argv, "--min_angle", min_angle);
     max_refine_iters = parseIntParam(argc, argv, "--max_refine_iterations", max_refine_iters);
@@ -95,8 +93,6 @@ int main(int argc, char* argv[])
     const char* env_val;
     env_val = getenv("BENCH_PARAM_num_triangles");
     if (env_val) num_triangles = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_min_angle");
@@ -109,7 +105,6 @@ int main(int argc, char* argv[])
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
 
-    int iters = iterations;
     int num_vertices = num_triangles * 2;
 
     // -------------------------------------------------------------------
@@ -124,7 +119,7 @@ int main(int argc, char* argv[])
     fprintf(stderr, "DMR: Delaunay Mesh Refinement  |  Triangles: %d  |  "
             "Vertices: %d  |  min_angle: %.1f deg  |  refine_iters: %d  |  "
             "Iterations: 5 warmup + %d timed\n\n",
-            num_triangles, num_vertices, min_angle, max_refine_iters, iters);
+            num_triangles, num_vertices, min_angle, max_refine_iters);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -292,8 +287,8 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         uint64_t t0 = mach_absolute_time();
         run_dmr();
         uint64_t t1 = mach_absolute_time();
@@ -301,29 +296,29 @@ int main(int argc, char* argv[])
     }
 
     double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum_ms += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg_ms = sum_ms / iters;
+    double avg_ms = sum_ms / 1;
     double mtri_per_sec = (double)num_triangles / (avg_ms * 1e-3) / 1e6;
 
     fprintf(stderr, "Performance: %.2f Mtri/sec  (avg %.4f ms, min %.4f ms, max %.4f ms)\n",
             mtri_per_sec, avg_ms, mn, mx);
 
     printf("{\"type\":\"kernel\",\"name\":\"dmr_check_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_triangles\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"num_triangles\":%d\"block_size\":%d,"
            "\"min_angle\":%.1f,\"max_refine_iterations\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_ms * 0.5, num_triangles, iters, block_size, min_angle,
+           avg_ms * 0.5, num_triangles, block_size, min_angle,
            max_refine_iters, precision);
 
     printf("{\"type\":\"kernel\",\"name\":\"dmr_refine_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_triangles\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"num_triangles\":%d\"block_size\":%d,"
            "\"min_angle\":%.1f,\"max_refine_iterations\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_ms * 0.5, num_triangles, iters, block_size, min_angle,
+           avg_ms * 0.5, num_triangles, block_size, min_angle,
            max_refine_iters, precision);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

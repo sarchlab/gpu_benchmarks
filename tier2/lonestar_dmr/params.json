@@ -81,18 +81,6 @@
         "float",
         "double"
       ]
-    },
-    {
-      "name": "iterations",
-      "description": "Number of timed iterations for averaging",
-      "type": "int",
-      "default": 5,
-      "values": [
-        3,
-        5,
-        10,
-        20
-      ]
     }
   ],
   "kernels": [

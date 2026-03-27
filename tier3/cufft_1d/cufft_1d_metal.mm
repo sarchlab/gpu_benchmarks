@@ -9,8 +9,8 @@
  *   Complex single-precision input (split-complex format)
  *   Forward FFT (FFT_FORWARD)
  *
- * Warmup: 5 iterations (not timed)
- * Timed:  5 iterations; report average
+ * Warmup: configurable iterations (not timed)
+ * Timed:  single iteration (repetition handled by CLI)
  *
  * Verification: sinusoidal input at frequency 3 → magnitude at bin 3 ≈ N/2.
  * Note: vDSP_fft_zip computes the standard DFT (no extra scaling).
@@ -36,7 +36,6 @@
 
 static int N      = (1 << 22);   /* 4194304 complex samples */
 static int WARMUP = 0;
-static int ITERS  = 5;
 static const char* DIRECTION = "forward";
 
 int main(void)
@@ -49,8 +48,6 @@ int main(void)
     if (env_val) N = atoi(env_val);
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) WARMUP = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iters");
-    if (env_val) ITERS = atoi(env_val);
     env_val = getenv("BENCH_PARAM_direction");
     if (env_val) DIRECTION = env_val;
 
@@ -93,7 +90,7 @@ int main(void)
     mach_timebase_info(&tb);
 
     /* ------------------------------------------------------------------ */
-    /* Warmup (5 iterations, not timed)                                   */
+    /* Warmup (configurable, not timed)                                   */
     /* ------------------------------------------------------------------ */
     for (int i = 0; i < WARMUP; i++) {
         vDSP_fft_zip(setup, &buf, 1, log2N, FFT_FORWARD);
@@ -110,19 +107,16 @@ int main(void)
     /* Timed iterations (time only the FFT calls, not data init)          */
     /* ------------------------------------------------------------------ */
     uint64_t t0 = mach_absolute_time();
-    for (int iter = 0; iter < ITERS; iter++) {
-        vDSP_fft_zip(setup, &buf, 1, log2N, FFT_FORWARD);
-    }
+    vDSP_fft_zip(setup, &buf, 1, log2N, FFT_FORWARD);
     uint64_t t1 = mach_absolute_time();
 
     double total_ns = (double)(t1 - t0) * tb.numer / tb.denom;
-    double avg_ns   = total_ns / ITERS;
-    double avg_ms   = avg_ns / 1e6;
+    double avg_ms   = total_ns / 1e6;
 
     /* ------------------------------------------------------------------ */
     /* Verification: run one fresh FFT on a clean sinusoidal input.       */
-    /* The timed loop applied ITERS consecutive FFTs (in-place), so       */
-    /* we cannot use that result for verification.                         */
+    /* The timed FFT is in-place, so we cannot use that result for         */
+    /* verification — run a fresh FFT instead.                             */
     /* ------------------------------------------------------------------ */
     {
         float *vr = (float *)malloc((size_t)N * sizeof(float));
@@ -171,11 +165,11 @@ int main(void)
 
     /* JSON-lines output */
     printf("{\"type\":\"kernel\",\"name\":\"cufftExecC2C\",\"time_ms\":%.6f,"
-           "\"params\":{\"n\":%d,\"warmup\":%d,\"iters\":%d,\"direction\":\"%s\"}}\n",
-           avg_ms, N, WARMUP, ITERS, DIRECTION);
+           "\"params\":{\"n\":%d,\"warmup\":%d,\"direction\":\"%s\"}}\n",
+           avg_ms, N, WARMUP, DIRECTION);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"GB/s\",\"value\":%.2f}]}\n",
-           (double)(avg_ms * ITERS), GBs);
+           avg_ms, GBs);
     fprintf(stderr, "cufft_1d  N=%d  time_ms=%.3f  GB/s=%.2f  (Accelerate vDSP_fft_zip)\n",
             N, avg_ms, GBs);
 

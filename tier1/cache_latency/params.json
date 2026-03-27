@@ -18,13 +18,6 @@
       "values": [300000, 2000000, 10000000]
     },
     {
-      "name": "num_iters",
-      "description": "Number of timed kernel launches for averaging",
-      "type": "int",
-      "default": 5,
-      "values": [3, 5, 10]
-    },
-    {
       "name": "rng_seed",
       "description": "Random seed for chain permutation (reproducibility)",
       "type": "int",

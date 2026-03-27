@@ -7,7 +7,7 @@
  * CPU verify: compare all 256 bins exactly.
  *
  * Usage:
- *   ./parboil_histogram [--n N] [--iterations I]
+ *   ./parboil_histogram [--n N]
  *
  *   --n N            Number of input elements (default: 16777216 = 16*1024*1024)
  *   --iterations I   Timed iterations         (default: 5)
@@ -111,13 +111,11 @@ int main(int argc, char* argv[])
 
     // Default values from params.json
     uint32_t n     = 16 * 1024 * 1024;
-    int      iters = 5;
     int      num_bins = 256;
     int      block_size = 256;
 
     // Command-line args as fallback
     n     = (uint32_t)parseIntParam(argc, argv, "--n", (int)n);
-    iters = parseIntParam(argc, argv, "--iterations", iters);
     num_bins = parseIntParam(argc, argv, "--num_bins", num_bins);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
 
@@ -125,8 +123,6 @@ int main(int argc, char* argv[])
     const char* env_val;
     env_val = getenv("BENCH_PARAM_n");
     if (env_val) n = (uint32_t)atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_num_bins");
     if (env_val) num_bins = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
@@ -148,7 +144,7 @@ int main(int argc, char* argv[])
     }
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
     fprintf(stderr, "N = %u elements  |  Bins = %d  |  Iterations = %d\n\n",
-            n, NUM_BINS, iters);
+            n, NUM_BINS);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -228,8 +224,8 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         uint64_t t0 = mach_absolute_time();
         dispatch_histogram();
         uint64_t t1 = mach_absolute_time();
@@ -257,19 +253,19 @@ int main(int argc, char* argv[])
     // Statistics
     // -------------------------------------------------------------------
     double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum_ms += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg_ms = sum_ms / iters;
+    double avg_ms = sum_ms / 1;
 
     double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         double d = times[i] - avg_ms;
         variance += d * d;
     }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
+    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
 
     // GB/s: N * sizeof(uint32) bytes of input data read
     double gb       = (double)n * sizeof(uint32_t) / 1.0e9;
@@ -283,9 +279,9 @@ int main(int argc, char* argv[])
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"histogram_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"n\":%u,\"iterations\":%d,\"num_bins\":%d,"
+           "\"params\":{\"n\":%u\"num_bins\":%d,"
            "\"block_size\":%d}}\n",
-           avg_ms, n, iters, num_bins, block_size);
+           avg_ms, n, num_bins, block_size);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",

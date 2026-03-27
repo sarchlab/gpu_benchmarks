@@ -52,17 +52,6 @@
       ]
     },
     {
-      "name": "iterations",
-      "description": "Timed benchmark iterations",
-      "type": "int",
-      "default": 5,
-      "values": [
-        3,
-        5,
-        10
-      ]
-    },
-    {
       "name": "damping_factor",
       "description": "PageRank damping factor",
       "type": "float",

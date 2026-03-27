@@ -456,9 +456,8 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaEventCreate(&evStart));
     CUDA_CHECK(cudaEventCreate(&evStop));
 
-    int iters = 5;
-    std::vector<double> times(iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         CUDA_CHECK(cudaEventRecord(evStart, 0));
         run_cedd();
         CUDA_CHECK(cudaEventRecord(evStop, 0));
@@ -474,8 +473,8 @@ int main(int argc, char** argv) {
 
     // Compute average time
     double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; ++i) sum += times[i];
+    double avg_ms = sum / 1;
 
     // Mpixels/sec = W * H / time_s / 1e6
     double mpix_per_sec = (double)npix / (avg_ms * 1e-3) / 1e6;

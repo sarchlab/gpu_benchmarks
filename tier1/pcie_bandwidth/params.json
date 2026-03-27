@@ -11,13 +11,6 @@
   },
   "non_scaling_params": [
     {
-      "name": "num_iterations",
-      "description": "Number of timed transfer repetitions for stable averaging",
-      "type": "int",
-      "default": 20,
-      "values": [5, 10, 20, 50, 100]
-    },
-    {
       "name": "transfer_type",
       "description": "Transfer mode: unidirectional H2D, D2H, or bidirectional",
       "type": "enum",

@@ -6,7 +6,6 @@
  * Parameters (from env vars BENCH_PARAM_*):
  *   grid_dim  — square grid dimension NX=NY for the 2D FFT
  *   warmup    — warmup iterations (not timed)
- *   iters     — timed iterations
  *   direction — FFT direction (forward/inverse/roundtrip)
  *
  * Verification: 2D sinusoidal input at frequencies (kx=3, ky=5)
@@ -129,7 +128,6 @@ int main(void)
     /* ------------------------------------------------------------------ */
     int grid_dim = 2048;
     int warmup   = 0;
-    int iters    = 5;
     const char *direction = "forward";
 
     const char *env_val;
@@ -137,8 +135,6 @@ int main(void)
     if (env_val) grid_dim = atoi(env_val);
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) warmup = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iters");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_direction");
     if (env_val) direction = env_val;
 
@@ -204,15 +200,13 @@ int main(void)
     GPU_EVENT_CREATE(ev_stop);
 
     GPU_EVENT_RECORD(ev_start);
-    for (int i = 0; i < iters; i++) {
-        FFT_EXEC(plan, d_in, d_out);
-    }
+    FFT_EXEC(plan, d_in, d_out);
     GPU_EVENT_RECORD(ev_stop);
     GPU_EVENT_SYNC(ev_stop);
 
     float total_ms = 0.0f;
     GPU_EVENT_ELAPSED(ev_start, ev_stop, total_ms);
-    float avg_ms = total_ms / (float)iters;
+    float avg_ms = total_ms;
 
     /* ------------------------------------------------------------------ */
     /* Copy result back for verification                                   */
@@ -263,8 +257,8 @@ int main(void)
 
     /* JSON-lines: kernel event */
     printf("{\"type\":\"kernel\",\"name\":\"%s\",\"time_ms\":%.6f,"
-           "\"params\":{\"grid_dim\":%d,\"warmup\":%d,\"iters\":%d,\"direction\":\"%s\"}}\n",
-           KERNEL_NAME, (double)avg_ms, grid_dim, warmup, iters, direction);
+           "\"params\":{\"grid_dim\":%d,\"warmup\":%d,\"direction\":\"%s\"}}\n",
+           KERNEL_NAME, (double)avg_ms, grid_dim, warmup, direction);
 
     /* JSON-lines: summary event */
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

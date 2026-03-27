@@ -11,8 +11,8 @@
  * Batch of 32 images is processed by encoding 32 convolution commands
  * into a single command buffer.
  *
- * Warmup: 5 iterations (not timed)
- * Timed:  5 iterations, report average via mach_absolute_time()
+ * Warmup: configurable iterations (not timed)
+ * Timed:  single iteration (repetition handled by CLI)
  *
  * Verification: compare a small patch of output against CPU reference
  * GFLOPS = 2 * N * K * H_out * W_out * C * R * S / time_s / 1e9
@@ -56,8 +56,6 @@ static const int PAD_V    = 3;
 static int OUT_H    = 112;
 static int OUT_W    = 112;
 static int WARMUP = 0;
-static int ITERS  = 5;
-
 /* =========================================================================
  * Timing helpers
  * ======================================================================= */
@@ -312,8 +310,8 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Conv: N=%d C=%d H=%d W=%d K=%d R=%d S=%d stride=%d pad=%d\n",
             BATCH_N, IN_C, IN_H, IN_W, OUT_K, FILT_R, FILT_S,
             STRIDE_V, PAD_V);
-    fprintf(stderr, "Output: %dx%dx%dx%d  warmup=%d  iters=%d\n\n",
-            BATCH_N, OUT_K, OUT_H, OUT_W, WARMUP, ITERS);
+    fprintf(stderr, "Output: %dx%dx%dx%d  warmup=%d\n\n",
+            BATCH_N, OUT_K, OUT_H, OUT_W, WARMUP);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -422,14 +420,10 @@ int main(int argc, char *argv[])
     /* ------------------------------------------------------------------
      * Timed iterations
      * ---------------------------------------------------------------- */
-    std::vector<double> times((size_t)ITERS);
-    for (int i = 0; i < ITERS; i++) {
         uint64_t t0 = mach_absolute_time();
-        run_batch();
-        uint64_t t1 = mach_absolute_time();
-        times[i] = ticks_to_ms(t1 - t0);
-        fprintf(stderr, "  iter %d: %.3f ms\n", i, times[i]);
-    }
+    run_batch();
+    uint64_t t1 = mach_absolute_time();
+    double total_ms = ticks_to_ms(t1 - t0);
 
     /* ------------------------------------------------------------------
      * Read back output for batch element 0 and verify
@@ -473,9 +467,7 @@ int main(int argc, char *argv[])
     /* ------------------------------------------------------------------
      * Statistics
      * ---------------------------------------------------------------- */
-    double sum_ms = 0.0;
-    for (int i = 0; i < ITERS; i++) sum_ms += times[i];
-    double avg_ms = sum_ms / ITERS;
+    double avg_ms = total_ms;
 
     double flops = 2.0 * BATCH_N * OUT_K * OUT_H * OUT_W *
                    IN_C * FILT_R * FILT_S;
@@ -488,7 +480,7 @@ int main(int argc, char *argv[])
            avg_ms, IN_H, BATCH_N, IN_C, OUT_K, FILT_R);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
-           sum_ms, gflops);
+           total_ms, gflops);
 
     /* Human-readable (stderr) */
     fprintf(stderr,

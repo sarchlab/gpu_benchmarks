@@ -15,10 +15,9 @@
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
 // Usage:
-//   ./polybench_2dconv [--size N] [--iterations I]
+//   ./polybench_2dconv [--size N]
 //
 //   --size N        Matrix dimension N×N   (default: 2048)
-//   --iterations I  Timed benchmark iterations (default: 5)
 //
 // Output (stdout): JSON-lines protocol
 // Output (stderr): GFLOPS
@@ -167,15 +166,12 @@ int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     int N     = parseIntParam(argc, argv, "--size", 2048);
-    int iters = parseIntParam(argc, argv, "--iterations", 5);
     int block_size = 256;
     const char* precision = "float";
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
@@ -193,7 +189,7 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Matrix: %d×%d  |  Iterations: %d\n\n", NI, NJ, iters);
+    fprintf(stderr, "Matrix: %d×%d\n\n", NI, NJ);
 
     // Host allocations
     float* h_A = (float*)malloc(matSize);
@@ -224,8 +220,8 @@ int main(int argc, char** argv) {
     }
 
     // Timed iterations
-    std::vector<double> times(iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         timer.record_start();
         hipLaunchKernelGGL(convolution2D_kernel, grid, block, 0, 0,
                            d_A, d_B, NI, NJ);
@@ -234,19 +230,19 @@ int main(int argc, char** argv) {
     }
 
     double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg = sum / iters;
+    double avg = sum / 1;
 
     double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         double d = times[i] - avg;
         variance += d * d;
     }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
+    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
 
     // GFLOPS: each interior output element = 9 MACs = 18 FLOPs
     long long interior = (long long)(NI - 2) * (NJ - 2);
@@ -256,8 +252,8 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"convolution2D_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"precision\":\"%s\"}}\n",
-           avg, N, iters, block_size, precision);
+           "\"params\":{\"size\":%d\"block_size\":%d,\"precision\":\"%s\"}}\n",
+           avg, N, block_size, precision);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
            avg, gflops);

@@ -64,18 +64,6 @@
         256,
         512
       ]
-    },
-    {
-      "name": "num_iterations",
-      "description": "Number of timed kernel launches for averaging",
-      "type": "int",
-      "default": 5,
-      "values": [
-        3,
-        5,
-        10,
-        20
-      ]
     }
   ],
   "kernels": [

@@ -9,10 +9,9 @@
 // Native CUDA implementation.
 //
 // Usage:
-//   ./heteromark_fir [--size N] [--iterations I]
+//   ./heteromark_fir [--size N]
 //
 //   --size N         Number of input samples (default: 1048576)
-//   --iterations I   Timed iterations (default: 5)
 //
 // Output (stdout): CSV row — heteromark_fir,<N>,<time_ms>,<GBs>
 // Output (stderr): human-readable results
@@ -119,13 +118,11 @@ int main(int argc, char** argv) {
 
     // Defaults from params.json
     int size       = 1048576;
-    int iterations = 5;
     int num_taps   = 64;
     int block_size = 256;
 
     // Command-line fallback
     size       = parseIntParam(argc, argv, "--size", size);
-    iterations = parseIntParam(argc, argv, "--iterations", iterations);
     num_taps   = parseIntParam(argc, argv, "--num_taps", num_taps);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
 
@@ -133,8 +130,6 @@ int main(int argc, char** argv) {
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_num_taps");
     if (env_val) num_taps = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
@@ -144,7 +139,6 @@ int main(int argc, char** argv) {
     if (env_val) num_warmup = atoi(env_val);
 
     int N     = size;
-    int iters = iterations;
     int taps  = num_taps;
 
     size_t input_bytes  = (size_t)N * sizeof(float);
@@ -159,7 +153,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "FIR filter  |  Samples: %d  |  Taps: %d  |  "
             "Iterations: %d warmup + %d timed\n\n",
-            N, taps, num_warmup, iters);
+            N, taps, num_warmup);
 
     // Host allocation + initialization
     float* h_input  = (float*)malloc(input_bytes);
@@ -218,8 +212,8 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaEventCreate(&evStart));
     CUDA_CHECK(cudaEventCreate(&evStop));
 
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         CUDA_CHECK(cudaEventRecord(evStart, 0));
         run_fir();
         CUDA_CHECK(cudaEventRecord(evStop, 0));
@@ -235,8 +229,8 @@ int main(int argc, char** argv) {
 
     // Compute average time
     double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; ++i) sum += times[i];
+    double avg_ms = sum / 1;
 
     // GB/s = (input_size + output_size) * sizeof(float) / time_s / 1e9
     double total_bytes = (double)(input_bytes + output_bytes);
@@ -246,7 +240,7 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"fir_filter_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"num_taps\":%d,"
+           "\"params\":{\"size\":%d\"num_taps\":%d,"
            "\"block_size\":%d}}\n",
            avg_ms, size, iterations, num_taps, block_size);
 

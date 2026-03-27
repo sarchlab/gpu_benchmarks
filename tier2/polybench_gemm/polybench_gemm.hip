@@ -9,10 +9,9 @@
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
 // Usage:
-//   ./polybench_gemm [--size N] [--iterations I]
+//   ./polybench_gemm [--size N]
 //
 //   --size N         Matrix dimension N (N×N)  (default: 1024)
-//   --iterations I   Timed iterations          (default: 5)
 //
 // Output (stdout): CSV — polybench_gemm,<N>,<GFLOPS>
 // Output (stderr): device info, timing details
@@ -89,17 +88,6 @@
         }                                                                      \
     } while (0)
 
-static int parseIterations(int argc, char** argv) {
-    int iters = 5;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -184,15 +172,12 @@ int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     int N     = parseIntParam(argc, argv, "--size", 1024);
-    int iters = parseIterations(argc, argv);
     int block_size = parseIntParam(argc, argv, "--block_size", 256);
     const char* precision = "float";
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
@@ -212,8 +197,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Matrix size: %d×%d  |  alpha=%.1f  beta=%.1f  |  Iterations: %d\n\n",
-            N, N, alpha, beta, iters);
+    fprintf(stderr, "Matrix size: %d×%d  |  alpha=%.1f  beta=%.1f\n\n",
+            N, N, alpha, beta);
 
     // Host allocations
     float* h_A = (float*)malloc(bytes);
@@ -251,8 +236,8 @@ int main(int argc, char** argv) {
     }
 
     // Timed iterations
-    std::vector<double> times(iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         timer.record_start();
         hipLaunchKernelGGL(polybench_gemm_kernel, grid, block, 0, 0,
                            d_A, d_B, d_C, N, alpha, beta);
@@ -262,19 +247,19 @@ int main(int argc, char** argv) {
 
     // Compute statistics
     double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum_ms += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg_ms = sum_ms / iters;
+    double avg_ms = sum_ms / 1;
 
     double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         double d = times[i] - avg_ms;
         variance += d * d;
     }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
+    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
 
     // GFLOPS: 2 * N^3 multiply-adds
     double gflops = 2.0 * (double)N * (double)N * (double)N
@@ -285,9 +270,9 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"polybench_gemm_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_ms, N, iters, block_size, precision);
+           avg_ms, N, block_size, precision);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
            avg_ms, gflops);

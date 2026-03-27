@@ -18,7 +18,6 @@
  * Environment variables (override argv):
  *   BENCH_PARAM_array_bytes
  *   BENCH_PARAM_num_accesses
- *   BENCH_PARAM_num_iters
  *   BENCH_PARAM_rng_seed
  *
  * Build:
@@ -43,7 +42,6 @@
 
 static const size_t   DEFAULT_ARRAY_BYTES  = 2ULL * 1024 * 1024;  // 2 MB
 static const uint32_t DEFAULT_NUM_ACCESSES = 2000000u;
-static const int      DEFAULT_NUM_ITERS    = 5;
 static const uint32_t DEFAULT_RNG_SEED     = 42u;
 static const int      DEFAULT_NUM_WARMUP   = 0;
 
@@ -113,10 +111,6 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_num_accesses");
     if (env_val) num_accesses = (uint32_t)atoi(env_val);
 
-    int num_iters = DEFAULT_NUM_ITERS;
-    env_val = getenv("BENCH_PARAM_num_iters");
-    if (env_val) num_iters = atoi(env_val);
-
     uint32_t rng_seed = DEFAULT_RNG_SEED;
     env_val = getenv("BENCH_PARAM_rng_seed");
     if (env_val) rng_seed = (uint32_t)atoi(env_val);
@@ -140,7 +134,6 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Array size   : %zu bytes (%zu KB)\n",
             array_bytes, array_bytes / 1024);
     fprintf(stderr, "Num accesses : %u\n", num_accesses);
-    fprintf(stderr, "Num iters    : %d\n", num_iters);
     fprintf(stderr, "RNG seed     : %u\n", rng_seed);
     fprintf(stderr, "Warmup iters : %d\n", num_warmup);
     fprintf(stderr, "Method       : single-thread pointer chasing\n\n");
@@ -234,18 +227,14 @@ int main(int argc, char *argv[])
         dispatch_kernel();
     }
 
-    /* Timed runs. */
+    /* Timed kernel launch. */
     uint64_t t0 = mach_absolute_time();
-    for (int iter = 0; iter < num_iters; ++iter) {
-        dispatch_kernel();
-    }
+    dispatch_kernel();
     uint64_t t1 = mach_absolute_time();
 
     double total_ns       = ticks_to_ns(t1 - t0);
-    double total_accesses = (double)num_accesses * num_iters;
-    double latency_ns     = total_ns / total_accesses;
+    double latency_ns     = total_ns / (double)num_accesses;
     double total_ms       = total_ns / 1e6;
-    double avg_ms         = total_ms / num_iters;
 
     fprintf(stderr, "Array %zu KB: latency = %.2f ns\n",
             array_bytes / 1024, latency_ns);
@@ -253,8 +242,8 @@ int main(int argc, char *argv[])
     /* JSON-lines output to stdout: kernel event */
     printf("{\"type\":\"kernel\",\"name\":\"pointer_chase_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"array_bytes\":%zu,\"num_accesses\":%u,"
-           "\"num_iters\":%d,\"rng_seed\":%u}}\n",
-           avg_ms, array_bytes, num_accesses, num_iters, rng_seed);
+           "\"rng_seed\":%u}}\n",
+           total_ms, array_bytes, num_accesses, rng_seed);
 
     /* JSON-lines output to stdout: summary */
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

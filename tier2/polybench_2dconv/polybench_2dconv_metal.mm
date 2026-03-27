@@ -8,7 +8,7 @@
  *        {0.1, 0.2, 0.5}}
  *
  * Usage:
- *   ./polybench_2dconv [--size N] [--iterations I]
+ *   ./polybench_2dconv [--size N]
  *
  *   --size N        Matrix dimension N×N        (default: 2048)
  *   --iterations I  Timed benchmark iterations  (default: 5)
@@ -68,15 +68,12 @@ int main(int argc, char* argv[])
     setvbuf(stdout, NULL, _IONBF, 0);
 
     int N     = parseIntParam(argc, argv, "--size", 2048);
-    int iters = parseIntParam(argc, argv, "--iterations", 5);
     int block_size = 256;
     const char* precision = "float";
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
@@ -97,7 +94,7 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
-    fprintf(stderr, "Matrix: %d×%d  |  Iterations: %d\n\n", NI, NJ, iters);
+    fprintf(stderr, "Matrix: %d×%d\n\n", NI, NJ);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -187,8 +184,8 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
-    for (int iter = 0; iter < iters; ++iter) {
+    std::vector<double> times(1);
+    for (int iter = 0; iter < 1; ++iter) {
         uint64_t t0 = mach_absolute_time();
         dispatch_kernel();
         uint64_t t1 = mach_absolute_time();
@@ -196,18 +193,18 @@ int main(int argc, char* argv[])
     }
 
     double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg = sum / iters;
+    double avg = sum / 1;
     double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         double d = times[i] - avg;
         variance += d * d;
     }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
+    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
 
     // GFLOPS: each interior output element = 9 MACs = 18 FLOPs
     long long interior = (long long)(NI - 2) * (NJ - 2);
@@ -216,8 +213,8 @@ int main(int argc, char* argv[])
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"convolution2D_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"precision\":\"%s\"}}\n",
-           avg, N, iters, block_size, precision);
+           "\"params\":{\"size\":%d\"block_size\":%d,\"precision\":\"%s\"}}\n",
+           avg, N, block_size, precision);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
            avg, gflops);

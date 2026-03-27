@@ -126,13 +126,11 @@ int main(int argc, char* argv[])
     // Defaults
     int size       = 4194304;
     int block_size = 256;
-    int iterations = 20;
     const char* precision = "float";
 
     // Command-line fallback
     size       = parseIntParam(argc, argv, "--size", size);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
-    iterations = parseIntParam(argc, argv, "--iterations", iterations);
     precision  = parseStrParam(argc, argv, "--precision", precision);
 
     // Environment variable overrides
@@ -141,8 +139,6 @@ int main(int argc, char* argv[])
     if (env_val) size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
     int num_warmup = 0;
@@ -150,7 +146,6 @@ int main(int argc, char* argv[])
     if (env_val) num_warmup = atoi(env_val);
 
     int N     = size;
-    int iters = iterations;
     size_t bytes = (size_t)N * sizeof(float);
 
     // -------------------------------------------------------------------
@@ -164,7 +159,7 @@ int main(int argc, char* argv[])
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
     fprintf(stderr, "Array size: %d floats (%.1f MiB)\n",
             N, (double)bytes / (1024.0 * 1024.0));
-    fprintf(stderr, "Iterations: %d\n\n", iters);
+    fprintf(stderr, "\n\n");
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -243,8 +238,8 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         uint64_t t0 = mach_absolute_time();
         buf_result = dispatch_reduction(queue, pso, tg_size,
                                         buf_input, (NSUInteger)N,
@@ -255,12 +250,12 @@ int main(int argc, char* argv[])
 
     // Compute statistics
     double sum_t = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum_t += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg_ms = sum_t / iters;
+    double avg_ms = sum_t / 1;
     double total_ms = sum_t;
 
     // Effective bandwidth
@@ -269,7 +264,7 @@ int main(int argc, char* argv[])
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"reduce_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,\"iterations\":%d,"
+           "\"params\":{\"size\":%d,\"block_size\":%d"
            "\"precision\":\"%s\"}}\n",
            avg_ms, size, block_size, iterations, precision);
 

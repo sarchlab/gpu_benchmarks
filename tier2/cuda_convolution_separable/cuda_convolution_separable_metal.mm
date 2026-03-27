@@ -5,7 +5,7 @@
  * Measures throughput in GB/s = 2 * W * H * sizeof(float) / time_s / 1e9.
  *
  * Usage:
- *   ./cuda_convolution_separable [--width W] [--height H] [--radius R] [--iterations I]
+ *   ./cuda_convolution_separable [--width W] [--height H] [--radius R]
  *
  *   --width W         Image width  (default: 4096)
  *   --height H        Image height (default: 4096)
@@ -103,13 +103,11 @@ int main(int argc, char* argv[]) {
     int width  = 4096;
     int height = 4096;
     int radius = 8;
-    int iterations = 5;
 
     // Command-line fallback
     width  = parseIntParam(argc, argv, "--width",  width);
     height = parseIntParam(argc, argv, "--height", height);
     radius = parseIntParam(argc, argv, "--radius", radius);
-    iterations = parseIntParam(argc, argv, "--iterations", iterations);
 
     // Environment variable overrides
     const char* env_val;
@@ -119,13 +117,10 @@ int main(int argc, char* argv[]) {
     if (env_val) height = atoi(env_val);
     env_val = getenv("BENCH_PARAM_radius");
     if (env_val) radius = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     int num_warmup = 0;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
 
-    int iters = iterations;
 
     int klen = 2 * radius + 1;
     size_t imageBytes = (size_t)width * height * sizeof(float);
@@ -141,7 +136,7 @@ int main(int argc, char* argv[]) {
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
     fprintf(stderr, "Image: %dx%d  |  Kernel radius: %d (%d-tap)  |  "
                     "Iterations: 5 warmup + %d timed\n\n",
-            width, height, radius, klen, iters);
+            width, height, radius, klen);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -280,8 +275,8 @@ int main(int argc, char* argv[]) {
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         uint64_t t0 = mach_absolute_time();
         run_conv();
         uint64_t t1 = mach_absolute_time();
@@ -289,8 +284,8 @@ int main(int argc, char* argv[]) {
     }
 
     double tsum = 0.0;
-    for (int i = 0; i < iters; ++i) tsum += times[i];
-    double avg_ms = tsum / iters;
+    for (int i = 0; i < 1; ++i) tsum += times[i];
+    double avg_ms = tsum / 1;
 
     // GB/s = 2 * W * H * sizeof(float) / time_s / 1e9
     double data_bytes = 2.0 * (double)width * (double)height * sizeof(float);
@@ -300,11 +295,11 @@ int main(int argc, char* argv[]) {
 
     // JSON-lines kernel events (one per kernel)
     printf("{\"type\":\"kernel\",\"name\":\"convolution_row_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"width\":%d,\"height\":%d,\"radius\":%d,\"iterations\":%d}}\n",
+           "\"params\":{\"width\":%d,\"height\":%d,\"radius\":%d}}\n",
            avg_ms, width, height, radius, iterations);
 
     printf("{\"type\":\"kernel\",\"name\":\"convolution_col_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"width\":%d,\"height\":%d,\"radius\":%d,\"iterations\":%d}}\n",
+           "\"params\":{\"width\":%d,\"height\":%d,\"radius\":%d}}\n",
            avg_ms, width, height, radius, iterations);
 
     // JSON-lines summary event

@@ -11,8 +11,8 @@
  * Batch of N=64 images is processed by encoding 64 normalization commands
  * into a single command buffer.
  *
- * Warmup: 5 iterations (not timed)
- * Timed:  5 iterations, report average via mach_absolute_time()
+ * Warmup: configurable iterations (not timed)
+ * Timed:  single iteration (repetition handled by CLI)
  *
  * Effective bandwidth (forward only):
  *   ≈ 2 * N * C * H * W * sizeof(float) / time_s / 1e9
@@ -55,7 +55,6 @@ static int CHAN_C   = 256;
 static int IN_H     = 56;
 static int IN_W     = 56;
 static int WARMUP   = 0;
-static int ITERS    = 5;
 #define BN_EPS   1e-5f
 
 /* =========================================================================
@@ -228,9 +227,6 @@ int main(int argc, char *argv[])
     if (env_val) CHAN_C = atoi(env_val);
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) WARMUP = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iters");
-    if (env_val) ITERS = atoi(env_val);
-
     /* ------------------------------------------------------------------
      * Metal device setup
      * ---------------------------------------------------------------- */
@@ -240,8 +236,8 @@ int main(int argc, char *argv[])
         return 1;
     }
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
-    fprintf(stderr, "BatchNorm: N=%d C=%d H=%d W=%d  warmup=%d  iters=%d\n",
-            BATCH_N, CHAN_C, IN_H, IN_W, WARMUP, ITERS);
+    fprintf(stderr, "BatchNorm: N=%d C=%d H=%d W=%d  warmup=%d\n",
+            BATCH_N, CHAN_C, IN_H, IN_W, WARMUP);
     fprintf(stderr, "NOTE: Metal version performs forward-only batch normalization\n\n");
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
@@ -358,14 +354,10 @@ int main(int argc, char *argv[])
     /* ------------------------------------------------------------------
      * Timed iterations
      * ---------------------------------------------------------------- */
-    std::vector<double> times((size_t)ITERS);
-    for (int i = 0; i < ITERS; i++) {
         uint64_t t0 = mach_absolute_time();
-        run_batch();
-        uint64_t t1 = mach_absolute_time();
-        times[i] = ticks_to_ms(t1 - t0);
-        fprintf(stderr, "  iter %d: %.3f ms\n", i, times[i]);
-    }
+    run_batch();
+    uint64_t t1 = mach_absolute_time();
+    double total_ms = ticks_to_ms(t1 - t0);
 
     /* ------------------------------------------------------------------
      * Read back output for batch element 0 and verify
@@ -396,9 +388,7 @@ int main(int argc, char *argv[])
     /* ------------------------------------------------------------------
      * Statistics
      * ---------------------------------------------------------------- */
-    double sum_ms = 0.0;
-    for (int i = 0; i < ITERS; i++) sum_ms += times[i];
-    double avg_ms = sum_ms / ITERS;
+    double avg_ms = total_ms;
 
     /* Forward-only bandwidth: read input + write output = 2 * NCHW * 4 bytes
      * We report using the same formula as the HIP version for comparability:
@@ -410,11 +400,11 @@ int main(int argc, char *argv[])
 
     /* JSON-lines output */
     printf("{\"type\":\"kernel\",\"name\":\"cudnnBatchNormalizationForwardTraining\",\"time_ms\":%.6f,"
-           "\"params\":{\"spatial_dim\":%d,\"batch_n\":%d,\"channels\":%d,\"warmup\":%d,\"iters\":%d}}\n",
-           avg_ms, IN_H, BATCH_N, CHAN_C, WARMUP, ITERS);
+           "\"params\":{\"spatial_dim\":%d,\"batch_n\":%d,\"channels\":%d,\"warmup\":%d}}\n",
+           avg_ms, IN_H, BATCH_N, CHAN_C, WARMUP);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"GB/s\",\"value\":%.2f}]}\n",
-           sum_ms, gbs);
+           total_ms, gbs);
     /* Human-readable (stderr) */
     fprintf(stderr,
         "cudnn_batchnorm  N=%d C=%d H=%d W=%d  time_ms=%.3f  GB/s=%.2f  "

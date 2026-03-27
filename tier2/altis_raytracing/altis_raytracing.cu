@@ -7,12 +7,11 @@
 // Native CUDA implementation.
 //
 // Usage:
-//   ./altis_raytracing [--width W] [--height H] [--spheres S] [--iterations I]
+//   ./altis_raytracing [--width W] [--height H] [--spheres S]
 //
 //   --width  W       Image width  (default: 1024)
 //   --height H       Image height (default: 1024)
 //   --spheres S      Number of spheres (default: 64)
-//   --iterations I   Timed iterations (default: 5)
 //
 // Output (stdout): CSV — altis_raytracing,<WxH>,<time_ms>,<Mrays_per_sec>
 // Output (stderr): human-readable results
@@ -291,13 +290,11 @@ int main(int argc, char** argv) {
     int W          = 1024;
     int H          = 1024;
     int nSph       = 64;
-    int iterations = 5;
 
     // Command-line fallback
     W          = parseIntParam(argc, argv, "--width", W);
     H          = parseIntParam(argc, argv, "--height", H);
     nSph       = parseIntParam(argc, argv, "--spheres", nSph);
-    iterations = parseIntParam(argc, argv, "--iterations", iterations);
 
     // Environment variable overrides
     const char* env_val;
@@ -307,13 +304,10 @@ int main(int argc, char** argv) {
     if (env_val) H = atoi(env_val);
     env_val = getenv("BENCH_PARAM_spheres");
     if (env_val) nSph = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     int num_warmup = 0;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
 
-    int iters = iterations;
 
     int total_pixels = W * H;
     size_t image_bytes  = (size_t)total_pixels * 4;
@@ -326,7 +320,7 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Ray Tracing  |  Image: %dx%d  |  Spheres: %d  |  "
-            "Iterations: 5 warmup + %d timed\n\n", W, H, nSph, iters);
+            "Iterations: 5 warmup + %d timed\n\n", W, H, nSph);
 
     // Generate random spheres (deterministic seed)
     std::vector<Sphere> h_spheres(nSph);
@@ -381,8 +375,8 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaEventCreate(&evStart));
     CUDA_CHECK(cudaEventCreate(&evStop));
 
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         CUDA_CHECK(cudaEventRecord(evStart, 0));
         run_raytrace();
         CUDA_CHECK(cudaEventRecord(evStop, 0));
@@ -398,8 +392,8 @@ int main(int argc, char** argv) {
 
     // Compute average time
     double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; ++i) sum += times[i];
+    double avg_ms = sum / 1;
 
     // Mrays/sec = W * H / time_s / 1e6
     double mrays = (double)(W * H) / (avg_ms * 1e-3) / 1e6;
@@ -409,7 +403,7 @@ int main(int argc, char** argv) {
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"raytrace_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"width\":%d,\"height\":%d,\"spheres\":%d,"
-           "\"iterations\":%d}}\n",
+           "}}\n",
            avg_ms, W, H, nSph, iterations);
 
     // JSON-lines summary event

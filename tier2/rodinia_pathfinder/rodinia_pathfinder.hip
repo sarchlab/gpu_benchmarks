@@ -6,11 +6,10 @@
 // Compiles with hipcc (AMD ROCm) or nvcc -x cu (CUDA).
 //
 // Usage:
-//   ./rodinia_pathfinder [--rows R] [--cols C] [--iterations I]
+//   ./rodinia_pathfinder [--rows R] [--cols C]
 //
 //   --rows R        Grid rows                  (default: 100000)
 //   --cols C        Grid columns               (default: 100)
-//   --iterations I  Timed benchmark iterations (default: 3)
 //
 // Output (stdout): CSV — benchmark,rows,cols,time_ms,GBs
 // Output (stderr): Verification result and device info
@@ -154,13 +153,11 @@ int main(int argc, char** argv) {
     // Defaults
     int cols  = 100;
     int rows  = 100000;
-    int iters = 3;
     int block_size_param = 256;
 
     // Command-line fallback
     rows  = parseIntParam(argc, argv, "--rows", rows);
     cols  = parseIntParam(argc, argv, "--cols", cols);
-    iters = parseIntParam(argc, argv, "--iterations", iters);
 
     // Environment variable overrides
     const char* env_val;
@@ -168,8 +165,6 @@ int main(int argc, char** argv) {
     if (env_val) cols = atoi(env_val);
     env_val = getenv("BENCH_PARAM_rows");
     if (env_val) rows = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size_param = atoi(env_val);
     int num_warmup = 0;
@@ -182,8 +177,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Grid: %d rows x %d cols  |  Iterations: %d\n\n",
-            rows, cols, iters);
+    fprintf(stderr, "Grid: %d rows x %d cols\n\n",
+            rows, cols);
 
     long long total_cells = (long long)rows * cols;
     size_t wall_bytes = (size_t)total_cells * sizeof(int);
@@ -291,8 +286,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipEventCreate(&ev_start));
     HIP_CHECK(hipEventCreate(&ev_stop));
 
-    std::vector<double> times(iters);
-    for (int iter = 0; iter < iters; iter++) {
+    std::vector<double> times(1);
+    for (int iter = 0; iter < 1; iter++) {
         HIP_CHECK(hipMemcpy(d_src, h_src, row_bytes, hipMemcpyHostToDevice));
 
         int* src = d_src;
@@ -314,7 +309,7 @@ int main(int argc, char** argv) {
         times[iter] = (double)ms;
 
         // Copy result back on last iteration
-        if (iter == iters - 1) {
+        if (iter == 1 - 1) {
             HIP_CHECK(hipMemcpy(h_result, src, row_bytes, hipMemcpyDeviceToHost));
         }
     }
@@ -324,8 +319,8 @@ int main(int argc, char** argv) {
 
     // Compute stats
     double sum = 0.0;
-    for (int i = 0; i < iters; i++) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; i++) sum += times[i];
+    double avg_ms = sum / 1;
 
     // GB/s: ROWS * COLS * sizeof(int) * 3 (2 reads: src+wall, 1 write: dst)
     double total_bytes_accessed = (double)rows * cols * sizeof(int) * 3.0;
@@ -342,8 +337,8 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"dynproc_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"cols\":%d,\"rows\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
-           avg_ms, cols, rows, iters, block_size_param);
+           "\"params\":{\"cols\":%d,\"rows\":%d\"block_size\":%d}}\n",
+           avg_ms, cols, rows, block_size_param);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

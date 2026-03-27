@@ -36,7 +36,6 @@ static int GEMM_M  = 4096;
 static int GEMM_N  = 4096;
 static int GEMM_K  = 4096;
 static int WARMUP  = 0;
-static int ITERS   = 5;
 static double ALPHA = 1.0;
 
 /* -------------------------------------------------------------------------
@@ -87,8 +86,6 @@ int main(int argc, char *argv[])
     if (env_val) { GEMM_M = atoi(env_val); GEMM_N = GEMM_M; GEMM_K = GEMM_M; }
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) WARMUP = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iters");
-    if (env_val) ITERS = atoi(env_val);
     env_val = getenv("BENCH_PARAM_alpha");
     if (env_val) ALPHA = atof(env_val);
 
@@ -97,8 +94,8 @@ int main(int argc, char *argv[])
     const int K = GEMM_K;
 
     fprintf(stderr, "cublas_dgemm (Apple/Accelerate cblas_dgemm, CPU-only — Metal has no FP64)\n");
-    fprintf(stderr, "M=%d  N=%d  K=%d  warmup=%d  iters=%d\n\n",
-            M, N, K, WARMUP, ITERS);
+    fprintf(stderr, "M=%d  N=%d  K=%d  warmup=%d\n\n",
+            M, N, K, WARMUP);
 
     /* ------------------------------------------------------------------ */
     /* Allocate and initialize host matrices                               */
@@ -134,14 +131,10 @@ int main(int argc, char *argv[])
     /* ------------------------------------------------------------------ */
     /* Timed iterations                                                    */
     /* ------------------------------------------------------------------ */
-    std::vector<double> times((size_t)ITERS);
-    for (int i = 0; i < ITERS; i++) {
         uint64_t t0 = mach_absolute_time();
-        run_dgemm();
-        uint64_t t1 = mach_absolute_time();
-        times[i] = ticks_to_ms(t1 - t0);
-        fprintf(stderr, "  iter %d: %.3f ms\n", i, times[i]);
-    }
+    run_dgemm();
+    uint64_t t1 = mach_absolute_time();
+    double total_ms = ticks_to_ms(t1 - t0);
 
     /* ------------------------------------------------------------------ */
     /* Verify first 8×8 corner vs simple CPU DGEMM                        */
@@ -172,9 +165,7 @@ int main(int argc, char *argv[])
     /* ------------------------------------------------------------------ */
     /* Statistics                                                          */
     /* ------------------------------------------------------------------ */
-    double sum_ms = 0.0;
-    for (int i = 0; i < ITERS; i++) sum_ms += times[i];
-    double avg_ms = sum_ms / ITERS;
+    double avg_ms = total_ms;
 
     double gflops = 2.0 * M * N * K / (avg_ms / 1000.0) / 1e9;
 
@@ -182,12 +173,12 @@ int main(int argc, char *argv[])
     /* Report — JSON-lines to stdout                                       */
     /* ------------------------------------------------------------------ */
     printf("{\"type\":\"kernel\",\"name\":\"cublasDgemm\",\"time_ms\":%.6f,"
-           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"alpha\":%.6f}}\n",
-           avg_ms, M, WARMUP, ITERS, ALPHA);
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"alpha\":%.6f}}\n",
+           avg_ms, M, WARMUP, ALPHA);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
-           sum_ms, gflops);
+           total_ms, gflops);
 
     /* Human-readable to stderr */
     fprintf(stderr, "cublas_dgemm  M=%d N=%d K=%d  time_ms=%.3f  GFLOPS=%.2f  (Accelerate cblas_dgemm, CPU-only)\n",

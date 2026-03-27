@@ -91,7 +91,6 @@ int main(int argc, char *argv[])
     int N = 4096;
     int K = 4096;
     int WARMUP = 0;
-    int ITERS = 5;
     float alpha_param = 1.0f;
 
     const char* env_val;
@@ -99,8 +98,6 @@ int main(int argc, char *argv[])
     if (env_val) { M = atoi(env_val); N = M; K = M; }
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) WARMUP = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iters");
-    if (env_val) ITERS = atoi(env_val);
     env_val = getenv("BENCH_PARAM_alpha");
     if (env_val) alpha_param = (float)atof(env_val);
 
@@ -113,8 +110,8 @@ int main(int argc, char *argv[])
         return 1;
     }
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
-    fprintf(stderr, "M=%d  N=%d  K=%d  warmup=%d  iters=%d\n\n",
-            M, N, K, WARMUP, ITERS);
+    fprintf(stderr, "M=%d  N=%d  K=%d  warmup=%d\n\n",
+            M, N, K, WARMUP);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -212,14 +209,10 @@ int main(int argc, char *argv[])
     /* ------------------------------------------------------------------ */
     /* Timed iterations                                                    */
     /* ------------------------------------------------------------------ */
-    std::vector<double> times((size_t)ITERS);
-    for (int i = 0; i < ITERS; i++) {
         uint64_t t0 = mach_absolute_time();
-        run_gemm();
-        uint64_t t1 = mach_absolute_time();
-        times[i] = ticks_to_ms(t1 - t0);
-        fprintf(stderr, "  iter %d: %.3f ms\n", i, times[i]);
-    }
+    run_gemm();
+    uint64_t t1 = mach_absolute_time();
+    double total_ms = ticks_to_ms(t1 - t0);
 
     /* ------------------------------------------------------------------ */
     /* Verify first 8×8 corner vs CPU reference                            */
@@ -250,20 +243,18 @@ int main(int argc, char *argv[])
     /* ------------------------------------------------------------------ */
     /* Statistics                                                          */
     /* ------------------------------------------------------------------ */
-    double sum_ms = 0.0;
-    for (int i = 0; i < ITERS; i++) sum_ms += times[i];
-    double avg_ms = sum_ms / ITERS;
+    double avg_ms = total_ms;
 
     double tflops = 2.0 * M * N * K / (avg_ms / 1000.0) / 1e12;
 
     /* JSON-lines kernel event */
     printf("{\"type\":\"kernel\",\"name\":\"cublasHgemm\",\"time_ms\":%.6f,"
-           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"alpha\":%.6f}}\n",
-           avg_ms, M, WARMUP, ITERS, alpha_param);
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"alpha\":%.6f}}\n",
+           avg_ms, M, WARMUP, alpha_param);
     /* JSON-lines summary event */
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"TFLOPS\",\"value\":%.2f}]}\n",
-           sum_ms, tflops);
+           total_ms, tflops);
 
     /* Human-readable */
     fprintf(stderr, "cublas_hgemm  M=%d N=%d K=%d  time_ms=%.3f  TFLOPS=%.2f\n",

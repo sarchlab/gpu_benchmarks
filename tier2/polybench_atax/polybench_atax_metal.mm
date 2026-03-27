@@ -5,7 +5,7 @@
  * Measures memory bandwidth in GB/s (A read twice per iteration).
  *
  * Usage:
- *   ./polybench_atax [--nx NX] [--ny NY] [--iterations I]
+ *   ./polybench_atax [--nx NX] [--ny NY]
  *
  *   --nx NX          Number of rows    (default: 4096)
  *   --ny NY          Number of columns (default: 4096)
@@ -89,7 +89,6 @@ int main(int argc, char* argv[])
 
     int nx    = parseIntParam(argc, argv, "--nx", 4096);
     int ny    = parseIntParam(argc, argv, "--ny", 4096);
-    int iters = parseIntParam(argc, argv, "--iterations", 5);
     int block_size = 256;
 
     const char* env_val;
@@ -97,8 +96,6 @@ int main(int argc, char* argv[])
     if (env_val) nx = atoi(env_val);
     env_val = getenv("BENCH_PARAM_ny");
     if (env_val) ny = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     int num_warmup = 0;
@@ -119,7 +116,7 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
-    fprintf(stderr, "Matrix size: %d×%d  |  Iterations: %d\n\n", nx, ny, iters);
+    fprintf(stderr, "Matrix size: %d×%d\n\n", nx, ny);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -249,9 +246,9 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Timed iterations — time each kernel separately
     // -------------------------------------------------------------------
-    std::vector<double> k1_times((size_t)iters);
-    std::vector<double> k2_times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> k1_times(1);
+    std::vector<double> k2_times(1);
+    for (int i = 0; i < 1; ++i) {
         uint64_t t0, t1;
 
         t0 = mach_absolute_time();
@@ -289,12 +286,12 @@ int main(int argc, char* argv[])
     // Statistics
     // -------------------------------------------------------------------
     double k1_sum = 0.0, k2_sum = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         k1_sum += k1_times[i];
         k2_sum += k2_times[i];
     }
-    double k1_avg = k1_sum / iters;
-    double k2_avg = k2_sum / iters;
+    double k1_avg = k1_sum / 1;
+    double k2_avg = k2_sum / 1;
     double total_avg_ms = k1_avg + k2_avg;
 
     // GB/s: A read twice (kernel1 + kernel2), each is NX*NY*4 bytes
@@ -306,11 +303,11 @@ int main(int argc, char* argv[])
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"atax_kernel1\",\"time_ms\":%.6f,"
-           "\"params\":{\"nx\":%d,\"ny\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
-           k1_avg, nx, ny, iters, block_size);
+           "\"params\":{\"nx\":%d,\"ny\":%d\"block_size\":%d}}\n",
+           k1_avg, nx, ny, block_size);
     printf("{\"type\":\"kernel\",\"name\":\"atax_kernel2\",\"time_ms\":%.6f,"
-           "\"params\":{\"nx\":%d,\"ny\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
-           k2_avg, nx, ny, iters, block_size);
+           "\"params\":{\"nx\":%d,\"ny\":%d\"block_size\":%d}}\n",
+           k2_avg, nx, ny, block_size);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
            total_avg_ms, gbps);

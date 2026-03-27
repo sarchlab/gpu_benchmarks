@@ -33,7 +33,7 @@ TARGET := fp16_throughput
 ifeq ($(PLATFORM),cuda)
   CC      := nvcc
   SRC     := fp16_throughput.cu
-  CFLAGS  := -O3 -std=c++14 -arch=sm_53
+  CFLAGS  := -O3 -std=c++14   -arch=native
 
 else ifeq ($(PLATFORM),rocm)
   CC      := hipcc

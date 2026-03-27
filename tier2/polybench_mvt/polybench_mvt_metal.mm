@@ -9,7 +9,7 @@
  * Measures memory bandwidth in GB/s (A read twice per iteration).
  *
  * Usage:
- *   ./polybench_mvt [--n N] [--iterations I]
+ *   ./polybench_mvt [--n N]
  *
  *   --n N            Matrix dimension (default: 4096)
  *   --iterations I   Timed iterations (default: 5)
@@ -52,17 +52,6 @@ static double ticks_to_ms(uint64_t ticks)
 // Argument parsing
 // ---------------------------------------------------------------------------
 
-static int parseIterations(int argc, char** argv) {
-    int iters = 5;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -106,15 +95,12 @@ int main(int argc, char* argv[])
     setvbuf(stdout, NULL, _IONBF, 0);
 
     int n     = parseIntParam(argc, argv, "--n", 4096);
-    int iters = parseIterations(argc, argv);
     int block_size_param = 256;
     const char* precision = "float";
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_n");
     if (env_val) n = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size_param = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
@@ -135,7 +121,7 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
-    fprintf(stderr, "Matrix size: %d×%d  |  Iterations: %d\n\n", n, n, iters);
+    fprintf(stderr, "Matrix size: %d×%d\n\n", n, n);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -271,8 +257,8 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         uint64_t t0 = mach_absolute_time();
         dispatch_mvt();
         uint64_t t1 = mach_absolute_time();
@@ -310,18 +296,18 @@ int main(int argc, char* argv[])
     // Statistics
     // -------------------------------------------------------------------
     double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum_ms += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg_ms = sum_ms / iters;
+    double avg_ms = sum_ms / 1;
     double variance = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         double d = times[i] - avg_ms;
         variance += d * d;
     }
-    double stddev = (iters > 1) ? sqrt(variance / (iters - 1)) : 0.0;
+    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
 
     // GB/s: A read twice (kernel1 + kernel2), each is N*N*4 bytes
     double gb   = 2.0 * (double)n * (double)n * sizeof(float) / 1e9;
@@ -332,13 +318,13 @@ int main(int argc, char* argv[])
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"mvt_kernel1\",\"time_ms\":%.6f,"
-           "\"params\":{\"n\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"n\":%d\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_ms, n, iters, block_size_param, precision);
+           avg_ms, n, block_size_param, precision);
     printf("{\"type\":\"kernel\",\"name\":\"mvt_kernel2\",\"time_ms\":%.6f,"
-           "\"params\":{\"n\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"n\":%d\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_ms, n, iters, block_size_param, precision);
+           avg_ms, n, block_size_param, precision);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
            avg_ms, gbps);

@@ -64,7 +64,6 @@ int main(int argc, char** argv) {
     int block_size     = 256;
     int num_vcycles    = 5;
     int num_smooth     = 3;
-    int iterations     = 5;
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_grid_size");
@@ -75,8 +74,6 @@ int main(int argc, char** argv) {
     if (env_val) num_vcycles = atoi(env_val);
     env_val = getenv("BENCH_PARAM_num_smooth_steps");
     if (env_val) num_smooth = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     int num_warmup = 0;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
@@ -88,7 +85,6 @@ int main(int argc, char** argv) {
 
     { int p = 4; while (p < N) p *= 2; N = p; }
 
-    int iters = iterations;
 
     @autoreleasepool {
 
@@ -101,7 +97,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Device: %s\n", [[device name] UTF8String]);
     fprintf(stderr, "NPB MG  |  Grid: %d x %d x %d  |  V-cycles: %d  |  "
             "Smooth steps: %d  |  Timed runs: 5 warmup + %d timed\n\n",
-            N, N, N, num_vcycles, num_smooth, iters);
+            N, N, N, num_vcycles, num_smooth);
 
     // Load shader library
     NSError* error = nil;
@@ -306,8 +302,8 @@ int main(int argc, char** argv) {
     for (int w = 0; w < num_warmup; ++w) run_mg();
 
     // Timed iterations
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         uint64_t t0 = mach_absolute_time();
         run_mg();
         uint64_t t1 = mach_absolute_time();
@@ -315,8 +311,8 @@ int main(int argc, char** argv) {
     }
 
     double tsum = 0.0;
-    for (int i = 0; i < iters; ++i) tsum += times[i];
-    double avg_ms = tsum / iters;
+    for (int i = 0; i < 1; ++i) tsum += times[i];
+    double avg_ms = tsum / 1;
     double total_ms = tsum;
 
     double mcells = (double)(N * N * N) / 1e6;
@@ -324,18 +320,18 @@ int main(int argc, char** argv) {
 
     printf("{\"type\":\"kernel\",\"name\":\"smooth_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"grid_size\":%d,\"block_size\":%d,"
-           "\"num_vcycles\":%d,\"num_smooth_steps\":%d,\"iterations\":%d}}\n",
-           avg_ms, N, block_size, num_vcycles, num_smooth, iters);
+           "\"num_vcycles\":%d,\"num_smooth_steps\":%d}}\n",
+           avg_ms, N, block_size, num_vcycles, num_smooth);
 
     printf("{\"type\":\"kernel\",\"name\":\"restrict_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"grid_size\":%d,\"block_size\":%d,"
-           "\"num_vcycles\":%d,\"num_smooth_steps\":%d,\"iterations\":%d}}\n",
-           avg_ms, N, block_size, num_vcycles, num_smooth, iters);
+           "\"num_vcycles\":%d,\"num_smooth_steps\":%d}}\n",
+           avg_ms, N, block_size, num_vcycles, num_smooth);
 
     printf("{\"type\":\"kernel\",\"name\":\"prolong_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"grid_size\":%d,\"block_size\":%d,"
-           "\"num_vcycles\":%d,\"num_smooth_steps\":%d,\"iterations\":%d}}\n",
-           avg_ms, N, block_size, num_vcycles, num_smooth, iters);
+           "\"num_vcycles\":%d,\"num_smooth_steps\":%d}}\n",
+           avg_ms, N, block_size, num_vcycles, num_smooth);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"avg_iter_ms\",\"value\":%.4f},"

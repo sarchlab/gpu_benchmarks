@@ -298,9 +298,8 @@ int main(int argc, char* argv[]) {
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    int iters = 5;
-    std::vector<double> times(iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         uint64_t t0 = mach_absolute_time();
         run_tc();
         uint64_t t1 = mach_absolute_time();
@@ -316,8 +315,8 @@ int main(int argc, char* argv[]) {
     long long num_triangles = gpu_total / 3;
 
     double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; ++i) sum += times[i];
+    double avg_ms = sum / 1;
 
     double tri_per_sec = (double)num_triangles / (avg_ms * 1e-3);
 

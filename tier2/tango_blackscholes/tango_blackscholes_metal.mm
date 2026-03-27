@@ -5,7 +5,7 @@
  * Black-Scholes formula. Measures throughput in M options/sec.
  *
  * Usage:
- *   ./tango_blackscholes [--size N] [--iterations I]
+ *   ./tango_blackscholes [--size N]
  *
  *   --size N         Number of options (default: 4194304 = 4M)
  *   --iterations I   Timed iterations (default: 5)
@@ -132,13 +132,11 @@ int main(int argc, char* argv[]) {
 
     // Defaults from params.json
     int size       = 4194304;
-    int iterations = 5;
     int block_size = 256;
     const char* precision = "float";
 
     // Command-line fallback
     size       = parseIntParam(argc, argv, "--size", size);
-    iterations = parseIntParam(argc, argv, "--iterations", iterations);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
     precision  = parseStrParam(argc, argv, "--precision", precision);
 
@@ -146,8 +144,6 @@ int main(int argc, char* argv[]) {
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
@@ -157,7 +153,6 @@ int main(int argc, char* argv[]) {
     if (env_val) num_warmup = atoi(env_val);
 
     int N     = size;
-    int iters = iterations;
 
     const float r = 0.02f;
     size_t bytes = (size_t)N * sizeof(float);
@@ -172,7 +167,7 @@ int main(int argc, char* argv[]) {
     }
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
     fprintf(stderr, "Options: %d  |  Iterations: 5 warmup + %d timed\n\n",
-            N, iters);
+            N);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -288,8 +283,8 @@ int main(int argc, char* argv[]) {
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         uint64_t t0 = mach_absolute_time();
         run_bs();
         uint64_t t1 = mach_absolute_time();
@@ -297,8 +292,8 @@ int main(int argc, char* argv[]) {
     }
 
     double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; ++i) sum += times[i];
+    double avg_ms = sum / 1;
 
     // M options/sec = N / time_s / 1e6
     double mopts = (double)N / (avg_ms * 1e-3) / 1e6;
@@ -307,7 +302,7 @@ int main(int argc, char* argv[]) {
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"blackscholes_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
            avg_ms, size, iterations, block_size, precision);
 

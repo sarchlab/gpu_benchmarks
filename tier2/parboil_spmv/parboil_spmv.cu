@@ -8,12 +8,11 @@
 // Native CUDA implementation.
 //
 // Usage:
-//   ./parboil_spmv [--num_rows N] [--avg_nnz_per_row K] [--block_size B] [--iterations I]
+//   ./parboil_spmv [--num_rows N] [--avg_nnz_per_row K] [--block_size B]
 //
 //   --num_rows N         Number of matrix rows          (default: 65536)
 //   --avg_nnz_per_row K  Average non-zeros per row      (default: 10)
 //   --block_size B       GPU thread-block size          (default: 256)
-//   --iterations I       Timed benchmark iterations     (default: 10)
 //
 // Output (stdout): CSV row —
 //   kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
@@ -50,18 +49,6 @@ struct BenchResult {
     double      max_ms;
     double      stddev_ms;
 };
-
-static int parseIterations(int argc, char** argv) {
-    int iters = 10;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -114,8 +101,8 @@ static BenchResult runBenchmark(const char* kernel_name,
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    std::vector<double> times(iterations);
-    for (int i = 0; i < iterations; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         timer.record_start();
         func();
         timer.record_stop();
@@ -123,19 +110,19 @@ static BenchResult runBenchmark(const char* kernel_name,
     }
 
     double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iterations; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg = sum / iterations;
+    double avg = sum / 1;
 
     double variance = 0.0;
-    for (int i = 0; i < iterations; ++i) {
+    for (int i = 0; i < 1; ++i) {
         double d = times[i] - avg;
         variance += d * d;
     }
-    double stddev = (iterations > 1) ? sqrt(variance / (iterations - 1)) : 0.0;
+    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
 
     BenchResult r;
     r.kernel_name  = kernel_name;
@@ -258,14 +245,12 @@ int main(int argc, char** argv)
     int num_rows   = 65536;
     int avg_nnz    = 10;
     int block_size = 256;
-    int iters      = 10;
     int seed       = 42;
 
     // Command-line args as fallback
     num_rows   = parseIntParam(argc, argv, "--num_rows",         num_rows);
     avg_nnz    = parseIntParam(argc, argv, "--avg_nnz_per_row",  avg_nnz);
     block_size = parseIntParam(argc, argv, "--block_size",       block_size);
-    iters      = parseIterations(argc, argv);
     seed       = parseIntParam(argc, argv, "--seed",             seed);
 
     // Env vars override
@@ -276,8 +261,6 @@ int main(int argc, char** argv)
     if (env_val) avg_nnz = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     int num_warmup = 0;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
@@ -303,8 +286,8 @@ int main(int argc, char** argv)
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Rows: %d  |  NNZ: %d  |  Block: %d  |  Iterations: %d\n\n",
-            num_rows, total_nnz, block_size, iters);
+    fprintf(stderr, "Rows: %d  |  NNZ: %d  |  Block: %d\n\n",
+            num_rows, total_nnz, block_size);
 
     // Device allocations
     int*   d_row_ptr;
@@ -334,7 +317,8 @@ int main(int argc, char** argv)
     snprintf(problemSize, sizeof(problemSize), "%d", num_rows);
 
     g_num_warmup = num_warmup;
-    BenchResult r = runBenchmark("spmv_csr", problemSize, iters, [&]() {
+    BenchResult r = runBenchmark(
+        "spmv_csr", problemSize, 1, [&]() {
         spmv_csr<<<grid, block>>>(d_row_ptr, d_col_idx, d_values, d_x, d_y, num_rows);
     });
 
@@ -344,12 +328,12 @@ int main(int argc, char** argv)
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"spmv_csr\",\"time_ms\":%.6f,"
            "\"params\":{\"num_rows\":%d,\"avg_nnz_per_row\":%d,\"block_size\":%d,"
-           "\"iterations\":%d}}\n",
-           r.avg_ms, num_rows, avg_nnz, block_size, iters);
+           "}}\n",
+           r.avg_ms, num_rows, avg_nnz, block_size);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
-           r.avg_ms * iters, gflops);
+           r.avg_ms, gflops);
 
     fprintf(stderr, "GFLOPS: %.4f  (avg %.4f ms)\n", gflops, r.avg_ms);
 

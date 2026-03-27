@@ -28,7 +28,6 @@
  *   BENCH_PARAM_buffer_size_mb
  *   BENCH_PARAM_flops_per_byte
  *   BENCH_PARAM_threads_per_block
- *   BENCH_PARAM_timed_iterations
  *
  * Build:
  *   make PLATFORM=metal
@@ -49,7 +48,6 @@
 static const int    DEFAULT_BUFFER_MB       = 256;
 static const double DEFAULT_FLOPS_PER_BYTE  = 4.0;
 static const int    DEFAULT_THREADS_PER_BLK = 256;
-static const int    DEFAULT_TIMED_ITERS     = 5;
 static const int    DEFAULT_WARMUP_ITERS     = 0;
 
 // ---------------------------------------------------------------------------
@@ -80,7 +78,6 @@ static void benchmark_ratio(id<MTLDevice> device,
                             uint32_t num_elements,
                             double ratio,
                             int threads_per_block,
-                            int timed_iters,
                             int warmup_iters,
                             double *time_ms,
                             double *gflops,
@@ -116,26 +113,23 @@ static void benchmark_ratio(id<MTLDevice> device,
         dispatch_once();
     }
 
-    /* Timed iterations. */
+    /* Timed kernel launch. */
     uint64_t t0 = mach_absolute_time();
-    for (int i = 0; i < timed_iters; ++i) {
-        dispatch_once();
-    }
+    dispatch_once();
     uint64_t t1 = mach_absolute_time();
 
     double elapsed_s = ticks_to_seconds(t1 - t0);
     double elapsed_ms = elapsed_s * 1e3;
-    double avg_ms = elapsed_ms / timed_iters;
+    double avg_ms = elapsed_ms;
 
     /* Total FLOPs */
-    double total_flops = (double)timed_iters
-                         * (double)num_elements
+    double total_flops = (double)num_elements
                          * (double)num_fmas
                          * 2.0;
     double achieved_gflops = total_flops / elapsed_s / 1e9;
 
     /* Bandwidth: each element = 8 bytes (4 read + 4 write) */
-    double total_bytes = (double)timed_iters * (double)num_elements * 8.0;
+    double total_bytes = (double)num_elements * 8.0;
     double achieved_bw = total_bytes / elapsed_s / 1e9;
 
     *time_ms = avg_ms;
@@ -177,9 +171,6 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_threads_per_block");
     if (env_val) threads_per_block = atoi(env_val);
 
-    int timed_iterations = DEFAULT_TIMED_ITERS;
-    env_val = getenv("BENCH_PARAM_timed_iterations");
-    if (env_val) timed_iterations = atoi(env_val);
 
     int num_warmup = DEFAULT_WARMUP_ITERS;
     env_val = getenv("BENCH_PARAM_warmup");
@@ -200,8 +191,7 @@ int main(int argc, char *argv[])
            buffer_mb, num_elements, bytes);
     fprintf(stderr, "Flops/byte      : %.1f\n", flops_per_byte);
     fprintf(stderr, "Threads/block   : %d\n", threads_per_block);
-    fprintf(stderr, "Warmup iters    : %d\n", num_warmup);
-    fprintf(stderr, "Timed iters     : %d\n\n", timed_iterations);
+    fprintf(stderr, "Warmup iters    : %d\n\n", num_warmup);
 
     /* Load the Metal shader library from source. */
     NSError *err = nil;
@@ -282,7 +272,7 @@ int main(int argc, char *argv[])
     double achieved_bw = 0.0;
 
     benchmark_ratio(device, pso, queue, d_data, num_elements, flops_per_byte,
-                    threads_per_block, timed_iterations,
+                    threads_per_block,
                     num_warmup,
                     &avg_time_ms, &achieved_gflops, &achieved_bw);
 
@@ -292,15 +282,14 @@ int main(int argc, char *argv[])
     /* JSON-lines output to stdout: kernel event */
     printf("{\"type\":\"kernel\",\"name\":\"mixbench_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"buffer_size_mb\":%d,\"flops_per_byte\":%.1f,"
-           "\"threads_per_block\":%d,\"timed_iterations\":%d}}\n",
-           avg_time_ms, buffer_mb, flops_per_byte, threads_per_block,
-           timed_iterations);
+           "\"threads_per_block\":%d}}\n",
+           avg_time_ms, buffer_mb, flops_per_byte, threads_per_block);
 
     /* JSON-lines output to stdout: summary */
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"GFLOPS\",\"value\":%.2f},"
            "{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
-           avg_time_ms * timed_iterations, achieved_gflops, achieved_bw);
+           avg_time_ms, achieved_gflops, achieved_bw);
 
     /* Clean up. */
     free(h_data);

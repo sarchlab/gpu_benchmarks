@@ -17,7 +17,6 @@
  *   BENCH_PARAM_matrix_dim
  *   BENCH_PARAM_precision          ("fp16" or "all")
  *   BENCH_PARAM_warmup
- *   BENCH_PARAM_timed_iterations
  */
 
 #import <Foundation/Foundation.h>
@@ -36,7 +35,6 @@ static const int DEFAULT_DIM               = 4096;
 static const int SIMD_TILE                 = 8;    // 8×8 simdgroup tiles
 static const int SIMDGROUP_SIZE            = 32;   // threads per simdgroup
 static const int DEFAULT_WARMUP_ITERATIONS = 0;
-static const int DEFAULT_TIMED_ITERATIONS  = 5;
 
 // ---------------------------------------------------------------------------
 // Timing helpers
@@ -119,9 +117,6 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) warmup_iterations = atoi(env_val);
 
-    int timed_iterations = DEFAULT_TIMED_ITERATIONS;
-    env_val = getenv("BENCH_PARAM_timed_iterations");
-    if (env_val) timed_iterations = atoi(env_val);
 
     int M = dim, N = dim, K = dim;
 
@@ -140,9 +135,8 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Matrix (M×N×K)   : %d × %d × %d\n", M, N, K);
         fprintf(stderr, "Tile size        : %d × %d (simdgroup)\n", SIMD_TILE, SIMD_TILE);
         fprintf(stderr, "Precision        : %s\n", precision);
-        fprintf(stderr, "Warmup iters     : %d\n", warmup_iterations);
-        fprintf(stderr, "Timed iters      : %d\n\n", timed_iterations);
-
+        fprintf(stderr, "Warmup iters     : %d\n\n", warmup_iterations);
+    
         /* Compile shader from embedded source. */
         NSError *error = nil;
         NSString *source = [NSString stringWithUTF8String:metalShaderSource];
@@ -238,18 +232,14 @@ int main(int argc, char *argv[])
         }
 
         /* ----------------------------------------------------------------- */
-        /* Timed iterations                                                  */
+        /* Timed kernel launch                                               */
         /* ----------------------------------------------------------------- */
         double ms_factor = ticks_to_ms();
         uint64_t t0 = mach_absolute_time();
-
-        for (int i = 0; i < timed_iterations; ++i) {
-            run_once();
-        }
-
+        run_once();
         uint64_t t1 = mach_absolute_time();
         double total_ms = (double)(t1 - t0) * ms_factor;
-        double avg_ms   = total_ms / timed_iterations;
+        double avg_ms   = total_ms;
         double avg_s    = avg_ms * 1e-3;
 
         /* TOPS = 2 * M * N * K / time_s / 1e12 */
@@ -261,8 +251,8 @@ int main(int argc, char *argv[])
         /* JSON-lines output to stdout: kernel event */
         printf("{\"type\":\"kernel\",\"name\":\"wmma_fp16_gemm\",\"time_ms\":%.6f,"
                "\"params\":{\"matrix_dim\":%d,\"precision\":\"%s\","
-               "\"warmup_iterations\":%d,\"timed_iterations\":%d}}\n",
-               avg_ms, dim, precision, warmup_iterations, timed_iterations);
+               "\"warmup_iterations\":%d}}\n",
+               avg_ms, dim, precision, warmup_iterations);
 
         /* JSON-lines output to stdout: summary */
         printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

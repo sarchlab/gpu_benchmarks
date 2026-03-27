@@ -91,8 +91,6 @@ static int M      = 4096;
 static int N      = 4096;
 static int K      = 4096;
 static int WARMUP = 0;
-static int ITERS  = 5;
-
 /* -------------------------------------------------------------------------
  * CPU reference DGEMM (only for a small corner — O(verify_m * verify_n * K))
  * ---------------------------------------------------------------------- */
@@ -129,9 +127,6 @@ int main(void)
     if (env_val) { M = atoi(env_val); N = M; K = M; }
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) WARMUP = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iters");
-    if (env_val) ITERS = atoi(env_val);
-
     /* ------------------------------------------------------------------ */
     /* Allocate and initialize host matrices                               */
     /* ------------------------------------------------------------------ */
@@ -209,15 +204,13 @@ int main(void)
     GPU_EVENT_CREATE(ev_stop);
 
     GPU_EVENT_RECORD(ev_start);
-    for (int i = 0; i < ITERS; i++) {
-        RUN_DGEMM();
-    }
+    RUN_DGEMM();
     GPU_EVENT_RECORD(ev_stop);
     GPU_EVENT_SYNC(ev_stop);
 
     float total_ms = 0.0f;
     GPU_EVENT_ELAPSED(ev_start, ev_stop, total_ms);
-    float avg_ms = total_ms / (float)ITERS;
+    float avg_ms = total_ms;
 
     /* ------------------------------------------------------------------ */
     /* Copy result back                                                    */
@@ -266,12 +259,12 @@ int main(void)
 
 #ifdef USE_CUBLAS
     printf("{\"type\":\"kernel\",\"name\":\"cublasDgemm\",\"time_ms\":%.6f,"
-           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"alpha\":%.6f}}\n",
-           (double)avg_ms, M, WARMUP, ITERS, alpha);
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"alpha\":%.6f}}\n",
+           (double)avg_ms, M, WARMUP, alpha);
 #elif defined(USE_ROCBLAS)
     printf("{\"type\":\"kernel\",\"name\":\"rocblas_dgemm\",\"time_ms\":%.6f,"
-           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"alpha\":%.6f}}\n",
-           (double)avg_ms, M, WARMUP, ITERS, alpha);
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"alpha\":%.6f}}\n",
+           (double)avg_ms, M, WARMUP, alpha);
 #endif
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

@@ -40,7 +40,6 @@ static const int DEFAULT_BLOCK_SIZE   = 256;
 static const int DEFAULT_NUM_GROUPS   = 128;
 static const int DEFAULT_INNER_ITERS  = 1000;
 static const int DEFAULT_WARMUP_ITERS  = 0;
-static const int TIMED_ITERS          = 5;
 static const int SMEM_FLOATS          = 12288;         // 48 KB / 4 bytes
 static const double BYTES_PER_GB      = 1e9;
 
@@ -132,14 +131,13 @@ static double run_benchmark(id<MTLDevice>  device,
     for (int i = 0; i < num_warmup; ++i)
         dispatch();
 
-    // Timed iterations
+    // Timed kernel launch
     uint64_t t0 = mach_absolute_time();
-    for (int i = 0; i < TIMED_ITERS; ++i)
-        dispatch();
+    dispatch();
     uint64_t t1 = mach_absolute_time();
 
     double total_s = ticks_to_seconds(t1 - t0);
-    double avg_ms  = (total_s / TIMED_ITERS) * 1e3;
+    double avg_ms  = total_s * 1e3;
 
     // Bandwidth
     double bytes_per_launch = 2.0 * SMEM_FLOATS * sizeof(float)
@@ -198,8 +196,7 @@ int main(int argc, char *argv[])
            SMEM_FLOATS * (int)sizeof(float), SMEM_FLOATS);
     fprintf(stderr, "Inner iters   : %d\n", inner_iters);
     fprintf(stderr, "Access pattern: %s\n", access_pattern);
-    fprintf(stderr, "Warmup iters  : %d\n", num_warmup);
-    fprintf(stderr, "Timed iters   : %d\n\n", TIMED_ITERS);
+    fprintf(stderr, "Warmup iters  : %d\n\n", num_warmup);
 
     // Compile Metal shader source at runtime
     NSError *err = nil;

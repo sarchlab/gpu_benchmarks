@@ -125,22 +125,18 @@ int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     int N          = 1024;
-    int iterations = 5;
     int block_size = 256;
     float alpha    = 1.5f;
     float beta     = 1.2f;
     const char* precision = "float";
 
     N          = parseIntParam(argc, argv, "--size", N);
-    iterations = parseIntParam(argc, argv, "--iterations", iterations);
     alpha      = parseFloatParam(argc, argv, "--alpha", alpha);
     beta       = parseFloatParam(argc, argv, "--beta", beta);
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_alpha");
@@ -153,7 +149,6 @@ int main(int argc, char** argv) {
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
 
-    int iters = iterations;
     size_t bytes = (size_t)N * N * sizeof(float);
 
     // Print device info
@@ -163,8 +158,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "2MM: D=alpha*A*B+beta*D, E=alpha*C*D+beta*E  |  N=%d  |  "
-            "alpha=%.1f  beta=%.1f  |  Iterations: %d warmup + %d timed\n\n",
-            N, alpha, beta, num_warmup, iters);
+            "alpha=%.1f  beta=%.1f warmup + %d timed\n\n",
+            N, alpha, beta, num_warmup);
 
     // Host allocations
     float* h_A = (float*)malloc(bytes);
@@ -217,8 +212,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipEventCreate(&evStart));
     HIP_CHECK(hipEventCreate(&evStop));
 
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         HIP_CHECK(hipEventRecord(evStart, 0));
         run_2mm();
         HIP_CHECK(hipEventRecord(evStop, 0));
@@ -233,12 +228,12 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipEventDestroy(evStop));
 
     double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum_ms += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg_ms = sum_ms / iters;
+    double avg_ms = sum_ms / 1;
 
     double gflops = 4.0 * (double)N * (double)N * (double)N
                     / (avg_ms * 1e-3) / 1e9;
@@ -247,14 +242,14 @@ int main(int argc, char** argv) {
             gflops, avg_ms, mn, mx);
 
     printf("{\"type\":\"kernel\",\"name\":\"mm_kernel_1\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"alpha\":%.2f,\"beta\":%.2f,\"precision\":\"%s\"}}\n",
-           avg_ms * 0.5, N, iters, block_size, alpha, beta, precision);
+           avg_ms * 0.5, N, block_size, alpha, beta, precision);
 
     printf("{\"type\":\"kernel\",\"name\":\"mm_kernel_2\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,"
+           "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"alpha\":%.2f,\"beta\":%.2f,\"precision\":\"%s\"}}\n",
-           avg_ms * 0.5, N, iters, block_size, alpha, beta, precision);
+           avg_ms * 0.5, N, block_size, alpha, beta, precision);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",

@@ -33,7 +33,7 @@ TARGET := graph_tc
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := graph_tc.cu
-  CFLAGS := -O3 -std=c++14
+  CFLAGS := -O3 -std=c++14 -arch=native
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

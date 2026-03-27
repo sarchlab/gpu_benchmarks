@@ -23,13 +23,6 @@
       "type": "int",
       "default": 5,
       "values": [3, 5, 10]
-    },
-    {
-      "name": "timed_iterations",
-      "description": "Number of timed kernel launches for averaging",
-      "type": "int",
-      "default": 5,
-      "values": [3, 5, 10]
     }
   ],
   "kernels": ["wmma_fp16_gemm", "wmma_tf32_gemm"]

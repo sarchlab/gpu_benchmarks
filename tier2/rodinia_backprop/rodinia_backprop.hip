@@ -18,7 +18,7 @@
  *   6. update_w2       — w2[j*OUTPUT_N+k] += lr * hidden[j] * delta_out[k]
  *
  * Usage:
- *   ./rodinia_backprop [--input N] [--hidden H] [--output O] [--iterations I]
+ *   ./rodinia_backprop [--input N] [--hidden H] [--output O]
  *
  * Output (stdout): CSV — backprop,<input_n>,<hidden_n>,<time_ms>,<GFLOPS>
  * Output (stderr): device info, timing details
@@ -217,13 +217,11 @@ int main(int argc, char* argv[])
     int input_n  = DEFAULT_INPUT_N;
     int hidden_n = DEFAULT_HIDDEN_N;
     int output_n = DEFAULT_OUTPUT_N;
-    int iters    = DEFAULT_ITERS;
 
     // Command-line fallback
     input_n  = parseIntParam(argc, argv, "--input", input_n);
     hidden_n = parseIntParam(argc, argv, "--hidden", hidden_n);
     output_n = parseIntParam(argc, argv, "--output", output_n);
-    iters    = parseIntParam(argc, argv, "--iterations", iters);
 
     // Environment variable overrides
     const char* env_val;
@@ -233,8 +231,6 @@ int main(int argc, char* argv[])
     if (env_val) hidden_n = atoi(env_val);
     env_val = getenv("BENCH_PARAM_output");
     if (env_val) output_n = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     int num_warmup = 0;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
@@ -243,8 +239,8 @@ int main(int argc, char* argv[])
     gpuDeviceProp_t prop;
     gpuGetDeviceProperties(&prop, 0);
     fprintf(stderr, "Device: %s\n", prop.name);
-    fprintf(stderr, "Network: %d → %d → %d  |  Iterations: %d\n\n",
-            input_n, hidden_n, output_n, iters);
+    fprintf(stderr, "Network: %d → %d → %d\n\n",
+            input_n, hidden_n, output_n);
 
     // -----------------------------------------------------------------------
     // Host allocation and initialization
@@ -335,12 +331,12 @@ int main(int argc, char* argv[])
     // -----------------------------------------------------------------------
     // Timed iterations
     // -----------------------------------------------------------------------
-    std::vector<float> times((size_t)iters);
+    std::vector<float> times(1);
     gpuEvent_t ev_start, ev_stop;
     gpuEventCreate(&ev_start);
     gpuEventCreate(&ev_stop);
 
-    for (int it = 0; it < iters; it++) {
+    for (int it = 0; it < 1; it++) {
         gpuEventRecord(ev_start, 0);
         run_epoch();
         gpuEventRecord(ev_stop, 0);
@@ -355,12 +351,12 @@ int main(int argc, char* argv[])
     // Statistics
     // -----------------------------------------------------------------------
     double sum_ms = 0.0, mn_ms = times[0], mx_ms = times[0];
-    for (int i = 0; i < iters; i++) {
+    for (int i = 0; i < 1; i++) {
         sum_ms += times[i];
         if (times[i] < mn_ms) mn_ms = times[i];
         if (times[i] > mx_ms) mx_ms = times[i];
     }
-    double avg_ms = sum_ms / iters;
+    double avg_ms = sum_ms / 1;
 
     // GFLOPS: approximate (forward ≈ 2*INPUT*HIDDEN + 2*HIDDEN*OUTPUT,
     //                       backward ≈ same)
@@ -378,8 +374,8 @@ int main(int argc, char* argv[])
     };
     for (int ki = 0; ki < 6; ki++) {
         printf("{\"type\":\"kernel\",\"name\":\"%s\",\"time_ms\":%.6f,"
-               "\"params\":{\"input\":%d,\"hidden\":%d,\"output\":%d,\"iterations\":%d}}\n",
-               kernel_names[ki], avg_ms, input_n, hidden_n, output_n, iters);
+               "\"params\":{\"input\":%d,\"hidden\":%d,\"output\":%d}}\n",
+               kernel_names[ki], avg_ms, input_n, hidden_n, output_n);
     }
 
     // JSON-lines summary event

@@ -22,7 +22,6 @@
  *   BENCH_PARAM_matrix_dim
  *   BENCH_PARAM_precision          ("fp16", "tf32", or "all")
  *   BENCH_PARAM_warmup
- *   BENCH_PARAM_timed_iterations
  */
 
 #include <cstdio>
@@ -79,7 +78,6 @@ static const int WMMA_N                    = 16;
 static const int WMMA_K                    = 16;
 static const int WARP_SIZE                 = 32;
 static const int DEFAULT_WARMUP_ITERATIONS = 0;
-static const int DEFAULT_TIMED_ITERATIONS  = 5;
 
 // ---------------------------------------------------------------------------
 // FP16 WMMA GEMM kernel
@@ -150,7 +148,7 @@ __global__ void wmma_tf32_gemm(const float *A, const float *B, float *C,
 template <typename LaunchFn>
 static void benchmark_kernel(const char *kernel_name, const char *precision_str,
                              int M, int N, int K,
-                             int warmup_iters, int timed_iters,
+                             int warmup_iters,
                              int matrix_dim,
                              LaunchFn launch_fn,
                              double *out_avg_ms, double *out_tops)
@@ -165,18 +163,16 @@ static void benchmark_kernel(const char *kernel_name, const char *precision_str,
     }
     GPU_CHECK(gpuDeviceSynchronize());
 
-    /* Timed iterations. */
+    /* Timed kernel launch. */
     GPU_CHECK(gpuEventRecord(ev_start, 0));
-    for (int i = 0; i < timed_iters; ++i) {
-        launch_fn();
-    }
+    launch_fn();
     GPU_CHECK(gpuEventRecord(ev_stop, 0));
     GPU_CHECK(gpuEventSynchronize(ev_stop));
 
     float elapsed_ms = 0.0f;
     GPU_CHECK(gpuEventElapsedTime(&elapsed_ms, ev_start, ev_stop));
 
-    double avg_ms = (double)elapsed_ms / timed_iters;
+    double avg_ms = (double)elapsed_ms;
     double avg_s  = avg_ms * 1e-3;
 
     /* TOPS = 2 * M * N * K / time_s / 1e12 */
@@ -188,9 +184,9 @@ static void benchmark_kernel(const char *kernel_name, const char *precision_str,
     /* JSON-lines output to stdout: kernel event */
     printf("{\"type\":\"kernel\",\"name\":\"%s\",\"time_ms\":%.6f,"
            "\"params\":{\"matrix_dim\":%d,\"precision\":\"%s\","
-           "\"warmup_iterations\":%d,\"timed_iterations\":%d}}\n",
+           "\"warmup_iterations\":%d}}\n",
            kernel_name, avg_ms, matrix_dim, precision_str,
-           warmup_iters, timed_iters);
+           warmup_iters);
 
     *out_avg_ms = avg_ms;
     *out_tops   = tops;
@@ -232,9 +228,6 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) warmup_iterations = atoi(env_val);
 
-    int timed_iterations = DEFAULT_TIMED_ITERATIONS;
-    env_val = getenv("BENCH_PARAM_timed_iterations");
-    if (env_val) timed_iterations = atoi(env_val);
 
     int M = dim, N = dim, K = dim;
 
@@ -248,8 +241,7 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Matrix (M×N×K)   : %d × %d × %d\n", M, N, K);
     fprintf(stderr, "WMMA tile        : %d × %d × %d\n", WMMA_M, WMMA_N, WMMA_K);
     fprintf(stderr, "Precision        : %s\n", precision);
-    fprintf(stderr, "Warmup iters     : %d\n", warmup_iterations);
-    fprintf(stderr, "Timed iters      : %d\n\n", timed_iterations);
+    fprintf(stderr, "Warmup iters     : %d\n\n", warmup_iterations);
 
     double total_time_ms = 0.0;
     double max_tops = 0.0;
@@ -278,7 +270,7 @@ int main(int argc, char *argv[])
 
         double avg_ms, tops;
         benchmark_kernel("wmma_fp16_gemm", "fp16", M, N, K,
-                         warmup_iterations, timed_iterations, dim,
+                         warmup_iterations, dim,
                          [&]() {
             wmma_fp16_gemm<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
         }, &avg_ms, &tops);
@@ -313,7 +305,7 @@ int main(int argc, char *argv[])
 
             double avg_ms, tops;
             benchmark_kernel("wmma_tf32_gemm", "tf32", M, N, K,
-                             warmup_iterations, timed_iterations, dim,
+                             warmup_iterations, dim,
                              [&]() {
                 wmma_tf32_gemm<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
             }, &avg_ms, &tops);

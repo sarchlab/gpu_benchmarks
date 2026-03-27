@@ -206,7 +206,6 @@ int main(void)
     int N = 4096;
     int K = 4096;
     int warmup = 0;
-    int iters = 5;
     int block_tile_m = BM;
 
     /* Read parameters from environment variables */
@@ -215,8 +214,6 @@ int main(void)
     if (env_val) { M = atoi(env_val); N = M; K = M; }
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) warmup = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iters");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_tile_m");
     if (env_val) block_tile_m = atoi(env_val);
 
@@ -280,15 +277,13 @@ int main(void)
     GPU_EVENT_CREATE(ev_stop);
 
     GPU_EVENT_RECORD(ev_start);
-    for (int i = 0; i < iters; i++) {
-        tiled_gemm_kernel<<<grid, block>>>(dA, dB, dC, M, N, K);
-    }
+    tiled_gemm_kernel<<<grid, block>>>(dA, dB, dC, M, N, K);
     GPU_EVENT_RECORD(ev_stop);
     GPU_EVENT_SYNC(ev_stop);
 
     float total_ms = 0.0f;
     GPU_EVENT_ELAPSED(ev_start, ev_stop, total_ms);
-    float avg_ms = total_ms / (float)iters;
+    float avg_ms = total_ms;
 
     /* ------------------------------------------------------------------ */
     /* Copy result back                                                    */
@@ -328,8 +323,8 @@ int main(void)
 
     /* Kernel event */
     printf("{\"type\":\"kernel\",\"name\":\"tiled_gemm_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"iters\":%d,\"block_tile_m\":%d}}\n",
-           (double)avg_ms, M, warmup, iters, block_tile_m);
+           "\"params\":{\"matrix_dim\":%d,\"warmup\":%d,\"block_tile_m\":%d}}\n",
+           (double)avg_ms, M, warmup, block_tile_m);
 
     /* Summary event */
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

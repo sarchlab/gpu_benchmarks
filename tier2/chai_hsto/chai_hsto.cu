@@ -6,10 +6,9 @@
 // Native CUDA implementation.
 //
 // Usage:
-//   ./chai_hsto [--size N] [--iterations I]
+//   ./chai_hsto [--size N]
 //
 //   --size N         Number of input bytes (default: 16777216 = 16M)
-//   --iterations I   Timed iterations (default: 5)
 //
 // Output (stdout): CSV — chai_hsto,<N>,<time_ms>,<GBs>
 // Output (stderr): human-readable results
@@ -117,13 +116,11 @@ int main(int argc, char** argv) {
 
     // Defaults from params.json
     int size       = 16777216;
-    int iterations = 5;
     int num_bins   = NUM_BINS;
     int block_size = BLOCK_SIZE;
 
     // Command-line fallback
     size       = parseIntParam(argc, argv, "--size", size);
-    iterations = parseIntParam(argc, argv, "--iterations", iterations);
     num_bins   = parseIntParam(argc, argv, "--num_bins", num_bins);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
 
@@ -131,8 +128,6 @@ int main(int argc, char** argv) {
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_num_bins");
     if (env_val) num_bins = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
@@ -142,7 +137,6 @@ int main(int argc, char** argv) {
     if (env_val) num_warmup = atoi(env_val);
 
     int N     = size;
-    int iters = iterations;
 
     size_t data_bytes  = (size_t)N * sizeof(unsigned char);
     size_t histo_bytes = num_bins * sizeof(unsigned int);
@@ -155,7 +149,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Histogram  |  N: %d (%.2f MB)  |  Bins: %d  |  "
             "Iterations: %d warmup + %d timed\n\n",
-            N, (double)data_bytes / (1024.0 * 1024.0), num_bins, num_warmup, iters);
+            N, (double)data_bytes / (1024.0 * 1024.0), num_bins, num_warmup);
 
     // Generate random input data (deterministic seed)
     unsigned char* h_data = (unsigned char*)malloc(data_bytes);
@@ -203,8 +197,8 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaEventCreate(&evStart));
     CUDA_CHECK(cudaEventCreate(&evStop));
 
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         CUDA_CHECK(cudaEventRecord(evStart, 0));
         run_histo();
         CUDA_CHECK(cudaEventRecord(evStop, 0));
@@ -220,8 +214,8 @@ int main(int argc, char** argv) {
 
     // Compute average time
     double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; ++i) sum += times[i];
+    double avg_ms = sum / 1;
 
     // GB/s = N * sizeof(uint8_t) / time_s / 1e9
     double gbs = (double)N * 1.0 / (avg_ms * 1e-3) / 1e9;
@@ -230,7 +224,7 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"histogram_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"num_bins\":%d,"
+           "\"params\":{\"size\":%d\"num_bins\":%d,"
            "\"block_size\":%d}}\n",
            avg_ms, size, iterations, num_bins, block_size);
 

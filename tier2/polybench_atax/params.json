@@ -45,18 +45,6 @@
       ]
     },
     {
-      "name": "iterations",
-      "description": "Number of timed iterations",
-      "type": "int",
-      "default": 5,
-      "values": [
-        3,
-        5,
-        10,
-        20
-      ]
-    },
-    {
       "name": "block_size",
       "description": "Number of threads per block",
       "type": "int",

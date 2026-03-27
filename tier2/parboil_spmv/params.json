@@ -62,17 +62,6 @@
         256,
         512
       ]
-    },
-    {
-      "name": "iterations",
-      "description": "Timed benchmark iterations",
-      "type": "int",
-      "default": 10,
-      "values": [
-        5,
-        10,
-        20
-      ]
     }
   ],
   "kernels": [

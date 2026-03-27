@@ -76,13 +76,11 @@ int main(int argc, char* argv[])
     // Defaults
     int size       = 512;
     int block_size = 16;
-    int iterations = 20;
     const char* precision = "float";
 
     // Command-line fallback
     size       = parseIntParam(argc, argv, "--size", size);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
-    iterations = parseIntParam(argc, argv, "--iterations", iterations);
     precision  = parseStrParam(argc, argv, "--precision", precision);
 
     // Environment variable overrides
@@ -91,15 +89,12 @@ int main(int argc, char* argv[])
     if (env_val) size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
     int num_warmup = 0;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
 
-    int iters = iterations;
     int M = size, N = size, K = size;
     float alpha = 1.0f, beta = 0.0f;
 
@@ -116,7 +111,7 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
-    fprintf(stderr, "Matrix size: %d×%d  |  Iterations: %d\n\n", size, size, iters);
+    fprintf(stderr, "Matrix size: %d×%d\n\n", size, size);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -216,8 +211,8 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         uint64_t t0 = mach_absolute_time();
         dispatch_gemm();
         uint64_t t1 = mach_absolute_time();
@@ -225,12 +220,12 @@ int main(int argc, char* argv[])
     }
 
     double sum_t = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         sum_t += times[i];
         if (times[i] < mn) mn = times[i];
         if (times[i] > mx) mx = times[i];
     }
-    double avg_ms = sum_t / iters;
+    double avg_ms = sum_t / 1;
     double total_ms = sum_t;
 
     double gflops = 2.0 * (double)M * (double)N * (double)K
@@ -238,7 +233,7 @@ int main(int argc, char* argv[])
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"gemm_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,\"iterations\":%d,"
+           "\"params\":{\"size\":%d,\"block_size\":%d"
            "\"precision\":\"%s\"}}\n",
            avg_ms, size, block_size, iterations, precision);
 

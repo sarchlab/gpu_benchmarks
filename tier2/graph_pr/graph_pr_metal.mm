@@ -6,7 +6,7 @@
  * neighbors.
  *
  * Usage:
- *   ./graph_pr [--vertices N] [--degree D] [--iterations I] [--pr-iterations P]
+ *   ./graph_pr [--vertices N] [--degree D] [--pr-iterations P]
  *
  *   --vertices N       Number of vertices (default: 131072)
  *   --degree D         Average degree per vertex (default: 16)
@@ -159,12 +159,10 @@ int main(int argc, char* argv[]) {
     int vertices      = 131072;
     int degree        = 16;
     int pr_iterations = 20;
-    int iterations    = 5;
 
     // Command-line fallback
     vertices      = parseIntParam(argc, argv, "--vertices", vertices);
     degree        = parseIntParam(argc, argv, "--degree", degree);
-    iterations    = parseIntParam(argc, argv, "--iterations", iterations);
     pr_iterations = parseIntParam(argc, argv, "--pr-iterations", pr_iterations);
 
     // Environment variable overrides
@@ -175,15 +173,12 @@ int main(int argc, char* argv[]) {
     if (env_val) degree = atoi(env_val);
     env_val = getenv("BENCH_PARAM_pr_iterations");
     if (env_val) pr_iterations = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     int num_warmup = 0;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
 
     int N         = vertices;
     int avg_deg   = degree;
-    int iters     = iterations;
     int pr_iters  = pr_iterations;
     float damping = 0.85f;
 
@@ -204,7 +199,7 @@ int main(int argc, char* argv[]) {
     fprintf(stderr, "PageRank (pull-based)  |  Vertices: %d  |  Edges: %d  |  "
             "PR iterations: %d  |  Damping: %.2f  |  "
             "Iterations: 5 warmup + %d timed\n\n",
-            N, num_edges, pr_iters, damping, iters);
+            N, num_edges, pr_iters, damping);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -325,8 +320,8 @@ int main(int argc, char* argv[]) {
     // -------------------------------------------------------------------
     // Timed iterations
     // -------------------------------------------------------------------
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         uint64_t t0 = mach_absolute_time();
         run_pagerank();
         uint64_t t1 = mach_absolute_time();
@@ -334,8 +329,8 @@ int main(int argc, char* argv[]) {
     }
 
     double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; ++i) sum += times[i];
+    double avg_ms = sum / 1;
 
     // GTEPS = N_edges * pr_iterations / time_s / 1e9
     double gteps = (double)num_edges * (double)pr_iters / (avg_ms * 1e-3) / 1e9;
@@ -345,7 +340,7 @@ int main(int argc, char* argv[]) {
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"pagerank_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"vertices\":%d,\"degree\":%d,\"pr_iterations\":%d,"
-           "\"iterations\":%d}}\n",
+           "}}\n",
            avg_ms, vertices, degree, pr_iterations, iterations);
 
     // JSON-lines summary event

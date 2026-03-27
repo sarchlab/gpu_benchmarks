@@ -17,11 +17,10 @@
 // Native CUDA implementation.
 //
 // Usage:
-//   ./polybench_bicg [--m M] [--n N] [--iterations I]
+//   ./polybench_bicg [--m M] [--n N]
 //
 //   --m M            Number of rows    (default: 4096)
 //   --n N            Number of columns (default: 4096)
-//   --iterations I   Timed iterations  (default: 5)
 //
 // Output (stdout): JSON-lines protocol
 // Output (stderr): device info, timing details
@@ -144,7 +143,6 @@ int main(int argc, char** argv) {
 
     int m     = parseIntParam(argc, argv, "--m", 4096);
     int n     = parseIntParam(argc, argv, "--n", 4096);
-    int iters = parseIntParam(argc, argv, "--iterations", 5);
     int block_size = 256;
 
     const char* env_val;
@@ -152,8 +150,6 @@ int main(int argc, char** argv) {
     if (env_val) m = atoi(env_val);
     env_val = getenv("BENCH_PARAM_n");
     if (env_val) n = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     int num_warmup = 0;
@@ -172,7 +168,7 @@ int main(int argc, char** argv) {
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Matrix size: %d×%d  |  Iterations: %d\n\n", m, n, iters);
+    fprintf(stderr, "Matrix size: %d×%d\n\n", m, n);
 
     // Host allocations
     float* h_A = (float*)malloc(bytes_A);
@@ -215,8 +211,8 @@ int main(int argc, char** argv) {
     }
 
     // Timed iterations — time each kernel separately
-    std::vector<double> k1_times(iters), k2_times(iters);
-    for (int iter = 0; iter < iters; ++iter) {
+    std::vector<double> k1_times(1), k2_times(1);
+    for (int iter = 0; iter < 1; ++iter) {
         timer.record_start();
         bicg_kernel1<<<grid_k1, block_size, 0, 0>>>(d_A, d_r, d_s, m, n);
         timer.record_stop();
@@ -262,12 +258,12 @@ int main(int argc, char** argv) {
 
     // Compute statistics
     double k1_sum = 0.0, k2_sum = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         k1_sum += k1_times[i];
         k2_sum += k2_times[i];
     }
-    double k1_avg = k1_sum / iters;
-    double k2_avg = k2_sum / iters;
+    double k1_avg = k1_sum / 1;
+    double k2_avg = k2_sum / 1;
     double total_avg_ms = k1_avg + k2_avg;
 
     // GB/s: A is read twice (kernel1 + kernel2), each is M*N*4 bytes
@@ -279,11 +275,11 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"bicg_kernel1\",\"time_ms\":%.6f,"
-           "\"params\":{\"m\":%d,\"n\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
-           k1_avg, m, n, iters, block_size);
+           "\"params\":{\"m\":%d,\"n\":%d\"block_size\":%d}}\n",
+           k1_avg, m, n, block_size);
     printf("{\"type\":\"kernel\",\"name\":\"bicg_kernel2\",\"time_ms\":%.6f,"
-           "\"params\":{\"m\":%d,\"n\":%d,\"iterations\":%d,\"block_size\":%d}}\n",
-           k2_avg, m, n, iters, block_size);
+           "\"params\":{\"m\":%d,\"n\":%d\"block_size\":%d}}\n",
+           k2_avg, m, n, block_size);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
            total_avg_ms, gbps);

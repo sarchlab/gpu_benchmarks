@@ -91,7 +91,6 @@ int main(int argc, char** argv) {
     int block_size   = 256;
     int num_updates  = 128;       // updates per thread
     int num_threads  = 65536;     // total threads launched
-    int iterations   = 5;
 
     // Environment variable overrides (primary)
     const char* env_val;
@@ -103,13 +102,10 @@ int main(int argc, char** argv) {
     if (env_val) num_updates = atoi(env_val);
     env_val = getenv("BENCH_PARAM_num_threads");
     if (env_val) num_threads = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     int num_warmup = 0;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
 
-    int iters      = iterations;
     int gridSize   = (num_threads + block_size - 1) / block_size;
     int actual_threads = gridSize * block_size;
     long long total_updates = (long long)actual_threads * num_updates;
@@ -125,7 +121,7 @@ int main(int argc, char** argv) {
             "Updates/thread: %d  |  Threads: %d  |  Total updates: %lld  |  "
             "Iterations: %d warmup + %d timed\n\n",
             table_size, (double)table_size * 8.0 / 1e6,
-            num_updates, actual_threads, total_updates, num_warmup, iters);
+            num_updates, actual_threads, total_updates, num_warmup);
 
     // -----------------------------------------------------------------------
     // Allocate table on device
@@ -163,8 +159,8 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaEventCreate(&evStart));
     CUDA_CHECK(cudaEventCreate(&evStop));
 
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    std::vector<double> times(1);
+    for (int i = 0; i < 1; ++i) {
         reset_table();
 
         CUDA_CHECK(cudaEventRecord(evStart, 0));
@@ -183,8 +179,8 @@ int main(int argc, char** argv) {
 
     // Compute average time
     double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
+    for (int i = 0; i < 1; ++i) sum += times[i];
+    double avg_ms = sum / 1;
     double total_ms = sum;
 
     // GUPS = total_updates / time_s / 1e9
@@ -193,7 +189,7 @@ int main(int argc, char** argv) {
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"gups_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"table_size\":%d,\"block_size\":%d,\"num_updates\":%d,"
-           "\"num_threads\":%d,\"iterations\":%d}}\n",
+           "\"num_threads\":%d}}\n",
            avg_ms, table_size, block_size, num_updates, num_threads, iterations);
 
     // JSON-lines summary event

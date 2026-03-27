@@ -10,10 +10,9 @@
 //   total_flops = 2*NI*NK*NJ + 2*NJ*NM*NL + 2*NI*NJ*NL
 //
 // Usage:
-//   ./polybench_3mm [--size N] [--iterations I]
+//   ./polybench_3mm [--size N]
 //
 //   --size N         Matrix dimension N (NxN for all matrices) (default: 256)
-//   --iterations I   Timed iterations                          (default: 5)
 //
 // Output (stdout): JSON-lines protocol
 // Output (stderr): device info, timing details
@@ -142,15 +141,12 @@ int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     int N     = parseIntParam(argc, argv, "--size", 256);
-    int iters = parseIntParam(argc, argv, "--iterations", 5);
     int block_size = 256;
     const char* precision = "float";
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
@@ -168,8 +164,8 @@ int main(int argc, char** argv) {
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Matrix size: %d×%d (all)  |  Iterations: %d\n\n",
-            N, N, iters);
+    fprintf(stderr, "Matrix size: %d×%d (all)\n\n",
+            N, N);
 
     // Buffer sizes
     size_t sA = (size_t)NI * NK * sizeof(float); // A: NI×NK
@@ -228,8 +224,8 @@ int main(int argc, char** argv) {
     }
 
     // Timed iterations — time each kernel separately
-    std::vector<double> k1_times(iters), k2_times(iters), k3_times(iters);
-    for (int iter = 0; iter < iters; ++iter) {
+    std::vector<double> k1_times(1), k2_times(1), k3_times(1);
+    for (int iter = 0; iter < 1; ++iter) {
         timer.record_start();
         mm3_kernel1<<<grid1, block, 0, 0>>>(d_A, d_B, d_E, NI, NK, NJ);
         timer.record_stop();
@@ -248,14 +244,14 @@ int main(int argc, char** argv) {
 
     // Compute statistics
     double k1_sum = 0.0, k2_sum = 0.0, k3_sum = 0.0;
-    for (int i = 0; i < iters; ++i) {
+    for (int i = 0; i < 1; ++i) {
         k1_sum += k1_times[i];
         k2_sum += k2_times[i];
         k3_sum += k3_times[i];
     }
-    double k1_avg = k1_sum / iters;
-    double k2_avg = k2_sum / iters;
-    double k3_avg = k3_sum / iters;
+    double k1_avg = k1_sum / 1;
+    double k2_avg = k2_sum / 1;
+    double k3_avg = k3_sum / 1;
     double total_avg_ms = k1_avg + k2_avg + k3_avg;
 
     // total_flops = 2*NI*NK*NJ + 2*NJ*NM*NL + 2*NI*NJ*NL
@@ -269,14 +265,14 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"mm3_kernel1\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"precision\":\"%s\"}}\n",
-           k1_avg, N, iters, block_size, precision);
+           "\"params\":{\"size\":%d\"block_size\":%d,\"precision\":\"%s\"}}\n",
+           k1_avg, N, block_size, precision);
     printf("{\"type\":\"kernel\",\"name\":\"mm3_kernel2\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"precision\":\"%s\"}}\n",
-           k2_avg, N, iters, block_size, precision);
+           "\"params\":{\"size\":%d\"block_size\":%d,\"precision\":\"%s\"}}\n",
+           k2_avg, N, block_size, precision);
     printf("{\"type\":\"kernel\",\"name\":\"mm3_kernel3\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"iterations\":%d,\"block_size\":%d,\"precision\":\"%s\"}}\n",
-           k3_avg, N, iters, block_size, precision);
+           "\"params\":{\"size\":%d\"block_size\":%d,\"precision\":\"%s\"}}\n",
+           k3_avg, N, block_size, precision);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
            total_avg_ms, gflops);

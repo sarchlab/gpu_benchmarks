@@ -8,8 +8,8 @@
  *   Forward:  y = scale * (x - mean) / sqrt(var + eps) + bias
  *   Backward: compute grad_input, grad_scale, grad_bias
  *
- * Warmup: 5 iterations (not timed)
- * Timed:  5 iterations, report average
+ * Warmup: configurable iterations (not timed)
+ * Timed:  single iteration (repetition handled by CLI)
  *
  * Effective bandwidth = total_bytes_read_and_written / time_s / 1e9
  *   For fwd+bwd ≈ 3 * N * C * H * W * sizeof(float) * 2 / time_s / 1e9
@@ -111,7 +111,6 @@ static int CHAN_C   = 256;
 static int IN_H     = 56;
 static int IN_W     = 56;
 static int WARMUP   = 0;
-static int ITERS    = 5;
 #define BN_EPS   1e-5
 
 /* =========================================================================
@@ -131,9 +130,6 @@ int main(void)
     if (env_val) CHAN_C = atoi(env_val);
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) WARMUP = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iters");
-    if (env_val) ITERS = atoi(env_val);
-
     /* ------------------------------------------------------------------
      * Host allocation and initialisation
      * ---------------------------------------------------------------- */
@@ -309,16 +305,14 @@ int main(void)
     GPU_EVENT_CREATE(ev_stop);
 
     GPU_EVENT_RECORD(ev_start);
-    for (int i = 0; i < ITERS; i++) {
-        RUN_BN_FWD();
+    RUN_BN_FWD();
         RUN_BN_BWD();
-    }
     GPU_EVENT_RECORD(ev_stop);
     GPU_EVENT_SYNC(ev_stop);
 
     float total_ms = 0.0f;
     GPU_EVENT_ELAPSED(ev_start, ev_stop, total_ms);
-    float avg_ms = total_ms / (float)ITERS;
+    float avg_ms = total_ms;
 
     /* ------------------------------------------------------------------
      * Copy results back for verification
@@ -378,12 +372,12 @@ int main(void)
     /* JSON-lines output */
 #ifdef USE_CUDNN
     printf("{\"type\":\"kernel\",\"name\":\"cudnnBatchNormalizationForwardTraining\",\"time_ms\":%.6f,"
-           "\"params\":{\"spatial_dim\":%d,\"batch_n\":%d,\"channels\":%d,\"warmup\":%d,\"iters\":%d}}\n",
-           (double)avg_ms, IN_H, BATCH_N, CHAN_C, WARMUP, ITERS);
+           "\"params\":{\"spatial_dim\":%d,\"batch_n\":%d,\"channels\":%d,\"warmup\":%d}}\n",
+           (double)avg_ms, IN_H, BATCH_N, CHAN_C, WARMUP);
 #elif defined(USE_MIOPEN)
     printf("{\"type\":\"kernel\",\"name\":\"miopenBatchNormalizationForwardTraining\",\"time_ms\":%.6f,"
-           "\"params\":{\"spatial_dim\":%d,\"batch_n\":%d,\"channels\":%d,\"warmup\":%d,\"iters\":%d}}\n",
-           (double)avg_ms, IN_H, BATCH_N, CHAN_C, WARMUP, ITERS);
+           "\"params\":{\"spatial_dim\":%d,\"batch_n\":%d,\"channels\":%d,\"warmup\":%d}}\n",
+           (double)avg_ms, IN_H, BATCH_N, CHAN_C, WARMUP);
 #endif
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"GB/s\",\"value\":%.2f}]}\n",

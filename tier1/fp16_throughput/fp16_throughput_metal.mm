@@ -26,7 +26,6 @@
  *   BENCH_PARAM_fmas_per_thread
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_threads_per_block
- *   BENCH_PARAM_num_iterations
  *
  * Build:
  *   make PLATFORM=metal
@@ -46,7 +45,6 @@
 static const int DEFAULT_FMAS_PER_THREAD = 4096;
 static const int DEFAULT_THREADS_PER_BLOCK = 256;
 static const int DEFAULT_NUM_BLOCKS = 1024;
-static const int DEFAULT_NUM_ITERATIONS = 10;
 static const int DEFAULT_NUM_WARMUP = 0;
 
 // ---------------------------------------------------------------------------
@@ -96,10 +94,6 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_threads_per_block");
     if (env_val) threads_per_block = atoi(env_val);
 
-    int num_iterations = DEFAULT_NUM_ITERATIONS;
-    env_val = getenv("BENCH_PARAM_num_iterations");
-    if (env_val) num_iterations = atoi(env_val);
-
     int num_warmup = DEFAULT_NUM_WARMUP;
     env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) num_warmup = atoi(env_val);
@@ -117,8 +111,7 @@ int main(int argc, char *argv[])
            num_blocks, threads_per_block, total_threads);
     fprintf(stderr, "FMAs / thread   : %d  (fma(half2,...), 4 FLOPs each)\n",
            fmas_per_thread);
-    fprintf(stderr, "Warmup iters    : %d\n", num_warmup);
-    fprintf(stderr, "Kernel repeats  : %d\n\n", num_iterations);
+    fprintf(stderr, "Warmup iters    : %d\n\n", num_warmup);
 
     NSError *err = nil;
     id<MTLLibrary> library = nil;
@@ -190,9 +183,9 @@ int main(int argc, char *argv[])
         [cb waitUntilCompleted];
     }
 
-    /* Timed benchmark loop. */
+    /* Timed kernel launch. */
     uint64_t t0 = mach_absolute_time();
-    for (int iter = 0; iter < num_iterations; ++iter) {
+    {
         id<MTLCommandBuffer>       cb  = [queue commandBuffer];
         id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
         [enc setComputePipelineState:pso];
@@ -207,26 +200,22 @@ int main(int argc, char *argv[])
     uint64_t t1 = mach_absolute_time();
 
     long long num_threads_ll = (long long)total_threads;
-    long long total_flops = (long long)num_iterations
-                            * num_threads_ll
+    long long total_flops = num_threads_ll
                             * (long long)fmas_per_thread
                             * 4LL;
     double elapsed_s  = ticks_to_seconds(t1 - t0);
     double elapsed_ms = elapsed_s * 1e3;
     double gflops     = (double)total_flops / elapsed_s / 1e9;
-    double avg_time_ms = elapsed_ms / num_iterations;
 
-    fprintf(stderr, "Elapsed time    : %.3f ms (%.3f ms / kernel)\n",
-           elapsed_ms, avg_time_ms);
+    fprintf(stderr, "Elapsed time    : %.3f ms\n", elapsed_ms);
     fprintf(stderr, "Total FLOPs     : %lld\n", total_flops);
     fprintf(stderr, "FP16 Throughput : %.2f GFLOPS\n", gflops);
 
     /* JSON-lines output to stdout. */
     printf("{\"type\":\"kernel\",\"name\":\"fp16_fma_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"fmas_per_thread\":%d,\"num_blocks\":%d,"
-           "\"threads_per_block\":%d,\"num_iterations\":%d}}\n",
-           avg_time_ms, fmas_per_thread, num_blocks, threads_per_block,
-           num_iterations);
+           "\"threads_per_block\":%d}}\n",
+           (double)elapsed_ms, fmas_per_thread, num_blocks, threads_per_block);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",

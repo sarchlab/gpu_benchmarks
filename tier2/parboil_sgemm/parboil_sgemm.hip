@@ -215,6 +215,9 @@ int main(int argc, char** argv)
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     float alpha = 1.5f;
     float beta  = 1.2f;
@@ -260,11 +263,12 @@ int main(int argc, char** argv)
     dim3 grid((N + TILE - 1) / TILE, (N + TILE - 1) / TILE);
 
     // Warmup
-    hipLaunchKernelGGL(sgemm_kernel, grid, block, 0, 0,
-                       d_A, d_B, d_C, N, alpha, beta);
-    HIP_CHECK(hipDeviceSynchronize());
-    // Reset C after warmup
-    HIP_CHECK(hipMemcpy(d_C, h_C, bytes, hipMemcpyHostToDevice));
+    for (int w = 0; w < num_warmup; ++w) {
+        hipLaunchKernelGGL(sgemm_kernel, grid, block, 0, 0,
+                           d_A, d_B, d_C, N, alpha, beta);
+        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipMemcpy(d_C, h_C, bytes, hipMemcpyHostToDevice));
+    }
 
     // Timed iterations
     HipTimer timer;

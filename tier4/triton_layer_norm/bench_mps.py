@@ -13,6 +13,7 @@ def benchmark():
     m = int(os.environ.get('BENCH_PARAM_m', '4096'))
     eps = float(os.environ.get('BENCH_PARAM_eps', '1e-5'))
     dtype_str = os.environ.get('BENCH_PARAM_dtype', 'float32')
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     dtype_map = {'float16': torch.float16, 'float32': torch.float32, 'float64': torch.float64}
     dtype = dtype_map.get(dtype_str, torch.float32)
@@ -25,9 +26,10 @@ def benchmark():
     bias = torch.zeros(n, device=device, dtype=dtype)
 
     # Warmup
-    for _ in range(5):
+    for _ in range(num_warmup):
         y = F.layer_norm(x, (n,), weight, bias, eps=eps)
-    _ = y.sum().item()
+    if num_warmup > 0:
+        _ = y.sum().item()
 
     # Timed
     times = []

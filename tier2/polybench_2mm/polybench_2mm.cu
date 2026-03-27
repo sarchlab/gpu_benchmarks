@@ -132,6 +132,9 @@ int main(int argc, char** argv) {
     if (env_val) beta = (float)atof(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int iters = iterations;
     size_t bytes = (size_t)N * N * sizeof(float);
@@ -143,8 +146,8 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "2MM: D=alpha*A*B+beta*D, E=alpha*C*D+beta*E  |  N=%d  |  "
-            "alpha=%.1f  beta=%.1f  |  Iterations: 5 warmup + %d timed\n\n",
-            N, alpha, beta, iters);
+            "alpha=%.1f  beta=%.1f  |  Iterations: %d warmup + %d timed\n\n",
+            N, alpha, beta, num_warmup, iters);
 
     // Host allocations: A, B, C, D, E — all NxN
     float* h_A = (float*)malloc(bytes);
@@ -191,8 +194,8 @@ int main(int argc, char** argv) {
         mm_kernel<<<grid, block>>>(d_C, d_D, d_E, N, alpha, beta);
     };
 
-    // Warmup (5 iterations)
-    for (int w = 0; w < 5; ++w) {
+    // Warmup
+    for (int w = 0; w < num_warmup; ++w) {
         run_2mm();
         CUDA_CHECK(cudaDeviceSynchronize());
     }

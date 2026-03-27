@@ -122,6 +122,8 @@ static const int DEFAULT_NUM_BLOCKS = 1024;
 /** How many times to repeat the kernel for a stable average. */
 static const int DEFAULT_NUM_ITERATIONS = 10;
 
+static const int DEFAULT_NUM_WARMUP = 0;
+
 // ---------------------------------------------------------------------------
 // FP32 FMA kernel
 // ---------------------------------------------------------------------------
@@ -209,6 +211,10 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_num_iterations");
     if (env_val) num_iterations = atoi(env_val);
 
+    int num_warmup = DEFAULT_NUM_WARMUP;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
+
     /* Print device information to stderr. */
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
@@ -221,6 +227,7 @@ int main(int argc, char *argv[])
            num_blocks, threads_per_block,
            num_blocks * threads_per_block);
     fprintf(stderr, "FMAs / thread   : %d\n", fmas_per_thread);
+    fprintf(stderr, "Warmup iters    : %d\n", num_warmup);
     fprintf(stderr, "Kernel repeats  : %d\n\n", num_iterations);
 
     /* Allocate a single float on the device to receive the checksum. */
@@ -232,9 +239,11 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipEventCreate(&ev_start));
     HIP_CHECK(hipEventCreate(&ev_stop));
 
-    /* Warm-up launch — not timed. */
-    hipLaunchKernelGGL(fp32_fma_kernel, dim3(num_blocks), dim3(threads_per_block),
-                       0, 0, d_out, fmas_per_thread);
+    /* Warm-up launches — not timed. */
+    for (int w = 0; w < num_warmup; ++w) {
+        hipLaunchKernelGGL(fp32_fma_kernel, dim3(num_blocks), dim3(threads_per_block),
+                           0, 0, d_out, fmas_per_thread);
+    }
     HIP_CHECK(hipDeviceSynchronize());
 
     /* Timed benchmark loop. */

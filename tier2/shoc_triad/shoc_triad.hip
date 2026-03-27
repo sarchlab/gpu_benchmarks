@@ -183,6 +183,9 @@ int main(int argc, char** argv) {
     if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int N = array_size;
     int iters = iterations;
@@ -223,9 +226,11 @@ int main(int argc, char** argv) {
     int grid = (N + block_size - 1) / block_size;
 
     // Warmup
-    hipLaunchKernelGGL(triad_kernel, dim3(grid), dim3(block_size),
-                       0, 0, d_a, d_b, d_c, scalar, N);
-    HIP_CHECK(hipDeviceSynchronize());
+    for (int w = 0; w < num_warmup; ++w) {
+        hipLaunchKernelGGL(triad_kernel, dim3(grid), dim3(block_size),
+                           0, 0, d_a, d_b, d_c, scalar, N);
+        HIP_CHECK(hipDeviceSynchronize());
+    }
 
     // Timed iterations
     BenchmarkTimer timer;

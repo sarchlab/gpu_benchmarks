@@ -113,6 +113,7 @@ def benchmark():
     num_layers = int(os.environ.get('BENCH_PARAM_num_layers', '6'))
     hidden_size = int(os.environ.get('BENCH_PARAM_hidden_size', '384'))
     num_heads = int(os.environ.get('BENCH_PARAM_num_heads', '6'))
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     # Split total_generated into 3 CoT steps + answer
     cot_step_tokens = total_generated // 4
@@ -131,9 +132,10 @@ def benchmark():
 
     # Warmup
     print("Warmup...", file=sys.stderr)
-    for _ in range(5):
+    for _ in range(num_warmup):
         out = cot_reasoning(model, prompt, cot_step_tokens, answer_tokens)
-    _ = out[0, -1].item()  # sync
+    if num_warmup > 0:
+        _ = out[0, -1].item()  # sync
 
     # Timed
     print("Benchmarking...", file=sys.stderr)

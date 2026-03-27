@@ -35,7 +35,7 @@
 #include <math.h>
 
 static int N      = (1 << 22);   /* 4194304 complex samples */
-static int WARMUP = 5;
+static int WARMUP = 0;
 static int ITERS  = 5;
 static const char* DIRECTION = "forward";
 

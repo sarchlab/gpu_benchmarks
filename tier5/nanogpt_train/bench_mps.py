@@ -84,6 +84,7 @@ def benchmark():
     n_layer = int(os.environ.get('BENCH_PARAM_n_layer', '6'))
     n_embd = int(os.environ.get('BENCH_PARAM_n_embd', '384'))
     n_head = int(os.environ.get('BENCH_PARAM_n_head', '6'))
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     vocab_size = 50257
 
@@ -109,10 +110,11 @@ def benchmark():
         return loss
 
     # Warmup
-    for i in range(5):
+    for i in range(num_warmup):
         loss = step()
-        print(f"  warmup {i+1}/5", file=sys.stderr)
-    _ = loss.item()  # sync
+        print(f"  warmup {i+1}/{num_warmup}", file=sys.stderr)
+    if num_warmup > 0:
+        _ = loss.item()  # sync
 
     # Timed
     total_time = 0.0

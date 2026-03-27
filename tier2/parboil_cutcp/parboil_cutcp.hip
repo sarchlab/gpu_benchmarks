@@ -163,6 +163,9 @@ int main(int argc, char** argv) {
     if (env_val) cutoff = (float)atof(env_val);
     env_val = getenv("BENCH_PARAM_iterations");
     if (env_val) iterations = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int iters = iterations;
     float cutoff2 = cutoff * cutoff;
@@ -217,7 +220,7 @@ int main(int argc, char** argv) {
     };
 
     // Warmup
-    for (int w = 0; w < 5; ++w) {
+    for (int w = 0; w < num_warmup; ++w) {
         run_cutcp();
         HIP_CHECK(hipDeviceSynchronize());
     }

@@ -271,6 +271,9 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_verify");
     if (env_val) verify = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int N = vertices;
     int D = avg_degree;
@@ -282,7 +285,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Triangle Counting  |  Vertices: %d  |  Avg Degree: %d  |  "
-            "Iterations: 5 warmup + 5 timed\n\n", N, D);
+            "Iterations: %d warmup + 5 timed\n\n", N, D, num_warmup);
 
     // Generate graph
     fprintf(stderr, "Generating random graph...\n");
@@ -334,9 +337,9 @@ int main(int argc, char** argv) {
     };
 
     // -------------------------------------------------------------------
-    // Warmup (5 iterations)
+    // Warmup
     // -------------------------------------------------------------------
-    for (int w = 0; w < 5; ++w) {
+    for (int w = 0; w < num_warmup; ++w) {
         run_tc();
         HIP_CHECK(hipDeviceSynchronize());
     }

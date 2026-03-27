@@ -37,6 +37,13 @@
       "type": "int",
       "default": 7,
       "values": [1, 3, 5, 7]
+    },
+    {
+      "name": "warmup",
+      "description": "Number of warmup iterations before timing",
+      "type": "int",
+      "default": 0,
+      "values": [0, 3, 5, 10]
     }
   ],
   "kernels": ["cudnnConvolutionForward", "miopenConvolutionForward"]

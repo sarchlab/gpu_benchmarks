@@ -26,6 +26,7 @@ def benchmark():
     n_layer = int(os.environ.get('BENCH_PARAM_n_layer', '6'))
     n_embd = int(os.environ.get('BENCH_PARAM_n_embd', '512'))
     n_head = int(os.environ.get('BENCH_PARAM_n_head', '8'))
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     config = GPT2Config(
         n_layer=n_layer,
@@ -45,10 +46,11 @@ def benchmark():
           file=sys.stderr)
 
     # Warmup
-    for i in range(5):
+    for i in range(num_warmup):
         out = generate(model, prompt, num_new_tokens)
-        print(f"  warmup {i+1}/5", file=sys.stderr)
-    _ = out[0, -1].item()  # sync
+        print(f"  warmup {i+1}/{num_warmup}", file=sys.stderr)
+    if num_warmup > 0:
+        _ = out[0, -1].item()  # sync
 
     # Timed
     total_time = 0.0

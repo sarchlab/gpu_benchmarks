@@ -55,7 +55,7 @@
 static const int DEFAULT_OPS_PER_THREAD  = 1024;
 static const int DEFAULT_THREADS_PER_BLK = 256;
 static const int DEFAULT_NUM_BLOCKS      = 1024;
-static const int NUM_WARMUP              = 5;
+static const int DEFAULT_NUM_WARMUP      = 0;
 static const int NUM_ITERATIONS          = 5;
 
 // ---------------------------------------------------------------------------
@@ -99,6 +99,7 @@ static void run_benchmark(const char *kernel_name,
                           KernelFunc kernel, unsigned int *d_counter,
                           int ops_per_thread, int num_blocks,
                           int threads_per_block, const char *atomic_op,
+                          int num_warmup,
                           double *out_avg_ms, double *out_gops)
 {
     /* Reset counter. */
@@ -107,7 +108,7 @@ static void run_benchmark(const char *kernel_name,
                         cudaMemcpyHostToDevice));
 
     /* Warm-up launches. */
-    for (int w = 0; w < NUM_WARMUP; ++w) {
+    for (int w = 0; w < num_warmup; ++w) {
         kernel<<<dim3(num_blocks), dim3(threads_per_block), 0, 0>>>(d_counter, ops_per_thread);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
@@ -197,6 +198,10 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_atomic_op");
     if (env_val) atomic_op = env_val;
 
+    int num_warmup = DEFAULT_NUM_WARMUP;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
+
     /* Print device information to stderr. */
     int device_id = 0;
     CUDA_CHECK(cudaGetDevice(&device_id));
@@ -210,7 +215,7 @@ int main(int argc, char *argv[])
             num_blocks * threads_per_block);
     fprintf(stderr, "Ops / thread    : %d\n", ops_per_thread);
     fprintf(stderr, "Atomic op       : %s\n", atomic_op);
-    fprintf(stderr, "Warmup iters    : %d\n", NUM_WARMUP);
+    fprintf(stderr, "Warmup iters    : %d\n", num_warmup);
     fprintf(stderr, "Timed iters     : %d\n\n", NUM_ITERATIONS);
 
     /* Allocate a single unsigned int on the device as the shared counter. */
@@ -229,7 +234,7 @@ int main(int argc, char *argv[])
         run_benchmark("atomicAdd_kernel",
                       (KernelFunc)atomicAdd_kernel, d_counter,
                       ops_per_thread, num_blocks, threads_per_block, atomic_op,
-                      &avg_ms, &gops);
+                      num_warmup, &avg_ms, &gops);
         total_time_ms += avg_ms;
         if (gops > max_gops) max_gops = gops;
     }
@@ -239,7 +244,7 @@ int main(int argc, char *argv[])
         run_benchmark("atomicCAS_kernel",
                       (KernelFunc)atomicCAS_kernel, d_counter,
                       ops_per_thread, num_blocks, threads_per_block, atomic_op,
-                      &avg_ms, &gops);
+                      num_warmup, &avg_ms, &gops);
         total_time_ms += avg_ms;
         if (gops > max_gops) max_gops = gops;
     }
@@ -249,7 +254,7 @@ int main(int argc, char *argv[])
         run_benchmark("atomicMin_kernel",
                       (KernelFunc)atomicMin_kernel, d_counter,
                       ops_per_thread, num_blocks, threads_per_block, atomic_op,
-                      &avg_ms, &gops);
+                      num_warmup, &avg_ms, &gops);
         total_time_ms += avg_ms;
         if (gops > max_gops) max_gops = gops;
     }

@@ -16,7 +16,7 @@
  * Environment variables (override argv):
  *   BENCH_PARAM_matrix_dim
  *   BENCH_PARAM_precision          ("fp16" or "all")
- *   BENCH_PARAM_warmup_iterations
+ *   BENCH_PARAM_warmup
  *   BENCH_PARAM_timed_iterations
  */
 
@@ -35,7 +35,7 @@
 static const int DEFAULT_DIM               = 4096;
 static const int SIMD_TILE                 = 8;    // 8×8 simdgroup tiles
 static const int SIMDGROUP_SIZE            = 32;   // threads per simdgroup
-static const int DEFAULT_WARMUP_ITERATIONS = 5;
+static const int DEFAULT_WARMUP_ITERATIONS = 0;
 static const int DEFAULT_TIMED_ITERATIONS  = 5;
 
 // ---------------------------------------------------------------------------
@@ -116,7 +116,7 @@ int main(int argc, char *argv[])
     if (env_val) precision = env_val;
 
     int warmup_iterations = DEFAULT_WARMUP_ITERATIONS;
-    env_val = getenv("BENCH_PARAM_warmup_iterations");
+    env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) warmup_iterations = atoi(env_val);
 
     int timed_iterations = DEFAULT_TIMED_ITERATIONS;

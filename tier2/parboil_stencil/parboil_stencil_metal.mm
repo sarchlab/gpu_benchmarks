@@ -119,6 +119,9 @@ int main(int argc, char* argv[])
     if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int nx    = grid_dim;
     int ny    = grid_dim;
@@ -212,9 +215,9 @@ int main(int argc, char* argv[])
     MTLSize threadsPerGrid   = MTLSizeMake((NSUInteger)nx, (NSUInteger)ny, (NSUInteger)nz);
 
     // -------------------------------------------------------------------
-    // Warmup: run num_timesteps once, not timed
+    // Warmup (not timed)
     // -------------------------------------------------------------------
-    {
+    for (int w = 0; w < num_warmup; ++w) {
         id<MTLBuffer> src_buf = buf_A;
         id<MTLBuffer> dst_buf = buf_B;
 

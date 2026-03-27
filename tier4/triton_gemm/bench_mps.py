@@ -13,6 +13,7 @@ def benchmark():
     block_n = int(os.environ.get('BENCH_PARAM_block_n', '256'))
     block_k = int(os.environ.get('BENCH_PARAM_block_k', '64'))
     group_size_m = int(os.environ.get('BENCH_PARAM_group_size_m', '8'))
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     # Square matrices: M = N = K
     M_dim, N_dim, K_dim = m, m, m
@@ -23,9 +24,10 @@ def benchmark():
     b = torch.rand((K_dim, N_dim), device=device, dtype=torch.float32)
 
     # Warmup
-    for _ in range(5):
+    for _ in range(num_warmup):
         c = torch.mm(a, b)
-    _ = c.sum().item()
+    if num_warmup > 0:
+        _ = c.sum().item()
 
     # Timed
     times = []

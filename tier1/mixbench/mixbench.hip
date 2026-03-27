@@ -112,7 +112,7 @@ static const int    DEFAULT_BUFFER_MB       = 256;
 static const double DEFAULT_FLOPS_PER_BYTE  = 4.0;
 static const int    DEFAULT_THREADS_PER_BLK = 256;
 static const int    DEFAULT_TIMED_ITERS     = 5;
-static const int    WARMUP_ITERATIONS       = 5;
+static const int    DEFAULT_WARMUP_ITERS     = 0;
 
 // ---------------------------------------------------------------------------
 // Mixbench kernel
@@ -169,6 +169,7 @@ __global__ void mixbench_kernel(float *data, int num_elements, int num_fmas)
  */
 static void benchmark_ratio(float *d_data, int num_elements, double ratio,
                             int threads_per_block, int timed_iters,
+                            int warmup_iters,
                             double *time_ms, double *gflops, double *bw_gbps)
 {
     /* Compute FMA count for this ratio.
@@ -184,7 +185,7 @@ static void benchmark_ratio(float *d_data, int num_elements, double ratio,
     GPU_CHECK(gpuEventCreate(&ev_stop));
 
     /* Warmup iterations. */
-    for (int i = 0; i < WARMUP_ITERATIONS; ++i) {
+    for (int i = 0; i < warmup_iters; ++i) {
         mixbench_kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(
             d_data, num_elements, num_fmas);
     }
@@ -262,6 +263,10 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_timed_iterations");
     if (env_val) timed_iterations = atoi(env_val);
 
+    int num_warmup = DEFAULT_WARMUP_ITERS;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
+
     size_t bytes = static_cast<size_t>(buffer_mb) * 1024ULL * 1024ULL;
     int num_elements = (int)(bytes / sizeof(float));
 
@@ -276,7 +281,7 @@ int main(int argc, char *argv[])
            buffer_mb, num_elements, bytes);
     fprintf(stderr, "Flops/byte      : %.1f\n", flops_per_byte);
     fprintf(stderr, "Threads/block   : %d\n", threads_per_block);
-    fprintf(stderr, "Warmup iters    : %d\n", WARMUP_ITERATIONS);
+    fprintf(stderr, "Warmup iters    : %d\n", num_warmup);
     fprintf(stderr, "Timed iters     : %d\n\n", timed_iterations);
 
     /* Allocate and initialize host data. */
@@ -304,6 +309,7 @@ int main(int argc, char *argv[])
 
     benchmark_ratio(d_data, num_elements, flops_per_byte,
                     threads_per_block, timed_iterations,
+                    num_warmup,
                     &avg_time_ms, &achieved_gflops, &achieved_bw);
 
     fprintf(stderr, "FLOP/byte=%.1f  Time=%.3f ms  GFLOPS=%.2f  BW=%.2f GB/s\n",

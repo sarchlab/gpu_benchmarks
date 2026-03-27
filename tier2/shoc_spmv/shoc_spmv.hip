@@ -194,6 +194,9 @@ int main(int argc, char** argv)
     if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int iters      = iterations;
     int num_cols   = num_rows;
@@ -255,9 +258,11 @@ int main(int argc, char** argv)
     BenchmarkTimer timer;
 
     // Warmup
-    hipLaunchKernelGGL(spmv_csr_kernel, grid_size, BLOCK_SIZE, 0, 0,
-                       d_row_ptr, d_col_idx, d_values, d_x, d_y, num_rows);
-    HIP_CHECK(hipDeviceSynchronize());
+    for (int w = 0; w < num_warmup; ++w) {
+        hipLaunchKernelGGL(spmv_csr_kernel, grid_size, BLOCK_SIZE, 0, 0,
+                           d_row_ptr, d_col_idx, d_values, d_x, d_y, num_rows);
+        HIP_CHECK(hipDeviceSynchronize());
+    }
 
     // Timed iterations
     std::vector<double> times(iters);

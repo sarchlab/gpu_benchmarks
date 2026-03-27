@@ -259,6 +259,9 @@ int main(int argc, char** argv) {
     if (env_val) num_smooth = atoi(env_val);
     env_val = getenv("BENCH_PARAM_iterations");
     if (env_val) iterations = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], "--size") == 0) N = atoi(argv[i+1]);
@@ -370,7 +373,7 @@ int main(int argc, char** argv) {
         for (int v = 0; v < num_vcycles; ++v) run_vcycle();
     };
 
-    for (int w = 0; w < 5; ++w) { run_mg(); HIP_CHECK(hipDeviceSynchronize()); }
+    for (int w = 0; w < num_warmup; ++w) { run_mg(); HIP_CHECK(hipDeviceSynchronize()); }
 
     hipEvent_t evStart, evStop;
     HIP_CHECK(hipEventCreate(&evStart));

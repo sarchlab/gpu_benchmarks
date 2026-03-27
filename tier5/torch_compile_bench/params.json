@@ -61,10 +61,10 @@
       ]
     },
     {
-      "name": "num_warmup",
+      "name": "warmup",
       "description": "Number of warmup iterations before timing",
       "type": "int",
-      "default": 5,
+      "default": 0,
       "values": [
         3,
         5,

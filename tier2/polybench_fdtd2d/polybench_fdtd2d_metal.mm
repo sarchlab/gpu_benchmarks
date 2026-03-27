@@ -111,6 +111,9 @@ int main(int argc, char* argv[])
     if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int NX = N, NY = N;
     size_t grid_bytes = (size_t)NX * NY * sizeof(float);
@@ -247,17 +250,19 @@ int main(int argc, char* argv[])
     };
 
     // -------------------------------------------------------------------
-    // Warmup: run TMAX steps once (not timed)
+    // Warmup (not timed)
     // -------------------------------------------------------------------
-    memcpy(h_ex, init_ex.data(), grid_bytes);
-    memcpy(h_ey, init_ey.data(), grid_bytes);
-    memcpy(h_hz, init_hz.data(), grid_bytes);
+    for (int w = 0; w < num_warmup; ++w) {
+        memcpy(h_ex, init_ex.data(), grid_bytes);
+        memcpy(h_ey, init_ey.data(), grid_bytes);
+        memcpy(h_hz, init_hz.data(), grid_bytes);
 
-    for (int t = 0; t < TMAX; ++t) {
-        id<MTLCommandBuffer> cb = [queue commandBuffer];
-        run_timestep(cb);
-        [cb commit];
-        [cb waitUntilCompleted];
+        for (int t = 0; t < TMAX; ++t) {
+            id<MTLCommandBuffer> cb = [queue commandBuffer];
+            run_timestep(cb);
+            [cb commit];
+            [cb waitUntilCompleted];
+        }
     }
 
     // -------------------------------------------------------------------

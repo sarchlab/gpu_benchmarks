@@ -429,6 +429,9 @@ int main(int argc, char** argv) {
     if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_theta");
     if (env_val) theta_p = atof(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int N         = bodies;
     int timesteps = timesteps_p;
@@ -458,8 +461,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Barnes-Hut N-body  |  Bodies: %d  |  Theta: %.2f  |  "
-            "Timesteps: %d  |  Iterations: 5 warmup + %d timed\n\n",
-            N, theta, timesteps, iters);
+            "Timesteps: %d  |  Iterations: %d warmup + %d timed\n\n",
+            N, theta, timesteps, num_warmup, iters);
 
     // Allocate device arrays for bodies
     float *d_px, *d_py, *d_vx, *d_vy, *d_mass, *d_ax, *d_ay;
@@ -530,10 +533,10 @@ int main(int argc, char** argv) {
     };
 
     // -------------------------------------------------------------------
-    // Warmup (5 iterations)
+    // Warmup
     // -------------------------------------------------------------------
     double flops_est = 0.0;
-    for (int w = 0; w < 5; ++w) {
+    for (int w = 0; w < num_warmup; ++w) {
         auto wpx = h_px, wpy = h_py, wvx = h_vx, wvy = h_vy;
         flops_est = run_simulation(wpx, wpy, wvx, wvy);
     }

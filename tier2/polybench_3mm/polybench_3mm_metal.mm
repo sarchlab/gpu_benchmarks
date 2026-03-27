@@ -114,6 +114,9 @@ int main(int argc, char* argv[])
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     // All matrices are N×N
     const uint32_t NI = (uint32_t)N;
@@ -216,11 +219,13 @@ int main(int argc, char* argv[])
     }
 
     // -------------------------------------------------------------------
-    // Warmup (not measured)
+    // Warmup
     // -------------------------------------------------------------------
-    dispatch_mm(queue, pso1, buf_A, buf_B, buf_E, NI, NK, NJ);
-    dispatch_mm(queue, pso2, buf_C, buf_D, buf_F, NJ, NM, NL);
-    dispatch_mm(queue, pso3, buf_E, buf_F, buf_G, NI, NJ, NL);
+    for (int w = 0; w < num_warmup; ++w) {
+        dispatch_mm(queue, pso1, buf_A, buf_B, buf_E, NI, NK, NJ);
+        dispatch_mm(queue, pso2, buf_C, buf_D, buf_F, NJ, NM, NL);
+        dispatch_mm(queue, pso3, buf_E, buf_F, buf_G, NI, NJ, NL);
+    }
 
     // -------------------------------------------------------------------
     // Timed iterations — time each kernel separately

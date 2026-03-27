@@ -16,6 +16,7 @@ def benchmark():
     time_frames = int(os.environ.get('BENCH_PARAM_time_frames', '3000'))
     encoder_layers = int(os.environ.get('BENCH_PARAM_encoder_layers', '4'))
     d_model = int(os.environ.get('BENCH_PARAM_d_model', '256'))
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     config = WhisperConfig(
         d_model=d_model,
@@ -54,10 +55,11 @@ def benchmark():
         )
 
     # Warmup
-    for i in range(5):
+    for i in range(num_warmup):
         out = run_generate()
-        print(f"  warmup {i+1}/5", file=sys.stderr)
-    _ = out[0, -1].item()  # sync
+        print(f"  warmup {i+1}/{num_warmup}", file=sys.stderr)
+    if num_warmup > 0:
+        _ = out[0, -1].item()  # sync
 
     # Timed
     total_time = 0.0

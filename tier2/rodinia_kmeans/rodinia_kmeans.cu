@@ -144,6 +144,9 @@ int main(int argc, char** argv)
     if (env_val) K = atoi(env_val);
     env_val = getenv("BENCH_PARAM_max_iter");
     if (env_val) max_iter = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     // Print device info
     int device_id = 0;
@@ -213,8 +216,8 @@ int main(int argc, char** argv)
     CUDA_CHECK(cudaEventCreate(&ev_start));
     CUDA_CHECK(cudaEventCreate(&ev_stop));
 
-    // Warmup: one iteration (not timed)
-    {
+    // Warmup
+    for (int w = 0; w < num_warmup; ++w) {
         kmeans_assign_kernel<<<dim3(grid_size), dim3(block_size), 0, 0>>>(d_points, d_centers, d_membership, N, D, K);
         CUDA_CHECK(cudaDeviceSynchronize());
     }

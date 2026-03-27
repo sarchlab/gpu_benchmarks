@@ -35,7 +35,7 @@
 static int GEMM_M  = 4096;
 static int GEMM_N  = 4096;
 static int GEMM_K  = 4096;
-static int WARMUP  = 5;
+static int WARMUP  = 0;
 static int ITERS   = 5;
 static double ALPHA = 1.0;
 

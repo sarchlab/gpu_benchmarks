@@ -106,6 +106,7 @@ def benchmark():
     generate_len = int(os.environ.get('BENCH_PARAM_generate_len', '64'))
     num_layers = int(os.environ.get('BENCH_PARAM_num_layers', '4'))
     hidden = int(os.environ.get('BENCH_PARAM_hidden', '256'))
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     # Fixed config
     vocab_size = 50257
@@ -143,7 +144,7 @@ def benchmark():
 
     # Warmup
     print("Warming up...", file=sys.stderr)
-    for _ in range(5):
+    for _ in range(num_warmup):
         _ = model(query_ids, doc_emb_matrix, generate_len=generate_len)
     torch.cuda.synchronize()
 

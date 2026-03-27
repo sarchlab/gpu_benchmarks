@@ -69,19 +69,35 @@ For each benchmark, `gpubench`:
 
 ## Step 3: Output Structure
 
-After collection, traces are organized as:
+After collection, traces are organized by benchmark and parameter configuration:
 
 ```
 my_traces/
   gemm/
-    traces/
-      kernelslist          # list of kernel trace files
-      kernel_0.trace
-      kernel_1.trace
-      ...
+    M_512/                          # scaling param only
+      traces/
+        kernelslist
+        kernel_0.trace
+        ...
+    M_1024/
+      traces/
+        ...
+  matmul/
+    N_256__TILE_16__ALGO_naive/     # scaling + non-scaling params
+      traces/
+        ...
+    N_256__TILE_32__ALGO_naive/
+      traces/
+        ...
 ```
 
-The `kernelslist` file is the entry point for BBSim simulation.
+The directory name encodes the full parameter configuration:
+`<scaling_param>_<value>` when there are no non-scaling parameters, or
+`<scaling_param>_<value>__<ns_param1>_<value1>__<ns_param2>_<value2>` when
+non-scaling parameters are present (sorted alphabetically by parameter name).
+
+The `kernelslist` file inside each configuration directory is the entry point
+for BBSim simulation.
 
 ## Step 4: Simulate with BBSim
 

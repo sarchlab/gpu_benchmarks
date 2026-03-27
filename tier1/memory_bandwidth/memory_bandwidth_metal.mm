@@ -38,6 +38,7 @@
 
 static const int    DEFAULT_BUFFER_MB      = 256;
 static const int    DEFAULT_NUM_ITERATIONS = 20;
+static const int    DEFAULT_NUM_WARMUP     = 0;
 static const double BYTES_PER_GB           = 1e9;
 
 // ---------------------------------------------------------------------------
@@ -67,7 +68,7 @@ static double ticks_to_seconds(uint64_t ticks)
 // ---------------------------------------------------------------------------
 
 static BenchResult benchmark_h2d(id<MTLDevice> device, size_t bytes,
-                                  int num_iterations)
+                                  int num_iterations, int num_warmup)
 {
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -78,7 +79,7 @@ static BenchResult benchmark_h2d(id<MTLDevice> device, size_t bytes,
     memset(src.contents, 0xAB, bytes);
 
     /* Warm-up. */
-    {
+    for (int w = 0; w < num_warmup; ++w) {
         id<MTLCommandBuffer> cb = [queue commandBuffer];
         id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
         [blit copyFromBuffer:src sourceOffset:0
@@ -112,7 +113,7 @@ static BenchResult benchmark_h2d(id<MTLDevice> device, size_t bytes,
 // ---------------------------------------------------------------------------
 
 static BenchResult benchmark_d2h(id<MTLDevice> device, size_t bytes,
-                                  int num_iterations)
+                                  int num_iterations, int num_warmup)
 {
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -137,7 +138,7 @@ static BenchResult benchmark_d2h(id<MTLDevice> device, size_t bytes,
     }
 
     /* Warm-up. */
-    {
+    for (int w = 0; w < num_warmup; ++w) {
         id<MTLCommandBuffer> cb = [queue commandBuffer];
         id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
         [blit copyFromBuffer:src sourceOffset:0
@@ -172,7 +173,8 @@ static BenchResult benchmark_d2h(id<MTLDevice> device, size_t bytes,
 
 static BenchResult benchmark_d2d(id<MTLDevice> device,
                                   id<MTLLibrary> library,
-                                  size_t bytes, int num_iterations)
+                                  size_t bytes, int num_iterations,
+                                  int num_warmup)
 {
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -216,7 +218,7 @@ static BenchResult benchmark_d2d(id<MTLDevice> device,
     NSUInteger grid_size = (num_f4 + tg_size - 1) / tg_size * tg_size;
 
     /* Warm-up. */
-    {
+    for (int w = 0; w < num_warmup; ++w) {
         id<MTLCommandBuffer> cb = [queue commandBuffer];
         id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
         [enc setComputePipelineState:pso];
@@ -288,6 +290,10 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_use_pinned_memory");
     if (env_val) use_pinned_memory = env_val;
 
+    int num_warmup = DEFAULT_NUM_WARMUP;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
+
     bool run_h2d = (strcmp(transfer_type, "all") == 0 || strcmp(transfer_type, "h2d") == 0);
     bool run_d2h = (strcmp(transfer_type, "all") == 0 || strcmp(transfer_type, "d2h") == 0);
     bool run_d2d = (strcmp(transfer_type, "all") == 0 || strcmp(transfer_type, "d2d") == 0);
@@ -306,7 +312,8 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Transfer size: %d MiB (%zu bytes)\n", buffer_mb, bytes);
     fprintf(stderr, "Iterations per test: %d\n", num_iterations);
     fprintf(stderr, "Transfer type: %s\n", transfer_type);
-    fprintf(stderr, "Pinned memory: %s\n\n", use_pinned_memory);
+    fprintf(stderr, "Pinned memory: %s\n", use_pinned_memory);
+    fprintf(stderr, "Warmup iters: %d\n\n", num_warmup);
 
     /* Compile the Metal shader library at runtime (needed for D2D kernel). */
     NSError *err = nil;
@@ -345,7 +352,7 @@ int main(int argc, char *argv[])
 
     /* ----- H2D ----- */
     if (run_h2d) {
-        BenchResult r = benchmark_h2d(device, bytes, num_iterations);
+        BenchResult r = benchmark_h2d(device, bytes, num_iterations, num_warmup);
         h2d_bw = r.bandwidth_gbps;
         double avg_ms = r.total_ms / num_iterations;
         total_time_ms += r.total_ms;
@@ -359,7 +366,7 @@ int main(int argc, char *argv[])
 
     /* ----- D2H ----- */
     if (run_d2h) {
-        BenchResult r = benchmark_d2h(device, bytes, num_iterations);
+        BenchResult r = benchmark_d2h(device, bytes, num_iterations, num_warmup);
         d2h_bw = r.bandwidth_gbps;
         double avg_ms = r.total_ms / num_iterations;
         total_time_ms += r.total_ms;
@@ -373,7 +380,7 @@ int main(int argc, char *argv[])
 
     /* ----- D2D ----- */
     if (run_d2d) {
-        BenchResult r = benchmark_d2d(device, library, bytes, num_iterations);
+        BenchResult r = benchmark_d2d(device, library, bytes, num_iterations, num_warmup);
         d2d_bw = r.bandwidth_gbps;
         double avg_ms = r.total_ms / num_iterations;
         total_time_ms += r.total_ms;

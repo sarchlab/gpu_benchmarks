@@ -52,6 +52,7 @@
 
 static const int    DEFAULT_BUFFER_MB      = 256;
 static const int    DEFAULT_NUM_ITERATIONS = 20;
+static const int    DEFAULT_NUM_WARMUP     = 0;
 static const double BYTES_PER_GB           = 1e9;
 
 // ---------------------------------------------------------------------------
@@ -79,13 +80,16 @@ static float cuda_elapsed_ms(cudaEvent_t start, cudaEvent_t stop)
 // ---------------------------------------------------------------------------
 
 static BenchResult benchmark_h2d(const void *h_buf, void *d_buf,
-                                  size_t bytes, int num_iterations)
+                                  size_t bytes, int num_iterations,
+                                  int num_warmup)
 {
     cudaEvent_t start, stop;
     CUDA_CHECK(cudaEventCreate(&start));
     CUDA_CHECK(cudaEventCreate(&stop));
 
-    CUDA_CHECK(cudaMemcpy(d_buf, h_buf, bytes, cudaMemcpyHostToDevice));
+    for (int w = 0; w < num_warmup; ++w) {
+        CUDA_CHECK(cudaMemcpy(d_buf, h_buf, bytes, cudaMemcpyHostToDevice));
+    }
     CUDA_CHECK(cudaDeviceSynchronize());
 
     CUDA_CHECK(cudaEventRecord(start, 0));
@@ -109,13 +113,16 @@ static BenchResult benchmark_h2d(const void *h_buf, void *d_buf,
 // ---------------------------------------------------------------------------
 
 static BenchResult benchmark_d2h(const void *d_buf, void *h_buf,
-                                  size_t bytes, int num_iterations)
+                                  size_t bytes, int num_iterations,
+                                  int num_warmup)
 {
     cudaEvent_t start, stop;
     CUDA_CHECK(cudaEventCreate(&start));
     CUDA_CHECK(cudaEventCreate(&stop));
 
-    CUDA_CHECK(cudaMemcpy(h_buf, d_buf, bytes, cudaMemcpyDeviceToHost));
+    for (int w = 0; w < num_warmup; ++w) {
+        CUDA_CHECK(cudaMemcpy(h_buf, d_buf, bytes, cudaMemcpyDeviceToHost));
+    }
     CUDA_CHECK(cudaDeviceSynchronize());
 
     CUDA_CHECK(cudaEventRecord(start, 0));
@@ -140,7 +147,8 @@ static BenchResult benchmark_d2h(const void *d_buf, void *h_buf,
 
 static BenchResult benchmark_bidir(const void *h_src, void *h_dst,
                                     const void *d_src, void *d_dst,
-                                    size_t bytes, int num_iterations)
+                                    size_t bytes, int num_iterations,
+                                    int num_warmup)
 {
     cudaStream_t stream_h2d, stream_d2h;
     CUDA_CHECK(cudaStreamCreate(&stream_h2d));
@@ -151,12 +159,14 @@ static BenchResult benchmark_bidir(const void *h_src, void *h_dst,
     CUDA_CHECK(cudaEventCreate(&stop));
 
     /* Warm-up. */
-    CUDA_CHECK(cudaMemcpyAsync(d_dst, h_src, bytes,
-                             cudaMemcpyHostToDevice, stream_h2d));
-    CUDA_CHECK(cudaMemcpyAsync(h_dst, d_src, bytes,
-                             cudaMemcpyDeviceToHost, stream_d2h));
-    CUDA_CHECK(cudaStreamSynchronize(stream_h2d));
-    CUDA_CHECK(cudaStreamSynchronize(stream_d2h));
+    for (int w = 0; w < num_warmup; ++w) {
+        CUDA_CHECK(cudaMemcpyAsync(d_dst, h_src, bytes,
+                                 cudaMemcpyHostToDevice, stream_h2d));
+        CUDA_CHECK(cudaMemcpyAsync(h_dst, d_src, bytes,
+                                 cudaMemcpyDeviceToHost, stream_d2h));
+        CUDA_CHECK(cudaStreamSynchronize(stream_h2d));
+        CUDA_CHECK(cudaStreamSynchronize(stream_d2h));
+    }
 
     CUDA_CHECK(cudaEventRecord(start, 0));
     for (int i = 0; i < num_iterations; ++i) {
@@ -215,6 +225,10 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_use_pinned_memory");
     if (env_val) use_pinned_memory = env_val;
 
+    int num_warmup = DEFAULT_NUM_WARMUP;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
+
     bool pinned   = (strcmp(use_pinned_memory, "false") != 0);
     bool run_h2d  = (strcmp(transfer_type, "all") == 0 || strcmp(transfer_type, "h2d") == 0);
     bool run_d2h  = (strcmp(transfer_type, "all") == 0 || strcmp(transfer_type, "d2h") == 0);
@@ -231,7 +245,8 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Transfer size   : %d MiB (%zu bytes)\n", buffer_mb, bytes);
     fprintf(stderr, "Iterations/test : %d\n", num_iterations);
     fprintf(stderr, "Transfer type   : %s\n", transfer_type);
-    fprintf(stderr, "Pinned memory   : %s\n\n", use_pinned_memory);
+    fprintf(stderr, "Pinned memory   : %s\n", use_pinned_memory);
+    fprintf(stderr, "Warmup iters    : %d\n\n", num_warmup);
 
     /* Allocate host memory. */
     void *h_src = nullptr;
@@ -264,7 +279,7 @@ int main(int argc, char *argv[])
     /* ----- H2D ----- */
     if (run_h2d) {
         fprintf(stderr, "%-30s", "H2D (unidirectional)");
-        BenchResult r = benchmark_h2d(h_src, d_dst, bytes, num_iterations);
+        BenchResult r = benchmark_h2d(h_src, d_dst, bytes, num_iterations, num_warmup);
         h2d_bw = r.bandwidth_gbps;
         double avg_ms = r.total_ms / num_iterations;
         total_time_ms += r.total_ms;
@@ -279,7 +294,7 @@ int main(int argc, char *argv[])
     /* ----- D2H ----- */
     if (run_d2h) {
         fprintf(stderr, "%-30s", "D2H (unidirectional)");
-        BenchResult r = benchmark_d2h(d_src, h_dst, bytes, num_iterations);
+        BenchResult r = benchmark_d2h(d_src, h_dst, bytes, num_iterations, num_warmup);
         d2h_bw = r.bandwidth_gbps;
         double avg_ms = r.total_ms / num_iterations;
         total_time_ms += r.total_ms;
@@ -295,7 +310,7 @@ int main(int argc, char *argv[])
     if (run_bidir) {
         fprintf(stderr, "%-30s", "Bidirectional (H2D + D2H)");
         BenchResult r = benchmark_bidir(h_src, h_dst, d_src, d_dst,
-                                         bytes, num_iterations);
+                                         bytes, num_iterations, num_warmup);
         bidir_bw = r.bandwidth_gbps;
         double avg_ms = r.total_ms / num_iterations;
         total_time_ms += r.total_ms;

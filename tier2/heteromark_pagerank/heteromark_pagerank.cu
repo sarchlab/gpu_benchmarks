@@ -197,6 +197,9 @@ int main(int argc, char** argv) {
     if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_damping_factor");
     if (env_val) damping_factor = atof(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int N       = vertices;
     int iters   = iterations;
@@ -209,8 +212,8 @@ int main(int argc, char** argv) {
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Vertices: %d  |  PR iterations: %d  |  Timed iterations: 5 warmup + %d timed\n\n",
-            N, prIters, iters);
+    fprintf(stderr, "Vertices: %d  |  PR iterations: %d  |  Timed iterations: %d warmup + %d timed\n\n",
+            N, prIters, num_warmup, iters);
 
     // Generate synthetic graph
     std::vector<int> rowPtr, colIdx, outDegree;
@@ -258,9 +261,9 @@ int main(int argc, char** argv) {
     };
 
     // -------------------------------------------------------------------
-    // Warmup (5 iterations)
+    // Warmup
     // -------------------------------------------------------------------
-    for (int w = 0; w < 5; ++w) {
+    for (int w = 0; w < num_warmup; ++w) {
         run_pagerank();
         CUDA_CHECK(cudaDeviceSynchronize());
     }

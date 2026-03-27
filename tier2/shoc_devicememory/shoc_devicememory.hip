@@ -173,12 +173,16 @@ struct KernelResult {
     double total_ms;
 };
 
+static int g_num_warmup = 0;
+
 template <typename Func>
 static KernelResult benchKernel(int iters, Func func) {
     BenchmarkTimer timer;
 
     // Warmup
-    func();
+    for (int w = 0; w < g_num_warmup; ++w) {
+        func();
+    }
     HIP_CHECK(hipDeviceSynchronize());
 
     std::vector<double> times(iters);
@@ -227,6 +231,9 @@ int main(int argc, char** argv) {
     if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_transfer_mode");
     if (env_val) transfer_mode = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int iters = iterations;
     size_t N     = (size_t)array_size_mb * 1024 * 1024 / sizeof(float);
@@ -256,6 +263,7 @@ int main(int argc, char** argv) {
     int num_blocks = (int)((N + block_size - 1) / block_size);
     if (num_blocks > 65535) num_blocks = 65535;
 
+    g_num_warmup = num_warmup;
     double total_all_ms = 0.0;
 
     // Determine which kernels to run based on transfer_mode

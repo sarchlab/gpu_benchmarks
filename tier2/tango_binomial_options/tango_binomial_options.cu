@@ -195,6 +195,9 @@ int main(int argc, char** argv) {
     if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int iters = iterations;
 
@@ -243,9 +246,9 @@ int main(int argc, char** argv) {
     size_t sharedBytes = (size_t)(numSteps + 1) * sizeof(float);
 
     // -------------------------------------------------------------------
-    // Warmup (5 iterations)
+    // Warmup
     // -------------------------------------------------------------------
-    for (int w = 0; w < 5; ++w) {
+    for (int w = 0; w < num_warmup; ++w) {
         binomial_kernel<<<dim3(gridSize), dim3(blockSize), sharedBytes, 0>>>(d_options, d_prices, numSteps);
         CUDA_CHECK(cudaDeviceSynchronize());
     }

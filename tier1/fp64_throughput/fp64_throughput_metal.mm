@@ -53,6 +53,7 @@ static const int DEFAULT_FMAS_PER_THREAD = 4096;
 static const int DEFAULT_NUM_BLOCKS        = 1024;
 static const int DEFAULT_THREADS_PER_BLOCK = 256;
 static const int DEFAULT_NUM_ITERATIONS = 10;
+static const int DEFAULT_NUM_WARMUP = 0;
 
 // ---------------------------------------------------------------------------
 // Timing helper
@@ -105,6 +106,10 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_num_iterations");
     if (env_val) num_iterations = atoi(env_val);
 
+    int num_warmup = DEFAULT_NUM_WARMUP;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
+
     int total_threads = num_blocks * threads_per_block;
 
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -119,6 +124,7 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Grid            : %d blocks × %d threads = %d total threads\n",
            num_blocks, threads_per_block, total_threads);
     fprintf(stderr, "FMAs / thread   : %d\n", fmas_per_thread);
+    fprintf(stderr, "Warmup iters    : %d\n", num_warmup);
     fprintf(stderr, "Kernel repeats  : %d\n\n", num_iterations);
 
     NSError *err = nil;
@@ -190,7 +196,9 @@ int main(int argc, char *argv[])
         [cb waitUntilCompleted];
     };
 
-    dispatch_once();
+    for (int w = 0; w < num_warmup; ++w) {
+        dispatch_once();
+    }
 
     uint64_t t0 = mach_absolute_time();
     for (int iter = 0; iter < num_iterations; ++iter) {

@@ -171,6 +171,9 @@ int main(int argc, char** argv) {
     if (env_val) particles_per_box = atoi(env_val);
     env_val = getenv("BENCH_PARAM_iterations");
     if (env_val) iters = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int nb = num_boxes;  // boxes per dimension
     int total_boxes     = nb * nb * nb;
@@ -183,8 +186,8 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Boxes: %d×%d×%d (%d total)  |  Particles/box: %d  |  "
-            "Iterations: 5 warmup + %d timed\n\n",
-            nb, nb, nb, total_boxes, particles_per_box, iters);
+            "Iterations: %d warmup + %d timed\n\n",
+            nb, nb, nb, total_boxes, particles_per_box, num_warmup, iters);
 
     // -----------------------------------------------------------------------
     // Generate synthetic particle data
@@ -265,9 +268,9 @@ int main(int argc, char** argv) {
     dim3 block(block_size);
 
     // -----------------------------------------------------------------------
-    // Warmup (5 iterations)
+    // Warmup
     // -----------------------------------------------------------------------
-    for (int w = 0; w < 5; ++w) {
+    for (int w = 0; w < num_warmup; ++w) {
         CUDA_CHECK(cudaMemset(d_force_x, 0, force_bytes));
         CUDA_CHECK(cudaMemset(d_force_y, 0, force_bytes));
         CUDA_CHECK(cudaMemset(d_force_z, 0, force_bytes));

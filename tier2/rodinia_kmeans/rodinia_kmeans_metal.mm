@@ -99,6 +99,9 @@ int main(int argc, char* argv[])
     if (env_val) K = atoi(env_val);
     env_val = getenv("BENCH_PARAM_max_iter");
     if (env_val) max_iter = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     // -------------------------------------------------------------------
     // Metal device setup
@@ -265,7 +268,9 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Warmup
     // -------------------------------------------------------------------
-    dispatch_assign();
+    for (int w = 0; w < num_warmup; ++w) {
+        dispatch_assign();
+    }
 
     // -------------------------------------------------------------------
     // Main K-Means iteration loop

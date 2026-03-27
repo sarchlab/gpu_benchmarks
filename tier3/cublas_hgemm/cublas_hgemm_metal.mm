@@ -90,7 +90,7 @@ int main(int argc, char *argv[])
     int M = 4096;
     int N = 4096;
     int K = 4096;
-    int WARMUP = 5;
+    int WARMUP = 0;
     int ITERS = 5;
     float alpha_param = 1.0f;
 

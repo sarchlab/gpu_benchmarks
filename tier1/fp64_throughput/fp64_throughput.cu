@@ -66,6 +66,7 @@ static const int DEFAULT_FMAS_PER_THREAD = 4096;
 static const int DEFAULT_THREADS_PER_BLOCK = 256;
 static const int DEFAULT_NUM_BLOCKS = 1024;
 static const int DEFAULT_NUM_ITERATIONS = 10;
+static const int DEFAULT_NUM_WARMUP = 0;
 
 // ---------------------------------------------------------------------------
 // FP64 FMA kernel
@@ -130,6 +131,10 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_num_iterations");
     if (env_val) num_iterations = atoi(env_val);
 
+    int num_warmup = DEFAULT_NUM_WARMUP;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
+
     /* Print device information to stderr. */
     int device_id = 0;
     CUDA_CHECK(cudaGetDevice(&device_id));
@@ -142,6 +147,7 @@ int main(int argc, char *argv[])
            num_blocks, threads_per_block,
            num_blocks * threads_per_block);
     fprintf(stderr, "FMAs / thread   : %d\n", fmas_per_thread);
+    fprintf(stderr, "Warmup iters    : %d\n", num_warmup);
     fprintf(stderr, "Kernel repeats  : %d\n\n", num_iterations);
 
     double *d_out = nullptr;
@@ -151,8 +157,10 @@ int main(int argc, char *argv[])
     CUDA_CHECK(cudaEventCreate(&ev_start));
     CUDA_CHECK(cudaEventCreate(&ev_stop));
 
-    /* Warm-up launch. */
-    fp64_fma_kernel<<<dim3(num_blocks), dim3(threads_per_block), 0, 0>>>(d_out, fmas_per_thread);
+    /* Warm-up launches. */
+    for (int w = 0; w < num_warmup; ++w) {
+        fp64_fma_kernel<<<dim3(num_blocks), dim3(threads_per_block), 0, 0>>>(d_out, fmas_per_thread);
+    }
     CUDA_CHECK(cudaDeviceSynchronize());
 
     /* Timed benchmark loop. */

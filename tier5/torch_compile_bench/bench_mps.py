@@ -12,7 +12,8 @@ def bench_variant(model, x, label, num_warmup, num_runs=5):
     with torch.no_grad():
         for _ in range(num_warmup):
             out = model(x)
-    _ = out.sum().item()  # sync
+    if num_warmup > 0:
+        _ = out.sum().item()  # sync
 
     # Timed
     times = []
@@ -35,7 +36,7 @@ def benchmark():
     batch_size = int(os.environ.get('BENCH_PARAM_batch_size', '32'))
     image_size = int(os.environ.get('BENCH_PARAM_image_size', '224'))
     compile_mode = os.environ.get('BENCH_PARAM_compile_mode', 'default')
-    num_warmup = int(os.environ.get('BENCH_PARAM_num_warmup', '5'))
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     print(f"torch.compile benchmark (MPS) — batch_size={batch_size}, "
           f"image_size={image_size}, compile_mode={compile_mode}, "

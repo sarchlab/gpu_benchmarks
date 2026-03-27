@@ -215,6 +215,9 @@ int main(int argc, char** argv) {
     if (env_val) block_size_param = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     size_t bytes_A  = (size_t)n * n * sizeof(float);
     size_t bytes_v  = (size_t)n * sizeof(float);
@@ -267,9 +270,11 @@ int main(int argc, char** argv) {
     BenchmarkTimer timer;
 
     // Warmup
-    hipLaunchKernelGGL(mvt_kernel1, grid, block_size, 0, 0, d_A, d_y1, d_x1, n);
-    hipLaunchKernelGGL(mvt_kernel2, grid, block_size, 0, 0, d_A, d_y2, d_x2, n);
-    HIP_CHECK(hipDeviceSynchronize());
+    for (int w = 0; w < num_warmup; ++w) {
+        hipLaunchKernelGGL(mvt_kernel1, grid, block_size, 0, 0, d_A, d_y1, d_x1, n);
+        hipLaunchKernelGGL(mvt_kernel2, grid, block_size, 0, 0, d_A, d_y2, d_x2, n);
+        HIP_CHECK(hipDeviceSynchronize());
+    }
 
     // Timed iterations
     std::vector<double> times(iters);

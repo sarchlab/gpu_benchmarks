@@ -100,6 +100,7 @@ def benchmark():
     n_layer = int(os.environ.get('BENCH_PARAM_n_layer', '6'))
     n_embd = int(os.environ.get('BENCH_PARAM_n_embd', '384'))
     n_head = int(os.environ.get('BENCH_PARAM_n_head', '6'))
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     block_size = prompt_len + num_new_tokens
 
@@ -114,9 +115,10 @@ def benchmark():
 
     # Warmup
     print("Warmup...", file=sys.stderr)
-    for _ in range(5):
+    for _ in range(num_warmup):
         out = generate(model, prompt, num_new_tokens)
-    _ = out[0, -1].item()  # sync
+    if num_warmup > 0:
+        _ = out[0, -1].item()  # sync
 
     # Timed
     print("Benchmarking...", file=sys.stderr)

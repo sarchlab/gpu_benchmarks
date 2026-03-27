@@ -75,6 +75,8 @@ struct KernelResult {
     double total_ms;
 };
 
+static int g_num_warmup = 0;
+
 static KernelResult runBenchmarkMetal(
     int                          iters,
     id<MTLCommandQueue>          queue,
@@ -96,7 +98,9 @@ static KernelResult runBenchmarkMetal(
     };
 
     // Warmup
-    dispatch_one();
+    for (int w = 0; w < g_num_warmup; ++w) {
+        dispatch_one();
+    }
 
     std::vector<double> times((size_t)iters);
     for (int i = 0; i < iters; ++i) {
@@ -148,6 +152,9 @@ int main(int argc, char* argv[])
     if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_transfer_mode");
     if (env_val) transfer_mode = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int iters = iterations;
     size_t N     = (size_t)array_size_mb * 1024 * 1024 / sizeof(float);
@@ -235,6 +242,7 @@ int main(int argc, char* argv[])
     uint32_t params_wo[2] = { (uint32_t)N, (uint32_t)num_threads };
     uint32_t params_rw[2] = { (uint32_t)N, (uint32_t)num_threads };
 
+    g_num_warmup = num_warmup;
     double total_all_ms = 0.0;
 
     // --- Read-only ---

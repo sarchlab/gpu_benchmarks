@@ -102,6 +102,9 @@ int main(int argc, char* argv[])
     if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int N     = array_size;
     int iters = iterations;
@@ -211,7 +214,9 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Warmup
     // -------------------------------------------------------------------
-    dispatch_triad();
+    for (int w = 0; w < num_warmup; ++w) {
+        dispatch_triad();
+    }
 
     // -------------------------------------------------------------------
     // Timed iterations

@@ -98,6 +98,7 @@
 
 static const int    DEFAULT_BUFFER_MB      = 256;
 static const int    DEFAULT_NUM_ITERATIONS = 20;
+static const int    DEFAULT_NUM_WARMUP     = 0;
 static const double BYTES_PER_GB           = 1e9;
 
 // ---------------------------------------------------------------------------
@@ -125,13 +126,16 @@ static float hip_elapsed_ms(hipEvent_t start, hipEvent_t stop)
 // ---------------------------------------------------------------------------
 
 static BenchResult benchmark_h2d(const void *h_buf, void *d_buf,
-                                  size_t bytes, int num_iterations)
+                                  size_t bytes, int num_iterations,
+                                  int num_warmup)
 {
     hipEvent_t start, stop;
     HIP_CHECK(hipEventCreate(&start));
     HIP_CHECK(hipEventCreate(&stop));
 
-    HIP_CHECK(hipMemcpy(d_buf, h_buf, bytes, hipMemcpyHostToDevice));
+    for (int w = 0; w < num_warmup; ++w) {
+        HIP_CHECK(hipMemcpy(d_buf, h_buf, bytes, hipMemcpyHostToDevice));
+    }
     HIP_CHECK(hipDeviceSynchronize());
 
     HIP_CHECK(hipEventRecord(start, 0));
@@ -151,13 +155,16 @@ static BenchResult benchmark_h2d(const void *h_buf, void *d_buf,
 }
 
 static BenchResult benchmark_d2h(const void *d_buf, void *h_buf,
-                                  size_t bytes, int num_iterations)
+                                  size_t bytes, int num_iterations,
+                                  int num_warmup)
 {
     hipEvent_t start, stop;
     HIP_CHECK(hipEventCreate(&start));
     HIP_CHECK(hipEventCreate(&stop));
 
-    HIP_CHECK(hipMemcpy(h_buf, d_buf, bytes, hipMemcpyDeviceToHost));
+    for (int w = 0; w < num_warmup; ++w) {
+        HIP_CHECK(hipMemcpy(h_buf, d_buf, bytes, hipMemcpyDeviceToHost));
+    }
     HIP_CHECK(hipDeviceSynchronize());
 
     HIP_CHECK(hipEventRecord(start, 0));
@@ -177,13 +184,16 @@ static BenchResult benchmark_d2h(const void *d_buf, void *h_buf,
 }
 
 static BenchResult benchmark_d2d(const void *d_src, void *d_dst,
-                                  size_t bytes, int num_iterations)
+                                  size_t bytes, int num_iterations,
+                                  int num_warmup)
 {
     hipEvent_t start, stop;
     HIP_CHECK(hipEventCreate(&start));
     HIP_CHECK(hipEventCreate(&stop));
 
-    HIP_CHECK(hipMemcpy(d_dst, d_src, bytes, hipMemcpyDeviceToDevice));
+    for (int w = 0; w < num_warmup; ++w) {
+        HIP_CHECK(hipMemcpy(d_dst, d_src, bytes, hipMemcpyDeviceToDevice));
+    }
     HIP_CHECK(hipDeviceSynchronize());
 
     HIP_CHECK(hipEventRecord(start, 0));
@@ -237,6 +247,10 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_use_pinned_memory");
     if (env_val) use_pinned_memory = env_val;
 
+    int num_warmup = DEFAULT_NUM_WARMUP;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
+
     bool pinned = (strcmp(use_pinned_memory, "false") != 0);
     bool run_h2d = (strcmp(transfer_type, "all") == 0 || strcmp(transfer_type, "h2d") == 0);
     bool run_d2h = (strcmp(transfer_type, "all") == 0 || strcmp(transfer_type, "d2h") == 0);
@@ -253,7 +267,8 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Transfer size: %d MiB (%zu bytes)\n", buffer_mb, bytes);
     fprintf(stderr, "Iterations per test: %d\n", num_iterations);
     fprintf(stderr, "Transfer type: %s\n", transfer_type);
-    fprintf(stderr, "Pinned memory: %s\n\n", use_pinned_memory);
+    fprintf(stderr, "Pinned memory: %s\n", use_pinned_memory);
+    fprintf(stderr, "Warmup iters: %d\n\n", num_warmup);
 
     /* Allocate host memory. */
     void *h_src = nullptr;
@@ -286,7 +301,7 @@ int main(int argc, char *argv[])
 
     /* ----- H2D ----- */
     if (run_h2d) {
-        BenchResult r = benchmark_h2d(h_src, d_src, bytes, num_iterations);
+        BenchResult r = benchmark_h2d(h_src, d_src, bytes, num_iterations, num_warmup);
         h2d_bw = r.bandwidth_gbps;
         double avg_ms = r.total_ms / num_iterations;
         total_time_ms += r.total_ms;
@@ -300,7 +315,7 @@ int main(int argc, char *argv[])
 
     /* ----- D2H ----- */
     if (run_d2h) {
-        BenchResult r = benchmark_d2h(d_src, h_dst, bytes, num_iterations);
+        BenchResult r = benchmark_d2h(d_src, h_dst, bytes, num_iterations, num_warmup);
         d2h_bw = r.bandwidth_gbps;
         double avg_ms = r.total_ms / num_iterations;
         total_time_ms += r.total_ms;
@@ -314,7 +329,7 @@ int main(int argc, char *argv[])
 
     /* ----- D2D ----- */
     if (run_d2d) {
-        BenchResult r = benchmark_d2d(d_src, d_dst, bytes, num_iterations);
+        BenchResult r = benchmark_d2d(d_src, d_dst, bytes, num_iterations, num_warmup);
         d2d_bw = r.bandwidth_gbps;
         double avg_ms = r.total_ms / num_iterations;
         total_time_ms += r.total_ms;

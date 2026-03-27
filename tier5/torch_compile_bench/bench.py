@@ -35,7 +35,7 @@ def benchmark():
     batch_size = int(os.environ.get('BENCH_PARAM_batch_size', '32'))
     image_size = int(os.environ.get('BENCH_PARAM_image_size', '224'))
     compile_mode = os.environ.get('BENCH_PARAM_compile_mode', 'default')
-    num_warmup = int(os.environ.get('BENCH_PARAM_num_warmup', '5'))
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     print(f"torch.compile benchmark — batch_size={batch_size}, "
           f"image_size={image_size}, compile_mode={compile_mode}, "

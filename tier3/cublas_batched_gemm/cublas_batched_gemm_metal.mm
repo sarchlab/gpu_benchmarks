@@ -46,7 +46,7 @@ static int BATCH_COUNT = 64;
 static int GEMM_M      = 512;
 static int GEMM_N      = 512;
 static int GEMM_K      = 512;
-static int WARMUP      = 5;
+static int WARMUP      = 0;
 static int ITERS       = 5;
 
 /* -------------------------------------------------------------------------

@@ -187,6 +187,9 @@ int main(int argc, char** argv)
     if (env_val) num_bins = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     size_t bytes_data = (size_t)n * sizeof(uint32_t);
     size_t bytes_hist = (size_t)NUM_BINS * sizeof(uint32_t);
@@ -225,9 +228,11 @@ int main(int argc, char** argv)
     BenchmarkTimer timer;
 
     // Warmup
-    HIP_CHECK(hipMemset(d_hist, 0, bytes_hist));
-    hipLaunchKernelGGL(histogram_kernel, blocks, BLOCK_SIZE, 0, 0, d_data, d_hist, n);
-    HIP_CHECK(hipDeviceSynchronize());
+    for (int w = 0; w < num_warmup; ++w) {
+        HIP_CHECK(hipMemset(d_hist, 0, bytes_hist));
+        hipLaunchKernelGGL(histogram_kernel, blocks, BLOCK_SIZE, 0, 0, d_data, d_hist, n);
+        HIP_CHECK(hipDeviceSynchronize());
+    }
 
     // Timed iterations
     std::vector<double> times(iters);

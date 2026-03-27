@@ -145,6 +145,9 @@ int main(int argc, char* argv[])
     if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int N     = size;
     int iters = iterations;
@@ -228,11 +231,14 @@ int main(int argc, char* argv[])
     }
 
     // -------------------------------------------------------------------
-    // Warmup pass
+    // Warmup
     // -------------------------------------------------------------------
-    id<MTLBuffer> buf_result = dispatch_reduction(queue, pso, tg_size,
-                                                  buf_input, (NSUInteger)N,
-                                                  buf_s1, buf_s2);
+    id<MTLBuffer> buf_result = nil;
+    for (int w = 0; w < num_warmup; ++w) {
+        buf_result = dispatch_reduction(queue, pso, tg_size,
+                                        buf_input, (NSUInteger)N,
+                                        buf_s1, buf_s2);
+    }
 
     // -------------------------------------------------------------------
     // Timed iterations

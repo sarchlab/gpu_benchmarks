@@ -170,6 +170,9 @@ int main(int argc, char** argv) {
     if (env_val) alpha = (float)atof(env_val);
     env_val = getenv("BENCH_PARAM_beta");
     if (env_val) beta = (float)atof(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     size_t bytes_AB = (size_t)N * M * sizeof(float);
     size_t bytes_C  = (size_t)N * N * sizeof(float);
@@ -213,8 +216,8 @@ int main(int argc, char** argv) {
 
     BenchmarkTimer timer;
 
-    // Warmup (5 iterations, not measured)
-    for (int w = 0; w < 5; ++w) {
+    // Warmup (not measured)
+    for (int w = 0; w < num_warmup; ++w) {
         syr2k_kernel<<<grid, block>>>(d_A, d_B, d_C, N, M, alpha, beta);
     }
     CUDA_CHECK(cudaDeviceSynchronize());

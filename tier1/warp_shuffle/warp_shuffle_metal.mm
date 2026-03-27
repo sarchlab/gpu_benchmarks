@@ -47,7 +47,7 @@ static const int DEFAULT_OPS_PER_THREAD  = 4096;
 static const int DEFAULT_NUM_BLOCKS      = 1024;
 static const int DEFAULT_THREADS_PER_BLK = 256;
 static const int SIMD_WIDTH              = 32;
-static const int NUM_WARMUP              = 5;
+static const int DEFAULT_NUM_WARMUP      = 0;
 static const int NUM_ITERATIONS          = 5;
 
 // ---------------------------------------------------------------------------
@@ -76,6 +76,7 @@ static int run_benchmark(const char *kernel_name,
                          id<MTLBuffer> d_out,
                          int ops_per_thread, int num_blocks,
                          int threads_per_block, const char *shuffle_variant,
+                         int num_warmup,
                          double *out_avg_ms, double *out_gops)
 {
     NSError *err = nil;
@@ -120,7 +121,7 @@ static int run_benchmark(const char *kernel_name,
     };
 
     /* Warm-up launches. */
-    for (int w = 0; w < NUM_WARMUP; ++w) {
+    for (int w = 0; w < num_warmup; ++w) {
         dispatch_once();
     }
 
@@ -197,6 +198,10 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_shuffle_variant");
     if (env_val) shuffle_variant = env_val;
 
+    int num_warmup = DEFAULT_NUM_WARMUP;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
+
     /* Select the default Metal GPU device. */
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
     if (!device) {
@@ -212,7 +217,7 @@ int main(int argc, char *argv[])
     fprintf(stderr, "SIMD width      : %d\n", SIMD_WIDTH);
     fprintf(stderr, "Ops / thread    : %d\n", ops_per_thread);
     fprintf(stderr, "Shuffle variant : %s\n", shuffle_variant);
-    fprintf(stderr, "Warmup iters    : %d\n", NUM_WARMUP);
+    fprintf(stderr, "Warmup iters    : %d\n", num_warmup);
     fprintf(stderr, "Timed iters     : %d\n\n", NUM_ITERATIONS);
 
     /* Load the Metal shader library from source. */
@@ -270,7 +275,7 @@ int main(int argc, char *argv[])
         rc = run_benchmark("shfl_xor_kernel", "shfl_xor_kern",
                            device, library, queue, d_out,
                            ops_per_thread, num_blocks, threads_per_block,
-                           shuffle_variant, &avg_ms, &gops);
+                           shuffle_variant, num_warmup, &avg_ms, &gops);
         if (rc != EXIT_SUCCESS) return rc;
         total_time_ms += avg_ms;
         if (gops > max_gops) max_gops = gops;
@@ -281,7 +286,7 @@ int main(int argc, char *argv[])
         rc = run_benchmark("shfl_kernel", "shfl_kern",
                            device, library, queue, d_out,
                            ops_per_thread, num_blocks, threads_per_block,
-                           shuffle_variant, &avg_ms, &gops);
+                           shuffle_variant, num_warmup, &avg_ms, &gops);
         if (rc != EXIT_SUCCESS) return rc;
         total_time_ms += avg_ms;
         if (gops > max_gops) max_gops = gops;
@@ -292,7 +297,7 @@ int main(int argc, char *argv[])
         rc = run_benchmark("shfl_up_kernel", "shfl_up_kern",
                            device, library, queue, d_out,
                            ops_per_thread, num_blocks, threads_per_block,
-                           shuffle_variant, &avg_ms, &gops);
+                           shuffle_variant, num_warmup, &avg_ms, &gops);
         if (rc != EXIT_SUCCESS) return rc;
         total_time_ms += avg_ms;
         if (gops > max_gops) max_gops = gops;
@@ -303,7 +308,7 @@ int main(int argc, char *argv[])
         rc = run_benchmark("shfl_down_kernel", "shfl_down_kern",
                            device, library, queue, d_out,
                            ops_per_thread, num_blocks, threads_per_block,
-                           shuffle_variant, &avg_ms, &gops);
+                           shuffle_variant, num_warmup, &avg_ms, &gops);
         if (rc != EXIT_SUCCESS) return rc;
         total_time_ms += avg_ms;
         if (gops > max_gops) max_gops = gops;

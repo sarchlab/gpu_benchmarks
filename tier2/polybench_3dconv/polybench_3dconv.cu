@@ -130,6 +130,9 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_filter_size");
     if (env_val) filter_size = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     size_t vol_elems   = (size_t)N * N * N;
     size_t vol_bytes   = vol_elems * sizeof(float);
@@ -180,7 +183,7 @@ int main(int argc, char** argv) {
     BenchmarkTimer timer;
 
     // Warmup
-    for (int w = 0; w < 5; ++w) {
+    for (int w = 0; w < num_warmup; ++w) {
         conv3d_kernel<<<grid, block>>>(d_input, d_filter, d_output, N, filter_size);
     }
     CUDA_CHECK(cudaDeviceSynchronize());

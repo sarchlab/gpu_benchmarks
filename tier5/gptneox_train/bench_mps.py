@@ -15,6 +15,7 @@ def benchmark():
     num_hidden_layers = int(os.environ.get('BENCH_PARAM_num_hidden_layers', '6'))
     hidden_size = int(os.environ.get('BENCH_PARAM_hidden_size', '512'))
     num_attention_heads = int(os.environ.get('BENCH_PARAM_num_attention_heads', '8'))
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     config = GPTNeoXConfig(
         num_hidden_layers=num_hidden_layers,
@@ -40,14 +41,15 @@ def benchmark():
           file=sys.stderr)
 
     # Warmup
-    for i in range(5):
+    for i in range(num_warmup):
         optimizer.zero_grad()
         outputs = model(input_ids=input_ids, labels=labels)
         loss = outputs.loss
         loss.backward()
         optimizer.step()
-        print(f"  warmup {i+1}/5", file=sys.stderr)
-    _ = loss.item()  # sync
+        print(f"  warmup {i+1}/{num_warmup}", file=sys.stderr)
+    if num_warmup > 0:
+        _ = loss.item()  # sync
 
     # Timed
     total_time = 0.0

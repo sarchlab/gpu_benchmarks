@@ -116,6 +116,7 @@ def benchmark():
     num_layers = int(os.environ.get('BENCH_PARAM_num_layers', '4'))
     hidden_size = int(os.environ.get('BENCH_PARAM_hidden_size', '256'))
     num_heads = int(os.environ.get('BENCH_PARAM_num_heads', '4'))
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     total_generated = 3 * tokens_per_agent
     max_seq_len = prompt_len + 2 * tokens_per_agent
@@ -135,7 +136,7 @@ def benchmark():
 
     # Warmup
     print("Warmup...", file=sys.stderr)
-    for _ in range(5):
+    for _ in range(num_warmup):
         multi_agent_pipeline(agent_a, agent_b, agent_c, prompt, tokens_per_agent)
     torch.cuda.synchronize()
 

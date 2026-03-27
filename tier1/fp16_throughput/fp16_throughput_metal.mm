@@ -47,6 +47,7 @@ static const int DEFAULT_FMAS_PER_THREAD = 4096;
 static const int DEFAULT_THREADS_PER_BLOCK = 256;
 static const int DEFAULT_NUM_BLOCKS = 1024;
 static const int DEFAULT_NUM_ITERATIONS = 10;
+static const int DEFAULT_NUM_WARMUP = 0;
 
 // ---------------------------------------------------------------------------
 // Timing helpers
@@ -99,6 +100,10 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_num_iterations");
     if (env_val) num_iterations = atoi(env_val);
 
+    int num_warmup = DEFAULT_NUM_WARMUP;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
+
     int total_threads = num_blocks * threads_per_block;
 
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -112,6 +117,7 @@ int main(int argc, char *argv[])
            num_blocks, threads_per_block, total_threads);
     fprintf(stderr, "FMAs / thread   : %d  (fma(half2,...), 4 FLOPs each)\n",
            fmas_per_thread);
+    fprintf(stderr, "Warmup iters    : %d\n", num_warmup);
     fprintf(stderr, "Kernel repeats  : %d\n\n", num_iterations);
 
     NSError *err = nil;
@@ -170,8 +176,8 @@ int main(int argc, char *argv[])
     NSUInteger tg_size  = (NSUInteger)threads_per_block;
     NSUInteger grid_dim = (NSUInteger)total_threads;
 
-    /* Warm-up launch. */
-    {
+    /* Warm-up launches. */
+    for (int w = 0; w < num_warmup; ++w) {
         id<MTLCommandBuffer>       cb  = [queue commandBuffer];
         id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
         [enc setComputePipelineState:pso];

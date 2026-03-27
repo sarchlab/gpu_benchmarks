@@ -12,6 +12,7 @@ def benchmark():
     block_size = int(os.environ.get('BENCH_PARAM_block_size', '1024'))
     num_warps = int(os.environ.get('BENCH_PARAM_num_warps', '4'))
     dtype_str = os.environ.get('BENCH_PARAM_dtype', 'float32')
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     dtype_map = {'float16': torch.float16, 'float32': torch.float32, 'float64': torch.float64}
     dtype = dtype_map.get(dtype_str, torch.float32)
@@ -23,9 +24,10 @@ def benchmark():
     b = torch.rand(n, device=device, dtype=dtype)
 
     # Warmup
-    for _ in range(5):
+    for _ in range(num_warmup):
         c = torch.add(a, b)
-    _ = c.sum().item()
+    if num_warmup > 0:
+        _ = c.sum().item()
 
     # Timed
     times = []

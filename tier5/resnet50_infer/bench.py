@@ -13,6 +13,7 @@ def benchmark():
     image_size = int(os.environ.get('BENCH_PARAM_image_size', '224'))
     num_classes = int(os.environ.get('BENCH_PARAM_num_classes', '1000'))
     precision = os.environ.get('BENCH_PARAM_precision', 'fp32')
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     print(f"Running resnet50_infer with batch_size={batch_size}, image_size={image_size}, "
           f"num_classes={num_classes}, precision={precision}", file=sys.stderr)
@@ -29,7 +30,7 @@ def benchmark():
 
     # Warmup
     with torch.no_grad():
-        for _ in range(5):
+        for _ in range(num_warmup):
             if precision == 'amp':
                 with torch.cuda.amp.autocast():
                     _ = model(x)

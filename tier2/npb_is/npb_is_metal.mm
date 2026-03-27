@@ -113,6 +113,9 @@ int main(int argc, char* argv[]) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_verify");
     if (env_val) verify = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int iters = iterations;
 
@@ -125,8 +128,8 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
-    fprintf(stderr, "IS keys: %d (2^%.0f)  |  Buckets: %d  |  Iterations: 5 warmup + %d timed\n\n",
-            N, log2((double)N), NUM_BUCKETS, iters);
+    fprintf(stderr, "IS keys: %d (2^%.0f)  |  Buckets: %d  |  Iterations: %d warmup + %d timed\n\n",
+            N, log2((double)N), NUM_BUCKETS, num_warmup, iters);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -257,9 +260,9 @@ int main(int argc, char* argv[]) {
     };
 
     // -------------------------------------------------------------------
-    // Warmup (5 iterations)
+    // Warmup
     // -------------------------------------------------------------------
-    for (int w = 0; w < 5; ++w) {
+    for (int w = 0; w < num_warmup; ++w) {
         run_is();
     }
 

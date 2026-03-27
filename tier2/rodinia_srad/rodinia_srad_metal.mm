@@ -184,6 +184,9 @@ int main(int argc, char* argv[])
     if (env_val) block_dim = atoi(env_val);
     env_val = getenv("BENCH_PARAM_iterations");
     if (env_val) iters = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int    rows = image_size;
     int    cols = image_size;
@@ -277,11 +280,13 @@ int main(int argc, char* argv[])
                                     (NSUInteger)((rows + 15) / 16) * 16, 1);
 
     // -------------------------------------------------------------------
-    // Warmup (reset image, run once)
+    // Warmup
     // -------------------------------------------------------------------
-    memcpy(buf_J.contents, h_J_init, bytes);
-    runSRADIters(queue, pso1, pso2, buf_J, buf_dN, buf_dS, buf_dW, buf_dE, buf_c,
-                 dims, fparams, num_iters, grid_size, tg_size);
+    for (int w = 0; w < num_warmup; ++w) {
+        memcpy(buf_J.contents, h_J_init, bytes);
+        runSRADIters(queue, pso1, pso2, buf_J, buf_dN, buf_dS, buf_dW, buf_dE, buf_c,
+                     dims, fparams, num_iters, grid_size, tg_size);
+    }
 
     // -------------------------------------------------------------------
     // Timed benchmark iterations

@@ -217,6 +217,9 @@ int main(int argc, char* argv[])
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_iterations");
     if (env_val) iters = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     // Generate random CSR graph
     std::vector<int> row_offsets, col_indices;
@@ -314,10 +317,12 @@ int main(int argc, char* argv[])
     // -------------------------------------------------------------------
     // Warmup
     // -------------------------------------------------------------------
-    run_bfs_once(device, queue, pso_kernel, pso_update,
-                 buf_row_offsets, buf_col_indices,
-                 buf_cost, buf_frontier, buf_visited, buf_updated, buf_num_nodes,
-                 num_nodes, threads_per_tg);
+    for (int w = 0; w < num_warmup; ++w) {
+        run_bfs_once(device, queue, pso_kernel, pso_update,
+                     buf_row_offsets, buf_col_indices,
+                     buf_cost, buf_frontier, buf_visited, buf_updated, buf_num_nodes,
+                     num_nodes, threads_per_tg);
+    }
 
     // -------------------------------------------------------------------
     // Timed iterations

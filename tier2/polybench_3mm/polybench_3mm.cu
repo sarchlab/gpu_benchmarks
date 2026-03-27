@@ -155,6 +155,9 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     // All matrices are N×N
     const int NI = N, NJ = N, NK = N, NL = N, NM = N;
@@ -216,11 +219,13 @@ int main(int argc, char** argv) {
 
     BenchmarkTimer timer;
 
-    // Warmup (not measured)
-    mm3_kernel1<<<grid1, block, 0, 0>>>(d_A, d_B, d_E, NI, NK, NJ);
-    mm3_kernel2<<<grid2, block, 0, 0>>>(d_C, d_D, d_F, NJ, NM, NL);
-    mm3_kernel3<<<grid3, block, 0, 0>>>(d_E, d_F, d_G, NI, NJ, NL);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    // Warmup
+    for (int w = 0; w < num_warmup; ++w) {
+        mm3_kernel1<<<grid1, block, 0, 0>>>(d_A, d_B, d_E, NI, NK, NJ);
+        mm3_kernel2<<<grid2, block, 0, 0>>>(d_C, d_D, d_F, NJ, NM, NL);
+        mm3_kernel3<<<grid3, block, 0, 0>>>(d_E, d_F, d_G, NI, NJ, NL);
+        CUDA_CHECK(cudaDeviceSynchronize());
+    }
 
     // Timed iterations — time each kernel separately
     std::vector<double> k1_times(iters), k2_times(iters), k3_times(iters);

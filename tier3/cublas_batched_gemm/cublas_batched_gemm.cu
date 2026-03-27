@@ -64,7 +64,7 @@ static int BATCH_COUNT = 64;
 static int M           = 512;
 static int N           = 512;
 static int K           = 512;
-static int WARMUP      = 5;
+static int WARMUP      = 0;
 static int ITERS       = 5;
 
 /* -------------------------------------------------------------------------

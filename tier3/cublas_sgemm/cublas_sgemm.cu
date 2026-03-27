@@ -56,7 +56,7 @@ typedef cudaEvent_t gpu_event_t;
 static int M      = 4096;
 static int N      = 4096;
 static int K      = 4096;
-static int WARMUP = 5;
+static int WARMUP = 0;
 static int ITERS  = 5;
 
 /* -------------------------------------------------------------------------

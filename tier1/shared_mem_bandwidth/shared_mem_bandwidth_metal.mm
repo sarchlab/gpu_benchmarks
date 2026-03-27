@@ -39,7 +39,7 @@
 static const int DEFAULT_BLOCK_SIZE   = 256;
 static const int DEFAULT_NUM_GROUPS   = 128;
 static const int DEFAULT_INNER_ITERS  = 1000;
-static const int WARMUP_ITERS         = 5;
+static const int DEFAULT_WARMUP_ITERS  = 0;
 static const int TIMED_ITERS          = 5;
 static const int SMEM_FLOATS          = 12288;         // 48 KB / 4 bytes
 static const double BYTES_PER_GB      = 1e9;
@@ -77,6 +77,7 @@ static double run_benchmark(id<MTLDevice>  device,
                             int            block_size,
                             int            num_groups,
                             int            inner_iters,
+                            int            num_warmup,
                             double        *out_bw_GBs)
 {
     NSError *err = nil;
@@ -128,7 +129,7 @@ static double run_benchmark(id<MTLDevice>  device,
     };
 
     // Warmup
-    for (int i = 0; i < WARMUP_ITERS; ++i)
+    for (int i = 0; i < num_warmup; ++i)
         dispatch();
 
     // Timed iterations
@@ -179,6 +180,10 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_access_pattern");
     if (env_val) access_pattern = env_val;
 
+    int num_warmup = DEFAULT_WARMUP_ITERS;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
+
     // Select GPU device
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
     if (!device) {
@@ -193,7 +198,7 @@ int main(int argc, char *argv[])
            SMEM_FLOATS * (int)sizeof(float), SMEM_FLOATS);
     fprintf(stderr, "Inner iters   : %d\n", inner_iters);
     fprintf(stderr, "Access pattern: %s\n", access_pattern);
-    fprintf(stderr, "Warmup iters  : %d\n", WARMUP_ITERS);
+    fprintf(stderr, "Warmup iters  : %d\n", num_warmup);
     fprintf(stderr, "Timed iters   : %d\n\n", TIMED_ITERS);
 
     // Compile Metal shader source at runtime
@@ -243,7 +248,8 @@ int main(int argc, char *argv[])
         double nc_bw = 0.0;
         double nc_ms = run_benchmark(device, library,
                                      @"smem_bw_no_conflict",
-                                     block_size, num_groups, inner_iters, &nc_bw);
+                                     block_size, num_groups, inner_iters,
+                                     num_warmup, &nc_bw);
         fprintf(stderr, "no_conflict    : %.3f ms  %.2f GB/s\n", nc_ms, nc_bw);
         total_time_ms += nc_ms;
         if (nc_bw > max_bw) max_bw = nc_bw;
@@ -259,7 +265,8 @@ int main(int argc, char *argv[])
         double c_bw = 0.0;
         double c_ms = run_benchmark(device, library,
                                     @"smem_bw_conflict",
-                                    block_size, num_groups, inner_iters, &c_bw);
+                                    block_size, num_groups, inner_iters,
+                                    num_warmup, &c_bw);
         fprintf(stderr, "conflict       : %.3f ms  %.2f GB/s\n", c_ms, c_bw);
         total_time_ms += c_ms;
         if (c_bw > max_bw) max_bw = c_bw;

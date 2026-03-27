@@ -150,6 +150,9 @@ int main(int argc, char** argv) {
     if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     size_t bytes_A   = (size_t)nx * ny * sizeof(float);
     size_t bytes_x   = (size_t)ny * sizeof(float);
@@ -192,9 +195,11 @@ int main(int argc, char** argv) {
     BenchmarkTimer timer;
 
     // Warmup
-    atax_kernel1<<<grid1, block_size, 0, 0>>>(d_A, d_x, d_tmp, nx, ny);
-    atax_kernel2<<<grid2, block_size, 0, 0>>>(d_A, d_tmp, d_y, nx, ny);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    for (int w = 0; w < num_warmup; ++w) {
+        atax_kernel1<<<grid1, block_size, 0, 0>>>(d_A, d_x, d_tmp, nx, ny);
+        atax_kernel2<<<grid2, block_size, 0, 0>>>(d_A, d_tmp, d_y, nx, ny);
+        CUDA_CHECK(cudaDeviceSynchronize());
+    }
 
     // Timed iterations — time each kernel separately
     std::vector<double> k1_times(iters), k2_times(iters);

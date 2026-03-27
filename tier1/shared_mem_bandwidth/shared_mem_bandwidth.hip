@@ -101,7 +101,7 @@
 static const int DEFAULT_BLOCK_SIZE   = 256;
 static const int DEFAULT_NUM_BLOCKS   = 128;
 static const int DEFAULT_INNER_ITERS  = 1000;
-static const int WARMUP_ITERS         = 5;
+static const int DEFAULT_WARMUP_ITERS  = 0;
 static const int TIMED_ITERS          = 5;
 static const int SMEM_FLOATS          = 12288;         // 48 KB / 4 bytes
 static const double BYTES_PER_GB      = 1e9;
@@ -182,10 +182,11 @@ typedef void (*KernelFn)(float *, int);
  */
 static double run_benchmark(KernelFn kernel, float *d_sink,
                             int block_size, int num_blocks, int inner_iters,
+                            int num_warmup,
                             double *out_bw_GBs)
 {
     // Warmup
-    for (int i = 0; i < WARMUP_ITERS; ++i) {
+    for (int i = 0; i < num_warmup; ++i) {
         hipLaunchKernelGGL(kernel, dim3(num_blocks), dim3(block_size),
                            0, 0, d_sink, inner_iters);
         HIP_CHECK(hipGetLastError());
@@ -250,6 +251,10 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_access_pattern");
     if (env_val) access_pattern = env_val;
 
+    int num_warmup = DEFAULT_WARMUP_ITERS;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
+
     /* Print device info to stderr. */
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
@@ -263,7 +268,7 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Grid size     : %d blocks\n", num_blocks);
     fprintf(stderr, "Inner iters   : %d\n", inner_iters);
     fprintf(stderr, "Access pattern: %s\n", access_pattern);
-    fprintf(stderr, "Warmup iters  : %d\n", WARMUP_ITERS);
+    fprintf(stderr, "Warmup iters  : %d\n", num_warmup);
     fprintf(stderr, "Timed iters   : %d\n\n", TIMED_ITERS);
 
     /* Allocate device sink buffer. */
@@ -282,7 +287,8 @@ int main(int argc, char *argv[])
     if (run_no_conflict) {
         double nc_bw = 0.0;
         double nc_ms = run_benchmark(smem_bw_no_conflict, d_sink,
-                                     block_size, num_blocks, inner_iters, &nc_bw);
+                                     block_size, num_blocks, inner_iters,
+                                     num_warmup, &nc_bw);
         fprintf(stderr, "no_conflict    : %.3f ms  %.2f GB/s\n", nc_ms, nc_bw);
         total_time_ms += nc_ms;
         if (nc_bw > max_bw) max_bw = nc_bw;
@@ -297,7 +303,8 @@ int main(int argc, char *argv[])
     if (run_conflict) {
         double c_bw = 0.0;
         double c_ms = run_benchmark(smem_bw_conflict, d_sink,
-                                    block_size, num_blocks, inner_iters, &c_bw);
+                                    block_size, num_blocks, inner_iters,
+                                    num_warmup, &c_bw);
         fprintf(stderr, "conflict       : %.3f ms  %.2f GB/s\n", c_ms, c_bw);
         total_time_ms += c_ms;
         if (c_bw > max_bw) max_bw = c_bw;

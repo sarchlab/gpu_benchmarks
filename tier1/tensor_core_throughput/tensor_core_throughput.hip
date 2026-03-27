@@ -22,7 +22,7 @@
  * Environment variables (override argv):
  *   BENCH_PARAM_matrix_dim
  *   BENCH_PARAM_precision          ("fp16", "tf32", or "all")
- *   BENCH_PARAM_warmup_iterations
+ *   BENCH_PARAM_warmup
  *   BENCH_PARAM_timed_iterations
  */
 
@@ -115,7 +115,7 @@ static const int WMMA_M                    = 16;
 static const int WMMA_N                    = 16;
 static const int WMMA_K                    = 16;
 static const int WARP_SIZE                 = 32;
-static const int DEFAULT_WARMUP_ITERATIONS = 5;
+static const int DEFAULT_WARMUP_ITERATIONS = 0;
 static const int DEFAULT_TIMED_ITERATIONS  = 5;
 
 // ---------------------------------------------------------------------------
@@ -291,7 +291,7 @@ int main(int argc, char *argv[])
     if (env_val) precision = env_val;
 
     int warmup_iterations = DEFAULT_WARMUP_ITERATIONS;
-    env_val = getenv("BENCH_PARAM_warmup_iterations");
+    env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) warmup_iterations = atoi(env_val);
 
     int timed_iterations = DEFAULT_TIMED_ITERATIONS;

@@ -14,6 +14,7 @@ def benchmark():
     num_heads = int(os.environ.get('BENCH_PARAM_num_heads', '16'))
     head_dim = int(os.environ.get('BENCH_PARAM_head_dim', '64'))
     dtype_str = os.environ.get('BENCH_PARAM_dtype', 'float16')
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     dtype_map = {'float16': torch.float16, 'bfloat16': torch.bfloat16, 'float32': torch.float32}
     dtype = dtype_map.get(dtype_str, torch.float16)
@@ -26,7 +27,7 @@ def benchmark():
     v = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device, dtype=dtype)
 
     # Warmup
-    for _ in range(5):
+    for _ in range(num_warmup):
         _ = F.scaled_dot_product_attention(q, k, v)
     torch.cuda.synchronize()
 

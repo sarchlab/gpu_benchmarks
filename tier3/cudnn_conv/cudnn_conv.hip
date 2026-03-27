@@ -117,8 +117,8 @@ static const int STRIDE = 2;
 static const int PAD    = 3;
 static int OUT_H    = 112;   /* floor((IN_H + 2*PAD - FILT_R) / STRIDE) + 1 */
 static int OUT_W    = 112;
-static const int WARMUP = 5;
-static const int ITERS  = 5;
+static int WARMUP = 0;
+static int ITERS  = 5;
 
 /* =========================================================================
  * CPU reference convolution — only for a small patch
@@ -184,6 +184,8 @@ int main(void)
     if (env_val) OUT_K = atoi(env_val);
     env_val = getenv("BENCH_PARAM_filter_size");
     if (env_val) { FILT_R = atoi(env_val); FILT_S = FILT_R; }
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) WARMUP = atoi(env_val);
 
     /* Recompute output dimensions */
     OUT_H = (IN_H + 2 * PAD - FILT_R) / STRIDE + 1;

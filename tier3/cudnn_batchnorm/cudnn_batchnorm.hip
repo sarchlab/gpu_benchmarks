@@ -110,7 +110,7 @@ static int BATCH_N  = 64;
 static int CHAN_C   = 256;
 static int IN_H     = 56;
 static int IN_W     = 56;
-static int WARMUP   = 5;
+static int WARMUP   = 0;
 static int ITERS    = 5;
 #define BN_EPS   1e-5
 

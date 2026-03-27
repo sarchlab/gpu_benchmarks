@@ -223,6 +223,9 @@ int main(int argc, char** argv)
     if (env_val) block_size_param = atoi(env_val);
     env_val = getenv("BENCH_PARAM_verify");
     if (env_val) verify = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     size_t bytes_a = (size_t)N * N * sizeof(float);
     size_t bytes_b = (size_t)N * sizeof(float);
@@ -270,23 +273,25 @@ int main(int argc, char** argv)
     const int BLOCK1D = 256;
     const int BLOCK2D = 16;
 
-    // Warmup: run one full forward elimination (untimed)
-    HIP_CHECK(hipMemcpy(d_a, h_a, bytes_a, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_b, h_b, bytes_b, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemset(d_m, 0, bytes_a));
+    // Warmup
+    for (int w = 0; w < num_warmup; ++w) {
+        HIP_CHECK(hipMemcpy(d_a, h_a, bytes_a, hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(d_b, h_b, bytes_b, hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemset(d_m, 0, bytes_a));
 
-    for (int t = 0; t < N - 1; ++t) {
-        int remaining = N - t - 1;
-        // fan1
-        int grid1 = (remaining + BLOCK1D - 1) / BLOCK1D;
-        hipLaunchKernelGGL(fan1, grid1, BLOCK1D, 0, 0, d_m, d_a, N, t);
-        // fan2
-        dim3 block2(BLOCK2D, BLOCK2D);
-        dim3 grid2((remaining + BLOCK2D - 1) / BLOCK2D,
-                   (remaining + BLOCK2D - 1) / BLOCK2D);
-        hipLaunchKernelGGL(fan2, grid2, block2, 0, 0, d_m, d_a, d_b, N, t);
+        for (int t = 0; t < N - 1; ++t) {
+            int remaining = N - t - 1;
+            // fan1
+            int grid1 = (remaining + BLOCK1D - 1) / BLOCK1D;
+            hipLaunchKernelGGL(fan1, grid1, BLOCK1D, 0, 0, d_m, d_a, N, t);
+            // fan2
+            dim3 block2(BLOCK2D, BLOCK2D);
+            dim3 grid2((remaining + BLOCK2D - 1) / BLOCK2D,
+                       (remaining + BLOCK2D - 1) / BLOCK2D);
+            hipLaunchKernelGGL(fan2, grid2, block2, 0, 0, d_m, d_a, d_b, N, t);
+        }
+        HIP_CHECK(hipDeviceSynchronize());
     }
-    HIP_CHECK(hipDeviceSynchronize());
 
     // Timed iterations
     std::vector<double> times(iters);

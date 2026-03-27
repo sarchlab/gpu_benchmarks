@@ -231,6 +231,9 @@ int main(int argc, char** argv) {
     if (env_val) pr_iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_iterations");
     if (env_val) iterations = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int N         = vertices;
     int avg_deg   = degree;
@@ -269,9 +272,9 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaMemcpy(d_out_degree, out_degree.data(), N * sizeof(int), cudaMemcpyHostToDevice));
 
     // -------------------------------------------------------------------
-    // Warmup (5 iterations)
+    // Warmup
     // -------------------------------------------------------------------
-    for (int w = 0; w < 5; ++w) {
+    for (int w = 0; w < num_warmup; ++w) {
         run_pagerank_gpu(N, pr_iters, damping, d_col_offsets, d_row_indices,
                          d_out_degree, d_rank_a, d_rank_b);
     }

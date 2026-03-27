@@ -13,6 +13,7 @@ def benchmark():
     image_size = int(os.environ.get('BENCH_PARAM_image_size', '224'))
     num_classes = int(os.environ.get('BENCH_PARAM_num_classes', '1000'))
     learning_rate = float(os.environ.get('BENCH_PARAM_learning_rate', '0.01'))
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     print(f"Running resnet50_train (MPS) with batch_size={batch_size}, image_size={image_size}, "
           f"num_classes={num_classes}, lr={learning_rate}", file=sys.stderr)
@@ -27,13 +28,14 @@ def benchmark():
     criterion = torch.nn.CrossEntropyLoss()
 
     # Warmup
-    for _ in range(5):
+    for _ in range(num_warmup):
         optimizer.zero_grad()
         out = model(x)
         loss = criterion(out, y)
         loss.backward()
         optimizer.step()
-    _ = loss.item()  # sync
+    if num_warmup > 0:
+        _ = loss.item()  # sync
 
     num_iters = 10
 

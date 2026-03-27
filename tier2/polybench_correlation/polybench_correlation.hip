@@ -208,6 +208,9 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int M = N;
 
@@ -247,7 +250,7 @@ int main(int argc, char** argv) {
     dim3 corr_grid((N + TILE_SIZE - 1) / TILE_SIZE, (N + TILE_SIZE - 1) / TILE_SIZE);
 
     // Warmup
-    for (int w = 0; w < 5; ++w) {
+    for (int w = 0; w < num_warmup; ++w) {
         HIP_CHECK(hipMemcpy(d_data, h_data, data_bytes, hipMemcpyHostToDevice));
         hipLaunchKernelGGL(mean_kernel, dim3(blocks_n), dim3(threads1d), 0, 0,
                            d_data, d_mean, M, N);

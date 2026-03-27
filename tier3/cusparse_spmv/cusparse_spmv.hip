@@ -111,7 +111,7 @@ int main(int argc, char **argv)
     // -----------------------------------------------------------------------
     int num_rows    = 16384;
     int nnz_per_row = 32;
-    int warmup      = 5;
+    int warmup      = 0;
     int iters       = 5;
 
     const char *env_val;

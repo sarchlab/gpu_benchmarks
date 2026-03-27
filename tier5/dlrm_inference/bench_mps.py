@@ -105,6 +105,7 @@ def benchmark():
     num_dense_features = int(os.environ.get('BENCH_PARAM_num_dense_features', '13'))
     num_sparse_features = int(os.environ.get('BENCH_PARAM_num_sparse_features', '26'))
     precision = os.environ.get('BENCH_PARAM_precision', 'fp32')
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     print(f"Running dlrm_inference (MPS) with batch_size={batch_size}, "
           f"num_embeddings={num_embeddings}, embedding_dim={embedding_dim}, "
@@ -151,13 +152,14 @@ def benchmark():
 
     # Warmup
     with torch.no_grad():
-        for _ in range(5):
+        for _ in range(num_warmup):
             if precision == 'amp':
                 with torch.autocast('mps'):
                     out = model(dense_input, sparse_offsets, sparse_indices)
             else:
                 out = model(dense_input, sparse_offsets, sparse_indices)
-    _ = out.sum().item()  # sync
+    if num_warmup > 0:
+        _ = out.sum().item()  # sync
 
     num_iters = 5
 

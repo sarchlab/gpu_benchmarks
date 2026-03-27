@@ -57,6 +57,7 @@ def benchmark():
     block_n = int(os.environ.get('BENCH_PARAM_block_n', '256'))
     block_k = int(os.environ.get('BENCH_PARAM_block_k', '64'))
     group_size_m = int(os.environ.get('BENCH_PARAM_group_size_m', '8'))
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     # Square matrices: M = N = K
     M_dim, N_dim, K_dim = m, m, m
@@ -70,7 +71,7 @@ def benchmark():
     grid = lambda meta: (triton.cdiv(M_dim, meta['BLOCK_M']) * triton.cdiv(N_dim, meta['BLOCK_N']),)
 
     # Warmup
-    for _ in range(5):
+    for _ in range(num_warmup):
         matmul_kernel[grid](
             a, b, c,
             M_dim, N_dim, K_dim,

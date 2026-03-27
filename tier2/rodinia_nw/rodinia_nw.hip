@@ -152,12 +152,15 @@ template <typename Func>
 static BenchResult runBenchmark(const char* kernel_name,
                                 const char* problem_size,
                                 int         iterations,
+                                int         num_warmup,
                                 Func        func) {
     BenchmarkTimer timer;
 
     // Warmup
-    func();
-    HIP_CHECK(hipDeviceSynchronize());
+    for (int w = 0; w < num_warmup; ++w) {
+        func();
+        HIP_CHECK(hipDeviceSynchronize());
+    }
 
     std::vector<double> times(iterations);
     for (int i = 0; i < iterations; ++i) {
@@ -399,6 +402,9 @@ int main(int argc, char** argv) {
     if (env_val) penalty = atoi(env_val);
     env_val = getenv("BENCH_PARAM_iterations");
     if (env_val) iters = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     // Round sequence length up to a multiple of block_size
     int num_blocks = (seq_len + block_size - 1) / block_size;
@@ -451,7 +457,7 @@ int main(int argc, char** argv) {
     snprintf(problemSize, sizeof(problemSize), "%d", seq_len);
 
     BenchResult r = runBenchmark(
-        "rodinia_nw", problemSize, iters, [&]() {
+        "rodinia_nw", problemSize, iters, num_warmup, [&]() {
             // Reset matrix borders for each timed run
             HIP_CHECK(hipMemcpy(d_matrix, h_matrix,
                                 matrix_elems * sizeof(int),

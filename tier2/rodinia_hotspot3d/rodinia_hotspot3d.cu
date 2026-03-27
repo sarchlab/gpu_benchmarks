@@ -145,6 +145,9 @@ int main(int argc, char** argv) {
     if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_amb_temp");
     if (env_val) amb_temp = (float)atof(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int nx = grid_size, ny = grid_size, nz = grid_size;
     long long total_cells = (long long)nx * ny * nz;
@@ -174,8 +177,8 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Grid: %d×%d×%d  |  Block: %d³  |  Steps/launch: %d  |  "
-            "Iterations: 5 warmup + %d timed\n\n",
-            nx, ny, nz, block_dim, num_iterations, iters);
+            "Iterations: %d warmup + %d timed\n\n",
+            nx, ny, nz, block_dim, num_iterations, num_warmup, iters);
 
     // Host allocations
     size_t bytes = (size_t)total_cells * sizeof(float);
@@ -217,8 +220,8 @@ int main(int argc, char** argv) {
         }
     };
 
-    // Warmup (5 iterations)
-    for (int w = 0; w < 5; ++w) {
+    // Warmup
+    for (int w = 0; w < num_warmup; ++w) {
         run_stencil();
         CUDA_CHECK(cudaDeviceSynchronize());
     }

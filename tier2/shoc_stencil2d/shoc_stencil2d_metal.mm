@@ -116,6 +116,9 @@ int main(int argc, char* argv[])
     if (env_val) trials = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     size_t bytes = (size_t)N * N * sizeof(float);
 
@@ -285,9 +288,11 @@ int main(int argc, char* argv[])
     }
 
     // -------------------------------------------------------------------
-    // Warmup (not measured)
+    // Warmup
     // -------------------------------------------------------------------
-    run_trial(buf0, buf1);
+    for (int w = 0; w < num_warmup; ++w) {
+        run_trial(buf0, buf1);
+    }
 
     // -------------------------------------------------------------------
     // Timed trials

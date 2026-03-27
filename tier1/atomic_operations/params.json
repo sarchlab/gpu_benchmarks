@@ -76,6 +76,13 @@
         "atomicMin",
         "all"
       ]
+    },
+    {
+      "name": "warmup",
+      "description": "Number of warmup kernel launches before timing (0 to disable)",
+      "type": "int",
+      "default": 0,
+      "values": [0, 1, 2, 5]
     }
   ],
   "kernels": [

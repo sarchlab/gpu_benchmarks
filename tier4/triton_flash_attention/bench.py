@@ -84,6 +84,7 @@ def benchmark():
     d = int(os.environ.get('BENCH_PARAM_d', '64'))
     block_m = int(os.environ.get('BENCH_PARAM_block_m', '128'))
     block_n = int(os.environ.get('BENCH_PARAM_block_n', '64'))
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     BLOCK_D = d
     sm_scale = 1.0 / math.sqrt(d)
@@ -98,7 +99,7 @@ def benchmark():
     grid = (triton.cdiv(s, block_m), b * h)
 
     # Warmup
-    for _ in range(5):
+    for _ in range(num_warmup):
         flash_attention_fwd[grid](
             Q, K, V, O,
             Q.stride(0), Q.stride(1), Q.stride(2), Q.stride(3),

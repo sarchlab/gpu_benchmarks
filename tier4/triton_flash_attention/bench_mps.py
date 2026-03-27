@@ -15,6 +15,7 @@ def benchmark():
     d = int(os.environ.get('BENCH_PARAM_d', '64'))
     block_m = int(os.environ.get('BENCH_PARAM_block_m', '128'))
     block_n = int(os.environ.get('BENCH_PARAM_block_n', '64'))
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     print(f"Running flash_attention (MPS) with b={b}, h={h}, s={s}, d={d}, block_m={block_m}, block_n={block_n}", file=sys.stderr)
 
@@ -23,9 +24,10 @@ def benchmark():
     V = torch.randn(b, h, s, d, device=device, dtype=torch.float32)
 
     # Warmup
-    for _ in range(5):
+    for _ in range(num_warmup):
         out = F.scaled_dot_product_attention(Q, K, V)
-    _ = out.sum().item()
+    if num_warmup > 0:
+        _ = out.sum().item()
 
     # Timed
     times = []

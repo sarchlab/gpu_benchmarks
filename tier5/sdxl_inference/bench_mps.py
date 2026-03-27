@@ -29,6 +29,7 @@ def benchmark():
     sample_size = int(os.environ.get('BENCH_PARAM_sample_size', '128'))
     layers_per_block = int(os.environ.get('BENCH_PARAM_layers_per_block', '2'))
     cross_attention_dim = int(os.environ.get('BENCH_PARAM_cross_attention_dim', '768'))
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     # SDXL-like UNet config for benchmarking (no model download)
     unet = UNet2DConditionModel(
@@ -67,11 +68,12 @@ def benchmark():
           file=sys.stderr)
 
     # Warmup
-    for i in range(5):
+    for i in range(num_warmup):
         noisy = torch.randn_like(latents)
         result = denoise_loop(unet, scheduler, noisy, encoder_hidden_states, num_steps)
-        print(f"  warmup {i+1}/5", file=sys.stderr)
-    _ = result[0, 0, 0, 0].item()  # sync
+        print(f"  warmup {i+1}/{num_warmup}", file=sys.stderr)
+    if num_warmup > 0:
+        _ = result[0, 0, 0, 0].item()  # sync
 
     # Timed
     total_time = 0.0

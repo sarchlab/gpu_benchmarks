@@ -117,6 +117,9 @@ int main(int argc, char* argv[])
     if (env_val) block_size_param = atoi(env_val);
     env_val = getenv("BENCH_PARAM_verify");
     if (env_val) verify = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     size_t bytes_a = (size_t)N * N * sizeof(float);
     size_t bytes_b = (size_t)N * sizeof(float);
@@ -267,9 +270,11 @@ int main(int argc, char* argv[])
     };
 
     // -------------------------------------------------------------------
-    // Warmup (not measured)
+    // Warmup
     // -------------------------------------------------------------------
-    run_forward_elimination();
+    for (int w = 0; w < num_warmup; ++w) {
+        run_forward_elimination();
+    }
 
     // -------------------------------------------------------------------
     // Timed iterations

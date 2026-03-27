@@ -120,6 +120,9 @@ int main(int argc, char* argv[])
     if (env_val) num_iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_iterations");
     if (env_val) iters = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int grid_rows   = grid_size;
     int grid_cols   = grid_size;
@@ -223,8 +226,8 @@ int main(int argc, char* argv[])
     NSUInteger grid_x = (NSUInteger)((grid_cols + 15) / 16) * 16;
     NSUInteger grid_y = (NSUInteger)((grid_rows + 15) / 16) * 16;
 
-    // Warmup: run num_iterations stencil steps once, not timed
-    {
+    // Warmup
+    for (int w = 0; w < num_warmup; ++w) {
         // Copy initial temps to buf_temp0
         memcpy(buf_temp0.contents, h_temp, bytes);
 

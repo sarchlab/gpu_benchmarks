@@ -116,7 +116,7 @@ static const int WARP_SIZE = 64;
 static const int WARP_SIZE = 32;
 #endif
 
-static const int NUM_WARMUP     = 5;
+static const int DEFAULT_NUM_WARMUP = 0;
 static const int NUM_ITERATIONS = 5;
 
 // ---------------------------------------------------------------------------
@@ -182,10 +182,11 @@ static void run_benchmark(const char *kernel_name,
                           KernelFunc kernel, int *d_out,
                           int ops_per_thread, int num_blocks,
                           int threads_per_block, const char *shuffle_variant,
+                          int num_warmup,
                           double *out_avg_ms, double *out_gops)
 {
     /* Warm-up launches. */
-    for (int w = 0; w < NUM_WARMUP; ++w) {
+    for (int w = 0; w < num_warmup; ++w) {
         hipLaunchKernelGGL(kernel, dim3(num_blocks), dim3(threads_per_block),
                            0, 0, d_out, ops_per_thread);
     }
@@ -273,6 +274,10 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_shuffle_variant");
     if (env_val) shuffle_variant = env_val;
 
+    int num_warmup = DEFAULT_NUM_WARMUP;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
+
     /* Print device information to stderr. */
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
@@ -287,7 +292,7 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Warp size       : %d\n", WARP_SIZE);
     fprintf(stderr, "Ops / thread    : %d\n", ops_per_thread);
     fprintf(stderr, "Shuffle variant : %s\n", shuffle_variant);
-    fprintf(stderr, "Warmup iters    : %d\n", NUM_WARMUP);
+    fprintf(stderr, "Warmup iters    : %d\n", num_warmup);
     fprintf(stderr, "Timed iters     : %d\n\n", NUM_ITERATIONS);
 
     /* Allocate a single int on the device to receive the checksum. */
@@ -307,7 +312,7 @@ int main(int argc, char *argv[])
         run_benchmark("shfl_xor_kernel",
                       (KernelFunc)shfl_xor_kernel, d_out,
                       ops_per_thread, num_blocks, threads_per_block, shuffle_variant,
-                      &avg_ms, &gops);
+                      num_warmup, &avg_ms, &gops);
         total_time_ms += avg_ms;
         if (gops > max_gops) max_gops = gops;
     }
@@ -317,7 +322,7 @@ int main(int argc, char *argv[])
         run_benchmark("shfl_kernel",
                       (KernelFunc)shfl_kernel, d_out,
                       ops_per_thread, num_blocks, threads_per_block, shuffle_variant,
-                      &avg_ms, &gops);
+                      num_warmup, &avg_ms, &gops);
         total_time_ms += avg_ms;
         if (gops > max_gops) max_gops = gops;
     }
@@ -327,7 +332,7 @@ int main(int argc, char *argv[])
         run_benchmark("shfl_up_kernel",
                       (KernelFunc)shfl_up_kernel, d_out,
                       ops_per_thread, num_blocks, threads_per_block, shuffle_variant,
-                      &avg_ms, &gops);
+                      num_warmup, &avg_ms, &gops);
         total_time_ms += avg_ms;
         if (gops > max_gops) max_gops = gops;
     }
@@ -337,7 +342,7 @@ int main(int argc, char *argv[])
         run_benchmark("shfl_down_kernel",
                       (KernelFunc)shfl_down_kernel, d_out,
                       ops_per_thread, num_blocks, threads_per_block, shuffle_variant,
-                      &avg_ms, &gops);
+                      num_warmup, &avg_ms, &gops);
         total_time_ms += avg_ms;
         if (gops > max_gops) max_gops = gops;
     }

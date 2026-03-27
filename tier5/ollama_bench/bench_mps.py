@@ -29,7 +29,7 @@ except ImportError:
     sys.exit(0)
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
-WARMUP = 5
+WARMUP = 0
 ITERATIONS = 10
 
 PROMPTS = {
@@ -114,6 +114,8 @@ def benchmark():
     model_name = os.environ.get('BENCH_PARAM_model', 'tinyllama')
     prompt_length = os.environ.get('BENCH_PARAM_prompt_length', 'medium')
     temperature = float(os.environ.get('BENCH_PARAM_temperature', '0.7'))
+    global WARMUP
+    WARMUP = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     params = {
         "num_predict": num_predict,

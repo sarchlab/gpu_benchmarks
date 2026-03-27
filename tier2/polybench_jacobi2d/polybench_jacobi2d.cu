@@ -128,6 +128,9 @@ int main(int argc, char** argv) {
     if (env_val) trials = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size_param = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     size_t bytes = (size_t)N * N * sizeof(float);
 
@@ -164,7 +167,7 @@ int main(int argc, char** argv) {
               (N-2 + BLOCK_DIM - 1) / BLOCK_DIM);
 
     // Warmup (not measured)
-    {
+    for (int w = 0; w < num_warmup; ++w) {
         float *src = d_A, *dst = d_B;
         for (int t = 0; t < TSTEPS; ++t) {
             jacobi2d_kernel<<<grid, block, 0, 0>>>(src, dst, N);

@@ -151,12 +151,15 @@ template <typename Func>
 static BenchResult runBenchmark(const char* kernel_name,
                                 const char* problem_size,
                                 int         iterations,
+                                int         num_warmup,
                                 Func        func) {
     BenchmarkTimer timer;
 
     // Warmup
-    func();
-    HIP_CHECK(hipDeviceSynchronize());
+    for (int w = 0; w < num_warmup; ++w) {
+        func();
+        HIP_CHECK(hipDeviceSynchronize());
+    }
 
     std::vector<double> times(iterations);
     for (int i = 0; i < iterations; ++i) {
@@ -253,6 +256,9 @@ int main(int argc, char** argv) {
     if (env_val) num_iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_iterations");
     if (env_val) iters = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int grid_rows  = grid_size;
     int grid_cols  = grid_size;
@@ -308,7 +314,7 @@ int main(int argc, char** argv) {
     snprintf(problemSize, sizeof(problemSize), "%d", grid_size);
 
     BenchResult r = runBenchmark(
-        "hotspot", problemSize, iters, [&]() {
+        "hotspot", problemSize, iters, num_warmup, [&]() {
             // Reset temperature for each benchmark iteration
             HIP_CHECK(hipMemcpy(d_temp_src, h_temp,
                                 total_cells * sizeof(float), hipMemcpyHostToDevice));

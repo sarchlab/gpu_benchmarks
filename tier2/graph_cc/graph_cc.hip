@@ -241,6 +241,9 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_iterations");
     if (env_val) iterations = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int N     = num_vertices;
     int iters = iterations;
@@ -273,9 +276,9 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(d_col_indices, col_indices.data(), num_edges * sizeof(int), hipMemcpyHostToDevice));
 
     // -------------------------------------------------------------------
-    // Warmup (5 iterations)
+    // Warmup
     // -------------------------------------------------------------------
-    for (int w = 0; w < 5; ++w) {
+    for (int w = 0; w < num_warmup; ++w) {
         run_cc_gpu(N, max_iterations, block_size,
                    d_row_offsets, d_col_indices, d_labels, d_changed);
     }

@@ -224,6 +224,9 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_verify");
     if (env_val) verify = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int N     = size;
     int iters = iterations;
@@ -236,7 +239,7 @@ int main(int argc, char** argv) {
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Scan size: %d  |  Iterations: 5 warmup + %d timed\n\n", N, iters);
+    fprintf(stderr, "Scan size: %d  |  Iterations: %d warmup + %d timed\n\n", N, num_warmup, iters);
 
     // Host allocation + initialization
     unsigned int* h_input  = (unsigned int*)malloc(bytes);
@@ -256,9 +259,9 @@ int main(int argc, char** argv) {
     };
 
     // -------------------------------------------------------------------
-    // Warmup (5 iterations)
+    // Warmup
     // -------------------------------------------------------------------
-    for (int w = 0; w < 5; ++w) {
+    for (int w = 0; w < num_warmup; ++w) {
         run_scan();
         CUDA_CHECK(cudaDeviceSynchronize());
     }

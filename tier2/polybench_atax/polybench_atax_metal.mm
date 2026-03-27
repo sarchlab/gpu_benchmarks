@@ -101,6 +101,9 @@ int main(int argc, char* argv[])
     if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     size_t bytes_A   = (size_t)nx * ny * sizeof(float);
     size_t bytes_x   = (size_t)ny * sizeof(float);
@@ -236,10 +239,12 @@ int main(int argc, char* argv[])
     };
 
     // -------------------------------------------------------------------
-    // Warmup (not measured)
+    // Warmup
     // -------------------------------------------------------------------
-    dispatch_kernel1();
-    dispatch_kernel2();
+    for (int w = 0; w < num_warmup; ++w) {
+        dispatch_kernel1();
+        dispatch_kernel2();
+    }
 
     // -------------------------------------------------------------------
     // Timed iterations — time each kernel separately

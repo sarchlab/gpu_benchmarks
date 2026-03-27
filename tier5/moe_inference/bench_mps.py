@@ -127,6 +127,7 @@ def benchmark():
     top_k = int(os.environ.get('BENCH_PARAM_top_k', '2'))
     num_layers = int(os.environ.get('BENCH_PARAM_num_layers', '4'))
     hidden_size = int(os.environ.get('BENCH_PARAM_hidden_size', '512'))
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     num_heads = max(1, hidden_size // 64)
     max_seq_len = seq_len + num_new_tokens
@@ -152,10 +153,10 @@ def benchmark():
 
     # Warmup
     print("Warmup...", file=sys.stderr)
-    for i in range(5):
+    for i in range(num_warmup):
         out = generate(model, prompt, num_new_tokens)
         _ = out.cpu()
-        print(f"  warmup {i+1}/5", file=sys.stderr)
+        print(f"  warmup {i+1}/{num_warmup}", file=sys.stderr)
 
     # Timed
     print("Benchmarking...", file=sys.stderr)

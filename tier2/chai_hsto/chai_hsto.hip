@@ -187,6 +187,9 @@ int main(int argc, char** argv) {
     if (env_val) num_bins = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int N     = size;
     int iters = iterations;
@@ -201,8 +204,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Histogram  |  N: %d (%.2f MB)  |  Bins: %d  |  "
-            "Iterations: 5 warmup + %d timed\n\n",
-            N, (double)data_bytes / (1024.0 * 1024.0), num_bins, iters);
+            "Iterations: %d warmup + %d timed\n\n",
+            N, (double)data_bytes / (1024.0 * 1024.0), num_bins, num_warmup, iters);
 
     // Generate random input data (deterministic seed)
     unsigned char* h_data = (unsigned char*)malloc(data_bytes);
@@ -237,9 +240,9 @@ int main(int argc, char** argv) {
     };
 
     // -------------------------------------------------------------------
-    // Warmup (5 iterations)
+    // Warmup
     // -------------------------------------------------------------------
-    for (int w = 0; w < 5; ++w) {
+    for (int w = 0; w < num_warmup; ++w) {
         run_histo();
         HIP_CHECK(hipDeviceSynchronize());
     }

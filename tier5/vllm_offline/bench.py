@@ -64,6 +64,7 @@ def benchmark():
     num_prompts = int(os.environ.get('BENCH_PARAM_num_prompts', '10'))
     model_name = os.environ.get('BENCH_PARAM_model_name', 'facebook/opt-125m')
     max_output_tokens = int(os.environ.get('BENCH_PARAM_max_output_tokens', '128'))
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     params = {
         "max_tokens": max_tokens,
@@ -105,10 +106,10 @@ def benchmark():
         return
 
     # Warmup
-    print("Warmup: 5 iterations", file=sys.stderr)
-    for i in range(5):
+    print(f"Warmup: {num_warmup} iterations", file=sys.stderr)
+    for i in range(num_warmup):
         _ = llm.generate(prompts, sampling_params)
-        print(f"  warmup {i+1}/5 done", file=sys.stderr)
+        print(f"  warmup {i+1}/{num_warmup} done", file=sys.stderr)
 
     # Timed
     print("Benchmark: 10 iterations", file=sys.stderr)

@@ -15,6 +15,7 @@ def benchmark():
     num_heads = int(os.environ.get('BENCH_PARAM_num_heads', '16'))
     head_dim = int(os.environ.get('BENCH_PARAM_head_dim', '64'))
     dtype_str = os.environ.get('BENCH_PARAM_dtype', 'float16')
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     # MPS may not support all dtypes; fall back to float32
     dtype_map = {'float16': torch.float16, 'bfloat16': torch.float32, 'float32': torch.float32}
@@ -28,9 +29,10 @@ def benchmark():
     v = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device, dtype=dtype)
 
     # Warmup
-    for _ in range(5):
+    for _ in range(num_warmup):
         out = F.scaled_dot_product_attention(q, k, v)
-    _ = out.sum().item()  # sync
+    if num_warmup > 0:
+        _ = out.sum().item()  # sync
 
     # Timed
     num_iters = 50

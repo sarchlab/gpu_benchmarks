@@ -54,7 +54,7 @@
 static const int DEFAULT_MADS_PER_THREAD = 4096;
 static const int DEFAULT_THREADS_PER_BLOCK = 256;
 static const int DEFAULT_NUM_BLOCKS = 1024;
-static const int DEFAULT_NUM_WARMUP = 5;
+static const int DEFAULT_NUM_WARMUP = 0;
 static const int DEFAULT_NUM_ITERATIONS = 5;
 
 // ---------------------------------------------------------------------------
@@ -119,6 +119,10 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_num_iterations");
     if (env_val) num_iterations = atoi(env_val);
 
+    int num_warmup = DEFAULT_NUM_WARMUP;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
+
     int device_id = 0;
     CUDA_CHECK(cudaGetDevice(&device_id));
     cudaDeviceProp prop;
@@ -130,7 +134,7 @@ int main(int argc, char *argv[])
            num_blocks, threads_per_block,
            num_blocks * threads_per_block);
     fprintf(stderr, "MADs / thread   : %d\n", mads_per_thread);
-    fprintf(stderr, "Warmup iters    : %d\n", DEFAULT_NUM_WARMUP);
+    fprintf(stderr, "Warmup iters    : %d\n", num_warmup);
     fprintf(stderr, "Timed iters     : %d\n\n", num_iterations);
 
     int *d_out = nullptr;
@@ -141,7 +145,7 @@ int main(int argc, char *argv[])
     CUDA_CHECK(cudaEventCreate(&ev_stop));
 
     /* Warm-up launches. */
-    for (int w = 0; w < DEFAULT_NUM_WARMUP; ++w) {
+    for (int w = 0; w < num_warmup; ++w) {
         int32_mad_kernel<<<dim3(num_blocks), dim3(threads_per_block), 0, 0>>>(d_out, mads_per_thread);
     }
     CUDA_CHECK(cudaDeviceSynchronize());

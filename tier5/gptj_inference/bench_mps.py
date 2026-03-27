@@ -116,6 +116,7 @@ def benchmark():
     n_embd = int(os.environ.get('BENCH_PARAM_n_embd', '4096'))
     gen_tokens = int(os.environ.get('BENCH_PARAM_gen_tokens', '64'))
     precision = os.environ.get('BENCH_PARAM_precision', 'fp32')
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     block_size = seq_len + gen_tokens
 
@@ -133,13 +134,14 @@ def benchmark():
 
     # Warmup
     print("Warmup...", file=sys.stderr)
-    for _ in range(5):
+    for _ in range(num_warmup):
         if precision == 'amp':
             with torch.autocast('mps'):
                 out = generate(model, prompt, gen_tokens)
         else:
             out = generate(model, prompt, gen_tokens)
-    _ = out[0, -1].item()  # sync
+    if num_warmup > 0:
+        _ = out[0, -1].item()  # sync
 
     # Timed: 5 iterations
     print("Benchmarking...", file=sys.stderr)

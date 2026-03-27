@@ -119,6 +119,9 @@ int main(int argc, char* argv[])
     if (env_val) block_size_param = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     size_t bytes_A = (size_t)n * n * sizeof(float);
     size_t bytes_v = (size_t)n * sizeof(float);
@@ -259,9 +262,11 @@ int main(int argc, char* argv[])
     };
 
     // -------------------------------------------------------------------
-    // Warmup (not measured)
+    // Warmup
     // -------------------------------------------------------------------
-    dispatch_mvt();
+    for (int w = 0; w < num_warmup; ++w) {
+        dispatch_mvt();
+    }
 
     // -------------------------------------------------------------------
     // Timed iterations

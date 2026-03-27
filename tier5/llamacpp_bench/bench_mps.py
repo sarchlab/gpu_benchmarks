@@ -74,6 +74,7 @@ def benchmark():
     n_gpu_layers = int(os.environ.get('BENCH_PARAM_n_gpu_layers', '99'))
     quantization = os.environ.get('BENCH_PARAM_quantization', 'Q4_0')
     threads = int(os.environ.get('BENCH_PARAM_threads', '4'))
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     params = {
         "n_predict": n_predict,
@@ -109,11 +110,11 @@ def benchmark():
     print(f"GPU layers: {n_gpu_layers}, quantization: {quantization}, threads: {threads}", file=sys.stderr)
 
     # Warmup
-    print("Warmup: 5 iterations", file=sys.stderr)
-    for i in range(5):
+    print(f"Warmup: {num_warmup} iterations", file=sys.stderr)
+    for i in range(num_warmup):
         tps = run_inference(binary, model, n_predict, n_gpu_layers, threads)
         status = f"{tps:.2f} tok/s" if tps else "parse failed"
-        print(f"  warmup {i+1}/5: {status}", file=sys.stderr)
+        print(f"  warmup {i+1}/{num_warmup}: {status}", file=sys.stderr)
 
     # Timed
     print("Benchmark: 10 iterations", file=sys.stderr)

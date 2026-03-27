@@ -45,6 +45,7 @@ static const size_t   DEFAULT_ARRAY_BYTES  = 2ULL * 1024 * 1024;  // 2 MB
 static const uint32_t DEFAULT_NUM_ACCESSES = 2000000u;
 static const int      DEFAULT_NUM_ITERS    = 5;
 static const uint32_t DEFAULT_RNG_SEED     = 42u;
+static const int      DEFAULT_NUM_WARMUP   = 0;
 
 // ---------------------------------------------------------------------------
 // Timing helpers
@@ -120,6 +121,10 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_rng_seed");
     if (env_val) rng_seed = (uint32_t)atoi(env_val);
 
+    int num_warmup = DEFAULT_NUM_WARMUP;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
+
     const size_t   N     = array_bytes / sizeof(uint32_t);
     const uint32_t N_u32 = static_cast<uint32_t>(N);
 
@@ -137,6 +142,7 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Num accesses : %u\n", num_accesses);
     fprintf(stderr, "Num iters    : %d\n", num_iters);
     fprintf(stderr, "RNG seed     : %u\n", rng_seed);
+    fprintf(stderr, "Warmup iters : %d\n", num_warmup);
     fprintf(stderr, "Method       : single-thread pointer chasing\n\n");
 
     /* Load and compile the Metal shader. */
@@ -224,7 +230,9 @@ int main(int argc, char *argv[])
     };
 
     /* Warm-up. */
-    dispatch_kernel();
+    for (int w = 0; w < num_warmup; ++w) {
+        dispatch_kernel();
+    }
 
     /* Timed runs. */
     uint64_t t0 = mach_absolute_time();

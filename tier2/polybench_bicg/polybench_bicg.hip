@@ -206,6 +206,9 @@ int main(int argc, char** argv) {
     if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     size_t bytes_A = (size_t)m * n * sizeof(float);
     size_t bytes_p = (size_t)n * sizeof(float);
@@ -255,8 +258,10 @@ int main(int argc, char** argv) {
     BenchmarkTimer timer;
 
     // Warmup
-    hipLaunchKernelGGL(bicg_kernel1, grid_k1, block_size, 0, 0, d_A, d_r, d_s, m, n);
-    hipLaunchKernelGGL(bicg_kernel2, grid_k2, block_size, 0, 0, d_A, d_p, d_q, m, n);
+    for (int w = 0; w < num_warmup; ++w) {
+        hipLaunchKernelGGL(bicg_kernel1, grid_k1, block_size, 0, 0, d_A, d_r, d_s, m, n);
+        hipLaunchKernelGGL(bicg_kernel2, grid_k2, block_size, 0, 0, d_A, d_p, d_q, m, n);
+    }
     HIP_CHECK(hipDeviceSynchronize());
 
     // Timed iterations — time each kernel separately

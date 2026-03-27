@@ -103,12 +103,15 @@ template <typename Func>
 static BenchResult runBenchmark(const char* kernel_name,
                                 const char* problem_size,
                                 int         iterations,
+                                int         num_warmup,
                                 Func        func) {
     BenchmarkTimer timer;
 
     // Warmup
-    func();
-    CUDA_CHECK(cudaDeviceSynchronize());
+    for (int w = 0; w < num_warmup; ++w) {
+        func();
+        CUDA_CHECK(cudaDeviceSynchronize());
+    }
 
     std::vector<double> times(iterations);
     for (int i = 0; i < iterations; ++i) {
@@ -231,6 +234,9 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_iterations");
     if (env_val) iters = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     // Generate random graph
     int* h_row_offsets = nullptr;
@@ -286,7 +292,7 @@ int main(int argc, char** argv) {
     long long bytes_per_bfs =
         2LL * ((long long)(num_nodes + 1 + num_edges + 3 * num_nodes) * sizeof(int));
 
-    BenchResult r = runBenchmark("rodinia_bfs", problemSize, iters, [&]() {
+    BenchResult r = runBenchmark("rodinia_bfs", problemSize, iters, num_warmup, [&]() {
         // Re-initialize BFS state for each timed run
         for (int i = 0; i < num_nodes; ++i) {
             h_cost[i]     = -1;

@@ -113,6 +113,7 @@ static const int DEFAULT_FMAS_PER_THREAD = 4096;
 static const int DEFAULT_THREADS_PER_BLOCK = 256;
 static const int DEFAULT_NUM_BLOCKS = 1024;
 static const int DEFAULT_NUM_ITERATIONS = 10;
+static const int DEFAULT_NUM_WARMUP = 0;
 
 // ---------------------------------------------------------------------------
 // FP16 FMA kernel
@@ -177,6 +178,10 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_num_iterations");
     if (env_val) num_iterations = atoi(env_val);
 
+    int num_warmup = DEFAULT_NUM_WARMUP;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
+
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     hipDeviceProp_t prop;
@@ -187,6 +192,7 @@ int main(int argc, char *argv[])
            num_blocks, threads_per_block,
            num_blocks * threads_per_block);
     fprintf(stderr, "FMAs / thread   : %d  (__hfma2, 4 FLOPs each)\n", fmas_per_thread);
+    fprintf(stderr, "Warmup iters    : %d\n", num_warmup);
     fprintf(stderr, "Kernel repeats  : %d\n\n", num_iterations);
 
     __half2 *d_out = nullptr;
@@ -196,9 +202,11 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipEventCreate(&ev_start));
     HIP_CHECK(hipEventCreate(&ev_stop));
 
-    hipLaunchKernelGGL(fp16_fma_kernel,
-                       dim3(num_blocks), dim3(threads_per_block), 0, 0,
-                       d_out, fmas_per_thread);
+    for (int w = 0; w < num_warmup; ++w) {
+        hipLaunchKernelGGL(fp16_fma_kernel,
+                           dim3(num_blocks), dim3(threads_per_block), 0, 0,
+                           d_out, fmas_per_thread);
+    }
     HIP_CHECK(hipDeviceSynchronize());
 
     HIP_CHECK(hipEventRecord(ev_start, 0));

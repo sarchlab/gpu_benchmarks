@@ -214,6 +214,9 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_iterations");
     if (env_val) iterations = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int N     = num_vertices;
     int iters = iterations;
@@ -232,8 +235,8 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Connected Components (label propagation)  |  "
             "Vertices: %d  |  Edges: %d  |  Avg degree: %d  |  "
             "Max iterations: %d  |  "
-            "Benchmark iterations: 5 warmup + %d timed\n\n",
-            N, num_edges, avg_degree, max_iterations, iters);
+            "Benchmark iterations: %d warmup + %d timed\n\n",
+            N, num_edges, avg_degree, max_iterations, num_warmup, iters);
 
     // Allocate device memory
     int *d_row_offsets, *d_col_indices, *d_labels, *d_changed;
@@ -247,9 +250,9 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaMemcpy(d_col_indices, col_indices.data(), num_edges * sizeof(int), cudaMemcpyHostToDevice));
 
     // -------------------------------------------------------------------
-    // Warmup (5 iterations)
+    // Warmup
     // -------------------------------------------------------------------
-    for (int w = 0; w < 5; ++w) {
+    for (int w = 0; w < num_warmup; ++w) {
         run_cc_gpu(N, max_iterations, block_size,
                    d_row_offsets, d_col_indices, d_labels, d_changed);
     }

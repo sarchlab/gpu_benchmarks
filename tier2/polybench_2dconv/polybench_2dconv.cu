@@ -130,6 +130,9 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int NI = N, NJ = N;
     size_t matSize = (size_t)NI * NJ * sizeof(float);
@@ -163,9 +166,11 @@ int main(int argc, char** argv) {
 
     BenchmarkTimer timer;
 
-    // Warmup (not measured)
-    convolution2D_kernel<<<grid, block, 0, 0>>>(d_A, d_B, NI, NJ);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    // Warmup
+    for (int w = 0; w < num_warmup; ++w) {
+        convolution2D_kernel<<<grid, block, 0, 0>>>(d_A, d_B, NI, NJ);
+        CUDA_CHECK(cudaDeviceSynchronize());
+    }
 
     // Timed iterations
     std::vector<double> times(iters);

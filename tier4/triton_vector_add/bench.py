@@ -29,6 +29,7 @@ def benchmark():
     block_size = int(os.environ.get('BENCH_PARAM_block_size', '1024'))
     num_warps = int(os.environ.get('BENCH_PARAM_num_warps', '4'))
     dtype_str = os.environ.get('BENCH_PARAM_dtype', 'float32')
+    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
 
     dtype_map = {'float16': torch.float16, 'float32': torch.float32, 'float64': torch.float64}
     dtype = dtype_map.get(dtype_str, torch.float32)
@@ -43,7 +44,7 @@ def benchmark():
     grid = lambda meta: (triton.cdiv(n, meta['BLOCK_SIZE']),)
 
     # Warmup
-    for _ in range(5):
+    for _ in range(num_warmup):
         vector_add_kernel[grid](a, b, c, n, BLOCK_SIZE=block_size, num_warps=num_warps)
     torch.cuda.synchronize()
 

@@ -212,6 +212,9 @@ int main(int argc, char **argv)
     if (env_val) block_size_param = atoi(env_val);
     env_val = getenv("BENCH_PARAM_verify");
     if (env_val) verify_mode = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
     if (N % BSIZE != 0) {
         fprintf(stderr, "Error: N=%d must be divisible by BSIZE=%d\n", N, BSIZE);
         return 1;
@@ -261,7 +264,13 @@ int main(int argc, char **argv)
         }
     };
 
-    // Warmup (untimed) — also used for correctness verification
+    // Warmup
+    for (int w = 0; w < num_warmup; ++w) {
+        CUDA_CHECK(cudaMemcpy(d_a, h_a, bytes, cudaMemcpyHostToDevice));
+        run_lud();
+        CUDA_CHECK(cudaDeviceSynchronize());
+    }
+    // Correctness verification (one extra run)
     CUDA_CHECK(cudaMemcpy(d_a, h_a, bytes, cudaMemcpyHostToDevice));
     run_lud();
     CUDA_CHECK(cudaDeviceSynchronize());

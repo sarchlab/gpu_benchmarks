@@ -31,7 +31,7 @@ typedef hipEvent_t GpuEvent;
 #error "Define USE_CUDA or USE_HIP"
 #endif
 
-#define WARMUP 5
+static int WARMUP = 0;
 
 __global__ void copy_kernel(const float* __restrict__ a, float* __restrict__ c, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -85,6 +85,8 @@ int main() {
     if (env_val) scalar = (float)atof(env_val);
     env_val = getenv("BENCH_PARAM_num_times");
     if (env_val) num_times = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) WARMUP = atoi(env_val);
 
     float *da, *db, *dc;
     MALLOC((void**)&da, (size_t)n * sizeof(float));

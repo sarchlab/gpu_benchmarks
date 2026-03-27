@@ -180,6 +180,9 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     int NI = N, NJ = N;
     size_t matSize = (size_t)NI * NJ * sizeof(float);
@@ -213,10 +216,12 @@ int main(int argc, char** argv) {
 
     BenchmarkTimer timer;
 
-    // Warmup (not measured)
-    hipLaunchKernelGGL(convolution2D_kernel, grid, block, 0, 0,
-                       d_A, d_B, NI, NJ);
-    HIP_CHECK(hipDeviceSynchronize());
+    // Warmup
+    for (int w = 0; w < num_warmup; ++w) {
+        hipLaunchKernelGGL(convolution2D_kernel, grid, block, 0, 0,
+                           d_A, d_B, NI, NJ);
+        HIP_CHECK(hipDeviceSynchronize());
+    }
 
     // Timed iterations
     std::vector<double> times(iters);

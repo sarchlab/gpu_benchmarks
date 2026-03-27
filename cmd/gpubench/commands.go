@@ -605,12 +605,6 @@ func cmdRun(args runArgs) int {
 			eprintf("  Scaling: %s (%d configs x %d reps = %d runs)\n",
 				spName, len(configs), reps, len(configs)*reps)
 
-			benchTraceDir := filepath.Join(traceOutput, b.Benchmark)
-			if err := os.MkdirAll(benchTraceDir, 0755); err != nil {
-				eprintf("Error creating trace dir %s: %v\n", benchTraceDir, err)
-				return ExitDB
-			}
-
 			bp, bf := 0, 0
 			cmd := getBenchCommand(b, plat)
 
@@ -618,6 +612,14 @@ func cmdRun(args runArgs) int {
 				if interrupted {
 					break
 				}
+
+				cfgTraceDir := filepath.Join(traceOutput, b.Benchmark,
+					traceConfigDir(spName, cfg.ScalingValue, cfg.NSDict))
+				if err := os.MkdirAll(cfgTraceDir, 0755); err != nil {
+					eprintf("Error creating trace dir %s: %v\n", cfgTraceDir, err)
+					return ExitDB
+				}
+
 				for rep := 1; rep <= reps; rep++ {
 					if interrupted {
 						break
@@ -626,7 +628,7 @@ func cmdRun(args runArgs) int {
 					env = append(env,
 						fmt.Sprintf("LD_PRELOAD=%s", args.collectTrace),
 						"USER_DEFINED_FOLDERS=1",
-						fmt.Sprintf("TRACES_FOLDER=%s", benchTraceDir),
+						fmt.Sprintf("TRACES_FOLDER=%s", cfgTraceDir),
 					)
 					eprintf("    %s=%-12s rep %d/%d  ",
 						spName, formatValue(cfg.ScalingValue), rep, reps)
@@ -666,22 +668,23 @@ func cmdRun(args runArgs) int {
 						break
 					}
 				}
+
+				if args.postProcess != "" && bp > 0 {
+					kernelsList := filepath.Join(cfgTraceDir, "traces", "kernelslist")
+					eprintf("  Post-processing: %s %s\n", args.postProcess, kernelsList)
+					ppCtx, ppCancel := context.WithTimeout(context.Background(), 300*time.Second)
+					ppCmd := exec.CommandContext(ppCtx, args.postProcess, kernelsList)
+					ppCmd.Stdout = os.Stdout
+					ppCmd.Stderr = os.Stderr
+					if err := ppCmd.Run(); err != nil {
+						eprintf("  Post-process error: %v\n", err)
+					}
+					ppCancel()
+				}
+
 				if !args.continueOnError && bf > 0 {
 					break
 				}
-			}
-
-			if args.postProcess != "" && bp > 0 {
-				kernelsList := filepath.Join(benchTraceDir, "traces", "kernelslist")
-				eprintf("  Post-processing: %s %s\n", args.postProcess, kernelsList)
-				ppCtx, ppCancel := context.WithTimeout(context.Background(), 300*time.Second)
-				ppCmd := exec.CommandContext(ppCtx, args.postProcess, kernelsList)
-				ppCmd.Stdout = os.Stdout
-				ppCmd.Stderr = os.Stderr
-				if err := ppCmd.Run(); err != nil {
-					eprintf("  Post-process error: %v\n", err)
-				}
-				ppCancel()
 			}
 
 			totalPassed += bp
@@ -690,7 +693,8 @@ func cmdRun(args runArgs) int {
 			if bf > 0 {
 				sym = "FAIL"
 			}
-			eprintf("  [%s] %d/%d passed  traces: %s\n\n", sym, bp, bp+bf, benchTraceDir)
+			eprintf("  [%s] %d/%d passed  traces: %s\n\n",
+				sym, bp, bp+bf, filepath.Join(traceOutput, b.Benchmark))
 		}
 
 		eprint("=== Trace Collection Summary ===")
@@ -936,6 +940,25 @@ func toJSONString(m map[string]interface{}) string {
 		return "{}"
 	}
 	return string(data)
+}
+
+// traceConfigDir builds a directory name encoding the full parameter config.
+// Example: "N_1024" or "M_512__TILE_16__ALGO_naive".
+func traceConfigDir(
+	spName string, spValue interface{}, nsDict map[string]interface{},
+) string {
+	parts := []string{fmt.Sprintf("%s_%s", spName, formatValue(spValue))}
+	if len(nsDict) > 0 {
+		keys := make([]string, 0, len(nsDict))
+		for k := range nsDict {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			parts = append(parts, fmt.Sprintf("%s_%s", k, formatValue(nsDict[k])))
+		}
+	}
+	return strings.Join(parts, "__")
 }
 
 func nullString(s string) sql.NullString {

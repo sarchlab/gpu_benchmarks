@@ -205,7 +205,7 @@ int main(void)
     int M = 4096;
     int N = 4096;
     int K = 4096;
-    int warmup = 5;
+    int warmup = 0;
     int iters = 5;
     int block_tile_m = BM;
 

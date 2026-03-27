@@ -149,6 +149,8 @@ struct BenchmarkTimer {
     }
 };
 
+static int g_num_warmup = 0;
+
 template <typename Func>
 static BenchResult runBenchmark(const char* kernel_name,
                                 const char* problem_size,
@@ -157,7 +159,9 @@ static BenchResult runBenchmark(const char* kernel_name,
     BenchmarkTimer timer;
 
     // Warmup
-    func();
+    for (int w = 0; w < g_num_warmup; ++w) {
+        func();
+    }
     HIP_CHECK(hipDeviceSynchronize());
 
     std::vector<double> times(iterations);
@@ -324,6 +328,9 @@ int main(int argc, char** argv)
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_iterations");
     if (env_val) iters = atoi(env_val);
+    int num_warmup = 0;
+    env_val = getenv("BENCH_PARAM_warmup");
+    if (env_val) num_warmup = atoi(env_val);
 
     // Generate sparse matrix
     int*   h_row_ptr  = nullptr;
@@ -376,6 +383,7 @@ int main(int argc, char** argv)
     char problemSize[64];
     snprintf(problemSize, sizeof(problemSize), "%d", num_rows);
 
+    g_num_warmup = num_warmup;
     BenchResult r = runBenchmark("spmv_csr", problemSize, iters, [&]() {
         spmv_csr<<<grid, block>>>(d_row_ptr, d_col_idx, d_values, d_x, d_y, num_rows);
     });

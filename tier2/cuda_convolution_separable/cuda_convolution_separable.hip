@@ -425,11 +425,11 @@ int main(int argc, char** argv) {
     // JSON-lines kernel events (one per kernel)
     printf("{\"type\":\"kernel\",\"name\":\"convolution_row_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"width\":%d,\"height\":%d,\"radius\":%d}}\n",
-           avg_ms, width, height, radius, iterations);
+           avg_ms, width, height, radius);
 
     printf("{\"type\":\"kernel\",\"name\":\"convolution_col_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"width\":%d,\"height\":%d,\"radius\":%d}}\n",
-           avg_ms, width, height, radius, iterations);
+           avg_ms, width, height, radius);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

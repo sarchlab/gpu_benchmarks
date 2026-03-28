@@ -227,7 +227,7 @@ int main(int argc, char** argv) {
         printf("{\"type\":\"kernel\",\"name\":\"readOnly_kernel\",\"time_ms\":%.6f,"
                "\"params\":{\"array_size_mb\":%d,\"block_size\":%d"
                "\"transfer_mode\":\"%s\"}}\n",
-               kr.avg_ms, array_size_mb, block_size, iterations, transfer_mode);
+               kr.avg_ms, array_size_mb, block_size, transfer_mode);
 
         fprintf(stderr, "Read-only bandwidth:  %.2f GB/s  (%d MB)\n", read_bw, array_size_mb);
     }
@@ -243,7 +243,7 @@ int main(int argc, char** argv) {
         printf("{\"type\":\"kernel\",\"name\":\"writeOnly_kernel\",\"time_ms\":%.6f,"
                "\"params\":{\"array_size_mb\":%d,\"block_size\":%d"
                "\"transfer_mode\":\"%s\"}}\n",
-               kr.avg_ms, array_size_mb, block_size, iterations, transfer_mode);
+               kr.avg_ms, array_size_mb, block_size, transfer_mode);
 
         fprintf(stderr, "Write-only bandwidth: %.2f GB/s  (%d MB)\n", write_bw, array_size_mb);
     }
@@ -266,7 +266,7 @@ int main(int argc, char** argv) {
         printf("{\"type\":\"kernel\",\"name\":\"readWrite_kernel\",\"time_ms\":%.6f,"
                "\"params\":{\"array_size_mb\":%d,\"block_size\":%d"
                "\"transfer_mode\":\"%s\"}}\n",
-               kr.avg_ms, array_size_mb, block_size, iterations, transfer_mode);
+               kr.avg_ms, array_size_mb, block_size, transfer_mode);
 
         fprintf(stderr, "Read-write bandwidth: %.2f GB/s  (%d MB)\n", rw_bw, array_size_mb);
     }

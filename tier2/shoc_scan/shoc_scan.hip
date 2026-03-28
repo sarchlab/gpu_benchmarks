@@ -353,12 +353,12 @@ int main(int argc, char** argv) {
     printf("{\"type\":\"kernel\",\"name\":\"scan_block_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"array_size\":%d,\"block_size\":%d"
            "\"precision\":\"%s\"}}\n",
-           avg_ms, array_size, block_size, iterations, precision);
+           avg_ms, array_size, block_size, precision);
 
     printf("{\"type\":\"kernel\",\"name\":\"add_block_sums_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"array_size\":%d,\"block_size\":%d"
            "\"precision\":\"%s\"}}\n",
-           avg_ms, array_size, block_size, iterations, precision);
+           avg_ms, array_size, block_size, precision);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

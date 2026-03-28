@@ -404,7 +404,7 @@ int main(int argc, char** argv) {
     printf("{\"type\":\"kernel\",\"name\":\"raytrace_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"width\":%d,\"height\":%d,\"spheres\":%d,"
            "}}\n",
-           avg_ms, W, H, nSph, iterations);
+           avg_ms, W, H, nSph);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

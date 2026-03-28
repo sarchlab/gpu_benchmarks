@@ -335,7 +335,7 @@ int main(int argc, char* argv[]) {
     printf("{\"type\":\"kernel\",\"name\":\"aes256_encrypt_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"key_length\":\"%s\"}}\n",
-           avg_ms, size, iterations, block_size, key_length);
+           avg_ms, size, block_size, key_length);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

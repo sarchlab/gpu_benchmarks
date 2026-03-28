@@ -238,7 +238,7 @@ int main(int argc, char** argv) {
     printf("{\"type\":\"kernel\",\"name\":\"ep_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"seed\":%d}}\n",
-           avg_ms, N, iterations, block_size, seed_param);
+           avg_ms, N, block_size, seed_param);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

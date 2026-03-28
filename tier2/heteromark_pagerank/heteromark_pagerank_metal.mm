@@ -191,7 +191,7 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
     fprintf(stderr, "Device: %s\n", device.name.UTF8String);
-    fprintf(stderr, "Vertices: %d  |  PR iterations: %d  |  Timed iterations: %d warmup + %d timed\n\n",
+    fprintf(stderr, "Vertices: %d  |  PR iterations: %d  |  Warmup: %d\n\n",
             N, prIters, num_warmup);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
@@ -341,7 +341,7 @@ int main(int argc, char* argv[]) {
     printf("{\"type\":\"kernel\",\"name\":\"pagerank_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"vertices\":%d,\"pr_iterations\":%d"
            "\"damping_factor\":%.6f}}\n",
-           avg_ms, vertices, pr_iterations, iterations, damping_factor);
+           avg_ms, vertices, pr_iterations, damping_factor);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

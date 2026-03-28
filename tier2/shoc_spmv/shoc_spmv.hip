@@ -315,7 +315,7 @@ int main(int argc, char** argv)
     printf("{\"type\":\"kernel\",\"name\":\"spmv_csr_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"num_rows\":%d,\"nnz_per_row\":%d"
            "\"precision\":\"%s\"}}\n",
-           avg_ms, num_rows, nnz_per_row, iterations, precision);
+           avg_ms, num_rows, nnz_per_row, precision);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

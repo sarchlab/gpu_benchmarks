@@ -226,7 +226,7 @@ int main(int argc, char** argv) {
     printf("{\"type\":\"kernel\",\"name\":\"histogram_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d\"num_bins\":%d,"
            "\"block_size\":%d}}\n",
-           avg_ms, size, iterations, num_bins, block_size);
+           avg_ms, size, num_bins, block_size);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

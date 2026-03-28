@@ -223,7 +223,7 @@ int main(int argc, char** argv) {
     printf("{\"type\":\"kernel\",\"name\":\"gups_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"table_size\":%d,\"block_size\":%d,\"num_updates\":%d,"
            "\"num_threads\":%d}}\n",
-           avg_ms, table_size, block_size, num_updates, num_threads, iterations);
+           avg_ms, table_size, block_size, num_updates, num_threads);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

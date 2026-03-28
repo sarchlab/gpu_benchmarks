@@ -71,7 +71,7 @@ __global__ void shfl_xor_kernel(int *out, int ops_per_thread)
 {
     int val = static_cast<int>(threadIdx.x + blockIdx.x * blockDim.x);
     for (int i = 0; i < ops_per_thread; ++i) {
-        val = __shfl_xor(val, 1, WARP_SIZE);
+        val = __shfl_xor_sync(0xFFFFFFFF, val, 1, WARP_SIZE);
     }
     if (blockIdx.x == 0 && threadIdx.x == 0) {
         *out = val;
@@ -83,7 +83,7 @@ __global__ void shfl_kernel(int *out, int ops_per_thread)
     int val = static_cast<int>(threadIdx.x + blockIdx.x * blockDim.x);
     int src_lane = (threadIdx.x ^ 1) % WARP_SIZE;
     for (int i = 0; i < ops_per_thread; ++i) {
-        val = __shfl(val, src_lane, WARP_SIZE);
+        val = __shfl_sync(0xFFFFFFFF, val, src_lane, WARP_SIZE);
     }
     if (blockIdx.x == 0 && threadIdx.x == 0) {
         *out = val;
@@ -94,7 +94,7 @@ __global__ void shfl_up_kernel(int *out, int ops_per_thread)
 {
     int val = static_cast<int>(threadIdx.x + blockIdx.x * blockDim.x);
     for (int i = 0; i < ops_per_thread; ++i) {
-        val = __shfl_up(val, 1, WARP_SIZE);
+        val = __shfl_up_sync(0xFFFFFFFF, val, 1, WARP_SIZE);
     }
     if (blockIdx.x == 0 && threadIdx.x == 0) {
         *out = val;
@@ -105,7 +105,7 @@ __global__ void shfl_down_kernel(int *out, int ops_per_thread)
 {
     int val = static_cast<int>(threadIdx.x + blockIdx.x * blockDim.x);
     for (int i = 0; i < ops_per_thread; ++i) {
-        val = __shfl_down(val, 1, WARP_SIZE);
+        val = __shfl_down_sync(0xFFFFFFFF, val, 1, WARP_SIZE);
     }
     if (blockIdx.x == 0 && threadIdx.x == 0) {
         *out = val;

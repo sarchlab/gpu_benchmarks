@@ -253,7 +253,7 @@ int main(int argc, char* argv[]) {
     printf("{\"type\":\"kernel\",\"name\":\"fir_filter_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d\"num_taps\":%d,"
            "\"block_size\":%d}}\n",
-           avg_ms, size, iterations, num_taps, block_size);
+           avg_ms, size, num_taps, block_size);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

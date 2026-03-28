@@ -534,27 +534,27 @@ int main(int argc, char** argv) {
     printf("{\"type\":\"kernel\",\"name\":\"update_particles_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d"
            "\"num_particles_ratio\":\"%s\",\"seed\":%d}}\n",
-           avg_ms, N, iterations, num_particles_ratio, seed_param);
+           avg_ms, N, num_particles_ratio, seed_param);
 
     printf("{\"type\":\"kernel\",\"name\":\"compute_weights_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d"
            "\"num_particles_ratio\":\"%s\",\"seed\":%d}}\n",
-           avg_ms, N, iterations, num_particles_ratio, seed_param);
+           avg_ms, N, num_particles_ratio, seed_param);
 
     printf("{\"type\":\"kernel\",\"name\":\"prefix_sum_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d"
            "\"num_particles_ratio\":\"%s\",\"seed\":%d}}\n",
-           avg_ms, N, iterations, num_particles_ratio, seed_param);
+           avg_ms, N, num_particles_ratio, seed_param);
 
     printf("{\"type\":\"kernel\",\"name\":\"add_block_sums_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d"
            "\"num_particles_ratio\":\"%s\",\"seed\":%d}}\n",
-           avg_ms, N, iterations, num_particles_ratio, seed_param);
+           avg_ms, N, num_particles_ratio, seed_param);
 
     printf("{\"type\":\"kernel\",\"name\":\"resample_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d"
            "\"num_particles_ratio\":\"%s\",\"seed\":%d}}\n",
-           avg_ms, N, iterations, num_particles_ratio, seed_param);
+           avg_ms, N, num_particles_ratio, seed_param);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

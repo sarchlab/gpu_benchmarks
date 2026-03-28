@@ -570,12 +570,12 @@ int main(int argc, char** argv) {
     printf("{\"type\":\"kernel\",\"name\":\"compute_flux_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_ms, N, iterations, block_size, precision);
+           avg_ms, N, block_size, precision);
 
     printf("{\"type\":\"kernel\",\"name\":\"rk_update_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_ms, N, iterations, block_size, precision);
+           avg_ms, N, block_size, precision);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

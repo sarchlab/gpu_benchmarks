@@ -341,7 +341,7 @@ int main(int argc, char* argv[]) {
     printf("{\"type\":\"kernel\",\"name\":\"pagerank_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"vertices\":%d,\"degree\":%d,\"pr_iterations\":%d,"
            "}}\n",
-           avg_ms, vertices, degree, pr_iterations, iterations);
+           avg_ms, vertices, degree, pr_iterations);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

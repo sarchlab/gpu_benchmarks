@@ -285,7 +285,7 @@ int main(int argc, char* argv[]) {
     printf("{\"type\":\"kernel\",\"name\":\"binomial_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"options\":%d,\"steps\":%d"
            "\"precision\":\"%s\"}}\n",
-           avg_ms, numOptions, numSteps, iterations, precision);
+           avg_ms, numOptions, numSteps, precision);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

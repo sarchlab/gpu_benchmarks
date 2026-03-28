@@ -80,7 +80,6 @@ int main(int argc, char** argv) {
 
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], "--size") == 0) N = atoi(argv[i+1]);
-        if (strcmp(argv[i], "--iterations") == 0) iterations = atoi(argv[i+1]);
     }
 
     { int p = 4; while (p < N) p *= 2; N = p; }

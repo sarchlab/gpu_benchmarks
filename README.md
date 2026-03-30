@@ -4,9 +4,21 @@ A comprehensive GPGPU benchmark suite covering microbenchmarks, application work
 
 ---
 
+## Purpose
+
+This suite provides a **GPU performance reference** for two primary use cases:
+
+1. **GPU hardware comparison** — Characterize and compare GPU performance across vendors, architectures, and generations using a standardized set of workloads spanning raw hardware capabilities to end-to-end applications.
+
+2. **GPU simulator validation** — Provide reference performance data and NVBit instruction traces that GPU architecture simulators (e.g., [BBSim/bb_triosim](https://github.com/sarchlab/bb_triosim)) can use to validate simulation accuracy against real hardware.
+
+The suite is designed to cover the widest possible diversity of GPU compute and memory access patterns, from low-level microbenchmarks through library calls to full ML inference pipelines. Each benchmark supports parameterized scaling sweeps, and all results are stored in a queryable SQLite database for systematic analysis.
+
+---
+
 ## Overview
 
-This suite contains **125 benchmarks across five tiers** of increasing complexity and scope, allowing researchers and engineers to evaluate GPU hardware and software stacks at every level — from raw memory bandwidth to end-to-end ML training throughput.
+This suite contains **130 benchmarks across five tiers** of increasing complexity and scope, allowing researchers and engineers to evaluate GPU hardware and software stacks at every level — from raw memory bandwidth to end-to-end ML training throughput.
 
 ---
 

@@ -577,22 +577,45 @@ func cmdRun(args runArgs) int {
 		return ExitOK
 	}
 
-	// Trace collection mode: skip SQLite, inject LD_PRELOAD env vars
+	// Trace collection mode: skip SQLite writes, inject LD_PRELOAD env vars.
+	// Uses a higher default timeout (NVBit adds 100-1000x overhead).
+	// When a results DB exists, only traces configs that have status='ok' runs.
 	if args.collectTrace != "" {
 		traceOutput := args.traceOutput
 		if traceOutput == "" {
 			traceOutput = "./traces"
 		}
+		// Use trace-specific timeout unless user explicitly set --timeout
+		if args.timeout == "" {
+			timeoutSecs = DefaultTraceTimeout
+		}
+
+		// Open DB read-only to discover which configs have successful runs.
+		var dbConfigs map[string]map[string]bool // benchmark -> set of scaling_param_values
+		if _, err := os.Stat(dbPath); err == nil {
+			db, err := sql.Open("sqlite3", dbPath+"?mode=ro")
+			if err == nil {
+				defer db.Close()
+				dbConfigs = loadSuccessfulConfigs(db)
+			}
+		}
+
 		eprint("=== Trace Collection Mode ===")
 		eprintf("Tracer:      %s\n", args.collectTrace)
 		eprintf("Output dir:  %s\n", traceOutput)
+		eprintf("Timeout:     %ds\n", timeoutSecs)
+		if dbConfigs != nil {
+			eprintf("DB guidance: %s (only tracing configs with successful runs)\n", dbPath)
+		} else {
+			eprint("DB guidance: none (tracing all configs)")
+		}
 		if args.postProcess != "" {
 			eprintf("Post-process: %s\n", args.postProcess)
 		}
 		eprint("NOTE: SQLite writes are disabled in trace collection mode.")
 
 		setupInterruptHandler()
-		totalPassed, totalFailed := 0, 0
+		totalPassed, totalFailed, totalSkipped := 0, 0, 0
 		startTime := time.Now()
 
 		for idx, b := range benchmarks {
@@ -601,6 +624,32 @@ func cmdRun(args runArgs) int {
 			}
 			spName := b.ScalingParam.Name
 			configs := generateConfigs(b, args.sweepNonScaling, scalingOverride)
+
+			// Filter configs to only those with successful DB runs
+			if dbConfigs != nil {
+				if benchSet, ok := dbConfigs[b.Benchmark]; ok {
+					var filtered []configPair
+					for _, cfg := range configs {
+						if benchSet[formatValue(cfg.ScalingValue)] {
+							filtered = append(filtered, cfg)
+						}
+					}
+					skipped := len(configs) - len(filtered)
+					totalSkipped += skipped
+					configs = filtered
+				} else {
+					// No successful runs for this benchmark at all
+					totalSkipped += len(configs)
+					eprintf("[%3d/%d] tier%d/%s — skipped (no successful runs in DB)\n",
+						idx+1, len(benchmarks), b.Tier, b.Benchmark)
+					continue
+				}
+			}
+
+			if len(configs) == 0 {
+				continue
+			}
+
 			eprintf("[%3d/%d] tier%d/%s\n", idx+1, len(benchmarks), b.Tier, b.Benchmark)
 			eprintf("  Scaling: %s (%d configs x %d reps = %d runs)\n",
 				spName, len(configs), reps, len(configs)*reps)
@@ -701,6 +750,9 @@ func cmdRun(args runArgs) int {
 		eprintf("  Total:   %d runs\n", totalPassed+totalFailed)
 		eprintf("  Passed:  %d\n", totalPassed)
 		eprintf("  Failed:  %d\n", totalFailed)
+		if totalSkipped > 0 {
+			eprintf("  Skipped: %d (no successful runs in DB)\n", totalSkipped)
+		}
 		eprintf("  Time:    %s\n", formatDuration(time.Since(startTime).Seconds()))
 		eprintf("  Output:  %s\n", traceOutput)
 
@@ -966,4 +1018,34 @@ func nullString(s string) sql.NullString {
 		return sql.NullString{}
 	}
 	return sql.NullString{String: s, Valid: true}
+}
+
+// loadSuccessfulConfigs queries the DB for all (benchmark, scaling_value)
+// pairs that have at least one successful run. Returns a map of
+// benchmark -> set of scaling_param_value strings.
+func loadSuccessfulConfigs(db *sql.DB) map[string]map[string]bool {
+	rows, err := db.Query(
+		`SELECT DISTINCT benchmark, scaling_param_value
+		 FROM runs WHERE status = 'ok'`)
+	if err != nil {
+		eprintf("Warning: could not query DB for successful configs: %v\n", err)
+		return nil
+	}
+	defer rows.Close()
+
+	result := make(map[string]map[string]bool)
+	count := 0
+	for rows.Next() {
+		var bench, spVal string
+		if err := rows.Scan(&bench, &spVal); err != nil {
+			continue
+		}
+		if result[bench] == nil {
+			result[bench] = make(map[string]bool)
+		}
+		result[bench][spVal] = true
+		count++
+	}
+	eprintf("  Loaded %d successful data points across %d benchmarks from DB\n", count, len(result))
+	return result
 }

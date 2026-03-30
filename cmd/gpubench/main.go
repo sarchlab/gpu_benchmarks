@@ -22,9 +22,10 @@ const (
 
 // Default values.
 const (
-	DefaultReps    = 7
-	DefaultDB      = "results.db"
-	DefaultTimeout = 300
+	DefaultReps         = 7
+	DefaultDB           = "results.db"
+	DefaultTimeout      = 300
+	DefaultTraceTimeout = 3600
 )
 
 // Global interrupt flag.

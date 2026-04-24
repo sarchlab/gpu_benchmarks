@@ -463,6 +463,30 @@ func isStatsName(name string) bool {
 	return name == "stats" || strings.HasPrefix(name, "stats_")
 }
 
+func traceTimeoutMarkerPath(cfgTraceDir string) string {
+	return filepath.Join(cfgTraceDir, "traces", "trace_timeout.json")
+}
+
+func traceTimedOut(cfgTraceDir string) bool {
+	_, err := os.Stat(traceTimeoutMarkerPath(cfgTraceDir))
+	return err == nil
+}
+
+func markTraceTimedOut(cfgTraceDir string, timeoutSecs int) error {
+	if err := os.RemoveAll(cfgTraceDir); err != nil {
+		return err
+	}
+	tracesDir := filepath.Join(cfgTraceDir, "traces")
+	if err := os.MkdirAll(tracesDir, 0755); err != nil {
+		return err
+	}
+	marker := fmt.Sprintf(
+		"{\n  \"status\": \"timeout\",\n  \"timeout_seconds\": %d,\n  \"recorded_at\": %q\n}\n",
+		timeoutSecs, time.Now().UTC().Format(time.RFC3339),
+	)
+	return os.WriteFile(traceTimeoutMarkerPath(cfgTraceDir), []byte(marker), 0644)
+}
+
 func traceNameFromKernelsListRef(ref string) string {
 	ref = filepath.Base(strings.TrimSpace(ref))
 	switch {
@@ -764,7 +788,7 @@ func cmdRun(args runArgs) int {
 
 		setupInterruptHandler()
 		totalCaptured, totalFailed, totalDBSkipped := 0, 0, 0
-		totalResumeSkipped, totalRetried := 0, 0
+		totalResumeSkipped, totalRetried, totalTimedOutSkipped := 0, 0, 0
 		startTime := time.Now()
 
 		for idx, b := range benchmarks {
@@ -803,7 +827,7 @@ func cmdRun(args runArgs) int {
 			eprintf("  Scaling: %s (%d configs x %d reps = %d runs)\n",
 				spName, len(configs), reps, len(configs)*reps)
 
-			bp, bf, bs, br := 0, 0, 0, 0
+			bp, bf, bs, br, bt := 0, 0, 0, 0, 0
 			cmd := getBenchCommand(b, plat)
 
 			for _, cfg := range configs {
@@ -811,15 +835,20 @@ func cmdRun(args runArgs) int {
 					break
 				}
 
-				cfgTraceDir := filepath.Join(traceOutput, b.Benchmark,
-					traceConfigDir(spName, cfg.ScalingValue, cfg.NSDict))
+				configDir := traceConfigDir(spName, cfg.ScalingValue, cfg.NSDict)
+				cfgLabel := filepath.Join(b.Benchmark, configDir)
+				cfgTraceDir := filepath.Join(traceOutput, b.Benchmark, configDir)
 
 				retryDetail := ""
 				if args.resumeTrace {
+					if traceTimedOut(cfgTraceDir) {
+						eprintf("    %s skip (previous timeout)\n", cfgLabel)
+						bt++
+						continue
+					}
 					complete, exists, detail := traceComplete(cfgTraceDir)
 					if complete {
-						eprintf("    %s=%-12s skip (trace complete)\n",
-							spName, formatValue(cfg.ScalingValue))
+						eprintf("    %s skip (trace complete)\n", cfgLabel)
 						bs++
 						continue
 					}
@@ -844,11 +873,12 @@ func cmdRun(args runArgs) int {
 					if args.cleanIncomplete {
 						cleanup = "; cleaned"
 					}
-					eprintf("    %s=%-12s retry incomplete (%s%s)\n",
-						spName, formatValue(cfg.ScalingValue), retryDetail, cleanup)
+					eprintf("    %s retry incomplete (%s%s)\n",
+						cfgLabel, retryDetail, cleanup)
 				}
 
 				cfgCaptured := false
+				cfgTimedOut := false
 				for rep := 1; rep <= reps; rep++ {
 					if interrupted {
 						break
@@ -859,8 +889,7 @@ func cmdRun(args runArgs) int {
 						"USER_DEFINED_FOLDERS=1",
 						fmt.Sprintf("TRACES_FOLDER=%s", cfgTraceDir),
 					)
-					eprintf("    %s=%-12s rep %d/%d  ",
-						spName, formatValue(cfg.ScalingValue), rep, reps)
+					eprintf("    %s rep %d/%d  ", cfgLabel, rep, reps)
 
 					ec, _, stderrStr, timedOut := runBenchmarkProc(
 						cmd, env, timeoutSecs, args.verbose)
@@ -888,18 +917,24 @@ func cmdRun(args runArgs) int {
 						cfgCaptured = true
 					} else if status == "timeout" {
 						eprintf("timeout after %ds\n", timeoutSecs)
+						if err := markTraceTimedOut(cfgTraceDir, timeoutSecs); err != nil {
+							eprintf("Error marking timeout trace dir %s: %v\n", cfgTraceDir, err)
+							return ExitDB
+						}
+						eprintf("      removed trace data; wrote %s\n", traceTimeoutMarkerPath(cfgTraceDir))
 						bf++
+						cfgTimedOut = true
 					} else {
 						eprintf("exit code %d\n", ec)
 						bf++
 					}
 
-					if !args.continueOnError && bf > 0 && status != "ok" {
+					if cfgTimedOut || (!args.continueOnError && bf > 0 && status != "ok") {
 						break
 					}
 				}
 
-				if args.postProcess != "" && cfgCaptured {
+				if args.postProcess != "" && cfgCaptured && !cfgTimedOut {
 					kernelsList := firstKernelsListPath(cfgTraceDir)
 					eprintf("  Post-processing: %s %s\n", args.postProcess, kernelsList)
 					ppCtx, ppCancel := context.WithTimeout(context.Background(), 300*time.Second)
@@ -921,12 +956,13 @@ func cmdRun(args runArgs) int {
 			totalFailed += bf
 			totalResumeSkipped += bs
 			totalRetried += br
+			totalTimedOutSkipped += bt
 			sym := "ok"
 			if bf > 0 {
 				sym = "FAIL"
 			}
-			eprintf("  [%s] captured=%d failed=%d skipped_complete=%d retried_incomplete=%d traces: %s\n\n",
-				sym, bp, bf, bs, br, filepath.Join(traceOutput, b.Benchmark))
+			eprintf("  [%s] captured=%d failed=%d skipped_complete=%d skipped_timeout=%d retried_incomplete=%d traces: %s\n\n",
+				sym, bp, bf, bs, bt, br, filepath.Join(traceOutput, b.Benchmark))
 		}
 
 		eprint("=== Trace Collection Summary ===")
@@ -935,6 +971,9 @@ func cmdRun(args runArgs) int {
 		eprintf("  Failed:             %d\n", totalFailed)
 		if totalResumeSkipped > 0 {
 			eprintf("  Skipped complete:   %d configs\n", totalResumeSkipped)
+		}
+		if totalTimedOutSkipped > 0 {
+			eprintf("  Skipped timeout:    %d configs\n", totalTimedOutSkipped)
 		}
 		if totalRetried > 0 {
 			eprintf("  Retried incomplete: %d configs\n", totalRetried)

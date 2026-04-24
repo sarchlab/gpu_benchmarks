@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -71,4 +72,26 @@ func TestTraceComplete(t *testing.T) {
 			t.Fatalf("traceComplete() = complete %v exists %v detail %q, want true true", complete, exists, detail)
 		}
 	})
+}
+
+func TestMarkTraceTimedOut(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "traces", "kernel-1-ctx_0xabc.trace.zst"), "large trace")
+
+	if err := markTraceTimedOut(dir, 3600); err != nil {
+		t.Fatalf("markTraceTimedOut() error = %v", err)
+	}
+	if !traceTimedOut(dir) {
+		t.Fatalf("traceTimedOut() = false, want true")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "traces", "kernel-1-ctx_0xabc.trace.zst")); !os.IsNotExist(err) {
+		t.Fatalf("trace file still exists after timeout cleanup, stat err = %v", err)
+	}
+	marker, err := os.ReadFile(traceTimeoutMarkerPath(dir))
+	if err != nil {
+		t.Fatalf("read timeout marker: %v", err)
+	}
+	if !strings.Contains(string(marker), `"status": "timeout"`) {
+		t.Fatalf("timeout marker missing status: %s", marker)
+	}
 }

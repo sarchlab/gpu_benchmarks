@@ -164,7 +164,7 @@ func main() {
 	runCmd.Flags().String("collect-trace", "", "Path to NVBit tracer_tool.so for instruction trace collection")
 	runCmd.Flags().String("trace-output", "./traces", "Output directory for collected traces (default: ./traces)")
 	runCmd.Flags().String("post-process", "", "Optional post-processing binary to run after trace collection")
-	runCmd.Flags().Bool("resume-trace", false, "Skip trace configs that already have complete trace outputs")
+	runCmd.Flags().Bool("resume-trace", false, "Skip trace configs that already have complete or timed-out trace outputs")
 	runCmd.Flags().Bool("trace-clean-incomplete", false, "When resuming traces, delete incomplete config trace directories before retrying")
 
 	// --- info command ---

@@ -52,7 +52,7 @@ gpubench run \
 | `--collect-trace <path>` | Path to `tracer_tool.so` (required to enable trace mode) | — |
 | `--trace-output <dir>` | Directory where traces are written | `./traces` |
 | `--post-process <binary>` | Optional post-processing binary run after each benchmark | — |
-| `--resume-trace` | Skip configs that already have complete trace outputs | `false` |
+| `--resume-trace` | Skip configs that already have complete or timed-out trace outputs | `false` |
 | `--trace-clean-incomplete` | When resuming, remove incomplete config trace directories before retrying | `false` |
 
 ### What happens internally
@@ -74,7 +74,8 @@ For each benchmark and parameter configuration, `gpubench`:
 ### Resuming Interrupted Trace Collection
 
 For long trace jobs, use `--resume-trace` so a restarted command skips configs
-that already produced complete trace outputs:
+that already produced complete trace outputs or were previously marked as timed
+out:
 
 ```bash
 gpubench run \
@@ -103,6 +104,11 @@ gpubench run \
   --resume-trace \
   --trace-clean-incomplete
 ```
+
+If a trace run times out, `gpubench` deletes that config's trace data and writes
+`<trace-output>/<benchmark>/<config>/traces/trace_timeout.json`. This keeps
+large partial traces from consuming disk space and lets future
+`--resume-trace` runs skip the same timeout-prone config instead of retrying it.
 
 ## Step 3: Output Structure
 

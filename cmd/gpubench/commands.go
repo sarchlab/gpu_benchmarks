@@ -455,6 +455,146 @@ func formatDuration(s float64) string {
 	return fmt.Sprintf("%dh %dm", int(s)/3600, (int(s)%3600)/60)
 }
 
+func isKernelsListName(name string) bool {
+	return name == "kernelslist" || strings.HasPrefix(name, "kernelslist_")
+}
+
+func isStatsName(name string) bool {
+	return name == "stats" || strings.HasPrefix(name, "stats_")
+}
+
+func traceNameFromKernelsListRef(ref string) string {
+	ref = filepath.Base(strings.TrimSpace(ref))
+	switch {
+	case strings.HasSuffix(ref, ".trace.zsim"):
+		return strings.TrimSuffix(ref, ".trace.zsim") + ".trace.zst"
+	case strings.HasSuffix(ref, ".trace.zst"):
+		return ref
+	default:
+		return ""
+	}
+}
+
+func kernelsListTraceRefs(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var refs []string
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.FieldsFunc(line, func(r rune) bool {
+			return r == ',' || r == ' ' || r == '\t'
+		})
+		for _, field := range fields {
+			if name := traceNameFromKernelsListRef(field); name != "" {
+				refs = append(refs, name)
+			}
+		}
+	}
+	return refs, nil
+}
+
+func traceComplete(cfgTraceDir string) (complete bool, exists bool, detail string) {
+	tracesDir := filepath.Join(cfgTraceDir, "traces")
+	entries, err := os.ReadDir(tracesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, false, "missing traces directory"
+		}
+		return false, true, err.Error()
+	}
+
+	kernelsLists := make([]string, 0)
+	statsFiles := make(map[string]bool)
+	traceFiles := make(map[string]bool)
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		switch {
+		case isKernelsListName(name):
+			kernelsLists = append(kernelsLists, name)
+		case isStatsName(name):
+			statsFiles[name] = true
+		case strings.HasSuffix(name, ".trace.zst"):
+			traceFiles[name] = true
+		}
+	}
+
+	if len(kernelsLists) == 0 {
+		return false, true, "missing kernelslist"
+	}
+	if len(statsFiles) == 0 {
+		return false, true, "missing stats"
+	}
+	if len(traceFiles) == 0 {
+		return false, true, "missing trace files"
+	}
+
+	sort.Strings(kernelsLists)
+	var lastDetail string
+	for _, kernelsList := range kernelsLists {
+		suffix := strings.TrimPrefix(kernelsList, "kernelslist")
+		if suffix != "" && !statsFiles["stats"+suffix] {
+			lastDetail = fmt.Sprintf("%s has no matching stats%s", kernelsList, suffix)
+			continue
+		}
+
+		refs, err := kernelsListTraceRefs(filepath.Join(tracesDir, kernelsList))
+		if err != nil {
+			lastDetail = fmt.Sprintf("cannot read %s: %v", kernelsList, err)
+			continue
+		}
+		if len(refs) == 0 {
+			lastDetail = fmt.Sprintf("%s has no kernel trace references", kernelsList)
+			continue
+		}
+
+		missing := ""
+		for _, ref := range refs {
+			if !traceFiles[ref] {
+				missing = ref
+				break
+			}
+		}
+		if missing == "" {
+			return true, true, "complete"
+		}
+		lastDetail = fmt.Sprintf("%s references missing %s", kernelsList, missing)
+	}
+
+	if lastDetail == "" {
+		lastDetail = "no complete trace context"
+	}
+	return false, true, lastDetail
+}
+
+func firstKernelsListPath(cfgTraceDir string) string {
+	tracesDir := filepath.Join(cfgTraceDir, "traces")
+	defaultPath := filepath.Join(tracesDir, "kernelslist")
+	if _, err := os.Stat(defaultPath); err == nil {
+		return defaultPath
+	}
+
+	entries, err := os.ReadDir(tracesDir)
+	if err != nil {
+		return defaultPath
+	}
+	var candidates []string
+	for _, entry := range entries {
+		if !entry.IsDir() && isKernelsListName(entry.Name()) {
+			candidates = append(candidates, entry.Name())
+		}
+	}
+	sort.Strings(candidates)
+	if len(candidates) == 0 {
+		return defaultPath
+	}
+	return filepath.Join(tracesDir, candidates[0])
+}
+
 // ── Command: run ───────────────────────────────────────────────────────────
 
 type runArgs struct {
@@ -473,6 +613,8 @@ type runArgs struct {
 	collectTrace    string
 	traceOutput     string
 	postProcess     string
+	resumeTrace     bool
+	cleanIncomplete bool
 }
 
 func cmdRun(args runArgs) int {
@@ -604,6 +746,12 @@ func cmdRun(args runArgs) int {
 		eprintf("Tracer:      %s\n", args.collectTrace)
 		eprintf("Output dir:  %s\n", traceOutput)
 		eprintf("Timeout:     %ds\n", timeoutSecs)
+		if args.resumeTrace {
+			eprint("Resume:      enabled (skipping complete trace configs)")
+			if args.cleanIncomplete {
+				eprint("Cleanup:     enabled (removing incomplete config dirs before retry)")
+			}
+		}
 		if dbConfigs != nil {
 			eprintf("DB guidance: %s (only tracing configs with successful runs)\n", dbPath)
 		} else {
@@ -615,7 +763,8 @@ func cmdRun(args runArgs) int {
 		eprint("NOTE: SQLite writes are disabled in trace collection mode.")
 
 		setupInterruptHandler()
-		totalPassed, totalFailed, totalSkipped := 0, 0, 0
+		totalCaptured, totalFailed, totalDBSkipped := 0, 0, 0
+		totalResumeSkipped, totalRetried := 0, 0
 		startTime := time.Now()
 
 		for idx, b := range benchmarks {
@@ -635,11 +784,11 @@ func cmdRun(args runArgs) int {
 						}
 					}
 					skipped := len(configs) - len(filtered)
-					totalSkipped += skipped
+					totalDBSkipped += skipped
 					configs = filtered
 				} else {
 					// No successful runs for this benchmark at all
-					totalSkipped += len(configs)
+					totalDBSkipped += len(configs)
 					eprintf("[%3d/%d] tier%d/%s — skipped (no successful runs in DB)\n",
 						idx+1, len(benchmarks), b.Tier, b.Benchmark)
 					continue
@@ -654,7 +803,7 @@ func cmdRun(args runArgs) int {
 			eprintf("  Scaling: %s (%d configs x %d reps = %d runs)\n",
 				spName, len(configs), reps, len(configs)*reps)
 
-			bp, bf := 0, 0
+			bp, bf, bs, br := 0, 0, 0, 0
 			cmd := getBenchCommand(b, plat)
 
 			for _, cfg := range configs {
@@ -664,11 +813,42 @@ func cmdRun(args runArgs) int {
 
 				cfgTraceDir := filepath.Join(traceOutput, b.Benchmark,
 					traceConfigDir(spName, cfg.ScalingValue, cfg.NSDict))
+
+				retryDetail := ""
+				if args.resumeTrace {
+					complete, exists, detail := traceComplete(cfgTraceDir)
+					if complete {
+						eprintf("    %s=%-12s skip (trace complete)\n",
+							spName, formatValue(cfg.ScalingValue))
+						bs++
+						continue
+					}
+					if exists {
+						retryDetail = detail
+						br++
+						if args.cleanIncomplete {
+							if err := os.RemoveAll(cfgTraceDir); err != nil {
+								eprintf("Error cleaning incomplete trace dir %s: %v\n", cfgTraceDir, err)
+								return ExitDB
+							}
+						}
+					}
+				}
+
 				if err := os.MkdirAll(cfgTraceDir, 0755); err != nil {
 					eprintf("Error creating trace dir %s: %v\n", cfgTraceDir, err)
 					return ExitDB
 				}
+				if retryDetail != "" {
+					cleanup := ""
+					if args.cleanIncomplete {
+						cleanup = "; cleaned"
+					}
+					eprintf("    %s=%-12s retry incomplete (%s%s)\n",
+						spName, formatValue(cfg.ScalingValue), retryDetail, cleanup)
+				}
 
+				cfgCaptured := false
 				for rep := 1; rep <= reps; rep++ {
 					if interrupted {
 						break
@@ -705,6 +885,7 @@ func cmdRun(args runArgs) int {
 					if status == "ok" {
 						eprint("trace captured")
 						bp++
+						cfgCaptured = true
 					} else if status == "timeout" {
 						eprintf("timeout after %ds\n", timeoutSecs)
 						bf++
@@ -718,8 +899,8 @@ func cmdRun(args runArgs) int {
 					}
 				}
 
-				if args.postProcess != "" && bp > 0 {
-					kernelsList := filepath.Join(cfgTraceDir, "traces", "kernelslist")
+				if args.postProcess != "" && cfgCaptured {
+					kernelsList := firstKernelsListPath(cfgTraceDir)
 					eprintf("  Post-processing: %s %s\n", args.postProcess, kernelsList)
 					ppCtx, ppCancel := context.WithTimeout(context.Background(), 300*time.Second)
 					ppCmd := exec.CommandContext(ppCtx, args.postProcess, kernelsList)
@@ -736,22 +917,30 @@ func cmdRun(args runArgs) int {
 				}
 			}
 
-			totalPassed += bp
+			totalCaptured += bp
 			totalFailed += bf
+			totalResumeSkipped += bs
+			totalRetried += br
 			sym := "ok"
 			if bf > 0 {
 				sym = "FAIL"
 			}
-			eprintf("  [%s] %d/%d passed  traces: %s\n\n",
-				sym, bp, bp+bf, filepath.Join(traceOutput, b.Benchmark))
+			eprintf("  [%s] captured=%d failed=%d skipped_complete=%d retried_incomplete=%d traces: %s\n\n",
+				sym, bp, bf, bs, br, filepath.Join(traceOutput, b.Benchmark))
 		}
 
 		eprint("=== Trace Collection Summary ===")
-		eprintf("  Total:   %d runs\n", totalPassed+totalFailed)
-		eprintf("  Passed:  %d\n", totalPassed)
-		eprintf("  Failed:  %d\n", totalFailed)
-		if totalSkipped > 0 {
-			eprintf("  Skipped: %d (no successful runs in DB)\n", totalSkipped)
+		eprintf("  Attempted:          %d runs\n", totalCaptured+totalFailed)
+		eprintf("  Captured:           %d\n", totalCaptured)
+		eprintf("  Failed:             %d\n", totalFailed)
+		if totalResumeSkipped > 0 {
+			eprintf("  Skipped complete:   %d configs\n", totalResumeSkipped)
+		}
+		if totalRetried > 0 {
+			eprintf("  Retried incomplete: %d configs\n", totalRetried)
+		}
+		if totalDBSkipped > 0 {
+			eprintf("  DB-skipped:         %d configs (no successful runs in DB)\n", totalDBSkipped)
 		}
 		eprintf("  Time:    %s\n", formatDuration(time.Since(startTime).Seconds()))
 		eprintf("  Output:  %s\n", traceOutput)

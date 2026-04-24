@@ -124,6 +124,8 @@ func main() {
 			collectTrace, _ := cmd.Flags().GetString("collect-trace")
 			traceOutput, _ := cmd.Flags().GetString("trace-output")
 			postProcess, _ := cmd.Flags().GetString("post-process")
+			resumeTrace, _ := cmd.Flags().GetBool("resume-trace")
+			cleanIncomplete, _ := cmd.Flags().GetBool("trace-clean-incomplete")
 
 			os.Exit(cmdRun(runArgs{
 				tier:            tier,
@@ -141,6 +143,8 @@ func main() {
 				collectTrace:    collectTrace,
 				traceOutput:     traceOutput,
 				postProcess:     postProcess,
+				resumeTrace:     resumeTrace,
+				cleanIncomplete: cleanIncomplete,
 			}))
 			return nil
 		},
@@ -160,6 +164,8 @@ func main() {
 	runCmd.Flags().String("collect-trace", "", "Path to NVBit tracer_tool.so for instruction trace collection")
 	runCmd.Flags().String("trace-output", "./traces", "Output directory for collected traces (default: ./traces)")
 	runCmd.Flags().String("post-process", "", "Optional post-processing binary to run after trace collection")
+	runCmd.Flags().Bool("resume-trace", false, "Skip trace configs that already have complete trace outputs")
+	runCmd.Flags().Bool("trace-clean-incomplete", false, "When resuming traces, delete incomplete config trace directories before retrying")
 
 	// --- info command ---
 	infoCmd := &cobra.Command{

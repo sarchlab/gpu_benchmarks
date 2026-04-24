@@ -52,6 +52,8 @@ gpubench run \
 | `--collect-trace <path>` | Path to `tracer_tool.so` (required to enable trace mode) | — |
 | `--trace-output <dir>` | Directory where traces are written | `./traces` |
 | `--post-process <binary>` | Optional post-processing binary run after each benchmark | — |
+| `--resume-trace` | Skip configs that already have complete trace outputs | `false` |
+| `--trace-clean-incomplete` | When resuming, remove incomplete config trace directories before retrying | `false` |
 
 ### What happens internally
 
@@ -68,6 +70,39 @@ For each benchmark and parameter configuration, `gpubench`:
 > **Note:** When `--collect-trace` is set, **no timing data is written to SQLite**.
 > The `--db` flag is ignored. This is by design — NVBit instrumentation adds
 > overhead that invalidates timing measurements.
+
+### Resuming Interrupted Trace Collection
+
+For long trace jobs, use `--resume-trace` so a restarted command skips configs
+that already produced complete trace outputs:
+
+```bash
+gpubench run \
+  --collect-trace /path/to/bb_triosim/tracer_tool/tracer_tool.so \
+  --trace-output ./my_traces \
+  --reps 1 \
+  --continue-on-error \
+  --resume-trace
+```
+
+A config is considered complete only when its `traces/` directory contains a
+`kernelslist*` file, a matching `stats*` file, and all `.trace.zst` files
+referenced by the kernel list. This avoids treating timeout artifacts as
+complete; for example, a config with only `kernelslist_ctx_*` and `stats_ctx_*`
+but no `.trace.zst` files will be retried.
+
+Add `--trace-clean-incomplete` when you want retries to start from a clean
+config directory:
+
+```bash
+gpubench run \
+  --collect-trace /path/to/bb_triosim/tracer_tool/tracer_tool.so \
+  --trace-output ./my_traces \
+  --reps 1 \
+  --continue-on-error \
+  --resume-trace \
+  --trace-clean-incomplete
+```
 
 ## Step 3: Output Structure
 

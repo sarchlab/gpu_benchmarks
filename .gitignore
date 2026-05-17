@@ -70,8 +70,23 @@ config.yaml
 *.db-shm
 *.db-wal
 
+# Benchmark output artifacts
+/perf_charts/
+/traces/
+/new_traces/
+/.matplotlib-cache/
+
+# Generated documentation
+/docs/parameter_selection.md
+
+# Local trace wrapper with machine-specific paths
+/run_traces.sh
+
 # Compile logs
 compile_errors.log
 
 # Output logs
 *.out
+
+# Local agent state
+/.codex

@@ -92,8 +92,6 @@ int main(int argc, char *argv[])
     if (env_val) { GEMM_M = atoi(env_val); GEMM_N = GEMM_M; GEMM_K = GEMM_M; }
     env_val = getenv("BENCH_PARAM_batch_count");
     if (env_val) BATCH_COUNT = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) WARMUP = atoi(env_val);
     const int M = GEMM_M;
     const int N = GEMM_N;
     const int K = GEMM_K;

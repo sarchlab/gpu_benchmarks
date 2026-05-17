@@ -213,7 +213,6 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_tile_dim");
     if (env_val) tile_dim = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_warmup");
     if (env_val) WARMUP_ITERS = atoi(env_val);
 
     size_t num_elems = (size_t)N * N;

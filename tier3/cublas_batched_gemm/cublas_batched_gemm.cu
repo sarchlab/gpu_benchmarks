@@ -99,8 +99,6 @@ int main(void)
     if (env_val) { M = atoi(env_val); N = M; K = M; }
     env_val = getenv("BENCH_PARAM_batch_count");
     if (env_val) BATCH_COUNT = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) WARMUP = atoi(env_val);
     const size_t sizeA = (size_t)M * K;
     const size_t sizeB = (size_t)K * N;
     const size_t sizeC = (size_t)M * N;

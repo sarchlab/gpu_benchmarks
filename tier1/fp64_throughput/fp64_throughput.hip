@@ -177,8 +177,6 @@ int main(int argc, char *argv[])
     if (env_val) threads_per_block = atoi(env_val);
 
     int num_warmup = DEFAULT_NUM_WARMUP;
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) num_warmup = atoi(env_val);
 
     /* Print device information to stderr. */
     int device_id = 0;

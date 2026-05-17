@@ -28,7 +28,7 @@ def benchmark():
     sample_size = int(os.environ.get('BENCH_PARAM_sample_size', '128'))
     layers_per_block = int(os.environ.get('BENCH_PARAM_layers_per_block', '2'))
     cross_attention_dim = int(os.environ.get('BENCH_PARAM_cross_attention_dim', '768'))
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     # SDXL-like UNet config for benchmarking (no model download)
     unet = UNet2DConditionModel(

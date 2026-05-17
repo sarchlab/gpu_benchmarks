@@ -105,7 +105,7 @@ def benchmark():
     num_dense_features = int(os.environ.get('BENCH_PARAM_num_dense_features', '13'))
     num_sparse_features = int(os.environ.get('BENCH_PARAM_num_sparse_features', '26'))
     precision = os.environ.get('BENCH_PARAM_precision', 'fp32')
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     print(f"Running dlrm_inference (MPS) with batch_size={batch_size}, "
           f"num_embeddings={num_embeddings}, embedding_dim={embedding_dim}, "

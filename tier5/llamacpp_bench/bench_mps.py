@@ -74,7 +74,7 @@ def benchmark():
     n_gpu_layers = int(os.environ.get('BENCH_PARAM_n_gpu_layers', '99'))
     quantization = os.environ.get('BENCH_PARAM_quantization', 'Q4_0')
     threads = int(os.environ.get('BENCH_PARAM_threads', '4'))
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     params = {
         "n_predict": n_predict,

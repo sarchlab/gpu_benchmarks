@@ -117,7 +117,7 @@ def benchmark():
     num_layers = int(os.environ.get('BENCH_PARAM_num_layers', '4'))
     hidden_size = int(os.environ.get('BENCH_PARAM_hidden_size', '256'))
     num_heads = int(os.environ.get('BENCH_PARAM_num_heads', '4'))
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     total_generated = 3 * tokens_per_agent
     max_seq_len = prompt_len + 2 * tokens_per_agent

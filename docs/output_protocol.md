@@ -129,7 +129,6 @@ The CLI records these but does not require any specific fields.
 ```
 [polybench_gemm] Platform: CUDA (NVIDIA A100-SXM4-80GB)
 [polybench_gemm] matrix_size=256, block_size=16
-[polybench_gemm] Warmup: 3 iterations
 [polybench_gemm] Timing: 10 iterations, avg=0.234 ms
 [polybench_gemm] GFLOPS: 143.2
 ```

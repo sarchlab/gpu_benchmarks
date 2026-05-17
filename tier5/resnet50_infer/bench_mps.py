@@ -13,7 +13,7 @@ def benchmark():
     image_size = int(os.environ.get('BENCH_PARAM_image_size', '224'))
     num_classes = int(os.environ.get('BENCH_PARAM_num_classes', '1000'))
     precision = os.environ.get('BENCH_PARAM_precision', 'fp32')
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     print(f"Running resnet50_infer (MPS) with batch_size={batch_size}, image_size={image_size}, "
           f"num_classes={num_classes}, precision={precision}", file=sys.stderr)

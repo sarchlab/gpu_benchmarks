@@ -182,6 +182,7 @@ gpu_benchmarks/
 └── docs/                          # Detailed specifications
     ├── cli_design.md
     ├── output_protocol.md
+    ├── parameter_selection.md
     ├── params_format.md
     ├── result_sharing.md
     └── schema.sql
@@ -453,8 +454,8 @@ go build -o gpubench ./cmd/gpubench
 # Override scaling parameter values
 ./gpubench run --benchmark fp32_throughput --scaling-values 64,256,1024
 
-# Full parameter sweep (scaling × non-scaling Cartesian product)
-./gpubench run --sweep-non-scaling
+# Use only default non-scaling parameter values
+./gpubench run --sweep-non-scaling=false
 ```
 
 ### Makefile Shortcuts
@@ -534,6 +535,7 @@ BENCH_PARAM_matrix_size=1024 BENCH_PARAM_block_size=16 ./benchmark
 
 - [`docs/cli_design.md`](docs/cli_design.md) — Full CLI command reference
 - [`docs/output_protocol.md`](docs/output_protocol.md) — JSON-lines output protocol specification
+- [`docs/parameter_selection.md`](docs/parameter_selection.md) — Consolidated default parameter selections for all benchmarks
 - [`docs/params_format.md`](docs/params_format.md) — `params.json` format specification
 - [`docs/result_sharing.md`](docs/result_sharing.md) — Result export and community sharing guide
 - [`docs/schema.sql`](docs/schema.sql) — SQLite results database schema

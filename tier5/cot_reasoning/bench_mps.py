@@ -113,7 +113,7 @@ def benchmark():
     num_layers = int(os.environ.get('BENCH_PARAM_num_layers', '6'))
     hidden_size = int(os.environ.get('BENCH_PARAM_hidden_size', '384'))
     num_heads = int(os.environ.get('BENCH_PARAM_num_heads', '6'))
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     # Split total_generated into 3 CoT steps + answer
     cot_step_tokens = total_generated // 4

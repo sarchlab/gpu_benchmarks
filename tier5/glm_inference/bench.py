@@ -25,7 +25,7 @@ def benchmark():
     n_layer = int(os.environ.get('BENCH_PARAM_n_layer', '6'))
     n_embd = int(os.environ.get('BENCH_PARAM_n_embd', '512'))
     n_head = int(os.environ.get('BENCH_PARAM_n_head', '8'))
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     # GLM-style config using GPT2Config as base
     config = GPT2Config(

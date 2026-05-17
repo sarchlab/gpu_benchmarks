@@ -259,8 +259,6 @@ int main(int argc, char **argv)
     env_val = getenv("BENCH_PARAM_verify");
     if (env_val) verify_mode = env_val;
     int num_warmup = 0;
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) num_warmup = atoi(env_val);
     if (N % BSIZE != 0) {
         fprintf(stderr, "Error: N=%d must be divisible by BSIZE=%d\n", N, BSIZE);
         return 1;

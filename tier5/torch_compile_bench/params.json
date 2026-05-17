@@ -59,18 +59,6 @@
         "reduce-overhead",
         "max-autotune"
       ]
-    },
-    {
-      "name": "warmup",
-      "description": "Number of warmup iterations before timing",
-      "type": "int",
-      "default": 0,
-      "values": [
-        3,
-        5,
-        10,
-        20
-      ]
     }
   ],
   "kernels": [

@@ -32,18 +32,6 @@
   },
   "non_scaling_params": [
     {
-      "name": "warmup",
-      "description": "Number of warmup FFT executions before timing",
-      "type": "int",
-      "default": 0,
-      "values": [
-        0,
-        3,
-        5,
-        10
-      ]
-    },
-    {
       "name": "direction",
       "description": "FFT direction",
       "type": "enum",

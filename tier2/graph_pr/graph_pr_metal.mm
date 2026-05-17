@@ -174,8 +174,6 @@ int main(int argc, char* argv[]) {
     env_val = getenv("BENCH_PARAM_pr_iterations");
     if (env_val) pr_iterations = atoi(env_val);
     int num_warmup = 0;
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) num_warmup = atoi(env_val);
 
     int N         = vertices;
     int avg_deg   = degree;

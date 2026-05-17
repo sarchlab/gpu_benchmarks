@@ -196,8 +196,6 @@ int main(int argc, char *argv[])
     if (env_val) access_pattern = env_val;
 
     int num_warmup = DEFAULT_WARMUP_ITERS;
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) num_warmup = atoi(env_val);
 
     /* Print device info to stderr. */
     int device_id = 0;

@@ -14,7 +14,7 @@ def benchmark():
     hidden_size = int(os.environ.get('BENCH_PARAM_hidden_size', '768'))
     num_hidden_layers = int(os.environ.get('BENCH_PARAM_num_hidden_layers', '12'))
     num_attention_heads = int(os.environ.get('BENCH_PARAM_num_attention_heads', '12'))
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     print(f"Running bert_inference with batch_size={batch_size}, seq_len={seq_len}, "
           f"hidden_size={hidden_size}, num_hidden_layers={num_hidden_layers}, "

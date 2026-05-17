@@ -116,7 +116,7 @@ def benchmark():
     n_embd = int(os.environ.get('BENCH_PARAM_n_embd', '4096'))
     gen_tokens = int(os.environ.get('BENCH_PARAM_gen_tokens', '64'))
     precision = os.environ.get('BENCH_PARAM_precision', 'fp32')
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     block_size = seq_len + gen_tokens
 

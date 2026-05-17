@@ -89,8 +89,6 @@ int main(void)
     if (env_val) BATCH_N = atoi(env_val);
     env_val = getenv("BENCH_PARAM_channels");
     if (env_val) CHAN_C = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) WARMUP = atoi(env_val);
     /* ------------------------------------------------------------------
      * Host allocation and initialisation
      * ---------------------------------------------------------------- */

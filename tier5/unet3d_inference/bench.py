@@ -89,7 +89,7 @@ def benchmark():
     in_channels = int(os.environ.get('BENCH_PARAM_in_channels', '1'))
     num_classes = int(os.environ.get('BENCH_PARAM_num_classes', '3'))
     precision = os.environ.get('BENCH_PARAM_precision', 'fp32')
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     print(f"Running unet3d_inference with batch_size={batch_size}, "
           f"volume_size={volume_size}, "

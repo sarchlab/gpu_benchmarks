@@ -64,7 +64,7 @@ def benchmark():
     num_prompts = int(os.environ.get('BENCH_PARAM_num_prompts', '10'))
     model_name = os.environ.get('BENCH_PARAM_model_name', 'facebook/opt-125m')
     max_output_tokens = int(os.environ.get('BENCH_PARAM_max_output_tokens', '128'))
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     params = {
         "max_tokens": max_tokens,

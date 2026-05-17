@@ -21,7 +21,6 @@
  * Environment variables (override argv):
  *   BENCH_PARAM_matrix_dim
  *   BENCH_PARAM_precision          ("fp16", "tf32", or "all")
- *   BENCH_PARAM_warmup
  */
 
 #include <cstdio>
@@ -225,8 +224,6 @@ int main(int argc, char *argv[])
     if (env_val) precision = env_val;
 
     int warmup_iterations = DEFAULT_WARMUP_ITERATIONS;
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) warmup_iterations = atoi(env_val);
 
 
     int M = dim, N = dim, K = dim;

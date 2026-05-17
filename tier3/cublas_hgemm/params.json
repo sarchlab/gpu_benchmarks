@@ -36,18 +36,6 @@
   },
   "non_scaling_params": [
     {
-      "name": "warmup",
-      "description": "Number of warmup iterations before timing",
-      "type": "int",
-      "default": 0,
-      "values": [
-        0,
-        3,
-        5,
-        10
-      ]
-    },
-    {
       "name": "alpha",
       "description": "Scalar multiplier for A*B (FP16)",
       "type": "float",

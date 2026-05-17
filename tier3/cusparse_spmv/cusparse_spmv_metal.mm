@@ -120,8 +120,6 @@ int main(int argc, char* argv[])
     if (env_val) num_rows = atoi(env_val);
     env_val = getenv("BENCH_PARAM_nnz_per_row");
     if (env_val) nnz_per_row = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) warmup = atoi(env_val);
     const int num_cols = num_rows;
     const int nnz      = num_rows * nnz_per_row;
 

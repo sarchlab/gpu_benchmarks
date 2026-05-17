@@ -57,7 +57,7 @@ def benchmark():
     block_n = int(os.environ.get('BENCH_PARAM_block_n', '256'))
     block_k = int(os.environ.get('BENCH_PARAM_block_k', '64'))
     group_size_m = int(os.environ.get('BENCH_PARAM_group_size_m', '8'))
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     # Square matrices: M = N = K
     M_dim, N_dim, K_dim = m, m, m

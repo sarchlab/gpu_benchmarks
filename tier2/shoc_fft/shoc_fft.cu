@@ -189,8 +189,6 @@ int main(int argc, char** argv) {
     env_val = getenv("BENCH_PARAM_batch_count");
     if (env_val) batch_count = atoi(env_val);
     int num_warmup = 0;
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) num_warmup = atoi(env_val);
 
     if (!isPowerOfTwo(N)) {
         fprintf(stderr, "Error: N=%d must be a power of 2\n", N);

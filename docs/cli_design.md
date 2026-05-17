@@ -93,7 +93,8 @@ Options:
   --reps N              Repetitions per configuration (default: 7)
   --db FILE             SQLite database file (default: results.db)
   --platform P          Force platform (default: auto-detect)
-  --sweep-non-scaling   Sweep non-scaling params too (default: use defaults only)
+  --sweep-non-scaling   Sweep non-scaling params too (default: true;
+                        use --sweep-non-scaling=false for defaults only)
   --timeout SECS        Per-benchmark timeout in seconds (default: 300)
   --scaling-values V    Override scaling param values (comma-separated)
   --dry-run             Show what would be run without executing
@@ -105,7 +106,7 @@ Examples:
   gpubench run --tier 1 --reps 3                  # run tier 1 with 3 reps
   gpubench run --benchmark shoc_gemm --reps 10    # run one benchmark, 10 reps
   gpubench run --db my_results.db                 # custom database file
-  gpubench run --sweep-non-scaling                # full parameter sweep
+  gpubench run --sweep-non-scaling=false          # non-scaling defaults only
   gpubench run --dry-run                          # preview execution plan
 ```
 
@@ -122,8 +123,8 @@ gpubench run [options]
   └─ For each benchmark:
        ├─ Read params.json
        ├─ Determine parameter configurations:
-       │    ├─ Default mode: sweep scaling_param.values × {non_scaling defaults}
-       │    └─ --sweep-non-scaling: sweep scaling × cartesian(non_scaling values)
+       │    ├─ Default mode: sweep scaling × cartesian(non_scaling values)
+       │    └─ --sweep-non-scaling=false: sweep scaling_param.values × {non_scaling defaults}
        │
        └─ For each parameter configuration:
             └─ For each repetition (1..N):
@@ -271,25 +272,27 @@ For each run, the CLI:
 
 ## Parameter Sweeping
 
-### Default Mode (scaling only)
+### Default Mode (full parameter sweep)
 
-By default, the CLI sweeps only the scaling parameter. Non-scaling parameters use their `default` values.
-
-For a benchmark with:
-- Scaling param: 20 values
-- 7 repetitions
-
-Total runs: **20 × 7 = 140**
-
-### Full Sweep Mode (`--sweep-non-scaling`)
-
-When `--sweep-non-scaling` is passed, the CLI generates the Cartesian product of all non-scaling parameter values, crossed with all scaling parameter values.
+By default, the CLI generates the Cartesian product of all non-scaling parameter values, crossed with all scaling parameter values.
 
 For a benchmark with:
 - Scaling param: 20 values
 - Non-scaling param A: 4 values
 - Non-scaling param B: 3 values
 - 7 repetitions
+
+Total runs: **20 × 4 × 3 × 7 = 1680**
+
+### Defaults-Only Mode (`--sweep-non-scaling=false`)
+
+When `--sweep-non-scaling=false` is passed, the CLI sweeps only the scaling parameter. Non-scaling parameters use their `default` values.
+
+For a benchmark with:
+- Scaling param: 20 values
+- 7 repetitions
+
+Total runs: **20 × 7 = 140**
 
 Total runs: **20 × 4 × 3 × 7 = 1,680**
 

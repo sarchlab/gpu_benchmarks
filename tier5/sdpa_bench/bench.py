@@ -14,7 +14,7 @@ def benchmark():
     num_heads = int(os.environ.get('BENCH_PARAM_num_heads', '16'))
     head_dim = int(os.environ.get('BENCH_PARAM_head_dim', '64'))
     dtype_str = os.environ.get('BENCH_PARAM_dtype', 'float16')
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     dtype_map = {'float16': torch.float16, 'bfloat16': torch.bfloat16, 'float32': torch.float32}
     dtype = dtype_map.get(dtype_str, torch.float16)

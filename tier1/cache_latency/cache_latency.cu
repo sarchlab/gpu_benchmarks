@@ -140,8 +140,6 @@ int main(int argc, char *argv[])
     if (env_val) rng_seed = (uint32_t)atoi(env_val);
 
     int num_warmup = DEFAULT_NUM_WARMUP;
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) num_warmup = atoi(env_val);
 
     const size_t   N     = array_bytes / sizeof(uint32_t);
     const uint32_t N_u32 = static_cast<uint32_t>(N);

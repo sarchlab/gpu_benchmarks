@@ -107,7 +107,7 @@ def benchmark():
     generate_len = int(os.environ.get('BENCH_PARAM_generate_len', '64'))
     num_layers = int(os.environ.get('BENCH_PARAM_num_layers', '4'))
     hidden = int(os.environ.get('BENCH_PARAM_hidden', '256'))
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     # Fixed config
     vocab_size = 50257

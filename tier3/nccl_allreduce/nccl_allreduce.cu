@@ -53,8 +53,6 @@ int main(void)
     if (env_val) message_size = atoll(env_val);
     env_val = getenv("BENCH_PARAM_num_gpus");
     if (env_val) num_gpus = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) warmup = atoi(env_val);
     env_val = getenv("BENCH_PARAM_dtype");
     if (env_val) dtype_str = env_val;
 

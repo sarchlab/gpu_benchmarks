@@ -217,8 +217,6 @@ int main(int argc, char** argv) {
     env_val = getenv("BENCH_PARAM_beta");
     if (env_val) beta = (float)atof(env_val);
     int num_warmup = 0;
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) num_warmup = atoi(env_val);
 
     size_t bytes_AB = (size_t)N * M * sizeof(float);
     size_t bytes_C  = (size_t)N * N * sizeof(float);

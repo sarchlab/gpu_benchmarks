@@ -147,8 +147,6 @@ int main(void)
     const char* env_val;
     env_val = getenv("BENCH_PARAM_matrix_dim");
     if (env_val) { M = atoi(env_val); N = M; K = M; }
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) WARMUP = atoi(env_val);
     env_val = getenv("BENCH_PARAM_alpha");
     if (env_val) alpha_param = (float)atof(env_val);
 

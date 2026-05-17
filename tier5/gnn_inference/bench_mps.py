@@ -113,7 +113,7 @@ def benchmark():
     num_heads = int(os.environ.get('BENCH_PARAM_num_heads', '4'))
     num_layers = int(os.environ.get('BENCH_PARAM_num_layers', '3'))
     precision = os.environ.get('BENCH_PARAM_precision', 'fp32')
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     print(f"Running gnn_inference (MPS) with num_nodes={num_nodes}, num_edges={num_edges}, "
           f"hidden_dim={hidden_dim}, num_heads={num_heads}, num_layers={num_layers}, "

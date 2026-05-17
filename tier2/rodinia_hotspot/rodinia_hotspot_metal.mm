@@ -107,8 +107,6 @@ int main(int argc, char* argv[])
     env_val = getenv("BENCH_PARAM_num_iterations");
     if (env_val) num_iterations = atoi(env_val);
     int num_warmup = 0;
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) num_warmup = atoi(env_val);
 
     int grid_rows   = grid_size;
     int grid_cols   = grid_size;

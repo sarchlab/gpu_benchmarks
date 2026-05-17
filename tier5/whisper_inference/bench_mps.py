@@ -16,7 +16,7 @@ def benchmark():
     time_frames = int(os.environ.get('BENCH_PARAM_time_frames', '3000'))
     encoder_layers = int(os.environ.get('BENCH_PARAM_encoder_layers', '4'))
     d_model = int(os.environ.get('BENCH_PARAM_d_model', '256'))
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     config = WhisperConfig(
         d_model=d_model,

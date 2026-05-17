@@ -134,8 +134,6 @@ int main(void)
     const char *env_val;
     env_val = getenv("BENCH_PARAM_grid_dim");
     if (env_val) grid_dim = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) warmup = atoi(env_val);
     env_val = getenv("BENCH_PARAM_direction");
     if (env_val) direction = env_val;
 

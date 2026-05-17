@@ -178,8 +178,6 @@ int main(int argc, char** argv) {
     env_val = getenv("BENCH_PARAM_transfer_mode");
     if (env_val) transfer_mode = env_val;
     int num_warmup = 0;
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) num_warmup = atoi(env_val);
 
     size_t N     = (size_t)array_size_mb * 1024 * 1024 / sizeof(float);
     size_t bytes = N * sizeof(float);

@@ -32,7 +32,7 @@ def benchmark():
     block_size = int(os.environ.get('BENCH_PARAM_block_size', '1024'))
     p = float(os.environ.get('BENCH_PARAM_p', '0.5'))
     dtype_str = os.environ.get('BENCH_PARAM_dtype', 'float32')
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     dtype_map = {'float16': torch.float16, 'float32': torch.float32, 'float64': torch.float64}
     dtype = dtype_map.get(dtype_str, torch.float32)

@@ -13,7 +13,7 @@ def benchmark():
     image_size = int(os.environ.get('BENCH_PARAM_image_size', '224'))
     patch_size = int(os.environ.get('BENCH_PARAM_patch_size', '16'))
     precision = os.environ.get('BENCH_PARAM_precision', 'fp32')
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     print(f"Running vit_inference (MPS) with batch_size={batch_size}, image_size={image_size}, "
           f"patch_size={patch_size}, precision={precision}", file=sys.stderr)

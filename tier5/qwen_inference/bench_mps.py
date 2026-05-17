@@ -27,7 +27,7 @@ def benchmark():
     hidden_size = int(os.environ.get('BENCH_PARAM_hidden_size', '512'))
     num_attention_heads = int(os.environ.get('BENCH_PARAM_num_attention_heads', '8'))
     num_key_value_heads = int(os.environ.get('BENCH_PARAM_num_key_value_heads', '4'))
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     config = AutoConfig.for_model(
         model_type="qwen2",

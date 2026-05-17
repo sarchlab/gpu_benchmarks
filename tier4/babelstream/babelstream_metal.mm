@@ -71,8 +71,6 @@ int main() {
     if (env_val) scalar = (float)atof(env_val);
     env_val = getenv("BENCH_PARAM_num_times");
     if (env_val) num_times = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) WARMUP = atoi(env_val);
 
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
     if (!device) { fprintf(stderr, "No Metal device\n"); return 1; }

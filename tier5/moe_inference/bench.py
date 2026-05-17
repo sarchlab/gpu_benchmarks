@@ -126,7 +126,7 @@ def benchmark():
     top_k = int(os.environ.get('BENCH_PARAM_top_k', '2'))
     num_layers = int(os.environ.get('BENCH_PARAM_num_layers', '4'))
     hidden_size = int(os.environ.get('BENCH_PARAM_hidden_size', '512'))
-    num_warmup = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    num_warmup = 0
 
     num_heads = max(1, hidden_size // 64)
     max_seq_len = seq_len + num_new_tokens

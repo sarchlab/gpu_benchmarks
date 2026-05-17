@@ -162,6 +162,7 @@ for full simulation options and configuration.
 
 - Use `--reps 1` during trace collection to avoid redundant traces.
 - Use `--benchmark <name>` to target a single benchmark rather than the full suite.
-- Set `BENCH_PARAM_warmup=0` (the default) to avoid tracing warmup kernel launches.
+- Benchmark warmup is not a benchmark parameter; trace collection runs the same
+  invocation that normal `gpubench run` uses for the selected parameter config.
 - Traces are compressed with zstd and are typically much smaller than raw traces.
 - NVBit only works on NVIDIA GPUs with CUDA. ROCm and Metal platforms are not supported.

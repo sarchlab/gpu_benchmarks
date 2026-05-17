@@ -115,7 +115,7 @@ def benchmark():
     prompt_length = os.environ.get('BENCH_PARAM_prompt_length', 'medium')
     temperature = float(os.environ.get('BENCH_PARAM_temperature', '0.7'))
     global WARMUP
-    WARMUP = int(os.environ.get('BENCH_PARAM_warmup', '0'))
+    WARMUP = 0
 
     params = {
         "num_predict": num_predict,

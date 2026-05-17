@@ -155,7 +155,7 @@ func main() {
 	runCmd.Flags().String("reps", "", "Repetitions (default: 7)")
 	runCmd.Flags().String("db", "", "SQLite file (default: results.db)")
 	runCmd.Flags().String("platform", "", "Platform: cuda, rocm, metal")
-	runCmd.Flags().Bool("sweep-non-scaling", false, "Sweep non-scaling params")
+	runCmd.Flags().Bool("sweep-non-scaling", true, "Sweep non-scaling params (use --sweep-non-scaling=false for defaults only)")
 	runCmd.Flags().String("timeout", "", "Timeout secs (default: 300)")
 	runCmd.Flags().String("scaling-values", "", "Override values (csv)")
 	runCmd.Flags().Bool("dry-run", false, "Dry run")

@@ -182,8 +182,6 @@ int main(void)
     if (env_val) OUT_K = atoi(env_val);
     env_val = getenv("BENCH_PARAM_filter_size");
     if (env_val) { FILT_R = atoi(env_val); FILT_S = FILT_R; }
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) WARMUP = atoi(env_val);
 
     /* Recompute output dimensions */
     OUT_H = (IN_H + 2 * PAD - FILT_R) / STRIDE + 1;

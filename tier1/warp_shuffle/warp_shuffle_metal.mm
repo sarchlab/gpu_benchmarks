@@ -195,8 +195,6 @@ int main(int argc, char *argv[])
     if (env_val) shuffle_variant = env_val;
 
     int num_warmup = DEFAULT_NUM_WARMUP;
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) num_warmup = atoi(env_val);
 
     /* Select the default Metal GPU device. */
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();

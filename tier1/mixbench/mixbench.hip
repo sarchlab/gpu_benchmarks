@@ -255,8 +255,6 @@ int main(int argc, char *argv[])
 
 
     int num_warmup = DEFAULT_WARMUP_ITERS;
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) num_warmup = atoi(env_val);
 
     size_t bytes = static_cast<size_t>(buffer_mb) * 1024ULL * 1024ULL;
     int num_elements = (int)(bytes / sizeof(float));

@@ -7,7 +7,33 @@
     "name": "matrix_dim",
     "description": "Square matrix dimension M=N=K; must be a multiple of 16 (WMMA tile size)",
     "type": "int",
-    "values": [256, 512, 768, 1024, 1280, 1536, 2048, 2560, 3072, 3584, 4096, 4608, 5120, 5632, 6144, 6656, 7168, 7680, 8192, 9216, 10240, 11264, 12288, 14336, 16384]
+    "values": [
+      256,
+      512,
+      768,
+      1024,
+      1280,
+      1536,
+      2048,
+      2560,
+      3072,
+      3584,
+      4096,
+      4608,
+      5120,
+      5632,
+      6144,
+      6656,
+      7168,
+      7680,
+      8192,
+      9216,
+      10240,
+      11264,
+      12288,
+      14336,
+      16384
+    ]
   },
   "non_scaling_params": [
     {
@@ -15,15 +41,15 @@
       "description": "Data type for WMMA fragments",
       "type": "enum",
       "default": "fp16",
-      "values": ["fp16", "tf32", "bf16"]
-    },
-    {
-      "name": "warmup_iterations",
-      "description": "Number of warmup kernel launches before timing",
-      "type": "int",
-      "default": 5,
-      "values": [3, 5, 10]
+      "values": [
+        "fp16",
+        "tf32",
+        "bf16"
+      ]
     }
   ],
-  "kernels": ["wmma_fp16_gemm", "wmma_tf32_gemm"]
+  "kernels": [
+    "wmma_fp16_gemm",
+    "wmma_tf32_gemm"
+  ]
 }

@@ -284,8 +284,6 @@ int main(int argc, char *argv[])
     if (env_val) use_pinned_memory = env_val;
 
     int num_warmup = DEFAULT_NUM_WARMUP;
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) num_warmup = atoi(env_val);
 
     bool run_h2d   = (strcmp(transfer_type, "all") == 0 || strcmp(transfer_type, "h2d") == 0);
     bool run_d2h   = (strcmp(transfer_type, "all") == 0 || strcmp(transfer_type, "d2h") == 0);

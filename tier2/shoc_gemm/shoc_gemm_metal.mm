@@ -92,8 +92,6 @@ int main(int argc, char* argv[])
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
     int num_warmup = 0;
-    env_val = getenv("BENCH_PARAM_warmup");
-    if (env_val) num_warmup = atoi(env_val);
 
     int M = size, N = size, K = size;
     float alpha = 1.0f, beta = 0.0f;

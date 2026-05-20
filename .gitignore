@@ -90,3 +90,7 @@ compile_errors.log
 
 # Local agent state
 /.codex
+
+# Status dashboard dependencies/build output
+/status-dashboard/node_modules/
+/status-dashboard/dist/

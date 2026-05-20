@@ -69,12 +69,11 @@
       "name": "atomic_op",
       "description": "Type of atomic operation to benchmark",
       "type": "enum",
-      "default": "all",
+      "default": "atomicAdd",
       "values": [
         "atomicAdd",
         "atomicCAS",
-        "atomicMin",
-        "all"
+        "atomicMin"
       ]
     }
   ],

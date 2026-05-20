@@ -26,7 +26,7 @@
  *   BENCH_PARAM_ops_per_thread
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_threads_per_block
- *   BENCH_PARAM_atomic_op   ("all", "atomicAdd", "atomicCAS", "atomicMin")
+ *   BENCH_PARAM_atomic_op   ("atomicAdd", "atomicCAS", "atomicMin")
  */
 
 #include <cstdio>
@@ -243,9 +243,15 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_threads_per_block");
     if (env_val) threads_per_block = atoi(env_val);
 
-    const char* atomic_op = "all";
+    const char* atomic_op = "atomicAdd";
     env_val = getenv("BENCH_PARAM_atomic_op");
     if (env_val) atomic_op = env_val;
+    if (strcmp(atomic_op, "atomicAdd") != 0 &&
+        strcmp(atomic_op, "atomicCAS") != 0 &&
+        strcmp(atomic_op, "atomicMin") != 0) {
+        fprintf(stderr, "Error: unsupported atomic_op '%s'\n", atomic_op);
+        return EXIT_FAILURE;
+    }
 
     int num_warmup = DEFAULT_NUM_WARMUP;
 
@@ -271,9 +277,9 @@ int main(int argc, char *argv[])
     double total_time_ms = 0.0;
     double max_gops = 0.0;
 
-    bool run_add = (strcmp(atomic_op, "all") == 0 || strcmp(atomic_op, "atomicAdd") == 0);
-    bool run_cas = (strcmp(atomic_op, "all") == 0 || strcmp(atomic_op, "atomicCAS") == 0);
-    bool run_min = (strcmp(atomic_op, "all") == 0 || strcmp(atomic_op, "atomicMin") == 0);
+    bool run_add = (strcmp(atomic_op, "atomicAdd") == 0);
+    bool run_cas = (strcmp(atomic_op, "atomicCAS") == 0);
+    bool run_min = (strcmp(atomic_op, "atomicMin") == 0);
 
     if (run_add) {
         double avg_ms, gops;

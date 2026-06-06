@@ -31,7 +31,7 @@ typedef hipEvent_t GpuEvent;
 #error "Define USE_CUDA or USE_HIP"
 #endif
 
-static int WARMUP = 0;
+static int WARMUP = 5;
 
 __global__ void copy_kernel(const float* __restrict__ a, float* __restrict__ c, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;

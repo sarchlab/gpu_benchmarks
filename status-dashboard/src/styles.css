@@ -45,7 +45,7 @@ button {
 }
 
 .topbar {
-  margin-bottom: 22px;
+  margin-bottom: 14px;
 }
 
 .eyebrow,
@@ -110,6 +110,49 @@ h2 {
 .secondary-button {
   height: 34px;
   padding: 0 12px;
+}
+
+.global-tabs {
+  display: inline-flex;
+  gap: 4px;
+  margin-bottom: 18px;
+  padding: 4px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #eef2f7;
+}
+
+.global-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 168px;
+  height: 38px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #475569;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.global-tab:hover {
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.global-tab-active {
+  color: #0f172a;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.global-tab svg {
+  flex: 0 0 auto;
 }
 
 .card {
@@ -623,6 +666,16 @@ select {
   .topbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .global-tabs {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .global-tab {
+    width: 100%;
   }
 
   h1 {

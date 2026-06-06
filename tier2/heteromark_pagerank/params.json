@@ -42,13 +42,9 @@
       "name": "pr_iterations",
       "description": "Number of PageRank iterations per run",
       "type": "int",
-      "default": 20,
+      "default": 5,
       "values": [
-        5,
-        10,
-        20,
-        50,
-        100
+        5
       ]
     },
     {

@@ -64,11 +64,9 @@
       "name": "iterations",
       "description": "Timed benchmark iterations",
       "type": "int",
-      "default": 5,
+      "default": 1,
       "values": [
-        3,
-        5,
-        10
+        1
       ]
     }
   ],

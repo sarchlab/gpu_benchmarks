@@ -41,12 +41,9 @@
       "name": "iterations",
       "description": "Number of timed iterations for averaging",
       "type": "int",
-      "default": 5,
+      "default": 1,
       "values": [
-        3,
-        5,
-        10,
-        20
+        1
       ]
     },
     {
@@ -55,10 +52,7 @@
       "type": "int",
       "default": 128,
       "values": [
-        64,
-        128,
-        256,
-        512
+        128
       ]
     },
     {
@@ -68,9 +62,7 @@
       "default": 100,
       "values": [
         10,
-        50,
         100,
-        200,
         500
       ]
     },
@@ -80,10 +72,7 @@
       "type": "float",
       "default": 0.7,
       "values": [
-        0.55,
-        0.7,
-        1.0,
-        1.5
+        0.7
       ]
     }
   ],

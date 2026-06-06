@@ -14,7 +14,7 @@ typedef cudaEvent_t GpuEvent;
 #define MEMCPY_H2D(dst,src,sz) GPU_CHECK(cudaMemcpy(dst,src,sz,cudaMemcpyHostToDevice))
 #define MEMCPY_D2H(dst,src,sz) GPU_CHECK(cudaMemcpy(dst,src,sz,cudaMemcpyDeviceToHost))
 
-static int WARMUP = 0;
+static int WARMUP = 5;
 
 __global__ void copy_kernel(const float* __restrict__ a, float* __restrict__ c, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;

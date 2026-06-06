@@ -42,9 +42,7 @@
       "type": "int",
       "default": 8,
       "values": [
-        4,
-        8,
-        16
+        8
       ]
     },
     {

@@ -24,7 +24,7 @@ const (
 const (
 	DefaultReps         = 7
 	DefaultDB           = "results.db"
-	DefaultTimeout      = 300
+	DefaultTimeout      = 60
 	DefaultTraceTimeout = 3600
 )
 
@@ -156,7 +156,7 @@ func main() {
 	runCmd.Flags().String("db", "", "SQLite file (default: results.db)")
 	runCmd.Flags().String("platform", "", "Platform: cuda, rocm, metal")
 	runCmd.Flags().Bool("sweep-non-scaling", true, "Sweep non-scaling params (use --sweep-non-scaling=false for defaults only)")
-	runCmd.Flags().String("timeout", "", "Timeout secs (default: 300)")
+	runCmd.Flags().String("timeout", "", "Timeout secs (default: 60)")
 	runCmd.Flags().String("scaling-values", "", "Override values (csv)")
 	runCmd.Flags().Bool("dry-run", false, "Dry run")
 	runCmd.Flags().Bool("continue-on-error", false, "Continue on error")

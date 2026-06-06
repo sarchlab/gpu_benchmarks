@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
-import { stat, readFile } from "node:fs/promises";
+import { stat, readFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,10 +11,6 @@ const dbPath = process.env.GPUBENCH_DB || path.join(repoRoot, "results.db");
 const port = Number(process.env.PORT || 4174);
 const distDir = path.join(__dirname, "dist");
 const apiOnly = process.env.STATUS_DASHBOARD_API_ONLY === "1";
-
-const tierExpectedRuns = {
-  "1": 65884
-};
 
 function runSql(query) {
   return new Promise((resolve, reject) => {
@@ -102,6 +98,94 @@ function uniqueSorted(values) {
   return [...new Set(values.map((value) => String(value)))].sort(sortValues);
 }
 
+function shellWords(commandLine) {
+  return String(commandLine || "").match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map((word) => (
+    word.replace(/^(['"])(.*)\1$/, "$2")
+  )) || [];
+}
+
+function commandFlagValue(commandLine, flag) {
+  const words = shellWords(commandLine);
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index];
+    if (word === flag) return words[index + 1] || "";
+    if (word.startsWith(`${flag}=`)) return word.slice(flag.length + 1);
+  }
+  return "";
+}
+
+function commandHasDefaultNonScalingSweep(commandLine) {
+  const explicit = commandFlagValue(commandLine, "--sweep-non-scaling");
+  if (explicit) return explicit !== "false";
+  return !shellWords(commandLine).includes("--sweep-non-scaling=false");
+}
+
+async function loadBenchmarkSpecs() {
+  const tierDirs = (await readdir(repoRoot, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && /^tier\d+$/.test(entry.name))
+    .map((entry) => entry.name)
+    .sort(sortValues);
+  const specs = [];
+  for (const tierDir of tierDirs) {
+    const tierPath = path.join(repoRoot, tierDir);
+    const benchmarkDirs = await readdir(tierPath, { withFileTypes: true });
+    for (const entry of benchmarkDirs) {
+      if (!entry.isDirectory()) continue;
+      const paramsPath = path.join(tierPath, entry.name, "params.json");
+      if (!existsSync(paramsPath)) continue;
+      const params = JSON.parse(await readFile(paramsPath, "utf8"));
+      specs.push({
+        benchmark: params.benchmark || entry.name,
+        suite: params.suite || "",
+        tier: Number(params.tier ?? tierDir.slice("tier".length)),
+        scalingValues: params.scaling_param?.values || [],
+        nonScalingParams: params.non_scaling_params || []
+      });
+    }
+  }
+  return specs;
+}
+
+async function expectedBenchmarksForSession(session) {
+  if (!session) {
+    return { rows: [], total: null, title: "All Benchmarks" };
+  }
+
+  const scalingOverride = commandFlagValue(session.command_line, "--scaling-values")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const sweepNonScaling = commandHasDefaultNonScalingSweep(session.command_line);
+  const specs = (await loadBenchmarkSpecs()).filter((spec) => (
+    (session.filter_tier == null || String(spec.tier) === String(session.filter_tier)) &&
+    (session.filter_suite == null || spec.suite === session.filter_suite) &&
+    (session.filter_bench == null || spec.benchmark === session.filter_bench)
+  ));
+
+  const reps = Number(session.repetitions || 1);
+  const rows = specs.map((spec) => {
+    const scalingCount = scalingOverride.length || spec.scalingValues.length;
+    const nonScalingCount = sweepNonScaling
+      ? spec.nonScalingParams.reduce((product, param) => product * Math.max(1, param.values?.length || 0), 1)
+      : 1;
+    return {
+      benchmark: spec.benchmark,
+      suite: spec.suite,
+      tier: spec.tier,
+      expectedRuns: scalingCount * nonScalingCount * reps
+    };
+  });
+  const total = rows.reduce((sum, row) => sum + row.expectedRuns, 0);
+  const title = session.filter_bench
+    ? session.filter_bench
+    : session.filter_suite
+      ? `${session.filter_suite} Suite`
+      : session.filter_tier
+        ? `Tier ${session.filter_tier}`
+        : "All Benchmarks";
+  return { rows, total, title };
+}
+
 async function getStatus() {
   if (!existsSync(dbPath)) {
     return {
@@ -117,7 +201,11 @@ async function getStatus() {
         timeouts: 0,
         expectedRuns: null,
         percent: 0,
-        etaSeconds: null
+        elapsedSeconds: null,
+        runRate: null,
+        remainingRuns: null,
+        etaSeconds: null,
+        title: "All Benchmarks"
       },
       runtime: {
         dbSessionStatus: null,
@@ -136,39 +224,13 @@ async function getStatus() {
     };
   }
 
-  const [sessions, totalsRows, benchmarks, tableRows, gpubenchProcesses] = await Promise.all([
+  const [sessions, tableRows, gpubenchProcesses] = await Promise.all([
     runSql(`
-      SELECT id, started_at, finished_at, status, repetitions, filter_tier,
+      SELECT id, started_at, finished_at, status, command_line, repetitions, filter_tier,
              filter_suite, filter_bench
       FROM sessions
       ORDER BY id DESC
       LIMIT 5;
-    `),
-    runSql(`
-      SELECT
-        COUNT(*) AS runs,
-        COALESCE(SUM(status='ok'), 0) AS ok,
-        COALESCE(SUM(status='error'), 0) AS errors,
-        COALESCE(SUM(status='timeout'), 0) AS timeouts,
-        MIN(started_at) AS first_started_at,
-        MAX(finished_at) AS last_finished_at
-      FROM runs
-      WHERE tier = 1;
-    `),
-    runSql(`
-      SELECT
-        benchmark,
-        COUNT(*) AS runs,
-        COUNT(DISTINCT scaling_param_value) AS points,
-        COALESCE(SUM(status='ok'), 0) AS ok,
-        COALESCE(SUM(status='error'), 0) AS errors,
-        COALESCE(SUM(status='timeout'), 0) AS timeouts,
-        MIN(started_at) AS first_started_at,
-        MAX(finished_at) AS last_finished_at
-      FROM runs
-      WHERE tier = 1
-      GROUP BY benchmark
-      ORDER BY MIN(id);
     `),
     runSql(`
       SELECT
@@ -179,11 +241,67 @@ async function getStatus() {
     getGpubenchProcesses()
   ]);
 
-  const totals = totalsRows[0] || {};
   const activeSession = sessions.find((session) => session.status === "running") || sessions[0];
-  const expectedRuns = activeSession?.filter_tier
-    ? tierExpectedRuns[String(activeSession.filter_tier)] ?? null
-    : null;
+  const sessionWhere = activeSession ? `WHERE session_id = ${Number(activeSession.id)}` : "";
+  const [totalsRows, observedBenchmarks] = await Promise.all([
+    runSql(`
+      SELECT
+        COUNT(*) AS runs,
+        COALESCE(SUM(status='ok'), 0) AS ok,
+        COALESCE(SUM(status='error'), 0) AS errors,
+        COALESCE(SUM(status='timeout'), 0) AS timeouts,
+        MIN(started_at) AS first_started_at,
+        MAX(finished_at) AS last_finished_at
+      FROM runs
+      ${sessionWhere};
+    `),
+    runSql(`
+      SELECT
+        tier,
+        suite,
+        benchmark,
+        COUNT(*) AS runs,
+        COUNT(DISTINCT scaling_param_value) AS points,
+        COALESCE(SUM(status='ok'), 0) AS ok,
+        COALESCE(SUM(status='error'), 0) AS errors,
+        COALESCE(SUM(status='timeout'), 0) AS timeouts,
+        MIN(started_at) AS first_started_at,
+        MAX(finished_at) AS last_finished_at
+      FROM runs
+      ${sessionWhere}
+      GROUP BY tier, suite, benchmark
+      ORDER BY MIN(id);
+    `)
+  ]);
+
+  const totals = totalsRows[0] || {};
+  const expected = await expectedBenchmarksForSession(activeSession);
+  const observedByBenchmark = new Map(observedBenchmarks.map((row) => [row.benchmark, row]));
+  const benchmarks = expected.rows.length
+    ? expected.rows.map((row) => {
+        const observed = observedByBenchmark.get(row.benchmark) || {};
+        return {
+          ...row,
+          runs: Number(observed.runs || 0),
+          points: Number(observed.points || 0),
+          ok: Number(observed.ok || 0),
+          errors: Number(observed.errors || 0),
+          timeouts: Number(observed.timeouts || 0),
+          first_started_at: observed.first_started_at || null,
+          last_finished_at: observed.last_finished_at || null
+        };
+      })
+    : observedBenchmarks.map((row) => ({
+        ...row,
+        tier: Number(row.tier),
+        runs: Number(row.runs || 0),
+        points: Number(row.points || 0),
+        ok: Number(row.ok || 0),
+        errors: Number(row.errors || 0),
+        timeouts: Number(row.timeouts || 0),
+        expectedRuns: null
+      }));
+  const expectedRuns = expected.total;
   const runs = Number(totals.runs || 0);
   const firstStart = totals.first_started_at ? Date.parse(`${totals.first_started_at}Z`) : null;
   const elapsedSeconds = firstStart ? Math.max(1, (Date.now() - firstStart) / 1000) : null;
@@ -220,7 +338,8 @@ async function getStatus() {
       elapsedSeconds,
       runRate,
       remainingRuns,
-      etaSeconds
+      etaSeconds,
+      title: expected.title
     },
     runtime: {
       dbSessionStatus,

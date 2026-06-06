@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static int WARMUP = 0;
+static int WARMUP = 5;
 
 static const char *shaderSrcC =
     "#include <metal_stdlib>\n"

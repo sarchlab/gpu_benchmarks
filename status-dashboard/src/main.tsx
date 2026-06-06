@@ -18,6 +18,7 @@ type Session = {
   started_at: string | null;
   finished_at: string | null;
   status: string;
+  command_line: string | null;
   repetitions: number;
   filter_tier: string | number | null;
   filter_suite: string | null;
@@ -25,7 +26,10 @@ type Session = {
 };
 
 type Benchmark = {
+  tier: number;
+  suite: string;
   benchmark: string;
+  expectedRuns: number | null;
   runs: number;
   points: number;
   ok: number;
@@ -57,6 +61,7 @@ type Status = {
     runRate: number | null;
     remainingRuns: number | null;
     etaSeconds: number | null;
+    title: string;
   };
   runtime: {
     dbSessionStatus: string | null;
@@ -132,6 +137,8 @@ type ChartData = {
   series: string[];
 };
 
+type GlobalTab = "session" | "explorer";
+
 const emptyResultOptions: ResultOptions = {
   benchmarks: [],
   fields: [],
@@ -175,23 +182,6 @@ function normalizeResultOptions(value: Partial<ResultOptions> | null | undefined
     kernels: Array.isArray(value?.kernels) ? value.kernels : []
   };
 }
-
-const tierOneExpected: Record<string, number> = {
-  atomic_operations: 12180,
-  cache_latency: 1323,
-  fp16_throughput: 4060,
-  fp32_throughput: 4060,
-  fp64_throughput: 4060,
-  int32_throughput: 4060,
-  memory_bandwidth: 1848,
-  mixbench: 2800,
-  pcie_bandwidth: 1848,
-  shared_mem_bandwidth: 8820,
-  tensor_core_throughput: 525,
-  warp_shuffle: 20300
-};
-
-const tierOneOrder = Object.keys(tierOneExpected);
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -473,6 +463,7 @@ function LineChart({ data }: { data: ChartData | null }) {
 }
 
 function App() {
+  const [activeTab, setActiveTab] = useState<GlobalTab>("session");
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -554,28 +545,27 @@ function App() {
   const activeSession = status?.sessions.find((session) => session.status === "running") || status?.sessions[0];
 
   const benchmarkRows = useMemo(() => {
-    const byName = new Map(status?.benchmarks.map((bench) => [bench.benchmark, bench]) || []);
-    return tierOneOrder.map((name) => {
-      const observed = byName.get(name);
-      const expected = tierOneExpected[name];
-      const runs = observed?.runs || 0;
+    return (status?.benchmarks || []).map((bench) => {
+      const expected = bench.expectedRuns;
+      const runs = bench.runs || 0;
       return {
-        name,
+        name: bench.benchmark,
         expected,
         runs,
-        points: observed?.points || 0,
-        ok: observed?.ok || 0,
-        errors: observed?.errors || 0,
-        timeouts: observed?.timeouts || 0,
+        points: bench.points || 0,
+        ok: bench.ok || 0,
+        errors: bench.errors || 0,
+        timeouts: bench.timeouts || 0,
         percent: expected ? (runs / expected) * 100 : 0
       };
     });
   }, [status]);
 
   const currentBenchmark =
-    benchmarkRows.find((row) => row.runs > 0 && row.runs < row.expected)?.name ||
+    benchmarkRows.find((row) => row.expected && row.runs > 0 && row.runs < row.expected)?.name ||
     [...benchmarkRows].reverse().find((row) => row.runs > 0)?.name ||
     "waiting";
+  const statusTitle = status?.totals.title || "Benchmarks";
   const health = status?.runtime?.health || activeSession?.status || "offline";
   const sessionDetail = activeSession
     ? `Started ${formatDate(activeSession.started_at)} · DB ${status?.runtime?.dbSessionStatus || activeSession.status} · process ${
@@ -613,18 +603,45 @@ function App() {
     });
   }
 
+  function selectTab(tab: GlobalTab) {
+    setActiveTab(tab);
+  }
+
   return (
     <main className="page">
       <section className="topbar">
         <div>
           <p className="eyebrow">GPU Benchmarks</p>
-          <h1>Tier 1 Execution Status</h1>
+          <h1>Status Dashboard</h1>
         </div>
         <button className="button" onClick={refresh} disabled={loading} title="Refresh now">
           <RefreshCw size={16} className={cn(loading && "spin")} />
           Refresh
         </button>
       </section>
+
+      <nav className="global-tabs" role="tablist" aria-label="Dashboard sections">
+        <button
+          className={cn("global-tab", activeTab === "session" && "global-tab-active")}
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "session"}
+          onClick={() => selectTab("session")}
+        >
+          <Activity size={16} />
+          Current Session
+        </button>
+        <button
+          className={cn("global-tab", activeTab === "explorer" && "global-tab-active")}
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "explorer"}
+          onClick={() => selectTab("explorer")}
+        >
+          <BarChart3 size={16} />
+          Data Explorer
+        </button>
+      </nav>
 
       {error && (
         <div className="alert">
@@ -633,185 +650,191 @@ function App() {
         </div>
       )}
 
-      <section className="summary">
-        <div className="card hero-card">
-          <div className="hero-row">
-            <div>
-              <p className="muted">Current run</p>
-              <h2>{activeSession ? `Session ${activeSession.id}` : "No session"}</h2>
-              <p className="fine-print">{sessionDetail}</p>
-              {status?.runtime?.health === "stale" && (
-                <p className="fine-print warning-text">
-                  No `gpubench run` process seen for {formatDuration(status.runtime.staleSeconds)}.
-                </p>
-              )}
-            </div>
-            <span className={cn("badge", health === "running" && "badge-live", health === "stale" && "badge-stale")}>
-              {health}
-            </span>
-          </div>
-          <div className="headline-progress">
-            <div>
-              <div className="big-number">{formatPercent(status?.totals.percent)}</div>
-              <p className="muted">Full Tier 1 progress</p>
-            </div>
-            <div className="progress-wrap">
-              <ProgressBar value={status?.totals.percent || 0} />
-              <p className="fine-print">
-                {formatNumber(status?.totals.runs)} / {formatNumber(status?.totals.expectedRuns)} runs
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="stat-grid">
-          <StatCard
-            label="Current benchmark"
-            value={currentBenchmark}
-            detail={`${formatNumber(status?.totals.ok)} successful rows`}
-            icon={<Activity size={18} />}
-          />
-          <StatCard
-            label="ETA"
-            value={formatDuration(status?.totals.etaSeconds)}
-            detail={`${(status?.totals.runRate || 0).toFixed(2)} runs/sec`}
-            icon={<Clock size={18} />}
-          />
-          <StatCard
-            label="Elapsed"
-            value={formatDuration(status?.totals.elapsedSeconds)}
-            detail={`${formatNumber(status?.totals.remainingRuns)} runs remaining`}
-            icon={<TimerReset size={18} />}
-          />
-          <StatCard
-            label="Dataset size"
-            value={formatBytes(status?.storage.totalBytes || 0)}
-            detail={`DB ${formatBytes(status?.storage.dbBytes || 0)} · WAL ${formatBytes(status?.storage.walBytes || 0)}`}
-            icon={<Database size={18} />}
-          />
-        </div>
-      </section>
-
-      <section className="grid-two">
-        <div className="card">
-          <div className="section-head">
-            <div>
-              <p className="muted">Benchmarks</p>
-              <h2>Tier 1 Sweep</h2>
-            </div>
-            <Gauge size={20} />
-          </div>
-          <div className="bench-list">
-            {benchmarkRows.map((row) => (
-              <div className="bench-row" key={row.name}>
-                <div className="bench-top">
-                  <span>{row.name}</span>
-                  <span className="fine-print">
-                    {formatNumber(row.runs)} / {formatNumber(row.expected)}
-                  </span>
+      {activeTab === "session" && (
+        <div role="tabpanel" aria-label="Current session">
+          <section className="summary">
+            <div className="card hero-card">
+              <div className="hero-row">
+                <div>
+                  <p className="muted">Current run</p>
+                  <h2>{activeSession ? `Session ${activeSession.id}` : "No session"}</h2>
+                  <p className="fine-print">{sessionDetail}</p>
+                  {status?.runtime?.health === "stale" && (
+                    <p className="fine-print warning-text">
+                      No `gpubench run` process seen for {formatDuration(status.runtime.staleSeconds)}.
+                    </p>
+                  )}
                 </div>
-                <ProgressBar value={row.percent} />
-                <div className="bench-meta">
-                  <span>{formatPercent(row.percent)}</span>
-                  <span>{row.points} scaling points</span>
-                  <span>{row.errors + row.timeouts} failed</span>
+                <span className={cn("badge", health === "running" && "badge-live", health === "stale" && "badge-stale")}>
+                  {health}
+                </span>
+              </div>
+              <div className="headline-progress">
+                <div>
+                  <div className="big-number">{formatPercent(status?.totals.percent)}</div>
+                  <p className="muted">Current session progress</p>
+                </div>
+                <div className="progress-wrap">
+                  <ProgressBar value={status?.totals.percent || 0} />
+                  <p className="fine-print">
+                    {formatNumber(status?.totals.runs)} / {formatNumber(status?.totals.expectedRuns)} runs
+                  </p>
                 </div>
               </div>
-            ))}
-          </div>
-        </div>
+            </div>
 
-        <div className="card">
+            <div className="stat-grid">
+              <StatCard
+                label="Current benchmark"
+                value={currentBenchmark}
+                detail={`${formatNumber(status?.totals.ok)} successful rows`}
+                icon={<Activity size={18} />}
+              />
+              <StatCard
+                label="ETA"
+                value={formatDuration(status?.totals.etaSeconds)}
+                detail={`${(status?.totals.runRate || 0).toFixed(2)} runs/sec`}
+                icon={<Clock size={18} />}
+              />
+              <StatCard
+                label="Elapsed"
+                value={formatDuration(status?.totals.elapsedSeconds)}
+                detail={`${formatNumber(status?.totals.remainingRuns)} runs remaining`}
+                icon={<TimerReset size={18} />}
+              />
+              <StatCard
+                label="Dataset size"
+                value={formatBytes(status?.storage.totalBytes || 0)}
+                detail={`DB ${formatBytes(status?.storage.dbBytes || 0)} · WAL ${formatBytes(status?.storage.walBytes || 0)}`}
+                icon={<Database size={18} />}
+              />
+            </div>
+          </section>
+
+          <section className="grid-two">
+            <div className="card">
+              <div className="section-head">
+                <div>
+                  <p className="muted">Benchmarks</p>
+                  <h2>{statusTitle} Sweep</h2>
+                </div>
+                <Gauge size={20} />
+              </div>
+              <div className="bench-list">
+                {benchmarkRows.map((row) => (
+                  <div className="bench-row" key={row.name}>
+                    <div className="bench-top">
+                      <span>{row.name}</span>
+                      <span className="fine-print">
+                        {formatNumber(row.runs)} / {formatNumber(row.expected)}
+                      </span>
+                    </div>
+                    <ProgressBar value={row.percent} />
+                    <div className="bench-meta">
+                      <span>{formatPercent(row.percent)}</span>
+                      <span>{row.points} scaling points</span>
+                      <span>{row.errors + row.timeouts} failed</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="section-head">
+                <div>
+                  <p className="muted">Storage</p>
+                  <h2>Recorded Tables</h2>
+                </div>
+                <BarChart3 size={20} />
+              </div>
+              <div className="table-card">
+                <div className="table-row">
+                  <span>runs</span>
+                  <strong>{formatNumber(status?.tableRows?.run_rows)}</strong>
+                </div>
+                <div className="table-row">
+                  <span>kernel_results</span>
+                  <strong>{formatNumber(status?.tableRows?.kernel_rows)}</strong>
+                </div>
+                <div className="table-row">
+                  <span>metrics</span>
+                  <strong>{formatNumber(status?.tableRows?.metric_rows)}</strong>
+                </div>
+              </div>
+              <div className="note">
+                <p className="fine-print">Auto-refreshes every 5 seconds from {status?.dbPath || "results.db"}.</p>
+                <p className="fine-print">ETA is based on the current observed insert rate, so it will move as benchmarks change.</p>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {activeTab === "explorer" && (
+        <section className="card results-card" role="tabpanel" aria-label="Data explorer">
           <div className="section-head">
             <div>
-              <p className="muted">Storage</p>
-              <h2>Recorded Tables</h2>
+              <p className="muted">Collected Results</p>
+              <h2>Execution Time Explorer</h2>
             </div>
             <BarChart3 size={20} />
           </div>
-          <div className="table-card">
-            <div className="table-row">
-              <span>runs</span>
-              <strong>{formatNumber(status?.tableRows?.run_rows)}</strong>
-            </div>
-            <div className="table-row">
-              <span>kernel_results</span>
-              <strong>{formatNumber(status?.tableRows?.kernel_rows)}</strong>
-            </div>
-            <div className="table-row">
-              <span>metrics</span>
-              <strong>{formatNumber(status?.tableRows?.metric_rows)}</strong>
-            </div>
-          </div>
-          <div className="note">
-            <p className="fine-print">Auto-refreshes every 5 seconds from {status?.dbPath || "results.db"}.</p>
-            <p className="fine-print">ETA is based on the current observed insert rate, so it will move as benchmarks change.</p>
-          </div>
-        </div>
-      </section>
-
-      <section className="card results-card">
-        <div className="section-head">
-          <div>
-            <p className="muted">Collected Results</p>
-            <h2>Execution Time Explorer</h2>
-          </div>
-          <BarChart3 size={20} />
-        </div>
-        <div className="control-grid">
-          <label>
-            <span>Benchmark</span>
-            <select value={selectedBenchmark} onChange={(event) => setSelectedBenchmark(event.target.value)}>
-              {options?.benchmarks.map((bench) => (
-                <option key={bench.benchmark} value={bench.benchmark}>
-                  {bench.benchmark} ({formatNumber(bench.runs)})
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <div className="mapping-panel">
-          <div className="mapping-head">
-            <span>Property</span>
-            <span>Filter</span>
-            <span>Channel</span>
-          </div>
-          {options?.properties.map((property) => (
-            <div className="mapping-row" key={property.id}>
-              <div>
-                <strong>{property.label}</strong>
-                <p className="fine-print">{property.kind}</p>
-              </div>
-              <FilterDropdown
-                values={property.values}
-                selected={filters[property.id] || []}
-                disabled={!property.values.length || property.id === xChannel || channels[property.id] === "y"}
-                onChange={(selected) => updateFilter(property.id, selected)}
-              />
-              <select
-                value={channels[property.id] || property.defaultChannel}
-                onChange={(event) => setPropertyChannel(property, event.target.value as Channel)}
-              >
-                {property.allowedChannels.map((channel) => (
-                  <option key={channel} value={channel}>
-                    {channel}
+          <div className="control-grid">
+            <label>
+              <span>Benchmark</span>
+              <select value={selectedBenchmark} onChange={(event) => setSelectedBenchmark(event.target.value)}>
+                {options?.benchmarks.map((bench) => (
+                  <option key={bench.benchmark} value={bench.benchmark}>
+                    {bench.benchmark} ({formatNumber(bench.runs)})
                   </option>
                 ))}
               </select>
-            </div>
-          ))}
-          <div className="mapping-actions">
-            <button className="button secondary-button" onClick={() => setFilters({})} type="button">
-              Clear filters
-            </button>
-            <p className="fine-print">Empty filters include all values. Multiple selected values are included.</p>
+            </label>
           </div>
-        </div>
-        <LineChart data={chartData} />
-        <p className="fine-print chart-note">
-          Y is mean execution time in milliseconds. Shaded bands and error bars show the 95% confidence interval when a point has multiple samples.
-        </p>
-      </section>
+          <div className="mapping-panel">
+            <div className="mapping-head">
+              <span>Property</span>
+              <span>Filter</span>
+              <span>Channel</span>
+            </div>
+            {options?.properties.map((property) => (
+              <div className="mapping-row" key={property.id}>
+                <div>
+                  <strong>{property.label}</strong>
+                  <p className="fine-print">{property.kind}</p>
+                </div>
+                <FilterDropdown
+                  values={property.values}
+                  selected={filters[property.id] || []}
+                  disabled={!property.values.length || property.id === xChannel || channels[property.id] === "y"}
+                  onChange={(selected) => updateFilter(property.id, selected)}
+                />
+                <select
+                  value={channels[property.id] || property.defaultChannel}
+                  onChange={(event) => setPropertyChannel(property, event.target.value as Channel)}
+                >
+                  {property.allowedChannels.map((channel) => (
+                    <option key={channel} value={channel}>
+                      {channel}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
+            <div className="mapping-actions">
+              <button className="button secondary-button" onClick={() => setFilters({})} type="button">
+                Clear filters
+              </button>
+              <p className="fine-print">Empty filters include all values. Multiple selected values are included.</p>
+            </div>
+          </div>
+          <LineChart data={chartData} />
+          <p className="fine-print chart-note">
+            Y is mean execution time in milliseconds. Shaded bands and error bars show the 95% confidence interval when a point has multiple samples.
+          </p>
+        </section>
+      )}
     </main>
   );
 }

@@ -15,7 +15,7 @@ def benchmark():
     d = int(os.environ.get('BENCH_PARAM_d', '64'))
     block_m = int(os.environ.get('BENCH_PARAM_block_m', '128'))
     block_n = int(os.environ.get('BENCH_PARAM_block_n', '64'))
-    num_warmup = 0
+    num_warmup = 5
 
     print(f"Running flash_attention (MPS) with b={b}, h={h}, s={s}, d={d}, block_m={block_m}, block_n={block_n}", file=sys.stderr)
 

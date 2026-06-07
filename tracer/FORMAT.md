@@ -1,0 +1,186 @@
+# `.ptrace` Format Specification (v1)
+
+`.ptrace` is gpubench's trace container. v1 (P1) is a **lossless re-encoding** of
+the Accel-Sim trace the NVBit tracer emits: it hoists the per-PC-invariant fields
+into a shared static table and stores only the varying data per dynamic
+instruction. It does **no address modeling yet** (that is P2); the address
+payload is stored verbatim.
+
+`ptrace expand` reconstructs the original Accel-Sim `.traceg` content
+byte-for-byte, so BBSim consumes expanded output unchanged.
+
+## Directory layout
+
+```
+<name>.ptrace/
+  manifest.json        ordered kernelslist entries, contexts, invocations
+  isa/<hash>.json      static per-PC table, deduped across invocations
+  dyn/inv_<n>.zst      columnar dynamic payload (zstd), one per invocation
+```
+
+## The Accel-Sim line, decomposed
+
+An instruction line (lineinfo off, no core-id) is space-separated with a trailing
+space:
+
+```
+PC  mask  dst_num [Rdst]  opcode  src_num [Rsrc...]  W [mode payload...]  imm
+```
+
+- **Static (per PC):** `dst_num [Rdst]`, `opcode`, `src_num [Rsrc...]`, the
+  memory width `W` (or the non-memory `0` marker), `is_mem`, and `imm`.
+  `imm` is the encoded immediate / branch target and is invariant per PC.
+- **Dynamic (per instruction):** `mask`, and for memory ops the address
+  compression `mode` ∈ {0 `list_all`, 1 `base_stride`, 2 `base_delta`} plus its
+  `payload` tokens.
+
+`convert` validates that each PC's static content is identical across every
+dynamic occurrence; an inconsistency is a hard error (it would indicate the
+decomposition is unsafe for that kernel).
+
+## `isa/<hash>.json` — static table
+
+```json
+{ "pcs":   [0, 16, 32, ...],
+  "insts": [ {"m":"1 R1 LDC 0", "mem":false, "i":"0"},
+             {"m":"1 R2 LDG.E 1 R4", "mem":true, "w":"4", "i":"0"} ] }
+```
+
+`pcs[i]` (virtual PC) has static content `insts[i]`. `m` is the space-joined
+middle tokens (dst+opcode+srcs), `mem`/`w`/`i` as above. The table is identified
+by a content hash and **stored once per distinct static program**, so a kernel
+relaunched N times (iterative solvers, auto-tuned loops) shares one table.
+
+## `dyn/inv_<n>.zst` — columnar dynamic payload (v2)
+
+zstd (full-window) of an uncompressed buffer that starts with a 1-byte version
+(`2`) followed by six length-prefixed sections:
+
+| section | contents |
+|---------|----------|
+| **A — structure** | `uvarint nBlocks`; per block: `uvarint x,y,z`, `uvarint nWarps`; per warp: `uvarint nInsts` |
+| **B — pc column**   | per instruction (block→warp→inst order): `uvarint pcId` (index into `isa.pcs`) |
+| **C — mask column** | per instruction: 4-byte LE `uint32` active-and-predicate mask |
+| **R — recipes**     | `uvarint nModeledPCs`; per PC: `uvarint pcId`, `byte multiclass`, `uvarint nClasses`; per class: `byte mode`, `uvarint nTail` + tail tokens, 6× signed-varint affine coefficients |
+| **S — selector**    | per **modeled multiclass** memory instruction: `uvarint classId` |
+| **D — residual addr** | per **recorded** (non-modeled) memory instruction: `byte mode`; `uvarint nTokens`; per token `uvarint len` + bytes |
+
+Decode is sequential: read A (fixes instruction count and block/warp shape), then
+B and C, then R (building a `pcId → recipe` map). For each memory instruction, in
+canonical order:
+
+- **modeled PC** → pick the class (id 0, or read S when multiclass); compute
+  `base = c0·bx + c1·by + c2·bz + c3·warp + c4·occ + c5`; payload =
+  `["0x%x"(base)] ++ tail`. No bytes are consumed from D.
+- **recorded PC** → read `mode` + payload tokens from D.
+
+`occ` is the per-warp occurrence index of the PC (reset each warp), recomputed
+identically on encode and decode. See "address modeling" below.
+
+## Address modeling (recipes)
+
+A memory PC is **modeled** (its base addresses replaced by coefficients) only
+when, for each address-encoding class (a distinct `mode` + constant `tail`):
+
+1. the class is **index-determined** — every instance at a given `(bx,by,bz,warp)`
+   uses the same class (so the choice is a function of indices, not data), and
+   there is real tail reuse (`nClasses ≤ nInstances/2`, or a single class); and
+2. the per-instance base address is an **exact integer-affine** function of
+   `(bx,by,bz,warp,occ)` (solved over rationals; integer solution required).
+
+Fitting is **self-verified**: each class regenerates its recorded base token and
+must match byte-for-byte, else the PC falls back to recorded. Data-dependent
+instructions (gather/scatter, PRNG) therefore stay in section D — lossless and
+honest. This covers tiers 0–3 (constant / affine / piecewise / tiled). Tiers 4
+(PRNG-from-seed) and 5 (recorded index column for gathers) are not yet emitted.
+
+Only blocks that actually executed are stored (matching the tracer, which skips
+empty blocks). Within a stored block, all warp slots `0..nWarps-1` are present;
+empty warps have `nInsts = 0`.
+
+## Sampled payload (dyn v4) — P3 synthesis
+
+`ptrace synth` writes a **sampled** dyn payload (leading version byte 4) that
+stores only a subset of blocks and reconstructs the rest. It is produced from a
+full trace by `ConvertSampled`:
+
+1. **Corner sample.** Instrument the blocks whose every coordinate is one of the
+   two smallest distinct values on its axis — at most `2×2×2 = 8` blocks
+   regardless of launch size. Two values per varying axis is the minimum the
+   affine solver needs to fix a slope.
+2. **Fit** recipes (above) on the sample only.
+3. **Verify-or-fallback.** For every other block, synthesize it from the sample's
+   first block (the per-warp shape *template*) + recipes, and compare byte-for-byte
+   to the real block. A mismatch demotes that block to *recorded*.
+
+Sections mirror v2 but cover only the **recorded** blocks, plus a plan:
+`[A struct][B pc][C mask][R recipes][D residual][F flags][G coords]`. Recorded
+blocks store every memory access in **D** verbatim (no recipe regeneration — a
+block is recorded precisely because the recipe did not reproduce it), and their
+struct in **A** carries *no* coordinates. **F** holds the total block count, the
+template's slot in the recorded list, and a bitset (1 = synth, 0 = recorded).
+**G** is the per-block coordinate stream: a zig-zag `(dx,dy,dz)` delta from the
+previous block, for *every* block in order.
+
+A synthesized block therefore costs only one flag bit plus its coordinate delta —
+both near-constant streams for a dense grid, which zstd reduces to almost nothing.
+The payload is then dominated by the (problem-size-independent) corner sample, so
+a fully-synthesizable kernel's sampled `.ptrace` is roughly **constant size
+regardless of grid**, and the compression ratio grows with the trace rather than
+plateauing. The result is byte-identical to the original; the recorded fraction is
+the collection-wall-time proxy.
+
+`ptrace synth --grid GxHxD` instead extrapolates the recipes to a **new** grid
+(`ExtrapolateGrid`) — generating a large trace from a small one. This has no
+ground truth at the new size and is therefore **unverified**; a committed
+ground-truth trace must gate any production use.
+
+## `manifest.json`
+
+```json
+{
+  "version": 1,
+  "source": "accelsim-convert",
+  "contexts": [
+    { "kernelslist": "kernelslist_ctx_0x..",
+      "stats": "stats_ctx_0x..", "stats_content": "...",
+      "entries": [
+        {"type":"memcpy","raw":"MemcpyHtoD,0x..,128"},
+        {"type":"kernel","raw":"kernel-1-ctx_0x...trace.zsim","inv":0}
+      ] }
+  ],
+  "invocations": [
+    { "trace_file":"kernel-1-ctx_0x...trace.zst",
+      "header":"-kernel name = ...\n...",
+      "isa":"<hash>", "dyn":"inv_0.zst" }
+  ]
+}
+```
+
+`contexts[].entries` mirrors the original `kernelslist` **in order** (memcpy ops
+interleaved with kernel launches) so `expand` reproduces it exactly. Each kernel
+entry points at an invocation, which carries the verbatim `.traceg` header (grid
+/block dims, shmem, nregs, base addresses), its ISA hash, and its dyn payload.
+
+## Container (`.trace.zst`) — for `convert` input and `expand` output
+
+Both the NVBit C++ tracer and bb_triosim's Go codec write the same container:
+
+```
+[4-byte LE hdr-json length][hdr JSON][traceg header bytes][dict bytes][frames...]
+```
+
+Each thread block is an independent zstd frame; block 0 is compressed without a
+dictionary and its raw text is the raw-content dictionary for blocks 1..N. The
+C++ tracer tags frames with dictID 0, the Go encoder with dictID 1; the reader in
+`container.go` registers the raw dict under both.
+
+## Versioning
+
+`manifest.version` is 2. The dyn payload carries its own leading version byte.
+v2 added the recipe (R), selector (S), and residual-addr (D) sections described
+above; a fully-recorded v2 payload (no modeled PCs) is equivalent to the original
+P1 lossless re-encoding. The dyn payload's leading version byte selects the
+decoder: **3** = full (every block stored, v2 sections), **4** = sampled (P3,
+recorded subset + synthesis plan). Future tiers (PRNG-from-seed, recorded index
+column) will extend section R without changing the section framing.

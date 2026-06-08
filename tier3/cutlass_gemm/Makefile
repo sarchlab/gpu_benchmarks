@@ -34,9 +34,9 @@ endif
 TARGET := cutlass_gemm
 
 ifeq ($(PLATFORM),cuda)
-  CUDA_ARCH ?= sm_90
   CC     := nvcc
   SRC    := cutlass_gemm.cu
+  CUDA_ARCH ?= sm_90
   CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
   LIBS   :=
 

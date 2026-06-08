@@ -31,9 +31,9 @@ endif
 TARGET := altis_particlefilter
 
 ifeq ($(PLATFORM),cuda)
-  CUDA_ARCH ?= sm_90
   CC     := nvcc
   SRC    := altis_particlefilter.cu
+  CUDA_ARCH ?= sm_90
   CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
 
 else ifeq ($(PLATFORM),rocm)

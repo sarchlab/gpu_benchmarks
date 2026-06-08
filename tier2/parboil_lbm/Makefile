@@ -31,9 +31,9 @@ endif
 TARGET := parboil_lbm
 
 ifeq ($(PLATFORM),cuda)
-  CUDA_ARCH ?= sm_90
   CC     := nvcc
   SRC    := parboil_lbm.cu
+  CUDA_ARCH ?= sm_90
   CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
 
 else ifeq ($(PLATFORM),rocm)

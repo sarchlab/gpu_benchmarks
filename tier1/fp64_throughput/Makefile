@@ -34,9 +34,9 @@ endif
 TARGET := fp64_throughput
 
 ifeq ($(PLATFORM),cuda)
-  CUDA_ARCH ?= sm_90
   CC      := nvcc
   SRC     := fp64_throughput.cu
+  CUDA_ARCH ?= sm_90
   CFLAGS  := -O3 -std=c++14 -arch=$(CUDA_ARCH)
 
 else ifeq ($(PLATFORM),rocm)

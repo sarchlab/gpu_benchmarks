@@ -31,9 +31,9 @@ endif
 TARGET := cublas_sgemm
 
 ifeq ($(PLATFORM),cuda)
-  CUDA_ARCH ?= sm_90
   CC     := nvcc
   SRC    := cublas_sgemm.cu
+  CUDA_ARCH ?= sm_90
   CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
   LIBS   := -lcublas
 

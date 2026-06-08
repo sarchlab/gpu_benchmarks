@@ -31,9 +31,9 @@ endif
 TARGET := lonestar_sssp
 
 ifeq ($(PLATFORM),cuda)
-  CUDA_ARCH ?= sm_90
   CC     := nvcc
   SRC    := lonestar_sssp.cu
+  CUDA_ARCH ?= sm_90
   CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
 
 else ifeq ($(PLATFORM),rocm)

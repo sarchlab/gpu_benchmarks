@@ -31,9 +31,10 @@ endif
 TARGET := cublas_sgemm
 
 ifeq ($(PLATFORM),cuda)
+  CUDA_ARCH ?= sm_90
   CC     := nvcc
   SRC    := cublas_sgemm.cu
-  CFLAGS := -O3 -std=c++14 -arch=native
+  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
   LIBS   := -lcublas
 
 else ifeq ($(PLATFORM),rocm)

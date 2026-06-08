@@ -31,9 +31,10 @@ endif
 TARGET := cufft_1d
 
 ifeq ($(PLATFORM),cuda)
+  CUDA_ARCH ?= sm_90
   CC     := nvcc
   SRC    := cufft_1d.cu
-  CFLAGS := -O3 -std=c++14 -arch=native
+  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
   LIBS   := -lcufft
 
 else ifeq ($(PLATFORM),rocm)

@@ -31,9 +31,10 @@ endif
 TARGET := parboil_cutcp
 
 ifeq ($(PLATFORM),cuda)
+  CUDA_ARCH ?= sm_90
   CC     := nvcc
   SRC    := parboil_cutcp.cu
-  CFLAGS := -O3 -std=c++14 -arch=native
+  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

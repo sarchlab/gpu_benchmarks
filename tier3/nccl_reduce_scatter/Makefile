@@ -9,7 +9,8 @@
 TARGET := nccl_reduce_scatter
 CC     := nvcc
 SRC    := nccl_reduce_scatter.cu
-CFLAGS := -O3 -std=c++14 -arch=native
+CUDA_ARCH ?= sm_90
+CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
 LIBS   := -lnccl
 
 .PHONY: all clean

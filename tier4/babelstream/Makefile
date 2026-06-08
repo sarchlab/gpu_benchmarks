@@ -11,9 +11,10 @@ endif
 TARGET := babelstream
 
 ifeq ($(PLATFORM),cuda)
+  CUDA_ARCH ?= sm_90
   CC     := nvcc
   SRC    := babelstream.cu
-  CFLAGS := -O3 -arch=native
+  CFLAGS := -O3 -arch=$(CUDA_ARCH)
   LIBS   :=
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

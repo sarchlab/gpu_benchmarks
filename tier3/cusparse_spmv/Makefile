@@ -31,9 +31,10 @@ endif
 TARGET := cusparse_spmv
 
 ifeq ($(PLATFORM),cuda)
+  CUDA_ARCH ?= sm_90
   CC     := nvcc
   SRC    := cusparse_spmv.cu
-  CFLAGS := -O3 -std=c++14 -arch=native
+  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
   LIBS   := -lcusparse
 
 else ifeq ($(PLATFORM),rocm)

@@ -32,9 +32,10 @@ TARGET := cudnn_batchnorm
 LDFLAGS :=
 
 ifeq ($(PLATFORM),cuda)
+  CUDA_ARCH ?= sm_90
   CC     := nvcc
   SRC    := cudnn_batchnorm.cu
-  CFLAGS := -O3 -std=c++14 -arch=native
+  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
 
   UNAME_M := $(shell uname -m)
   ifeq ($(UNAME_M),x86_64)
@@ -124,6 +125,7 @@ all: check-deps $(TARGET)
 
 check-deps:
 ifeq ($(PLATFORM),cuda)
+  CUDA_ARCH ?= sm_90
 ifeq ($(CUDNN_AVAILABLE),1)
 	@echo "INFO: $(TARGET) using cuDNN header: $(CUDNN_HEADER_FILE)"
 	@echo "INFO: $(TARGET) using cuDNN library: $(CUDNN_LIB_FILE)"
@@ -137,6 +139,7 @@ endif
 
 $(TARGET): $(SRC)
 ifeq ($(PLATFORM),cuda)
+  CUDA_ARCH ?= sm_90
 ifeq ($(CUDNN_AVAILABLE),1)
 	$(CC) $(CFLAGS) $< $(LDFLAGS) $(LIBS) -o $@
 else

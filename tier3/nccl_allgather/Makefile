@@ -9,7 +9,8 @@
 TARGET := nccl_allgather
 CC     := nvcc
 SRC    := nccl_allgather.cu
-CFLAGS := -O3 -std=c++14 -arch=native
+CUDA_ARCH ?= sm_90
+CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
 LIBS   := -lnccl
 
 .PHONY: all clean

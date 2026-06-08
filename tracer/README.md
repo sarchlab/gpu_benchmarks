@@ -41,6 +41,7 @@ ptrace stat    <in.ptrace>                          # invocations / ISA dedup / 
 ptrace holdout <accelsim-traces-dir>                # fit on a sub-grid, synth the rest (measure)
 ptrace synth   <accelsim-traces-dir>                # sampled collect + reconstruct; wall-time proxy
 ptrace synth   <traces-dir> --grid GxHxD <out-dir>  # extrapolate recipes to a new (larger) grid
+ptrace statfit <accelsim-traces-dir>                # lossy tier-7 fit of data-dependent gathers
 ```
 
 `verify` converts, expands, and asserts every kernel's decoded `.traceg` is
@@ -82,6 +83,17 @@ problem size — all reconstructions byte-identical:
 Full mode is `O(dynamic instructions)`; sampled mode is `O(static program + grid
 descriptor)`. See [`../docs/ptrace_method.md`](../docs/ptrace_method.md) §6, §8.
 
+## Lossy tier-7 for irregular gathers (`statfit`)
+
+A data-dependent gather (SpMV `x[col[]]`) is near-maximal entropy — incompressible
+losslessly (the index stream *is* the matrix). But for cache/perf simulation only
+the access *pattern* matters, so tier-7 stores a statistical model (working set +
+optional frequency histogram + seed) and regenerates a cache-equivalent stream.
+The gate is **cache-behavior equivalence** — the regenerated stream must match the
+LRU miss-rate curve and per-warp transaction count within tolerance, not the
+bytes. On the SHOC spmv gather: **40 KB → 240 B (~171×)**, all 16 gathers within
+6% on both metrics. Lossy and opt-in; never used for functional replay.
+
 ## Layout
 
 ```
@@ -94,6 +106,8 @@ tracer/
     ptrace.go          .ptrace format: ISA table, columnar dyn codec, manifest
     recipe.go          exact affine solver, recipe fitter (gated, self-verified)
     tier5.go           residual address column (recorded accesses, base + deltas)
+    tier7.go           lossy statistical model for data-dependent gathers
+    cache.go           LRU/stack-distance cache model (tier-7 equivalence gate)
     sample.go          P3 corner sampling, verify-or-fallback plan, sampled codec (v4)
     synth.go           SynthBlock, Holdout measurement, grid extrapolation
     convert.go         Accel-Sim traces dir -> .ptrace (Convert / ConvertSampled)

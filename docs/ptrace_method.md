@@ -243,7 +243,35 @@ side, and the §6 verify-or-fallback gate remains the correctness backstop. On t
 P0 suite it independently reproduces the dynamic split (regular dense kernels
 REGULAR; fft COMPUTED via `BREV`; spmv IRREGULAR; gups COMPUTED via xorshift).
 
-## 10. Known limitations
+## 10. Lossy statistical gathers — tier-7 (`tier7.go`, `cache.go`)
+
+Tiers 0–6 are lossless, but a data-dependent gather (SpMV `x[col[]]`) is
+near-maximal entropy — its index stream *is* the sparse matrix, so it cannot be
+compressed losslessly (~10 bits/access, irreducible). For **cache/performance
+simulation**, though, the exact addresses don't matter — only the pattern the
+memory system sees. Tier-7 exploits that:
+
+- **Model.** `StatModel` describes the stream's cache-relevant statistics: the
+  working set (`base`, `elem`, index `range`), per-warp active-lane counts, and —
+  only if needed — an index-frequency histogram for hot/cold skew. Indices are
+  drawn i.i.d. from that distribution; each warp-load's lanes are drawn
+  independently so the **coalescing** (memory-transaction count) is reproduced.
+- **Gate = cache-behavior equivalence.** `FitAndGate` fits the simplest model
+  (uniform, then histogram), synthesizes a stream, and accepts it only if it
+  matches the original's **LRU miss-rate curve** (across L1–L2 sizes, via the
+  stack-distance model in `cache.go`) *and* its **mean transactions/load**, within
+  tolerance. The metric preserved is the metric validated. A model that fails is
+  rejected and the access stays in the lossless tier-5 residual.
+- **Lossy and opt-in.** The regenerated addresses are functionally wrong; tier-7
+  is for timing/cache simulators only and is never used for functional replay.
+
+On the SHOC spmv gather this turns 40 KB into 16 × 15-byte uniform models (~171×),
+matching the miss curve through its knee and the transaction count within ~0.5%.
+Because the model is parameterized by working-set size and access count, it also
+gives a **lossy cross-size** path: generate the large-problem gather pattern from
+small-run statistics (the irregular-kernel case §6's exact extrapolation can't do).
+
+## 11. Known limitations
 
 - **Template-class synthesis.** `SynthBlock` picks a modeled instruction's class
   from the *template* block's `(mode, tail)`. If a multiclass recipe's class varies
@@ -260,3 +288,8 @@ REGULAR; fft COMPUTED via `BREV`; spmv IRREGULAR; gups COMPUTED via xorshift).
   the residual column (lossless) but not yet synthesizable.
 - **No live tracer.** The method runs on already-collected traces; instrumenting
   only the sampled blocks at collection time needs the NVBit back-end fork (P1b).
+- **Tier-7 is i.i.d. and not yet wired into expand.** The statistical model
+  assumes independent draws, so correlated/bursty gathers (banded matrices, BFS
+  frontiers) need a higher-order model; set-associative conflict misses need an
+  address-mod-sets feature; and the encoder is currently a standalone fit/measure
+  (`statfit`), not yet emitted into a `synth --lossy` full trace.

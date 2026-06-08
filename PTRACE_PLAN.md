@@ -37,6 +37,7 @@ that mispredicts even one sampled block is rejected and we fall to the next tier
 | 4 | **PRNG-seeded** | generator id + seed + counter mapping (see below) | random init, Monte Carlo, GUPS, shuffles |
 | 5 | **Indirect via recorded index** | `base + elem_size · index[]`, store only the index column | SpMV col-idx, gather/scatter, histogram bins |
 | 6 | **Fully recorded** | columnar address stream (L1/L2 compression only) | data-dependent / unclassifiable |
+| 7 | **Statistical (lossy)** | working set + freq histogram + seed; regenerated, cache-equivalent | high-entropy gathers (SpMV, scatter) — *perf simulation only* |
 
 Tiers 0–4 are synthesizable (extrapolate to new sizes). Tier 5 is *compact but
 not extrapolatable* — the index stream is recorded at real size (still far
@@ -166,6 +167,29 @@ verified plan) and `synth.go` (`SynthBlock`, `ExtrapolateGrid`). CLI: `ptrace sy
 - **Deferred:** the *live* NVBit driver that actually skips uninstrumented blocks
   (needs the back-end fork, P1b). Sampled mode helps only synthesizable kernels;
   irregular blocks fall back to recorded and the ratio degrades toward full mode.
+
+### P5 — Tier-7 statistical (lossy) gathers — **DONE (encoder + gate)**
+Implemented in `tracer/ptrace/tier7.go` (`StatModel` fit/synthesize/serialize +
+`FitAndGate`) and `cache.go` (LRU/stack-distance model). CLI: `ptrace statfit`.
+For a data-dependent gather, store a statistical model (working-set range +
+optional frequency histogram + per-warp lane counts + seed) and regenerate a
+**cache-equivalent** stream instead of the exact addresses.
+- [x] Fitter escalates uniform → frequency-histogram; the gate accepts a model
+      only if its synthesized stream matches the **LRU miss-rate curve** and the
+      **per-warp transaction count** within tolerance (cache-behavior equivalence,
+      not byte-equivalence). Reject ⇒ stay lossless.
+- [x] Tests: uniform accepted, skew escalates to histogram, serialize round-trip,
+      cache-model miss-curve sanity.
+- **Result (SHOC spmv gather):** 16 gathers, each a **15-byte uniform model**,
+  all within 6% on both metrics — **40 KB → 240 B (~171×)** on the gather (miss-rate
+  curve matched through the knee: 87%/75%/50%/25% real vs synth within ~0.5%; mean
+  transactions/load 28.4 = 28.4). Takes spmv from 3.08× lossless to ~13× overall.
+- **Lossy & opt-in:** flagged, never used for functional replay. The model is
+  parameterized by working-set size, so it also enables **lossy cross-size**
+  generation (stress caches like a large problem from small-run statistics).
+- **Deferred:** wire tier-7 into a `synth --lossy` full-trace emitter; richer
+  models for correlated/bursty access (Markov-of-stride); set-conflict features;
+  dedup identical models across unrolled/relaunched gathers (16 → 1 here).
 
 ### P4 — (optional) native `.ptrace` reader in BBSim
 Stream blocks directly from recipes/columns, skip materialization.

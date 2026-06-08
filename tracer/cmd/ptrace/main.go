@@ -6,6 +6,7 @@
 //	ptrace stat    <in.ptrace>               # size / dedup summary
 //	ptrace synth   <accelsim-traces-dir>     # sampled collect, report wall-time saved
 //	ptrace synth   <traces-dir> --grid GxHxD <out-traces-dir>  # extrapolate to a new size
+//	ptrace statfit <accelsim-traces-dir>     # lossy tier-7 fit of data-dependent gathers
 package main
 
 import (
@@ -42,6 +43,9 @@ func main() {
 	case "synth":
 		need(3)
 		err = synth(os.Args[2:])
+	case "statfit":
+		need(3)
+		err = statfit(os.Args[2])
 	default:
 		usage()
 	}
@@ -58,7 +62,7 @@ func need(n int) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ptrace convert|expand|verify|stat|holdout|synth ...")
+	fmt.Fprintln(os.Stderr, "usage: ptrace convert|expand|verify|stat|holdout|synth|statfit ...")
 	os.Exit(2)
 }
 
@@ -342,6 +346,92 @@ func parseGrid(s string) (gx, gy, gz int, err error) {
 func max1(n int) int {
 	if n < 1 {
 		return 1
+	}
+	return n
+}
+
+// statfit fits the lossy tier-7 statistical model to each data-dependent gather,
+// validates it against cache-behavior equivalence (LRU miss-rate curve + per-warp
+// transaction count), and reports the per-gather compression and fidelity. This
+// is the encoder for irregular accesses that resist lossless compression (SpMV
+// gather, etc.): it never affects functional/byte-exact paths.
+func statfit(tracesDir string) error {
+	const tol = 0.06 // 6% max miss-rate delta and transaction error
+	tmp, err := os.MkdirTemp("", "ptrace-statfit-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	pdir := filepath.Join(tmp, "out.ptrace")
+	if err := ptrace.Convert(tracesDir, pdir); err != nil {
+		return err
+	}
+	m, err := ptrace.ReadManifest(pdir)
+	if err != nil {
+		return err
+	}
+	isaCache := map[string]ptrace.ISATable{}
+	var rawTotal, modelTotal, accepted, gathers int
+	fmt.Printf("%-8s %9s %9s %9s %8s %8s  %s\n", "pc", "accesses", "raw", "model", "missΔ", "txnErr", "model")
+	for _, inv := range m.Invocations {
+		blocks, isa, err := ptrace.DecodeInvocationBlocks(pdir, inv, isaCache)
+		if err != nil {
+			return err
+		}
+		streams := ptrace.GatherStreams(blocks, isa)
+		for _, pc := range sortedPCs(streams) {
+			insts := streams[pc]
+			gathers++
+			model, fid, ok := ptrace.FitAndGate(insts, tol, 1)
+			rawTotal += fid.RawBytes
+			kind := "uniform"
+			if model.Freq != nil {
+				kind = "histogram"
+			}
+			status := kind
+			if ok {
+				accepted++
+				modelTotal += fid.ModelBytes
+			} else {
+				modelTotal += fid.RawBytes // rejected -> stays lossless
+				status = "REJECT (lossless): " + kind
+			}
+			fmt.Printf("0x%04x %9d %8dB %8dB %7.1f%% %7.1f%%  %s\n",
+				pc, countAddrs(insts), fid.RawBytes, fid.ModelBytes,
+				100*fid.MaxMissDelta, 100*fid.TxnRelErr, status)
+		}
+	}
+	if gathers == 0 {
+		fmt.Println("no data-dependent gathers found")
+		return nil
+	}
+	ratio := 0.0
+	if modelTotal > 0 {
+		ratio = float64(rawTotal) / float64(modelTotal)
+	}
+	fmt.Printf("\n%d/%d gathers accepted (lossy, cache-equivalent within %.0f%%)\n", accepted, gathers, 100*tol)
+	fmt.Printf("gather bytes: lossless ~%s -> tier-7 ~%s  (%.0fx on the gather)\n",
+		human(int64(rawTotal)), human(int64(modelTotal)), ratio)
+	return nil
+}
+
+func sortedPCs(m map[int][][]uint64) []int {
+	ks := make([]int, 0, len(m))
+	for k := range m {
+		ks = append(ks, k)
+	}
+	for i := 1; i < len(ks); i++ {
+		for j := i; j > 0 && ks[j-1] > ks[j]; j-- {
+			ks[j-1], ks[j] = ks[j], ks[j-1]
+		}
+	}
+	return ks
+}
+
+func countAddrs(insts [][]uint64) int {
+	n := 0
+	for _, al := range insts {
+		n += len(al)
 	}
 	return n
 }

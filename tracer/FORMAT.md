@@ -175,6 +175,30 @@ dictionary and its raw text is the raw-content dictionary for blocks 1..N. The
 C++ tracer tags frames with dictID 0, the Go encoder with dictID 1; the reader in
 `container.go` registers the raw dict under both.
 
+## Tier-7 statistical residual (lossy, `tier7.go`)
+
+A data-dependent gather (SpMV `x[col[]]`) is near-maximal entropy and cannot be
+compressed losslessly. For cache/performance simulation only the *pattern* matters,
+so tier-7 stores a regenerable statistical model instead of the addresses. One
+gather PC's model (`StatModel.Bytes`) is a uvarint stream:
+
+```
+[uvarint base][uvarint elem][uvarint range][uvarint seed]
+[uvarint nLaneClasses]( [uvarint laneCount][uvarint nWarpsWithThatCount] )*
+[uvarint nFreq]( [uvarint bucketCount] )*        # nFreq == 0 ⇒ uniform model
+```
+
+`base + index*elem` is an address; `index` is drawn i.i.d. over `[0,range)` —
+uniform when `nFreq == 0`, else from the `nFreq`-bucket frequency histogram. The
+per-warp active-lane counts replay the lane-class histogram. Synthesis is seeded
+(`seed`) and therefore deterministic.
+
+This residual is **lossy and opt-in**: it is *not* part of the byte-exact `convert`
+/`verify` path. It is accepted only when its regenerated stream reproduces the
+original's **LRU miss-rate curve and per-warp transaction count** within tolerance
+(the gate in `cache.go`); otherwise the access stays in the lossless tier-5
+residual (D). A tier-7 access must never be used for functional replay.
+
 ## Versioning
 
 `manifest.version` is 2. The dyn payload carries its own leading version byte.

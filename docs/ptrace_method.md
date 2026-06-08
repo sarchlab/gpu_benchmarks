@@ -12,6 +12,27 @@ already collects and re-encodes them. It does not yet instrument the GPU directl
 already-collected trace, but the synthesis/verification machinery is exactly what
 a sampled live tracer would use.
 
+## Mechanisms at a glance
+
+The method is a stack of independent mechanisms, each exploiting a different kind
+of redundancy and each gated so it can only ever shrink the trace, never corrupt
+it. The unifying principle: **classify, model what's provably regular, capture the
+rest, and verify against an equivalence check** — byte-equivalence for the
+lossless tiers, cache-behavior equivalence for the lossy one.
+
+| # | Mechanism | Exploits | Lossless? | Gate / safety |
+|---|-----------|----------|-----------|---------------|
+| §1–2 | Static/dynamic split + ISA dedup + columnar zstd | per-PC invariance; relaunch reuse | yes | exact re-emit |
+| §4 | Affine address recipes (tiers 0–3) | addresses affine in `(block,warp,iter)` | yes | self-verify each class; else record |
+| §5 | Tier-5 residual column | bounded indices in recorded gathers | yes | exact token regen |
+| §6 | Sampled synthesis (Mode 2) | SPMD block similarity | yes | byte-compare each synth block; else record |
+| §6 | Grid extrapolation (`--grid`) | affine recipes evaluate at any coord | yes\* | **unverified** (no ground truth at new size) |
+| §9 | Offline SASS analysis | the binary already encodes structure | n/a (a prior) | conservative; verify gate backstops |
+| §10 | Tier-7 statistical (lossy) | gather *pattern* ≪ gather *information* | **no** | cache-behavior equivalence; else record |
+
+Tiers 0–6 are lossless and reconstruct the trace byte-for-byte. Tier-7 is opt-in,
+lossy, and for cache/perf simulation only. The sections below detail each.
+
 ## 0. Inputs and the lossless contract
 
 The input is an Accel-Sim `traces/` directory: one or more `kernelslist*` files,

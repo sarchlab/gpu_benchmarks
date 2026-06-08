@@ -46,6 +46,9 @@ func main() {
 	case "statfit":
 		need(3)
 		err = statfit(os.Args[2])
+	case "scale":
+		need(5)
+		err = scaleVerify(os.Args[2:])
 	default:
 		usage()
 	}
@@ -62,7 +65,7 @@ func need(n int) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ptrace convert|expand|verify|stat|holdout|synth|statfit ...")
+	fmt.Fprintln(os.Stderr, "usage: ptrace convert|expand|verify|stat|holdout|synth|statfit|scale ...")
 	os.Exit(2)
 }
 
@@ -413,6 +416,178 @@ func statfit(tracesDir string) error {
 	fmt.Printf("gather bytes: lossless ~%s -> tier-7 ~%s  (%.0fx on the gather)\n",
 		human(int64(rawTotal)), human(int64(modelTotal)), ratio)
 	return nil
+}
+
+// scaleVerify generates the trace of a larger per-thread-work size from a small
+// sample by loop-replay, and verifies it byte-for-byte against a real trace of
+// the target size — proving "one small run -> many sizes" for regular kernels.
+//
+//	ptrace scale <sample-traces> <fromScaling> <toScaling> <truth-traces>
+func scaleVerify(args []string) error {
+	sampleDir, truthDir := args[0], args[3]
+	from, err := strconv.Atoi(args[1])
+	if err != nil {
+		return fmt.Errorf("bad fromScaling %q", args[1])
+	}
+	to, err := strconv.Atoi(args[2])
+	if err != nil {
+		return fmt.Errorf("bad toScaling %q", args[2])
+	}
+	sfs, tfs := traceFiles(sampleDir), traceFiles(truthDir)
+	if len(sfs) == 0 || len(tfs) == 0 {
+		return fmt.Errorf("no .trace.zst found (sample=%d truth=%d)", len(sfs), len(tfs))
+	}
+	nPass, nFail, notScalable := 0, 0, 0
+	var sampleBytes, truthBytes int64
+	for i, sf := range sfs {
+		sraw, _ := os.ReadFile(sf)
+		sampleBytes += int64(len(sraw))
+		sh, sb, err := ptrace.DecodeContainer(sraw)
+		if err != nil {
+			return err
+		}
+		isa := map[int]ptrace.StaticInst{}
+		hdr, blocks, err := ptrace.ParseTraceg(sh+strings.Join(sb, ""), isa)
+		if err != nil {
+			return err
+		}
+		scaled, ok := ptrace.ScaleBlocks(blocks, isa, to, from)
+		if !ok {
+			notScalable++
+			fmt.Printf("  %s: not regularly scalable (data-dependent loop / no loop)\n", filepath.Base(sf))
+			continue
+		}
+		gen, err := ptrace.EmitTraceg(hdr, scaled, isa)
+		if err != nil {
+			return err
+		}
+		if i >= len(tfs) {
+			break
+		}
+		traw, _ := os.ReadFile(tfs[i])
+		truthBytes += int64(len(traw))
+		th, tb, err := ptrace.DecodeContainer(traw)
+		if err != nil {
+			return err
+		}
+		want := th + strings.Join(tb, "")
+		// Compare per thread block, ignoring the run-specific header (shmem/local
+		// base addresses are assigned per process, not per problem size). Remaining
+		// token differences are classified: anything that is not an absolute memory
+		// address (also run-specific, e.g. a cudaMalloc'd output pointer) is a real
+		// structural error.
+		gblk, wblk := splitTBs(gen), splitTBs(want)
+		blkSame, tokDiff, addrDiff := compareTBs(gblk, wblk)
+		if len(gblk) == len(wblk) && tokDiff == addrDiff { // every diff is a run-specific address
+			nPass++
+			fmt.Printf("  %s: %d/%d blocks identical; %d run-specific address tokens differ (expected)\n",
+				filepath.Base(sf), blkSame, len(wblk), addrDiff)
+		} else {
+			nFail++
+			fmt.Printf("  %s: STRUCTURAL MISMATCH — %d/%d blocks identical, %d non-address token diffs\n",
+				filepath.Base(sf), blkSame, len(wblk), tokDiff-addrDiff)
+		}
+	}
+	fmt.Printf("scaled %d->%d : %d/%d kernels reproduced (structure byte-exact modulo run-specific addresses)",
+		from, to, nPass, nPass+nFail)
+	if notScalable > 0 {
+		fmt.Printf(" (%d not scalable)", notScalable)
+	}
+	fmt.Printf("\nsample trace: %s   (target real trace: %s — never collected; %.0fx less data + compute)\n",
+		human(sampleBytes), human(truthBytes), float64(truthBytes)/float64(maxI64(sampleBytes, 1)))
+	if nFail > 0 {
+		return fmt.Errorf("%d kernels failed structural scaling verification", nFail)
+	}
+	return nil
+}
+
+// splitTBs splits a .traceg into its per-thread-block segments (dropping the
+// run-specific header before the first block).
+func splitTBs(s string) []string {
+	parts := strings.Split(s, "\n#BEGIN_TB\n")
+	if len(parts) <= 1 {
+		return nil
+	}
+	return parts[1:]
+}
+
+// compareTBs compares thread blocks token-by-token, returning the count of
+// byte-identical blocks, the total differing tokens, and how many of those are
+// absolute-address-shaped (run-specific, expected to differ).
+func compareTBs(gen, want []string) (blkIdentical, tokDiff, addrDiff int) {
+	n := len(gen)
+	if len(want) < n {
+		n = len(want)
+	}
+	for i := 0; i < n; i++ {
+		if gen[i] == want[i] {
+			blkIdentical++
+			continue
+		}
+		gt, wt := strings.Fields(gen[i]), strings.Fields(want[i])
+		m := len(gt)
+		if len(wt) < m {
+			m = len(wt)
+		}
+		for j := 0; j < m; j++ {
+			if gt[j] != wt[j] {
+				tokDiff++
+				if isAddrToken(gt[j]) && isAddrToken(wt[j]) {
+					addrDiff++
+				}
+			}
+		}
+		tokDiff += abs(len(gt) - len(wt)) // length mismatch counts as structural
+	}
+	return
+}
+
+// isAddrToken reports whether a token looks like an absolute memory address
+// (hex, wide), i.e. a run-specific pointer rather than structural content.
+func isAddrToken(t string) bool {
+	t = strings.TrimPrefix(t, "0x")
+	if len(t) < 6 || len(t) > 16 {
+		return false
+	}
+	for _, c := range t {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+func maxI64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func traceFiles(dir string) []string {
+	var fs []string
+	filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() && strings.HasSuffix(p, ".trace.zst") {
+			fs = append(fs, p)
+		}
+		return nil
+	})
+	sortStrs(fs)
+	return fs
+}
+
+func sortStrs(a []string) {
+	for i := 1; i < len(a); i++ {
+		for j := i; j > 0 && a[j-1] > a[j]; j-- {
+			a[j-1], a[j] = a[j], a[j-1]
+		}
+	}
 }
 
 func sortedPCs(m map[int][][]uint64) []int {

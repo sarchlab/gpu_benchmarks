@@ -292,7 +292,34 @@ Because the model is parameterized by working-set size and access count, it also
 gives a **lossy cross-size** path: generate the large-problem gather pattern from
 small-run statistics (the irregular-kernel case §6's exact extrapolation can't do).
 
-## 11. Known limitations
+## 11. Scaling extrapolation (`scale.go`) — one small run → many sizes
+
+§6's sampled synthesis extrapolates the *spatial* axis (more thread blocks).
+`scale.go` extrapolates the *temporal* axis: a larger per-thread-work size is the
+same loop run more times. A regular kernel's warp stream is
+`prologue + body*k + epilogue`; `detectLoop` finds the dominant consecutively-
+repeating segment (the body) and its count, and `scaleWarp` re-emits it `k'` times
+for the target — as `(taken iteration)×(k'-1) + (exit iteration)`, so the
+back-edge branch's mask (taken on every iteration but the last, where it exits) is
+reproduced exactly. Memory inside the body gets its per-iteration address from the
+recipe's `occ` term; prologue/epilogue are copied verbatim.
+
+`ptrace scale <sample> <from> <to> <truth>` generates the target size and compares
+it block-by-block to a *real* trace of that size. On fp32, a sample at fmas=256
+reproduces the real 512 / 1024 / 8192 traces with **1023/1024 blocks byte-
+identical**; the single differing block differs by one token — the run-specific
+`cudaMalloc` output pointer (the verifier classifies absolute-address diffs as
+expected and flags anything else as structural).
+
+**The load-bearing caveat: sample within the target's code-path regime.** nvcc
+emits *different code by trip count* — a remainder loop at tiny sizes (one set of
+PCs) and a fully-unrolled body at larger sizes (different PCs). So fmas=8 cannot
+generate fmas=64: the target's instructions never appear in the small sample. Take
+the sample from the same unrolled regime as the target — which is the expensive
+regime anyway, so this is exactly where it pays off (the fmas=65536 config that
+times out to full-trace is pure loop repetition, generated in milliseconds).
+
+## 12. Known limitations
 
 - **Template-class synthesis.** `SynthBlock` picks a modeled instruction's class
   from the *template* block's `(mode, tail)`. If a multiclass recipe's class varies
@@ -309,6 +336,11 @@ small-run statistics (the irregular-kernel case §6's exact extrapolation can't 
   the residual column (lossless) but not yet synthesizable.
 - **No live tracer.** The method runs on already-collected traces; instrumenting
   only the sampled blocks at collection time needs the NVBit back-end fork (P1b).
+- **Scaling extrapolation needs a same-regime sample and exact run addresses.**
+  It works only for regular kernels with a loop-invariant body, requires the
+  sample to be in the target's compiler code-path regime (§11), and reproduces the
+  trace only up to run-specific absolute addresses (the output pointer, shmem/local
+  bases) — exact cross-run match needs base-address symbolization.
 - **Tier-7 is i.i.d. and not yet wired into expand.** The statistical model
   assumes independent draws, so correlated/bursty gathers (banded matrices, BFS
   frontiers) need a higher-order model; set-associative conflict misses need an

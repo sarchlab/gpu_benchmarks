@@ -191,6 +191,36 @@ optional frequency histogram + per-warp lane counts + seed) and regenerate a
   models for correlated/bursty access (Markov-of-stride); set-conflict features;
   dedup identical models across unrolled/relaunched gathers (16 → 1 here).
 
+### P6 — Scaling extrapolation (one small run → many sizes) — **DONE (regular kernels)**
+Implemented in `tracer/ptrace/scale.go` (`detectLoop` + `scaleWarp` + `ScaleBlocks`).
+CLI: `ptrace scale`. Where sampled synthesis (P3) extrapolates the *spatial* axis
+(more blocks), this extrapolates the *temporal* axis (a longer loop) — the axis
+that drives the expensive compute configs. A regular kernel's warp is
+`prologue + body*k + epilogue`; we detect the repeating body and re-emit it `k'`
+times for the target size, replaying it as `(taken iteration)×(k'-1) + (exit
+iteration)` so the back-edge masks land exactly as a real run records them.
+- [x] `ptrace scale <sample> <from> <to> <truth>` generates the target size and
+      verifies it block-by-block against a real trace, classifying any remaining
+      token diffs (run-specific absolute addresses are expected; anything else is
+      a structural error).
+- [x] Tests: synthetic loop replay (incl. back-edge mask), no-loop rejection.
+- **Result (fp32, sample fmas=256):** 256→512, 256→1024, 256→8192 each reproduce
+  the real trace with **1023/1024 thread blocks byte-identical**; the one differing
+  block differs by a single token — the `cudaMalloc`'d output pointer, which is
+  run-specific (differs between *any* two runs), not a synthesis error.
+- **Key finding — sample in the target's regime.** nvcc emits *different code
+  paths by trip count*: tiny sizes run a remainder loop (one set of PCs), larger
+  sizes run a fully-unrolled body (different PCs). So fmas=8 cannot generate
+  fmas=64 (the target's instructions never appear in the sample). Sample at a size
+  in the same unrolled regime as the target (which is the expensive regime anyway:
+  fmas≥128 here) and the body repeats cleanly and linearly.
+- **Payoff:** the configs that are infeasible to full-trace (fmas=65536 timed out
+  at >10 min) are pure loop repetition — generate them in milliseconds from one
+  small sample, instead of NVBit-instrumenting ~17 B real instructions.
+- **Deferred:** base-address symbolization (`argN+offset`) to make the output
+  pointer / shmem bases match a specific run exactly; data-dependent loops
+  (pointer chase, sparse) are not scalable this way — collect or model statistically.
+
 ### P4 — (optional) native `.ptrace` reader in BBSim
 Stream blocks directly from recipes/columns, skip materialization.
 

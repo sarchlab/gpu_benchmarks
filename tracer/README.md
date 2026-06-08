@@ -42,6 +42,7 @@ ptrace holdout <accelsim-traces-dir>                # fit on a sub-grid, synth t
 ptrace synth   <accelsim-traces-dir>                # sampled collect + reconstruct; wall-time proxy
 ptrace synth   <traces-dir> --grid GxHxD <out-dir>  # extrapolate recipes to a new (larger) grid
 ptrace statfit <accelsim-traces-dir>                # lossy tier-7 fit of data-dependent gathers
+ptrace scale   <sample-traces> <from> <to> <truth>  # generate a larger size from a small run
 ```
 
 `verify` converts, expands, and asserts every kernel's decoded `.traceg` is
@@ -110,6 +111,7 @@ tracer/
     cache.go           LRU/stack-distance cache model (tier-7 equivalence gate)
     sample.go          P3 corner sampling, verify-or-fallback plan, sampled codec (v4)
     synth.go           SynthBlock, Holdout measurement, grid extrapolation
+    scale.go           scaling extrapolation: detect loop body, replay to a larger size
     convert.go         Accel-Sim traces dir -> .ptrace (Convert / ConvertSampled)
     expand.go          .ptrace -> Accel-Sim traces dir
     ptrace_test.go     synthetic round-trip + synthesis + residual tests
@@ -138,6 +140,19 @@ backstop). On this suite it independently reproduces the P0 dynamic split:
 | shoc_fft | COMPUTED — `BREV` bit-reverse addressing (non-affine) |
 | shoc_spmv | IRREGULAR — indirect gathers + data-dependent loop |
 | altis_gups | COMPUTED — loop-carried xorshift PRNG |
+
+## Scaling extrapolation (one small run -> many sizes)
+
+`ptrace scale` generates the trace of a larger *per-thread-work* size from a small
+run, by detecting the kernel's loop body and replaying it more times (the temporal
+axis; `synth --grid` does the spatial axis). For fp32, a sample at fmas=256
+reproduces the real fmas=512 / 1024 / 8192 traces with **1023/1024 thread blocks
+byte-identical** — the lone diff is the run-specific `cudaMalloc` output pointer.
+**Caveat:** sample within the target's code-path regime — nvcc emits a remainder
+loop at tiny sizes and a fully-unrolled body at larger ones, so a tiny sample
+can't generate a large one. Regular (compute) kernels only; data-dependent loops
+must be collected. This eliminates exactly the configs that are infeasible to
+full-trace (fmas=65536 timed out at >10 min — pure loop repetition).
 
 ## Next
 

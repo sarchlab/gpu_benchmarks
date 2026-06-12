@@ -636,6 +636,8 @@ type runArgs struct {
 	verbose         bool
 	collectTrace    string
 	traceOutput     string
+	traceSample     string // PTRACE_SAMPLE spec for live-sampling tracer ("" = full)
+	traceSizes      int    // trace only the N smallest scaling values (0 = all)
 	postProcess     string
 	resumeTrace     bool
 	cleanIncomplete bool
@@ -770,6 +772,12 @@ func cmdRun(args runArgs) int {
 		eprintf("Tracer:      %s\n", args.collectTrace)
 		eprintf("Output dir:  %s\n", traceOutput)
 		eprintf("Timeout:     %ds\n", timeoutSecs)
+		if args.traceSample != "" {
+			eprintf("Sampling:    PTRACE_SAMPLE=%s (live block sampling)\n", args.traceSample)
+		}
+		if args.traceSizes > 0 {
+			eprintf("Sizes:       %d smallest scaling values per benchmark\n", args.traceSizes)
+		}
 		if args.resumeTrace {
 			eprint("Resume:      enabled (skipping complete trace configs)")
 			if args.cleanIncomplete {
@@ -817,6 +825,10 @@ func cmdRun(args runArgs) int {
 						idx+1, len(benchmarks), b.Tier, b.Benchmark)
 					continue
 				}
+			}
+
+			if args.traceSizes > 0 {
+				configs = smallestScalingConfigs(configs, args.traceSizes)
 			}
 
 			if len(configs) == 0 {
@@ -889,6 +901,9 @@ func cmdRun(args runArgs) int {
 						"USER_DEFINED_FOLDERS=1",
 						fmt.Sprintf("TRACES_FOLDER=%s", cfgTraceDir),
 					)
+					if args.traceSample != "" {
+						env = append(env, fmt.Sprintf("PTRACE_SAMPLE=%s", args.traceSample))
+					}
 					eprintf("    %s rep %d/%d  ", cfgLabel, rep, reps)
 
 					ec, _, stderrStr, timedOut := runBenchmarkProc(

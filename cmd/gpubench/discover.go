@@ -227,6 +227,61 @@ func cartesianProduct(lists [][]interface{}) [][]interface{} {
 	return result
 }
 
+// smallestScalingConfigs keeps only configs whose scaling value is among the n
+// smallest distinct values (numeric order when all values parse as numbers,
+// otherwise the order they were listed in params.json). Used by trace
+// collection to trace a few small sizes per benchmark and let `ptrace
+// scale`/`gen` extrapolate the rest. Pick sizes in the same compiled regime as
+// the targets — gate with `ptrace regime` (a remainder-loop tiny size cannot
+// generate an unrolled large one).
+func smallestScalingConfigs(configs []configPair, n int) []configPair {
+	var distinct []interface{}
+	seen := map[string]bool{}
+	for _, c := range configs {
+		k := formatValue(c.ScalingValue)
+		if !seen[k] {
+			seen[k] = true
+			distinct = append(distinct, c.ScalingValue)
+		}
+	}
+	allNumeric := true
+	nums := make([]float64, len(distinct))
+	for i, v := range distinct {
+		f, err := strconv.ParseFloat(formatValue(v), 64)
+		if err != nil {
+			allNumeric = false
+			break
+		}
+		nums[i] = f
+	}
+	if allNumeric {
+		idx := make([]int, len(distinct))
+		for i := range idx {
+			idx[i] = i
+		}
+		sort.Slice(idx, func(a, b int) bool { return nums[idx[a]] < nums[idx[b]] })
+		sorted := make([]interface{}, len(distinct))
+		for i, j := range idx {
+			sorted[i] = distinct[j]
+		}
+		distinct = sorted
+	}
+	if n > len(distinct) {
+		n = len(distinct)
+	}
+	keep := map[string]bool{}
+	for _, v := range distinct[:n] {
+		keep[formatValue(v)] = true
+	}
+	var out []configPair
+	for _, c := range configs {
+		if keep[formatValue(c.ScalingValue)] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // formatValue formats an interface{} value for display.
 func formatValue(v interface{}) string {
 	switch val := v.(type) {

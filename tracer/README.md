@@ -43,6 +43,9 @@ ptrace synth   <accelsim-traces-dir>                # sampled collect + reconstr
 ptrace synth   <traces-dir> --grid GxHxD <out-dir>  # extrapolate recipes to a new (larger) grid
 ptrace statfit <accelsim-traces-dir>                # lossy tier-7 fit of data-dependent gathers
 ptrace scale   <sample-traces> <from> <to> <truth>  # generate a larger size from a small run
+ptrace regime  <tracesA> <fromA> <tracesB> <fromB>  # gate: same compiled regime at both sizes?
+ptrace predict <traces-dir> [out.json]              # dynamic-count fingerprint of a (generated) trace
+ptrace countcheck <pred.json> <measured.json> [tol] # predicted vs profiler-measured counts
 ```
 
 `verify` converts, expands, and asserts every kernel's decoded `.traceg` is
@@ -153,6 +156,28 @@ loop at tiny sizes and a fully-unrolled body at larger ones, so a tiny sample
 can't generate a large one. Regular (compute) kernels only; data-dependent loops
 must be collected. This eliminates exactly the configs that are infeasible to
 full-trace (fmas=65536 timed out at >10 min — pure loop repetition).
+
+## Generation gates (don't extrapolate across a regime change)
+
+Extrapolation is only sound when the target size runs the same compiled program
+down the same code path — nvcc emits a remainder loop at tiny sizes and a
+fully-unrolled body at larger ones, and a compile-time-specialized size is a
+different binary outright. Two gates turn the README caveat above into checks:
+
+- **`ptrace regime A nA B nB`** (`recipe`-side gate, `regime.go`): compares two
+  *small* runs at different scaling values. Hard-fails on a static-program
+  (ISA-hash) mismatch or a control-flow-shape change (per-warp loop
+  prologue/body/epilogue signature, trip count dropped), then cross-predicts:
+  scaling A to B's size must reproduce B byte-exactly modulo run-specific
+  `cudaMalloc` addresses. Passing means extrapolation beyond B follows a line
+  verified over one real step instead of fit at a single point.
+- **`ptrace predict` + `countcheck`** (execution-side gate, `predict.go`): the
+  expensive part of tracing is recording addresses, not running the kernel. So
+  run the *target* size under a counts-only profile (ncu/CUPTI counters — no
+  addresses), and compare against the instruction/transaction counts the
+  generated trace predicts. A remainder loop or different unroll factor shifts
+  the counts immediately; zero/omitted measured fields are skipped, so any
+  subset of counters works.
 
 ## Next
 

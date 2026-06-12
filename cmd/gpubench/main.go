@@ -126,6 +126,8 @@ func main() {
 			postProcess, _ := cmd.Flags().GetString("post-process")
 			resumeTrace, _ := cmd.Flags().GetBool("resume-trace")
 			cleanIncomplete, _ := cmd.Flags().GetBool("trace-clean-incomplete")
+			traceSample, _ := cmd.Flags().GetString("trace-sample")
+			traceSizes, _ := cmd.Flags().GetInt("trace-sizes")
 
 			os.Exit(cmdRun(runArgs{
 				tier:            tier,
@@ -145,6 +147,8 @@ func main() {
 				postProcess:     postProcess,
 				resumeTrace:     resumeTrace,
 				cleanIncomplete: cleanIncomplete,
+				traceSample:     traceSample,
+				traceSizes:      traceSizes,
 			}))
 			return nil
 		},
@@ -166,6 +170,8 @@ func main() {
 	runCmd.Flags().String("post-process", "", "Optional post-processing binary to run after trace collection")
 	runCmd.Flags().Bool("resume-trace", false, "Skip trace configs that already have complete or timed-out trace outputs")
 	runCmd.Flags().Bool("trace-clean-incomplete", false, "When resuming traces, delete incomplete config trace directories before retrying")
+	runCmd.Flags().String("trace-sample", "", "PTRACE_SAMPLE spec for the live-sampling tracer (e.g. 'corner'); empty = full tracing")
+	runCmd.Flags().Int("trace-sizes", 0, "Trace only the N smallest scaling values per benchmark (0 = all configs)")
 
 	// --- info command ---
 	infoCmd := &cobra.Command{

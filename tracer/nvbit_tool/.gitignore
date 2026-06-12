@@ -1,0 +1,3 @@
+*.o
+*.so
+nvbit_release/

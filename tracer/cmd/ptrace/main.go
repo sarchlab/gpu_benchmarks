@@ -7,9 +7,13 @@
 //	ptrace synth   <accelsim-traces-dir>     # sampled collect, report wall-time saved
 //	ptrace synth   <traces-dir> --grid GxHxD <out-traces-dir>  # extrapolate to a new size
 //	ptrace statfit <accelsim-traces-dir>     # lossy tier-7 fit of data-dependent gathers
+//	ptrace regime  <tracesA> <fromA> <tracesB> <fromB>  # gate: same compiled regime at both sizes?
+//	ptrace predict <traces-dir> [out.json]   # dynamic-count fingerprint (counts-only gate)
+//	ptrace countcheck <pred.json> <measured.json> [tol]  # predicted vs profiler-measured counts
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,12 +47,27 @@ func main() {
 	case "synth":
 		need(3)
 		err = synth(os.Args[2:])
+	case "gen":
+		need(4)
+		err = genSampled(os.Args[2], os.Args[3])
+	case "diff":
+		need(4)
+		err = diffTraces(os.Args[2], os.Args[3])
 	case "statfit":
 		need(3)
 		err = statfit(os.Args[2])
 	case "scale":
 		need(5)
 		err = scaleVerify(os.Args[2:])
+	case "regime":
+		need(6)
+		err = regimeCheck(os.Args[2:])
+	case "predict":
+		need(3)
+		err = predict(os.Args[2:])
+	case "countcheck":
+		need(4)
+		err = countcheck(os.Args[2:])
 	default:
 		usage()
 	}
@@ -65,7 +84,7 @@ func need(n int) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ptrace convert|expand|verify|stat|holdout|synth|statfit|scale ...")
+	fmt.Fprintln(os.Stderr, "usage: ptrace convert|expand|verify|stat|holdout|synth|gen|statfit|scale|regime|predict|countcheck ...")
 	os.Exit(2)
 }
 
@@ -330,6 +349,141 @@ func synthGrid(tracesDir, outDir string, gx, gy, gz int) error {
 	return nil
 }
 
+// diffTraces structurally compares two trace dirs of the same launch config
+// (e.g. a `ptrace gen` output against a real full trace): blocks pair by
+// position; hex address tokens may differ (run-specific cudaMalloc bases);
+// any other difference is structural and counts as a failure.
+//
+//	ptrace diff <tracesA> <tracesB>
+func diffTraces(dirA, dirB string) error {
+	fsA, fsB := traceFiles(dirA), traceFiles(dirB)
+	if len(fsA) == 0 || len(fsB) == 0 {
+		return fmt.Errorf("no .trace.zst found (A=%d B=%d)", len(fsA), len(fsB))
+	}
+	if len(fsA) != len(fsB) {
+		return fmt.Errorf("kernel count differs (%d vs %d)", len(fsA), len(fsB))
+	}
+	nFail := 0
+	for i := range fsA {
+		blocksA, _, err := loadTraceFile(fsA[i])
+		if err != nil {
+			return fmt.Errorf("%s: %w", fsA[i], err)
+		}
+		blocksB, _, err := loadTraceFile(fsB[i])
+		if err != nil {
+			return fmt.Errorf("%s: %w", fsB[i], err)
+		}
+		total, same, addrDiffs, structDiffs := ptrace.DiffBlocks(blocksA, blocksB)
+		status := "PASS"
+		if structDiffs > 0 {
+			status = "FAIL"
+			nFail++
+		}
+		fmt.Printf("  %s: %s — %d/%d blocks identical, %d address diffs (run-specific), %d structural diffs\n",
+			filepath.Base(fsA[i]), status, same, total, addrDiffs, structDiffs)
+	}
+	if nFail > 0 {
+		return fmt.Errorf("%d kernels structurally differ", nFail)
+	}
+	return nil
+}
+
+// genSampled regenerates full-grid traces from a live-sampled collection
+// (P1b: the NVBit tracer recorded only corner-sample blocks). Recorded blocks
+// are kept verbatim; missing blocks are synthesized from recipes fit on them.
+// The output is NOT locally verified — gate it with `ptrace regime` between two
+// traced sizes and `ptrace countcheck` against an ncu counts profile.
+//
+//	ptrace gen <sampled-traces-dir> <out-traces-dir>
+func genSampled(tracesDir, outDir string) error {
+	files := traceFiles(tracesDir)
+	if len(files) == 0 {
+		return fmt.Errorf("no .trace.zst found in %s", tracesDir)
+	}
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+
+	type report struct {
+		TraceFile string `json:"trace_file"`
+		ptrace.GenResult
+	}
+	var reports []report
+	nFailed, nSelfCheck := 0, 0
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			return err
+		}
+		content, res, err := ptrace.GenFromSampled(raw)
+		if err != nil {
+			return fmt.Errorf("%s: %w", filepath.Base(f), err)
+		}
+		comp, err := ptrace.EncodeContainer(content)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(outDir, filepath.Base(f)), comp, 0o644); err != nil {
+			return err
+		}
+		reports = append(reports, report{filepath.Base(f), res})
+		nFailed += res.Failed
+		nSelfCheck += res.SelfCheckMismatch
+
+		switch {
+		case res.Passthrough:
+			fmt.Printf("  %s: passthrough (full trace, %d blocks)\n",
+				filepath.Base(f), res.TotalBlocks)
+		case res.Failed > 0 || res.SelfCheckMismatch > 0:
+			fmt.Printf("  %s: %d recorded + %d synthesized, %d FAILED (data-dependent), %d self-check mismatches\n",
+				filepath.Base(f), res.Recorded, res.Synthesized, res.Failed,
+				res.SelfCheckMismatch)
+		default:
+			fmt.Printf("  %s: %d recorded + %d synthesized = %d/%d blocks (grid %dx%dx%d)\n",
+				filepath.Base(f), res.Recorded, res.Synthesized,
+				res.Recorded+res.Synthesized, res.TotalBlocks,
+				res.Grid[0], res.Grid[1], res.Grid[2])
+		}
+	}
+
+	// Copy run sidecars (kernelslist, stats) verbatim so the output dir is a
+	// complete Accel-Sim trace dir.
+	entries, err := os.ReadDir(tracesDir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, "kernelslist") || strings.HasPrefix(name, "stats") {
+			data, err := os.ReadFile(filepath.Join(tracesDir, name))
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(filepath.Join(outDir, name), data, 0o644); err != nil {
+				return err
+			}
+		}
+	}
+
+	rj, err := json.MarshalIndent(reports, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(outDir, "gen-report.json"), rj, 0o644); err != nil {
+		return err
+	}
+
+	if nFailed > 0 {
+		return fmt.Errorf("%d blocks could not be synthesized (data-dependent addresses) — collect them with PTRACE_SAMPLE explicit blocks or trace this kernel fully", nFailed)
+	}
+	if nSelfCheck > 0 {
+		return fmt.Errorf("%d recorded blocks not reproduced by their own recipes (non-affine) — do not trust this kernel's synthesis", nSelfCheck)
+	}
+	fmt.Printf("generated %d kernels into %s (unverified locally — gate with regime + countcheck)\n",
+		len(files), outDir)
+	return nil
+}
+
 func parseGrid(s string) (gx, gy, gz int, err error) {
 	parts := strings.Split(strings.ToLower(s), "x")
 	if len(parts) < 1 || len(parts) > 3 {
@@ -499,6 +653,182 @@ func scaleVerify(args []string) error {
 		return fmt.Errorf("%d kernels failed structural scaling verification", nFail)
 	}
 	return nil
+}
+
+// regimeCheck gates extrapolation: it compares two small runs of the same
+// benchmark at different scaling values and refuses generation when the
+// compiled program or its control-flow regime differs between them — e.g. nvcc
+// emitting a remainder loop at one size and a fully-unrolled body at another,
+// or a compile-time-specialized size producing a different binary. Passing
+// means extrapolation beyond the larger size follows a line that has been
+// verified over one real step (A scaled to B's size reproduces B).
+//
+//	ptrace regime <tracesA> <fromA> <tracesB> <fromB>
+func regimeCheck(args []string) error {
+	dirA, dirB := args[0], args[2]
+	fromA, err := strconv.Atoi(args[1])
+	if err != nil {
+		return fmt.Errorf("bad fromA %q", args[1])
+	}
+	fromB, err := strconv.Atoi(args[3])
+	if err != nil {
+		return fmt.Errorf("bad fromB %q", args[3])
+	}
+	fsA, fsB := traceFiles(dirA), traceFiles(dirB)
+	if len(fsA) == 0 || len(fsB) == 0 {
+		return fmt.Errorf("no .trace.zst found (A=%d B=%d)", len(fsA), len(fsB))
+	}
+	if len(fsA) != len(fsB) {
+		return fmt.Errorf("kernel count differs (%d vs %d) — a size-dependent launch structure is itself a regime change", len(fsA), len(fsB))
+	}
+	nPass, nFail, nUnanchored := 0, 0, 0
+	for i := range fsA {
+		blocksA, isaA, err := loadTraceFile(fsA[i])
+		if err != nil {
+			return fmt.Errorf("%s: %w", fsA[i], err)
+		}
+		blocksB, isaB, err := loadTraceFile(fsB[i])
+		if err != nil {
+			return fmt.Errorf("%s: %w", fsB[i], err)
+		}
+		r := ptrace.CheckRegime(blocksA, isaA, fromA, blocksB, isaB, fromB)
+		name := filepath.Base(fsA[i])
+		switch {
+		case !r.ISAMatch:
+			nFail++
+			fmt.Printf("  %s: FAIL — static program differs (isa %.8s vs %.8s): different binary/SASS at the two sizes\n",
+				name, r.ISAHashA, r.ISAHashB)
+		case !r.PathMatch:
+			nFail++
+			fmt.Printf("  %s: FAIL — control-flow shape differs (loop prologue/body/epilogue): code path changes with size\n", name)
+		case r.Scalable && !r.CrossOK:
+			nFail++
+			fmt.Printf("  %s: FAIL — cross-prediction %d->%d: %d structural diffs (%d/%d blocks identical)\n",
+				name, fromA, fromB, r.StructDiffs, r.BlocksSame, r.BlocksTotal)
+		case !r.Scalable:
+			nUnanchored++
+			fmt.Printf("  %s: PASS (static+path only — no scalable loop; temporal extrapolation would refuse it anyway)\n", name)
+		default:
+			nPass++
+			fmt.Printf("  %s: PASS — scaling %d->%d verified: %d/%d blocks identical, %d run-specific address diffs\n",
+				name, fromA, fromB, r.BlocksSame, r.BlocksTotal, r.AddrDiffs)
+		}
+	}
+	if nFail > 0 {
+		return fmt.Errorf("%d/%d kernels in a different regime — do not extrapolate from these runs", nFail, len(fsA))
+	}
+	fmt.Printf("same regime at %d and %d: extrapolation beyond %d follows a verified line (%d verified, %d static-only)\n",
+		fromA, fromB, fromB, nPass, nUnanchored)
+	return nil
+}
+
+// predict emits the dynamic-count fingerprint of a traces dir (real or
+// generated — it reads .trace.zst containers directly, so the unverified
+// output of `synth --grid` works too). Compare against a counts-only profile
+// of a real run of the target size with `countcheck`.
+//
+//	ptrace predict <traces-dir> [out.json]
+func predict(args []string) error {
+	fs := traceFiles(args[0])
+	if len(fs) == 0 {
+		return fmt.Errorf("no .trace.zst found in %s", args[0])
+	}
+	var rep ptrace.CountsReport
+	for _, f := range fs {
+		blocks, isa, err := loadTraceFile(f)
+		if err != nil {
+			return fmt.Errorf("%s: %w", f, err)
+		}
+		c := ptrace.PredictCounts(blocks, isa)
+		c.TraceFile = filepath.Base(f)
+		rep.Kernels = append(rep.Kernels, c)
+		rep.Total = ptrace.AddCounts(rep.Total, c)
+	}
+	out, err := json.MarshalIndent(rep, "", "  ")
+	if err != nil {
+		return err
+	}
+	if len(args) >= 2 {
+		if err := os.WriteFile(args[1], out, 0o644); err != nil {
+			return err
+		}
+		fmt.Printf("%d kernels -> %s\n", len(rep.Kernels), args[1])
+	} else {
+		fmt.Println(string(out))
+	}
+	fmt.Printf("total: %d blocks, %d warps, %d warp insts, %d thread insts, %d mem insts, %d sectors\n",
+		rep.Total.Blocks, rep.Total.Warps, rep.Total.WarpInsts, rep.Total.ThreadInsts,
+		rep.Total.MemWarpInsts, rep.Total.Sectors)
+	return nil
+}
+
+// countcheck compares a predicted fingerprint (from `predict` on a generated
+// trace) against a measured one (counts-only profile of a real run, same JSON
+// shape; zero/omitted fields are skipped). Totals always compared; per-kernel
+// when both sides list the same number of kernels.
+//
+//	ptrace countcheck <predicted.json> <measured.json> [tol]
+func countcheck(args []string) error {
+	tol := 0.05
+	if len(args) >= 3 {
+		v, err := strconv.ParseFloat(args[2], 64)
+		if err != nil || v <= 0 {
+			return fmt.Errorf("bad tolerance %q", args[2])
+		}
+		tol = v
+	}
+	var pred, meas ptrace.CountsReport
+	for _, p := range []struct {
+		path string
+		dst  *ptrace.CountsReport
+	}{{args[0], &pred}, {args[1], &meas}} {
+		b, err := os.ReadFile(p.path)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(b, p.dst); err != nil {
+			return fmt.Errorf("%s: %w", p.path, err)
+		}
+	}
+	var fails []string
+	for _, f := range ptrace.CompareCounts(pred.Total, meas.Total, tol) {
+		fails = append(fails, "total "+f)
+	}
+	if len(pred.Kernels) > 0 && len(pred.Kernels) == len(meas.Kernels) {
+		for i := range pred.Kernels {
+			for _, f := range ptrace.CompareCounts(pred.Kernels[i], meas.Kernels[i], tol) {
+				fails = append(fails, fmt.Sprintf("kernel %d (%s) %s", i, pred.Kernels[i].TraceFile, f))
+			}
+		}
+	} else if len(meas.Kernels) > 0 && len(pred.Kernels) != len(meas.Kernels) {
+		fails = append(fails, fmt.Sprintf("kernel count: predicted %d, measured %d", len(pred.Kernels), len(meas.Kernels)))
+	}
+	if len(fails) > 0 {
+		for _, f := range fails {
+			fmt.Println("  FAIL", f)
+		}
+		return fmt.Errorf("%d count mismatches — generated trace does not match the real execution", len(fails))
+	}
+	fmt.Printf("counts match within %.1f%% — generation consistent with the real execution\n", 100*tol)
+	return nil
+}
+
+// loadTraceFile decodes one .trace.zst into blocks + ISA.
+func loadTraceFile(path string) ([]ptrace.Block, map[int]ptrace.StaticInst, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	h, b, err := ptrace.DecodeContainer(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	isa := map[int]ptrace.StaticInst{}
+	_, blocks, err := ptrace.ParseTraceg(h+strings.Join(b, ""), isa)
+	if err != nil {
+		return nil, nil, err
+	}
+	return blocks, isa, nil
 }
 
 // splitTBs splits a .traceg into its per-thread-block segments (dropping the

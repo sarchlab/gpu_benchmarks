@@ -144,24 +144,24 @@ __global__ void wmma_fp16_gemm(const half *A, const half *B, half *C,
                             wmma::mem_row_major);
 #else  /* USE_ROCM */
     rocwmma::fragment<rocwmma::matrix_a, WMMA_M, WMMA_N, WMMA_K,
-                      rocwmma::half_t, rocwmma::row_major> a_frag;
+                      rocwmma::float16_t, rocwmma::row_major> a_frag;
     rocwmma::fragment<rocwmma::matrix_b, WMMA_M, WMMA_N, WMMA_K,
-                      rocwmma::half_t, rocwmma::row_major> b_frag;
+                      rocwmma::float16_t, rocwmma::row_major> b_frag;
     rocwmma::fragment<rocwmma::accumulator, WMMA_M, WMMA_N, WMMA_K,
-                      rocwmma::half_t> c_frag;
+                      rocwmma::float16_t> c_frag;
 
-    rocwmma::fill_fragment(c_frag, static_cast<rocwmma::half_t>(0));
+    rocwmma::fill_fragment(c_frag, static_cast<rocwmma::float16_t>(0));
 
     for (int k = 0; k < K; k += WMMA_K) {
         rocwmma::load_matrix_sync(a_frag,
-            reinterpret_cast<const rocwmma::half_t*>(A + warpM * K + k), K);
+            reinterpret_cast<const rocwmma::float16_t*>(A + warpM * K + k), K);
         rocwmma::load_matrix_sync(b_frag,
-            reinterpret_cast<const rocwmma::half_t*>(B + k * N + warpN), N);
+            reinterpret_cast<const rocwmma::float16_t*>(B + k * N + warpN), N);
         rocwmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
     }
 
     rocwmma::store_matrix_sync(
-        reinterpret_cast<rocwmma::half_t*>(C + warpM * N + warpN),
+        reinterpret_cast<rocwmma::float16_t*>(C + warpM * N + warpN),
         c_frag, N, rocwmma::mem_row_major);
 #endif
 }

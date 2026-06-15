@@ -372,6 +372,7 @@ int main(int argc, char **argv)
             num_rows, num_cols, nnz,
             &alpha, mat_descr,
             d_values, d_row_ptr, d_col_idx,
+            nullptr,
             d_x, &beta, d_y));
     }
     HIP_CHECK(hipDeviceSynchronize());
@@ -385,6 +386,7 @@ int main(int argc, char **argv)
         num_rows, num_cols, nnz,
         &alpha, mat_descr,
         d_values, d_row_ptr, d_col_idx,
+        nullptr,
         d_x, &beta, d_y));
     HIP_CHECK(hipEventRecord(ev_stop, 0));
     HIP_CHECK(hipEventSynchronize(ev_stop));

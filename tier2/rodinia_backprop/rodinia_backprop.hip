@@ -28,7 +28,7 @@
  *   make PLATFORM=rocm   # AMD
  */
 
-#ifdef __HIP_PLATFORM_AMD__
+#ifdef __HIP__
   #include <hip/hip_runtime.h>
   #define GPU_API hip
   #define gpuMalloc       hipMalloc

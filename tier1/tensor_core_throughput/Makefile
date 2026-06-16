@@ -42,7 +42,7 @@ ifeq ($(PLATFORM),cuda)
 else ifeq ($(PLATFORM),rocm)
   CC      := hipcc
   SRC     := tensor_core_throughput.hip
-  CFLAGS  := -O3 -std=c++14 -DUSE_ROCM
+  CFLAGS  := -O3 -std=c++17 -DUSE_ROCM
 
 else ifeq ($(PLATFORM),metal)
   CC      := clang++

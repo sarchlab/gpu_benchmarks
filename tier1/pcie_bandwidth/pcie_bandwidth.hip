@@ -101,7 +101,13 @@
 // ---------------------------------------------------------------------------
 
 static const int    DEFAULT_BUFFER_MB      = 256;
-static const int    DEFAULT_NUM_WARMUP     = 0;
+static const int    DEFAULT_NUM_WARMUP     = 5;
+// Report the peak bandwidth over several timed iterations. A single timed copy
+// is unreliable on some platforms (e.g. MI300A charges a large one-time DMA
+// registration cost to the first transfer that touches a freshly-allocated
+// pinned buffer), which collapses the measured D2H bandwidth. Taking the best
+// of many iterations filters that one-time cost out, matching rocm-bandwidth-test.
+static const int    DEFAULT_NUM_ITERS      = 20;
 static const double BYTES_PER_GB           = 1e9;
 
 // ---------------------------------------------------------------------------
@@ -137,16 +143,19 @@ static BenchResult benchmark_h2d(const void *h_buf, void *d_buf,
     HIP_CHECK(hipEventCreate(&stop));
 
     for (int w = 0; w < num_warmup; ++w) {
-        HIP_CHECK(hipMemcpy(d_buf, h_buf, bytes, hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpyAsync(d_buf, h_buf, bytes, hipMemcpyHostToDevice, 0));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
-    HIP_CHECK(hipEventRecord(start, 0));
-    HIP_CHECK(hipMemcpy(d_buf, h_buf, bytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipEventRecord(stop, 0));
-    HIP_CHECK(hipEventSynchronize(stop));
-
-    float  total_ms = hip_elapsed_ms(start, stop);
+    float  total_ms = -1.0f;
+    for (int it = 0; it < DEFAULT_NUM_ITERS; ++it) {
+        HIP_CHECK(hipEventRecord(start, 0));
+        HIP_CHECK(hipMemcpyAsync(d_buf, h_buf, bytes, hipMemcpyHostToDevice, 0));
+        HIP_CHECK(hipEventRecord(stop, 0));
+        HIP_CHECK(hipEventSynchronize(stop));
+        float ms = hip_elapsed_ms(start, stop);
+        if (total_ms < 0.0f || ms < total_ms) total_ms = ms;
+    }
     double bw_GBs   = static_cast<double>(bytes)
                       / (total_ms * 1e-3) / BYTES_PER_GB;
 
@@ -168,16 +177,19 @@ static BenchResult benchmark_d2h(const void *d_buf, void *h_buf,
     HIP_CHECK(hipEventCreate(&stop));
 
     for (int w = 0; w < num_warmup; ++w) {
-        HIP_CHECK(hipMemcpy(h_buf, d_buf, bytes, hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpyAsync(h_buf, d_buf, bytes, hipMemcpyDeviceToHost, 0));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
-    HIP_CHECK(hipEventRecord(start, 0));
-    HIP_CHECK(hipMemcpy(h_buf, d_buf, bytes, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipEventRecord(stop, 0));
-    HIP_CHECK(hipEventSynchronize(stop));
-
-    float  total_ms = hip_elapsed_ms(start, stop);
+    float  total_ms = -1.0f;
+    for (int it = 0; it < DEFAULT_NUM_ITERS; ++it) {
+        HIP_CHECK(hipEventRecord(start, 0));
+        HIP_CHECK(hipMemcpyAsync(h_buf, d_buf, bytes, hipMemcpyDeviceToHost, 0));
+        HIP_CHECK(hipEventRecord(stop, 0));
+        HIP_CHECK(hipEventSynchronize(stop));
+        float ms = hip_elapsed_ms(start, stop);
+        if (total_ms < 0.0f || ms < total_ms) total_ms = ms;
+    }
     double bw_GBs   = static_cast<double>(bytes)
                       / (total_ms * 1e-3) / BYTES_PER_GB;
 
@@ -213,17 +225,20 @@ static BenchResult benchmark_bidir(const void *h_src, void *h_dst,
         HIP_CHECK(hipStreamSynchronize(stream_d2h));
     }
 
-    HIP_CHECK(hipEventRecord(start, 0));
-    HIP_CHECK(hipMemcpyAsync(d_dst, h_src, bytes,
-                             hipMemcpyHostToDevice, stream_h2d));
-    HIP_CHECK(hipMemcpyAsync(h_dst, d_src, bytes,
-                             hipMemcpyDeviceToHost, stream_d2h));
-    HIP_CHECK(hipStreamSynchronize(stream_h2d));
-    HIP_CHECK(hipStreamSynchronize(stream_d2h));
-    HIP_CHECK(hipEventRecord(stop, 0));
-    HIP_CHECK(hipEventSynchronize(stop));
-
-    float  total_ms    = hip_elapsed_ms(start, stop);
+    float  total_ms = -1.0f;
+    for (int it = 0; it < DEFAULT_NUM_ITERS; ++it) {
+        HIP_CHECK(hipEventRecord(start, 0));
+        HIP_CHECK(hipMemcpyAsync(d_dst, h_src, bytes,
+                                 hipMemcpyHostToDevice, stream_h2d));
+        HIP_CHECK(hipMemcpyAsync(h_dst, d_src, bytes,
+                                 hipMemcpyDeviceToHost, stream_d2h));
+        HIP_CHECK(hipStreamSynchronize(stream_h2d));
+        HIP_CHECK(hipStreamSynchronize(stream_d2h));
+        HIP_CHECK(hipEventRecord(stop, 0));
+        HIP_CHECK(hipEventSynchronize(stop));
+        float ms = hip_elapsed_ms(start, stop);
+        if (total_ms < 0.0f || ms < total_ms) total_ms = ms;
+    }
     double total_bytes = 2.0 * static_cast<double>(bytes);
     double bw_GBs      = total_bytes / (total_ms * 1e-3) / BYTES_PER_GB;
 

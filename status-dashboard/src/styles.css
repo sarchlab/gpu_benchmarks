@@ -48,6 +48,16 @@ button {
   margin-bottom: 14px;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+a.button {
+  text-decoration: none;
+}
+
 .eyebrow,
 .muted,
 .fine-print {

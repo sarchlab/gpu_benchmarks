@@ -331,7 +331,7 @@ int main(int argc, char** argv) {
             float rho, ux, uy, uz;
             cpu_collide(h_f_out.data(), &rho, &ux, &uy, &uz, idx, N);
 
-            if (rho < 0.5f || rho > 2.0f || isnan(rho)) {
+            if (rho < 0.5f || rho > 2.0f || std::isnan(rho)) {
                 if (errors < 10) {
                     fprintf(stderr, "Suspicious density at (%d,%d,%d): rho=%.6f\n",
                             ix, iy, iz, rho);

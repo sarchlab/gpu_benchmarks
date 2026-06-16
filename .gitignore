@@ -2,6 +2,7 @@
 tier1/*/bench
 tier1/*/bench_*
 tier1/atomic_operations/atomic_operations
+tier1/cache_bandwidth/cache_bandwidth
 tier1/cache_latency/cache_latency
 tier1/fp16_throughput/fp16_throughput
 tier1/fp32_throughput/fp32_throughput

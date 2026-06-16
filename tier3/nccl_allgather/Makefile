@@ -1,17 +1,42 @@
-# Makefile for tier3/nccl_allgather — AllGather benchmark using NCCL
+# Makefile for tier3/nccl_allgather — AllGather collective benchmark
 #
-# NCCL is NVIDIA-specific; only CUDA is supported.
+# Uses NCCL on NVIDIA/CUDA and RCCL (the API-compatible AMD equivalent) on ROCm.
 #
 # Usage:
-#   make
+#   make                  # auto-detect platform
+#   make PLATFORM=cuda
+#   make PLATFORM=rocm
 #   make clean
 
+# ---------------------------------------------------------------------------
+# Auto-detect platform
+# ---------------------------------------------------------------------------
+ifndef PLATFORM
+  ifneq ($(wildcard /opt/rocm),)
+    PLATFORM := rocm
+  else
+    PLATFORM := cuda
+  endif
+endif
+
 TARGET := nccl_allgather
-CC     := nvcc
-SRC    := nccl_allgather.cu
-CUDA_ARCH ?= sm_90
-CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
-LIBS   := -lnccl
+
+ifeq ($(PLATFORM),cuda)
+  CC        := nvcc
+  SRC       := nccl_allgather.cu
+  CUDA_ARCH ?= sm_90
+  CFLAGS    := -O3 -std=c++14 -arch=$(CUDA_ARCH)
+  LIBS      := -lnccl
+
+else ifeq ($(PLATFORM),rocm)
+  CC        := hipcc
+  SRC       := nccl_allgather.hip
+  CFLAGS    := -O3 -std=c++14
+  LIBS      := -lrccl
+
+else
+  $(error NCCL/RCCL collective benchmarks support PLATFORM=cuda or rocm only (got $(PLATFORM)))
+endif
 
 .PHONY: all clean
 

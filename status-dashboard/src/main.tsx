@@ -7,6 +7,7 @@ import {
   ChevronDown,
   Clock,
   Database,
+  Download,
   Gauge,
   RefreshCw,
   TimerReset
@@ -614,10 +615,16 @@ function App() {
           <p className="eyebrow">GPU Benchmarks</p>
           <h1>Status Dashboard</h1>
         </div>
-        <button className="button" onClick={refresh} disabled={loading} title="Refresh now">
-          <RefreshCw size={16} className={cn(loading && "spin")} />
-          Refresh
-        </button>
+        <div className="topbar-actions">
+          <a className="button" href="/api/download" download title="Download results.db">
+            <Download size={16} />
+            Download DB
+          </a>
+          <button className="button" onClick={refresh} disabled={loading} title="Refresh now">
+            <RefreshCw size={16} className={cn(loading && "spin")} />
+            Refresh
+          </button>
+        </div>
       </section>
 
       <nav className="global-tabs" role="tablist" aria-label="Dashboard sections">

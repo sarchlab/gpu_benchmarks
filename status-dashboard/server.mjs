@@ -698,6 +698,26 @@ createServer(async (req, res) => {
     }
     return;
   }
+  if (url.pathname === "/api/download") {
+    try {
+      if (!existsSync(dbPath)) {
+        res.writeHead(404, { "content-type": "text/plain" });
+        res.end("results.db not found");
+        return;
+      }
+      const data = await readFile(dbPath);
+      res.writeHead(200, {
+        "content-type": "application/x-sqlite3",
+        "content-disposition": 'attachment; filename="results.db"',
+        "content-length": data.length,
+        "cache-control": "no-store"
+      });
+      res.end(data);
+    } catch (error) {
+      sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+    }
+    return;
+  }
   await serveStatic(req, res);
 }).listen(port, "127.0.0.1", () => {
   const mode = apiOnly ? "API server" : "API/static server";

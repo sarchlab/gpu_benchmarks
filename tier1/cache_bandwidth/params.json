@@ -1,0 +1,49 @@
+{
+  "benchmark": "cache_bandwidth",
+  "tier": 1,
+  "suite": "microbench",
+  "description": "Measures GPU read bandwidth per cache level using many streaming threads over a resident window. Sweeping the working-set size traces a bandwidth-vs-size curve that plateaus per level (L1, L2, last-level cache, DRAM). mode=shared has all blocks read one buffer (global/device-wide bandwidth); mode=private gives each block its own buffer (per-unit bandwidth, divide by num_blocks). Reports GB/s.",
+  "scaling_param": {
+    "name": "working_set_bytes",
+    "description": "Resident window size in bytes; selects which cache level serves the reads",
+    "type": "int",
+    "values": [
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768,
+      65536,
+      131072,
+      262144,
+      524288,
+      1048576,
+      2097152,
+      4194304,
+      8388608,
+      16777216,
+      33554432,
+      67108864,
+      134217728,
+      268435456,
+      536870912,
+      1073741824
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "mode",
+      "description": "shared = all blocks read one buffer (global bandwidth); private = each block reads its own buffer (per-unit bandwidth)",
+      "type": "enum",
+      "default": "shared",
+      "values": [
+        "shared",
+        "private"
+      ]
+    }
+  ],
+  "kernels": [
+    "bw_read_kernel"
+  ]
+}

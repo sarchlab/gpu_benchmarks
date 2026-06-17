@@ -333,7 +333,7 @@ function ProgressBar({ value }: { value: number }) {
 
 const colors = ["#0f766e", "#2563eb", "#b45309", "#7c3aed", "#dc2626", "#0891b2", "#4d7c0f", "#be185d"];
 
-function LineChart({ data }: { data: ChartData | null }) {
+function LineChart({ data, logScale }: { data: ChartData | null; logScale: boolean }) {
   const points = data?.points || [];
   const seriesNames = data?.series || [];
   const xValues = [...new Set(points.map((point) => point.x))];
@@ -343,12 +343,40 @@ function LineChart({ data }: { data: ChartData | null }) {
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
   const maxY = Math.max(...points.map((point) => point.ciHighMs ?? point.avgMs), 0);
-  const yTop = maxY > 0 ? maxY * 1.08 : 1;
+  const linTop = maxY > 0 ? maxY * 1.08 : 1;
+  const positiveYs = points
+    .flatMap((point) => [point.avgMs, point.ciLowMs, point.ciHighMs])
+    .filter((v) => v > 0);
+  const minPos = positiveYs.length ? Math.min(...positiveYs) : 1;
+  const logLo = Math.pow(10, Math.floor(Math.log10(minPos)));
+  const logHiRaw = Math.pow(10, Math.ceil(Math.log10(maxY > 0 ? maxY : 1)));
+  const logHi = logHiRaw > logLo ? logHiRaw : logLo * 10;
   const xPosition = (x: string) => {
     if (xValues.length <= 1) return padding.left + plotWidth / 2;
     return padding.left + (xValues.indexOf(x) / (xValues.length - 1)) * plotWidth;
   };
-  const yPosition = (value: number) => padding.top + plotHeight - (value / yTop) * plotHeight;
+  const yPosition = (value: number) => {
+    if (logScale) {
+      const v = Math.max(value, logLo);
+      const frac = (Math.log10(v) - Math.log10(logLo)) / (Math.log10(logHi) - Math.log10(logLo));
+      return padding.top + plotHeight - frac * plotHeight;
+    }
+    return padding.top + plotHeight - (value / linTop) * plotHeight;
+  };
+  const yTicks: number[] = [];
+  if (logScale) {
+    for (let e = Math.log10(logLo); e <= Math.log10(logHi) + 1e-9; e += 1) {
+      yTicks.push(Math.pow(10, Math.round(e)));
+    }
+  } else {
+    for (const t of [0, 0.25, 0.5, 0.75, 1]) yTicks.push(linTop * t);
+  }
+  const formatTick = (v: number) => {
+    if (v === 0) return "0";
+    if (v >= 1000 || (v > 0 && v < 0.001)) return v.toExponential(0);
+    if (v >= 1) return v.toFixed(0);
+    return v.toFixed(3);
+  };
 
   if (!points.length) {
     return (
@@ -370,13 +398,20 @@ function LineChart({ data }: { data: ChartData | null }) {
           y2={padding.top + plotHeight}
           className="axis"
         />
-        {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
-          const y = padding.top + plotHeight - tick * plotHeight;
+        <text
+          transform={`translate(18 ${padding.top + plotHeight / 2}) rotate(-90)`}
+          textAnchor="middle"
+          className="axis-title"
+        >
+          {logScale ? "Execution time (ms, log scale)" : "Execution time (ms)"}
+        </text>
+        {yTicks.map((value, tickIndex) => {
+          const y = yPosition(value);
           return (
-            <g key={tick}>
+            <g key={tickIndex}>
               <line x1={padding.left} y1={y} x2={padding.left + plotWidth} y2={y} className="grid-line" />
               <text x={padding.left - 10} y={y + 4} textAnchor="end" className="axis-label">
-                {(yTop * tick).toFixed(yTop >= 10 ? 0 : 3)}
+                {formatTick(value)}
               </text>
             </g>
           );
@@ -473,6 +508,7 @@ function App() {
   const [selectedBenchmark, setSelectedBenchmark] = useState("");
   const [channels, setChannels] = useState<Record<string, Channel>>({});
   const [filters, setFilters] = useState<Record<string, string[]>>({});
+  const [logScale, setLogScale] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -836,7 +872,24 @@ function App() {
               <p className="fine-print">Empty filters include all values. Multiple selected values are included.</p>
             </div>
           </div>
-          <LineChart data={chartData} />
+          <div className="chart-toolbar">
+            <span className="fine-print">Y axis scale:</span>
+            <button
+              type="button"
+              className={cn("secondary-button", !logScale && "toggle-active")}
+              onClick={() => setLogScale(false)}
+            >
+              Linear
+            </button>
+            <button
+              type="button"
+              className={cn("secondary-button", logScale && "toggle-active")}
+              onClick={() => setLogScale(true)}
+            >
+              Log
+            </button>
+          </div>
+          <LineChart data={chartData} logScale={logScale} />
           <p className="fine-print chart-note">
             Y is mean execution time in milliseconds. Shaded bands and error bars show the 95% confidence interval when a point has multiple samples.
           </p>

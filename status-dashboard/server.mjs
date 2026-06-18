@@ -268,7 +268,6 @@ async function getStatus() {
         MIN(started_at) AS first_started_at,
         MAX(finished_at) AS last_finished_at
       FROM runs
-      ${sessionWhere}
       GROUP BY tier, suite, benchmark
       ORDER BY MIN(id);
     `)
@@ -302,7 +301,11 @@ async function getStatus() {
         expectedRuns: null
       }));
   const expectedRuns = expected.total;
-  const runs = Number(totals.runs || 0);
+  // Overall progress is derived from the cross-session per-benchmark counts
+  // (same aggregation as the benchmark table) so a sweep split across multiple
+  // sessions isn't under-counted. Session-scoped `totals` is kept only for the
+  // run timestamps used by the ETA/elapsed estimate.
+  const runs = benchmarks.reduce((sum, row) => sum + Number(row.runs || 0), 0);
   const firstStart = totals.first_started_at ? Date.parse(`${totals.first_started_at}Z`) : null;
   const elapsedSeconds = firstStart ? Math.max(1, (Date.now() - firstStart) / 1000) : null;
   const runRate = elapsedSeconds ? runs / elapsedSeconds : null;

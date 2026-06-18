@@ -1,0 +1,38 @@
+{
+  "benchmark": "empty_kernel",
+  "tier": 1,
+  "suite": "microbench",
+  "description": "Measures GPU kernel launch overhead with an empty kernel (no work), so the time is pure dispatch / grid-scheduling / completion cost. Sweeping num_blocks shows how overhead grows with grid size; block_size is swept as a non-scaling parameter. Reports launch_sync_us (round-trip launch+synchronize per launch) and enqueue_us (back-to-back async dispatch per launch).",
+  "scaling_param": {
+    "name": "num_blocks",
+    "description": "Number of thread blocks in the (empty) grid; primary axis for launch/scheduling overhead",
+    "type": "int",
+    "values": [
+      1,
+      8,
+      64,
+      512,
+      4096,
+      32768,
+      262144,
+      2097152
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Threads per block in the empty grid",
+      "type": "int",
+      "default": 256,
+      "values": [
+        32,
+        64,
+        256,
+        1024
+      ]
+    }
+  ],
+  "kernels": [
+    "empty_kernel"
+  ]
+}

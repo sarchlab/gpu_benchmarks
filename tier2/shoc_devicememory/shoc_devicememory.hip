@@ -264,17 +264,19 @@ int main(int argc, char** argv) {
     bool run_write = (strcmp(transfer_mode, "write") == 0 || strcmp(transfer_mode, "readwrite") == 0);
     bool run_rw    = (strcmp(transfer_mode, "readwrite") == 0);
 
+    double read_bw = 0.0, write_bw = 0.0, rw_bw = 0.0;
+
     // --- Read-only bandwidth ---
     if (run_read || strcmp(transfer_mode, "readwrite") == 0) {
         KernelResult kr = benchKernel(1, [&]() {
             hipLaunchKernelGGL(readOnly_kernel, dim3(num_blocks), dim3(block_size),
                                0, 0, d_input, d_output, (int)N);
         });
-        double read_bw = (double)bytes / (kr.avg_ms * 1e-3) / 1e9;
+        read_bw = (double)bytes / (kr.avg_ms * 1e-3) / 1e9;
         total_all_ms += kr.total_ms;
 
         printf("{\"type\":\"kernel\",\"name\":\"readOnly_kernel\",\"time_ms\":%.6f,"
-               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d"
+               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d,"
                "\"transfer_mode\":\"%s\"}}\n",
                kr.avg_ms, array_size_mb, block_size, transfer_mode);
 
@@ -287,11 +289,11 @@ int main(int argc, char** argv) {
             hipLaunchKernelGGL(writeOnly_kernel, dim3(num_blocks), dim3(block_size),
                                0, 0, d_output, (int)N);
         });
-        double write_bw = (double)bytes / (kr.avg_ms * 1e-3) / 1e9;
+        write_bw = (double)bytes / (kr.avg_ms * 1e-3) / 1e9;
         total_all_ms += kr.total_ms;
 
         printf("{\"type\":\"kernel\",\"name\":\"writeOnly_kernel\",\"time_ms\":%.6f,"
-               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d"
+               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d,"
                "\"transfer_mode\":\"%s\"}}\n",
                kr.avg_ms, array_size_mb, block_size, transfer_mode);
 
@@ -311,11 +313,11 @@ int main(int argc, char** argv) {
             hipLaunchKernelGGL(readWrite_kernel, dim3(num_blocks), dim3(block_size),
                                0, 0, d_input, (int)N);
         });
-        double rw_bw = 2.0 * (double)bytes / (kr.avg_ms * 1e-3) / 1e9;
+        rw_bw = 2.0 * (double)bytes / (kr.avg_ms * 1e-3) / 1e9;
         total_all_ms += kr.total_ms;
 
         printf("{\"type\":\"kernel\",\"name\":\"readWrite_kernel\",\"time_ms\":%.6f,"
-               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d"
+               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d,"
                "\"transfer_mode\":\"%s\"}}\n",
                kr.avg_ms, array_size_mb, block_size, transfer_mode);
 
@@ -324,8 +326,10 @@ int main(int argc, char** argv) {
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[]}\n",
-           total_all_ms);
+           "\"metrics\":[{\"name\":\"read_bw_gbps\",\"value\":%.2f},"
+           "{\"name\":\"write_bw_gbps\",\"value\":%.2f},"
+           "{\"name\":\"readwrite_bw_gbps\",\"value\":%.2f}]}\n",
+           total_all_ms, read_bw, write_bw, rw_bw);
 
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_output));

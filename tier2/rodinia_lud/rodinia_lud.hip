@@ -346,15 +346,15 @@ int main(int argc, char **argv)
 
     // JSON-lines kernel events
     printf("{\"type\":\"kernel\",\"name\":\"lud_diagonal\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,\"verify\":\"%s\"}}\n",
+           "\"params\":{\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
            avg_ms, N, block_size_param, verify_mode);
 
     printf("{\"type\":\"kernel\",\"name\":\"lud_perimeter\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,\"verify\":\"%s\"}}\n",
+           "\"params\":{\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
            avg_ms, N, block_size_param, verify_mode);
 
     printf("{\"type\":\"kernel\",\"name\":\"lud_internal\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,\"verify\":\"%s\"}}\n",
+           "\"params\":{\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
            avg_ms, N, block_size_param, verify_mode);
 
     // JSON-lines summary event

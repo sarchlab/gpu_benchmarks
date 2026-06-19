@@ -362,14 +362,14 @@ int main(int argc, char** argv) {
             mtri_per_sec, avg_ms, mn, mx);
 
     printf("{\"type\":\"kernel\",\"name\":\"dmr_check_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_triangles\":%d\"block_size\":%d,"
+           "\"params\":{\"num_triangles\":%d,\"block_size\":%d,"
            "\"min_angle\":%.1f,\"max_refine_iterations\":%d,"
            "\"precision\":\"%s\"}}\n",
            avg_ms * 0.5, num_triangles, block_size, min_angle,
            max_refine_iters, precision);
 
     printf("{\"type\":\"kernel\",\"name\":\"dmr_refine_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_triangles\":%d\"block_size\":%d,"
+           "\"params\":{\"num_triangles\":%d,\"block_size\":%d,"
            "\"min_angle\":%.1f,\"max_refine_iterations\":%d,"
            "\"precision\":\"%s\"}}\n",
            avg_ms * 0.5, num_triangles, block_size, min_angle,

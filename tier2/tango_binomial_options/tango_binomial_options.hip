@@ -331,7 +331,7 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"binomial_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"options\":%d,\"steps\":%d"
+           "\"params\":{\"options\":%d,\"steps\":%d,"
            "\"precision\":\"%s\"}}\n",
            avg_ms, numOptions, numSteps, precision);
 

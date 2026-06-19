@@ -311,7 +311,7 @@ int main(int argc, char** argv)
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"spmv_csr_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_rows\":%d,\"nnz_per_row\":%d"
+           "\"params\":{\"num_rows\":%d,\"nnz_per_row\":%d,"
            "\"precision\":\"%s\"}}\n",
            avg_ms, num_rows, nnz_per_row, precision);
 

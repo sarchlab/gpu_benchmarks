@@ -335,7 +335,7 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"dynproc_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"cols\":%d,\"rows\":%d\"block_size\":%d}}\n",
+           "\"params\":{\"cols\":%d,\"rows\":%d,\"block_size\":%d}}\n",
            avg_ms, cols, rows, block_size_param);
 
     // JSON-lines summary event

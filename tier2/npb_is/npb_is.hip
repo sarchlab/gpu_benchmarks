@@ -339,17 +339,17 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel events (one per kernel)
     printf("{\"type\":\"kernel\",\"name\":\"histogram_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"verify\":\"%s\"}}\n",
            avg_ms, N, block_size, verify);
 
     printf("{\"type\":\"kernel\",\"name\":\"prefix_sum_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"verify\":\"%s\"}}\n",
            avg_ms, N, block_size, verify);
 
     printf("{\"type\":\"kernel\",\"name\":\"scatter_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"verify\":\"%s\"}}\n",
            avg_ms, N, block_size, verify);
 

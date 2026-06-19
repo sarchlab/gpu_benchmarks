@@ -347,12 +347,12 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel events
     printf("{\"type\":\"kernel\",\"name\":\"scan_block_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"verify\":\"%s\"}}\n",
            avg_ms, size, block_size, verify);
 
     printf("{\"type\":\"kernel\",\"name\":\"add_block_sums_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"verify\":\"%s\"}}\n",
            avg_ms, size, block_size, verify);
 

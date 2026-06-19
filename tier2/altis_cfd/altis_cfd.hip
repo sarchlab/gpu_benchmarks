@@ -566,12 +566,12 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel events (one per kernel)
     printf("{\"type\":\"kernel\",\"name\":\"compute_flux_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
            avg_ms, N, block_size, precision);
 
     printf("{\"type\":\"kernel\",\"name\":\"rk_update_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
            avg_ms, N, block_size, precision);
 

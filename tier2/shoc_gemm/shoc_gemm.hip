@@ -285,7 +285,7 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"gemm_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d"
+           "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
            avg_ms, size, block_size, precision);
 

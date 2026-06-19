@@ -283,7 +283,7 @@ int main(int argc, char** argv)
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"histogram_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"n\":%u\"num_bins\":%d,"
+           "\"params\":{\"n\":%u,\"num_bins\":%d,"
            "\"block_size\":%d}}\n",
            avg_ms, n, num_bins, block_size);
 

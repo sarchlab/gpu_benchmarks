@@ -305,19 +305,19 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"mean_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
            avg_mean, N, block_size, precision);
     printf("{\"type\":\"kernel\",\"name\":\"stddev_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
            avg_stddev, N, block_size, precision);
     printf("{\"type\":\"kernel\",\"name\":\"normalize_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
            avg_norm, N, block_size, precision);
     printf("{\"type\":\"kernel\",\"name\":\"correlation_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
            avg_corr, N, block_size, precision);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

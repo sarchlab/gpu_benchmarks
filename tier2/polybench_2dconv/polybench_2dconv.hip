@@ -250,7 +250,7 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"convolution2D_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,\"precision\":\"%s\"}}\n",
+           "\"params\":{\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"}}\n",
            avg, N, block_size, precision);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",

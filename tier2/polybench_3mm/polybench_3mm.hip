@@ -313,13 +313,13 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"mm3_kernel1\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,\"precision\":\"%s\"}}\n",
+           "\"params\":{\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"}}\n",
            k1_avg, N, block_size, precision);
     printf("{\"type\":\"kernel\",\"name\":\"mm3_kernel2\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,\"precision\":\"%s\"}}\n",
+           "\"params\":{\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"}}\n",
            k2_avg, N, block_size, precision);
     printf("{\"type\":\"kernel\",\"name\":\"mm3_kernel3\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,\"precision\":\"%s\"}}\n",
+           "\"params\":{\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"}}\n",
            k3_avg, N, block_size, precision);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",

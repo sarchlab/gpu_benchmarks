@@ -252,7 +252,7 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"triad_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"array_size\":%d,\"block_size\":%d"
+           "\"params\":{\"array_size\":%d,\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
            avg_ms, array_size, block_size, precision);
 

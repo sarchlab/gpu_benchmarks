@@ -289,7 +289,7 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"fir_filter_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"num_taps\":%d,"
+           "\"params\":{\"size\":%d,\"num_taps\":%d,"
            "\"block_size\":%d}}\n",
            avg_ms, size, num_taps, block_size);
 

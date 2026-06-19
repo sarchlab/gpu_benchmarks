@@ -369,11 +369,11 @@ int main(int argc, char** argv) {
     // JSON-lines output
     double edges_per_sec = (double)num_edges / (r.avg_ms * 1e-3);
     printf("{\"type\":\"kernel\",\"name\":\"bfs_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_nodes\":%d,\"edges_per_node\":%d,\"block_size\":%d,"
+           "\"params\":{\"num_nodes\":%d,\"edges_per_node\":%d,\"block_size\":%d"
            "}}\n",
            r.avg_ms, num_nodes, edges_per_node, block_size);
     printf("{\"type\":\"kernel\",\"name\":\"bfs_update\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_nodes\":%d,\"edges_per_node\":%d,\"block_size\":%d,"
+           "\"params\":{\"num_nodes\":%d,\"edges_per_node\":%d,\"block_size\":%d"
            "}}\n",
            r.avg_ms, num_nodes, edges_per_node, block_size);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

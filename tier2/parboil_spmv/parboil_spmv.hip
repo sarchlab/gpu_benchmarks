@@ -375,7 +375,7 @@ int main(int argc, char** argv)
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"spmv_csr\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_rows\":%d,\"avg_nnz_per_row\":%d,\"block_size\":%d,"
+           "\"params\":{\"num_rows\":%d,\"avg_nnz_per_row\":%d,\"block_size\":%d"
            "}}\n",
            r.avg_ms, num_rows, avg_nnz, block_size);
 

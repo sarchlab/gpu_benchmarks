@@ -357,7 +357,7 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"pagerank_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"vertices\":%d,\"degree\":%d,\"pr_iterations\":%d,"
+           "\"params\":{\"vertices\":%d,\"degree\":%d,\"pr_iterations\":%d"
            "}}\n",
            avg_ms, vertices, degree, pr_iterations);
 

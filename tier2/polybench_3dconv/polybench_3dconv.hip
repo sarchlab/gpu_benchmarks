@@ -238,7 +238,7 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"conv3d_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"filter_size\":%d}}\n",
            avg_ms, N, block_size, filter_size);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

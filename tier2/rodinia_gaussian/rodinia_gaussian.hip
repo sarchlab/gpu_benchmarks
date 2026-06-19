@@ -351,11 +351,11 @@ int main(int argc, char** argv)
 
     // JSON-lines kernel events
     printf("{\"type\":\"kernel\",\"name\":\"fan1\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,\"verify\":\"%s\"}}\n",
+           "\"params\":{\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
            avg_ms, N, block_size_param, verify);
 
     printf("{\"type\":\"kernel\",\"name\":\"fan2\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,\"verify\":\"%s\"}}\n",
+           "\"params\":{\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
            avg_ms, N, block_size_param, verify);
 
     // JSON-lines summary event

@@ -273,7 +273,7 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"histogram_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"num_bins\":%d,"
+           "\"params\":{\"size\":%d,\"num_bins\":%d,"
            "\"block_size\":%d}}\n",
            avg_ms, size, num_bins, block_size);
 

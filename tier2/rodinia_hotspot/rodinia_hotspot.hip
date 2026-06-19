@@ -327,7 +327,7 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"hotspot_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"grid_size\":%d,\"block_size\":%d,\"num_iterations\":%d,"
+           "\"params\":{\"grid_size\":%d,\"block_size\":%d,\"num_iterations\":%d"
            "}}\n",
            r.avg_ms, grid_size, block_dim, num_iterations);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

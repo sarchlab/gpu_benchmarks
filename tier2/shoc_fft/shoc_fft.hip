@@ -348,10 +348,10 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"bit_reverse_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"precision\":\"%s\",\"batch_count\":%d}}\n",
+           "\"params\":{\"size\":%d,\"precision\":\"%s\",\"batch_count\":%d}}\n",
            br_avg_ms, N, precision, batch_count);
     printf("{\"type\":\"kernel\",\"name\":\"fft_butterfly_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"precision\":\"%s\",\"batch_count\":%d}}\n",
+           "\"params\":{\"size\":%d,\"precision\":\"%s\",\"batch_count\":%d}}\n",
            bf_avg_ms, N, precision, batch_count);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"gflops\",\"value\":%.4f}]}\n",

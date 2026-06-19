@@ -240,12 +240,12 @@ int main(int argc, char** argv) {
             gflops, avg_ms, mn, mx);
 
     printf("{\"type\":\"kernel\",\"name\":\"mm_kernel_1\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"alpha\":%.2f,\"beta\":%.2f,\"precision\":\"%s\"}}\n",
            avg_ms * 0.5, N, block_size, alpha, beta, precision);
 
     printf("{\"type\":\"kernel\",\"name\":\"mm_kernel_2\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"alpha\":%.2f,\"beta\":%.2f,\"precision\":\"%s\"}}\n",
            avg_ms * 0.5, N, block_size, alpha, beta, precision);
 

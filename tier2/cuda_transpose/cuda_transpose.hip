@@ -368,12 +368,12 @@ int main(int argc, char** argv) {
     double total_ms = naive_ms * TIMED_ITERS + opt_ms * TIMED_ITERS;
 
     printf("{\"type\":\"kernel\",\"name\":\"transpose_naive\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"tile_dim\":%d}}\n",
            naive_ms, N, block_size, tile_dim);
 
     printf("{\"type\":\"kernel\",\"name\":\"transpose_optimized\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d\"block_size\":%d,"
+           "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"tile_dim\":%d}}\n",
            opt_ms, N, block_size, tile_dim);
 

@@ -297,10 +297,10 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"atax_kernel1\",\"time_ms\":%.6f,"
-           "\"params\":{\"nx\":%d,\"ny\":%d\"block_size\":%d}}\n",
+           "\"params\":{\"nx\":%d,\"ny\":%d,\"block_size\":%d}}\n",
            k1_avg, nx, ny, block_size);
     printf("{\"type\":\"kernel\",\"name\":\"atax_kernel2\",\"time_ms\":%.6f,"
-           "\"params\":{\"nx\":%d,\"ny\":%d\"block_size\":%d}}\n",
+           "\"params\":{\"nx\":%d,\"ny\":%d,\"block_size\":%d}}\n",
            k2_avg, nx, ny, block_size);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",

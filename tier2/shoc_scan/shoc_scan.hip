@@ -349,12 +349,12 @@ int main(int argc, char** argv) {
 
     // JSON-lines: one event per kernel listed in params.json
     printf("{\"type\":\"kernel\",\"name\":\"scan_block_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"array_size\":%d,\"block_size\":%d"
+           "\"params\":{\"array_size\":%d,\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
            avg_ms, array_size, block_size, precision);
 
     printf("{\"type\":\"kernel\",\"name\":\"add_block_sums_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"array_size\":%d,\"block_size\":%d"
+           "\"params\":{\"array_size\":%d,\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
            avg_ms, array_size, block_size, precision);
 

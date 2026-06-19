@@ -451,7 +451,7 @@ int main(int argc, char** argv) {
 
     // JSON-lines kernel event
     printf("{\"type\":\"kernel\",\"name\":\"raytrace_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"width\":%d,\"height\":%d,\"spheres\":%d,"
+           "\"params\":{\"width\":%d,\"height\":%d,\"spheres\":%d"
            "}}\n",
            avg_ms, W, H, nSph);
 

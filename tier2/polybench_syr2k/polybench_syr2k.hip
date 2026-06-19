@@ -306,7 +306,7 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"syr2k_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"matrix_size\":%d,\"inner_size\":%d"
+           "\"params\":{\"matrix_size\":%d,\"inner_size\":%d,"
            "\"block_size\":%d,\"alpha\":%.2f,\"beta\":%.2f}}\n",
            avg_ms, N, M, block_size, alpha, beta);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

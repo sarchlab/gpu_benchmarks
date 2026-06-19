@@ -321,11 +321,11 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"mvt_kernel1\",\"time_ms\":%.6f,"
-           "\"params\":{\"n\":%d\"block_size\":%d,"
+           "\"params\":{\"n\":%d,\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
            avg_ms, n, block_size_param, precision);
     printf("{\"type\":\"kernel\",\"name\":\"mvt_kernel2\",\"time_ms\":%.6f,"
-           "\"params\":{\"n\":%d\"block_size\":%d,"
+           "\"params\":{\"n\":%d,\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
            avg_ms, n, block_size_param, precision);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

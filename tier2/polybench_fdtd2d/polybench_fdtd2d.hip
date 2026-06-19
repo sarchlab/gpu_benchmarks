@@ -328,13 +328,13 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"fdtd_update_ex\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"tmax\":%d\"block_size\":%d}}\n",
+           "\"params\":{\"size\":%d,\"tmax\":%d,\"block_size\":%d}}\n",
            r.avg_ms, N, TMAX, block_size);
     printf("{\"type\":\"kernel\",\"name\":\"fdtd_update_ey\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"tmax\":%d\"block_size\":%d}}\n",
+           "\"params\":{\"size\":%d,\"tmax\":%d,\"block_size\":%d}}\n",
            r.avg_ms, N, TMAX, block_size);
     printf("{\"type\":\"kernel\",\"name\":\"fdtd_update_hz\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"tmax\":%d\"block_size\":%d}}\n",
+           "\"params\":{\"size\":%d,\"tmax\":%d,\"block_size\":%d}}\n",
            r.avg_ms, N, TMAX, block_size);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",

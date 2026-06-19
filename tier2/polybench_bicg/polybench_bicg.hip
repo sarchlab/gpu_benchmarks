@@ -323,10 +323,10 @@ int main(int argc, char** argv) {
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"bicg_kernel1\",\"time_ms\":%.6f,"
-           "\"params\":{\"m\":%d,\"n\":%d\"block_size\":%d}}\n",
+           "\"params\":{\"m\":%d,\"n\":%d,\"block_size\":%d}}\n",
            k1_avg, m, n, block_size);
     printf("{\"type\":\"kernel\",\"name\":\"bicg_kernel2\",\"time_ms\":%.6f,"
-           "\"params\":{\"m\":%d,\"n\":%d\"block_size\":%d}}\n",
+           "\"params\":{\"m\":%d,\"n\":%d,\"block_size\":%d}}\n",
            k2_avg, m, n, block_size);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",

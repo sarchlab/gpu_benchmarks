@@ -141,7 +141,7 @@ struct BenchmarkTimer {
     }
 };
 
-static int g_num_warmup = 0;
+static int g_num_warmup = 5;
 
 template <typename Func>
 static BenchResult runBenchmark(const char* kernel_name,
@@ -263,7 +263,7 @@ int main(int argc, char** argv) {
     if (env_val) TMAX = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    int num_warmup = 0;
+    int num_warmup = 5;
 
     int NX = N, NY = N;
     size_t grid_bytes = (size_t)NX * NY * sizeof(float);

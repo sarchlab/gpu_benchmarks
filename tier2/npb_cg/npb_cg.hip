@@ -181,7 +181,7 @@ int main(int argc, char** argv) {
     if (env_val) nonzeros_per_row = atoi(env_val);
     env_val = getenv("BENCH_PARAM_iterations");
     if (env_val) iterations = atoi(env_val);
-    int num_warmup = 0;
+    int num_warmup = 5;
 
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], "--size") == 0) N = atoi(argv[i+1]);

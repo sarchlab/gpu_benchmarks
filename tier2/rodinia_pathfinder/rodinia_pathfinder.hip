@@ -167,7 +167,7 @@ int main(int argc, char** argv) {
     if (env_val) rows = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size_param = atoi(env_val);
-    int num_warmup = 0;
+    int num_warmup = 5;
 
     // Print device info
     int device_id = 0;

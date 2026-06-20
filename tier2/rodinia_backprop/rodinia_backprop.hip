@@ -231,7 +231,7 @@ int main(int argc, char* argv[])
     if (env_val) hidden_n = atoi(env_val);
     env_val = getenv("BENCH_PARAM_output");
     if (env_val) output_n = atoi(env_val);
-    int num_warmup = 0;
+    int num_warmup = 5;
 
     // Print device info
     gpuDeviceProp_t prop;

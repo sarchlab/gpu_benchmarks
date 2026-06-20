@@ -173,7 +173,7 @@ struct KernelResult {
     double total_ms;
 };
 
-static int g_num_warmup = 0;
+static int g_num_warmup = 5;
 
 template <typename Func>
 static KernelResult benchKernel(int iters, Func func) {
@@ -227,7 +227,7 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_transfer_mode");
     if (env_val) transfer_mode = env_val;
-    int num_warmup = 0;
+    int num_warmup = 5;
 
     size_t N     = (size_t)array_size_mb * 1024 * 1024 / sizeof(float);
     size_t bytes = N * sizeof(float);

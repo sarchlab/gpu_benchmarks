@@ -429,7 +429,7 @@ int main(int argc, char** argv) {
     if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_theta");
     if (env_val) theta_p = atof(env_val);
-    int num_warmup = 0;
+    int num_warmup = 5;
 
     int N         = bodies;
     int timesteps = timesteps_p;

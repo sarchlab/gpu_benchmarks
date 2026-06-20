@@ -350,7 +350,7 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_key_length");
     if (env_val) key_length = env_val;
-    int num_warmup = 0;
+    int num_warmup = 5;
 
     int N     = size;
 

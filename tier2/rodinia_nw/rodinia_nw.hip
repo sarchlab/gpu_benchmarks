@@ -386,7 +386,7 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_penalty");
     if (env_val) penalty = atoi(env_val);
-    int num_warmup = 0;
+    int num_warmup = 5;
 
     // Round sequence length up to a multiple of block_size
     int num_blocks = (seq_len + block_size - 1) / block_size;

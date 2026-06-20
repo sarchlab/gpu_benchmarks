@@ -200,7 +200,7 @@ int main(int argc, char** argv) {
     if (env_val) block_size_param = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
-    int num_warmup = 0;
+    int num_warmup = 5;
 
     size_t bytes_A  = (size_t)n * n * sizeof(float);
     size_t bytes_v  = (size_t)n * sizeof(float);

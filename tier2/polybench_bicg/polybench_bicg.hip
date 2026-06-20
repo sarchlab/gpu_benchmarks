@@ -202,7 +202,7 @@ int main(int argc, char** argv) {
     if (env_val) n = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    int num_warmup = 0;
+    int num_warmup = 5;
 
     size_t bytes_A = (size_t)m * n * sizeof(float);
     size_t bytes_p = (size_t)n * sizeof(float);

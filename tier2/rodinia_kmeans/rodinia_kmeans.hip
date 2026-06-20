@@ -194,7 +194,7 @@ int main(int argc, char** argv)
     if (env_val) K = atoi(env_val);
     env_val = getenv("BENCH_PARAM_max_iter");
     if (env_val) max_iter = atoi(env_val);
-    int num_warmup = 0;
+    int num_warmup = 5;
 
     // Print device info
     int device_id = 0;

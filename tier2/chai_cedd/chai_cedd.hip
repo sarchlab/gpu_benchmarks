@@ -438,7 +438,7 @@ int main(int argc, char** argv) {
     if (env_val) threshold_low = atoi(env_val);
     env_val = getenv("BENCH_PARAM_threshold_high");
     if (env_val) threshold_high = atoi(env_val);
-    int num_warmup = 0;
+    int num_warmup = 5;
 
     int W = width;
     int H = height;

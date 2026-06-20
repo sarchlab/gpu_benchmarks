@@ -258,7 +258,7 @@ int main(int argc, char **argv)
     if (env_val) block_size_param = atoi(env_val);
     env_val = getenv("BENCH_PARAM_verify");
     if (env_val) verify_mode = env_val;
-    int num_warmup = 0;
+    int num_warmup = 5;
     if (N % BSIZE != 0) {
         fprintf(stderr, "Error: N=%d must be divisible by BSIZE=%d\n", N, BSIZE);
         return 1;

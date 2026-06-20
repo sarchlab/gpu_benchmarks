@@ -313,7 +313,7 @@ int main(int argc, char** argv) {
     if (env_val) num_iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_dim = atoi(env_val);
-    int num_warmup = 0;
+    int num_warmup = 5;
 
     int rows = image_size;
     int cols = image_size;

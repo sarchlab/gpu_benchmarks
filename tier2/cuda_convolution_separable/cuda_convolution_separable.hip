@@ -304,7 +304,7 @@ int main(int argc, char** argv) {
     if (env_val) height = atoi(env_val);
     env_val = getenv("BENCH_PARAM_radius");
     if (env_val) radius = atoi(env_val);
-    int num_warmup = 0;
+    int num_warmup = 5;
 
 
     if (radius > MAX_KERNEL_RADIUS) {

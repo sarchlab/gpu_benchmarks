@@ -215,7 +215,7 @@ int main(int argc, char** argv) {
     if (env_val) tau = (float)atof(env_val);
     env_val = getenv("BENCH_PARAM_iterations");
     if (env_val) iterations = atoi(env_val);
-    int num_warmup = 0;
+    int num_warmup = 5;
 
     int iters = iterations;
     float omega = 1.0f / tau;

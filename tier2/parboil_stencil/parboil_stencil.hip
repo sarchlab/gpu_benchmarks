@@ -152,7 +152,7 @@ struct BenchmarkTimer {
     }
 };
 
-static int g_num_warmup = 0;
+static int g_num_warmup = 5;
 
 template <typename Func>
 static BenchResult runBenchmark(const char* kernel_name,

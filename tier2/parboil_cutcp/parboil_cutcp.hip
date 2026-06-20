@@ -160,7 +160,7 @@ int main(int argc, char** argv) {
     if (env_val) grid_spacing = (float)atof(env_val);
     env_val = getenv("BENCH_PARAM_cutoff_radius");
     if (env_val) cutoff = (float)atof(env_val);
-    int num_warmup = 0;
+    int num_warmup = 5;
 
     float cutoff2 = cutoff * cutoff;
     int grid_side = GRID_DIM_SIDE;

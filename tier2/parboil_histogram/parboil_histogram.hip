@@ -183,7 +183,7 @@ int main(int argc, char** argv)
     if (env_val) num_bins = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    int num_warmup = 0;
+    int num_warmup = 5;
 
     size_t bytes_data = (size_t)n * sizeof(uint32_t);
     size_t bytes_hist = (size_t)NUM_BINS * sizeof(uint32_t);

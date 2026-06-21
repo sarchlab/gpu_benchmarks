@@ -16,16 +16,19 @@
  *   Chasing is done at CACHELINE granularity: only the first word of each
  *   cacheline is a chase node, so consecutive accesses land on distinct
  *   lines (no intra-line spatial hits) while the touched lines still span
- *   the whole array (cache footprint == array_bytes). num_accesses is
- *   derived as reuse_k * array_bytes/cacheline_bytes — K FULL laps, no cap:
- *   ~1 cold miss + (K-1) resident hits per line at sizes that fit a cache
- *   level, degrading to all-miss latency once the set exceeds the caches
- *   (L2 -> MALL -> DRAM). The count grows with size (largest points take
- *   minutes on HW). No separate cache warm-up; the timed kernel self-warms,
- *   and a 1-access primer absorbs code-object load.
+ *   the whole array (cache footprint == array_bytes).
+ *
+ *   To avoid biasing the fast levels, the COLD fill lap is run UNTIMED and
+ *   discarded: an untimed warm-up walks one lap (capped at the largest cache
+ *   so the DRAM end doesn't pay a huge fill), which both loads the kernel
+ *   code object and makes the working set resident; only steady-state laps
+ *   are timed. Timed accesses = clamp(measure_laps * lines, MIN, MAX), so
+ *   resident sizes measure pure hits (L1/L2/MALL), sizes past the caches
+ *   measure all-miss (DRAM) latency, and the count is bounded so every point
+ *   runs in seconds regardless of array size.
  *
  * Output:
- *   Latency in nanoseconds per memory access.
+ *   Latency in ns per access (steady-state; the cold fill lap is excluded).
  *
  * Usage:
  *   ./cache_latency [array_bytes]
@@ -33,8 +36,8 @@
  * Environment variables (override argv):
  *   BENCH_PARAM_array_bytes
  *   BENCH_PARAM_cacheline_bytes   (default 64)
- *   BENCH_PARAM_reuse_k           (default 16)
- *   BENCH_PARAM_num_accesses      (default: derived; overrides the formula)
+ *   BENCH_PARAM_measure_laps      (default 4 timed laps of steady-state hits)
+ *   BENCH_PARAM_num_accesses      (overrides the timed-access count)
  *   BENCH_PARAM_rng_seed
  */
 
@@ -118,7 +121,10 @@
 
 static const size_t   DEFAULT_ARRAY_BYTES     = 2ULL * 1024 * 1024;  // 2 MB
 static const uint32_t DEFAULT_CACHELINE_BYTES = 64u;       // gfx942/MI300X line; one chase node per line
-static const uint32_t DEFAULT_REUSE_K         = 16u;       // full laps over the set: ~1 cold miss + (K-1) hits per line
+static const uint32_t DEFAULT_MEASURE_LAPS    = 4u;        // timed laps of steady-state hits (the cold lap is untimed)
+static const size_t   WARMUP_CAP_BYTES        = 256ULL * 1024 * 1024; // cap the untimed fill at the largest cache (MALL); DRAM needs no fill
+static const uint64_t MIN_TIMED_ACCESSES      = 131072u;   // floor so tiny resident sizes still get enough samples
+static const uint64_t MAX_TIMED_ACCESSES      = 16000000u; // ceiling so the DRAM end stays bounded (~seconds, fits the harness timeout)
 static const uint32_t DEFAULT_RNG_SEED        = 42u;
 
 // ---------------------------------------------------------------------------
@@ -213,9 +219,9 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_cacheline_bytes");
     if (env_val) cacheline_bytes = (uint32_t)atoi(env_val);
 
-    uint32_t reuse_k = DEFAULT_REUSE_K;
-    env_val = getenv("BENCH_PARAM_reuse_k");
-    if (env_val) reuse_k = (uint32_t)atoi(env_val);
+    uint32_t measure_laps = DEFAULT_MEASURE_LAPS;
+    env_val = getenv("BENCH_PARAM_measure_laps");
+    if (env_val) measure_laps = (uint32_t)atoi(env_val);
 
     uint32_t rng_seed = DEFAULT_RNG_SEED;
     env_val = getenv("BENCH_PARAM_rng_seed");
@@ -232,14 +238,21 @@ int main(int argc, char *argv[])
     }
     const uint32_t M = (uint32_t)(N / stride);   // cacheline nodes == touched lines
 
-    /* num_accesses = K FULL laps over the working set (no cap): ~1 cold miss +
-     * (K-1) resident hits per line for sizes that fit a cache level; all-miss
-     * latency once the set exceeds the caches. The count grows with array_bytes
-     * (largest points take minutes on HW). An explicit override wins. */
-    uint64_t num_accesses = (uint64_t)reuse_k * (uint64_t)M;
-    if (num_accesses < 1u) num_accesses = 1u;
+    /* Untimed warm-up = one lap that makes the set resident (and loads the code
+     * object), capped at the largest cache so the DRAM end skips a huge fill. */
+    const uint64_t warm_cap = (uint64_t)(WARMUP_CAP_BYTES / cacheline_bytes);
+    uint64_t num_warmup = ((uint64_t)M < warm_cap) ? (uint64_t)M : warm_cap;
+    if (num_warmup < 1u) num_warmup = 1u;
+
+    /* Timed accesses = measure_laps steady-state laps, clamped: a floor so tiny
+     * resident sizes still get enough samples, a ceiling so the DRAM end stays
+     * bounded. The cold fill is excluded (run untimed above), so these measure
+     * pure hits for resident sizes and pure misses past the caches. Override wins. */
+    uint64_t num_timed = (uint64_t)measure_laps * (uint64_t)M;
+    if (num_timed < MIN_TIMED_ACCESSES) num_timed = MIN_TIMED_ACCESSES;
+    if (num_timed > MAX_TIMED_ACCESSES) num_timed = MAX_TIMED_ACCESSES;
     env_val = getenv("BENCH_PARAM_num_accesses");
-    if (env_val) num_accesses = strtoull(env_val, nullptr, 10);
+    if (env_val) num_timed = strtoull(env_val, nullptr, 10);
 
     /* Print device information to stderr. */
     int device_id = 0;
@@ -253,10 +266,12 @@ int main(int argc, char *argv[])
             array_bytes, array_bytes / 1024);
     fprintf(stderr, "Cacheline      : %u B  (stride %u elems)\n", cacheline_bytes, stride);
     fprintf(stderr, "Lines (nodes)  : %u\n", M);
-    fprintf(stderr, "Reuse K / accs : %u laps -> %llu accesses\n",
-            reuse_k, (unsigned long long)num_accesses);
+    fprintf(stderr, "Warm-up (cold) : %llu accesses (untimed)\n",
+            (unsigned long long)num_warmup);
+    fprintf(stderr, "Timed (steady) : %u laps -> %llu accesses\n",
+            measure_laps, (unsigned long long)num_timed);
     fprintf(stderr, "RNG seed       : %u\n", rng_seed);
-    fprintf(stderr, "Method         : single-thread cacheline-stride pointer chasing\n\n");
+    fprintf(stderr, "Method         : cacheline-stride pointer chase, cold lap discarded\n\n");
 
     /* Build chain on host (only the M node slots are written; rest stay 0). */
     std::vector<uint32_t> h_arr(N, 0u);
@@ -273,12 +288,12 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipMemcpy(d_arr, h_arr.data(), array_bytes,
                         hipMemcpyHostToDevice));
 
-    /* Module-load primer: one untimed launch with a single access so the timed
-     * launch below doesn't pay the one-time code-object load (each data point is
-     * a fresh process). It touches only the start line, so the working set stays
-     * cold — the timed kernel self-warms (first lap misses, K-1 laps hit). */
+    /* Untimed warm-up lap: makes the working set resident (so the timed run
+     * measures steady-state hits, not the cold fill) and loads the kernel code
+     * object. Capped at the largest cache, so the DRAM end pays only a partial
+     * fill it doesn't need anyway. Excluded from timing. */
     hipLaunchKernelGGL(pointer_chase_kernel, dim3(1), dim3(1), 0, 0,
-                       d_arr, start_idx, 1u, d_result);
+                       d_arr, start_idx, num_warmup, d_result);
     HIP_CHECK(hipDeviceSynchronize());
 
     /* Timed runs. */
@@ -288,16 +303,16 @@ int main(int argc, char *argv[])
 
     HIP_CHECK(hipEventRecord(ev_start, 0));
     hipLaunchKernelGGL(pointer_chase_kernel, dim3(1), dim3(1), 0, 0,
-                       d_arr, start_idx, num_accesses, d_result);
+                       d_arr, start_idx, num_timed, d_result);
     HIP_CHECK(hipEventRecord(ev_stop, 0));
     HIP_CHECK(hipEventSynchronize(ev_stop));
 
     float total_ms = 0.0f;
     HIP_CHECK(hipEventElapsedTime(&total_ms, ev_start, ev_stop));
 
-    /* Latency (ns) = total_time_ns / num_accesses */
+    /* Latency (ns) = total_time_ns / timed accesses (cold fill lap excluded) */
     const double latency_ns = static_cast<double>(total_ms) * 1e6
-                              / static_cast<double>(num_accesses);
+                              / static_cast<double>(num_timed);
 
     fprintf(stderr, "Array %zu KB: latency = %.2f ns\n",
             array_bytes / 1024, latency_ns);
@@ -305,9 +320,11 @@ int main(int argc, char *argv[])
     /* JSON-lines output to stdout: kernel event */
     printf("{\"type\":\"kernel\",\"name\":\"pointer_chase_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"array_bytes\":%zu,\"num_accesses\":%llu,"
-           "\"cacheline_bytes\":%u,\"reuse_k\":%u,\"rng_seed\":%u}}\n",
-           (double)total_ms, array_bytes, (unsigned long long)num_accesses,
-           cacheline_bytes, reuse_k, rng_seed);
+           "\"warmup_accesses\":%llu,\"measure_laps\":%u,"
+           "\"cacheline_bytes\":%u,\"rng_seed\":%u}}\n",
+           (double)total_ms, array_bytes, (unsigned long long)num_timed,
+           (unsigned long long)num_warmup, measure_laps,
+           cacheline_bytes, rng_seed);
 
     /* JSON-lines output to stdout: summary */
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

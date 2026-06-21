@@ -369,65 +369,80 @@ int main(int argc, char** argv) {
                  (height + COL_TILE_H - 1) / COL_TILE_H);
     size_t colSmem = COL_TILE_W * (COL_TILE_H + 2 * radius) * sizeof(float);
 
+    // Per-kernel timing events (used only when accumulators are supplied)
+    hipEvent_t kStart, kStop;
+    HIP_CHECK(hipEventCreate(&kStart));
+    HIP_CHECK(hipEventCreate(&kStop));
+
     // Lambda: run full separable convolution
-    auto run_conv = [&]() {
-        hipLaunchKernelGGL(convolution_row_kernel,
-                           rowGrid, rowBlock, rowSmem, 0,
-                           d_input, d_temp, width, height, radius);
-        hipLaunchKernelGGL(convolution_col_kernel,
-                           colGrid, colBlock, colSmem, 0,
-                           d_temp, d_output, width, height, radius);
+    // When accumulators are supplied, each pass is timed separately;
+    // passing nullptr (warmup) runs untimed.
+    auto run_conv = [&](double* row_acc, double* col_acc) {
+        if (row_acc) {
+            HIP_CHECK(hipEventRecord(kStart, 0));
+            hipLaunchKernelGGL(convolution_row_kernel,
+                               rowGrid, rowBlock, rowSmem, 0,
+                               d_input, d_temp, width, height, radius);
+            HIP_CHECK(hipEventRecord(kStop, 0));
+            HIP_CHECK(hipEventSynchronize(kStop));
+            float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
+            *row_acc += (double)_ms;
+        } else {
+            hipLaunchKernelGGL(convolution_row_kernel,
+                               rowGrid, rowBlock, rowSmem, 0,
+                               d_input, d_temp, width, height, radius);
+        }
+
+        if (col_acc) {
+            HIP_CHECK(hipEventRecord(kStart, 0));
+            hipLaunchKernelGGL(convolution_col_kernel,
+                               colGrid, colBlock, colSmem, 0,
+                               d_temp, d_output, width, height, radius);
+            HIP_CHECK(hipEventRecord(kStop, 0));
+            HIP_CHECK(hipEventSynchronize(kStop));
+            float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
+            *col_acc += (double)_ms;
+        } else {
+            hipLaunchKernelGGL(convolution_col_kernel,
+                               colGrid, colBlock, colSmem, 0,
+                               d_temp, d_output, width, height, radius);
+        }
     };
 
     // -------------------------------------------------------------------
     // Warmup
     // -------------------------------------------------------------------
     for (int w = 0; w < num_warmup; ++w) {
-        run_conv();
+        run_conv(nullptr, nullptr);
         HIP_CHECK(hipDeviceSynchronize());
     }
 
     // -------------------------------------------------------------------
-    // Timed iterations
+    // Timed iterations — each pass timed into its own accumulator
     // -------------------------------------------------------------------
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    std::vector<double> times(1);
+    double row_ms = 0.0, col_ms = 0.0;
     for (int i = 0; i < 1; ++i) {
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        run_conv();
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
+        run_conv(&row_ms, &col_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
+    HIP_CHECK(hipEventDestroy(kStart));
+    HIP_CHECK(hipEventDestroy(kStop));
 
-    // Compute average time
-    double sum = 0.0;
-    for (int i = 0; i < 1; ++i) sum += times[i];
-    double avg_ms = sum / 1;
+    double total_ms = row_ms + col_ms;
+    double avg_ms = total_ms;
 
     // GB/s = 2 * W * H * sizeof(float) / time_s / 1e9
     double data_bytes = 2.0 * (double)width * (double)height * sizeof(float);
     double gbs = data_bytes / (avg_ms * 1e-3) / 1e9;
 
-    double total_ms = sum;
-
     // JSON-lines kernel events (one per kernel)
     printf("{\"type\":\"kernel\",\"name\":\"convolution_row_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"width\":%d,\"height\":%d,\"radius\":%d}}\n",
-           avg_ms, width, height, radius);
+           row_ms, width, height, radius);
 
     printf("{\"type\":\"kernel\",\"name\":\"convolution_col_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"width\":%d,\"height\":%d,\"radius\":%d}}\n",
-           avg_ms, width, height, radius);
+           col_ms, width, height, radius);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

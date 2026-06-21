@@ -484,27 +484,57 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_rng, h_rng.data(), uint_bytes,  hipMemcpyHostToDevice));
     };
 
-    // Lambda: run full particle filter over all time steps
-    auto run_pf = [&]() {
+    // Lambda: run full particle filter over all time steps.
+    // When timing events are supplied, each kernel launch is wrapped in its own
+    // event pair and its elapsed time is accumulated into the matching sum, so
+    // each distinct kernel reports its OWN separately measured GPU time
+    // (summed across the TIME_STEPS loop).
+    auto run_pf = [&](hipEvent_t* evStart, hipEvent_t* evStop,
+                      double* t_update, double* t_weights, double* t_prefix,
+                      double* t_addblock, double* t_resample) {
         for (int t = 0; t < TIME_STEPS; ++t) {
             // Kernel 1: update positions
+            if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
             hipLaunchKernelGGL(update_particles_kernel,
                                dim3(gridSize), dim3(blockSize), 0, 0,
                                d_x, d_y, d_rng, N);
+            if (evStart) {
+                HIP_CHECK(hipEventRecord(*evStop, 0));
+                HIP_CHECK(hipEventSynchronize(*evStop));
+                float ms = 0.0f;
+                HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
+                *t_update += (double)ms;
+            }
 
             // Kernel 2: compute weights
+            if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
             hipLaunchKernelGGL(compute_weights_kernel,
                                dim3(gridSize), dim3(blockSize), 0, 0,
                                d_x, d_y, d_weights, obs_x[t], obs_y[t], N);
+            if (evStart) {
+                HIP_CHECK(hipEventRecord(*evStop, 0));
+                HIP_CHECK(hipEventSynchronize(*evStop));
+                float ms = 0.0f;
+                HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
+                *t_weights += (double)ms;
+            }
 
             // Copy weights to CDF for prefix sum
             HIP_CHECK(hipMemcpy(d_cdf, d_weights, float_bytes, hipMemcpyDeviceToDevice));
 
             // Prefix sum (in-place on d_cdf)
+            if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
             hipLaunchKernelGGL(prefix_sum_kernel,
                                dim3(numScanBlocks), dim3(scanBlock),
                                scanElements * sizeof(float), 0,
                                d_cdf, d_block_sums, N);
+            if (evStart) {
+                HIP_CHECK(hipEventRecord(*evStop, 0));
+                HIP_CHECK(hipEventSynchronize(*evStop));
+                float ms = 0.0f;
+                HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
+                *t_prefix += (double)ms;
+            }
 
             // Fix up block sums on host (small array)
             if (numScanBlocks > 1) {
@@ -515,9 +545,17 @@ int main(int argc, char** argv) {
                 HIP_CHECK(hipMemcpy(d_block_sums, h_bsums.data(), blockSumBytes,
                                      hipMemcpyHostToDevice));
 
+                if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
                 hipLaunchKernelGGL(add_block_sums_kernel,
                                    dim3(numScanBlocks), dim3(scanBlock), 0, 0,
                                    d_cdf, d_block_sums, N);
+                if (evStart) {
+                    HIP_CHECK(hipEventRecord(*evStop, 0));
+                    HIP_CHECK(hipEventSynchronize(*evStop));
+                    float ms = 0.0f;
+                    HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
+                    *t_addblock += (double)ms;
+                }
             }
 
             // Get total weight (sum of all weights)
@@ -535,10 +573,18 @@ int main(int argc, char** argv) {
             if (total_weight < 1e-30f) total_weight = 1.0f;
 
             // Kernel 3: resample
+            if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
             hipLaunchKernelGGL(resample_kernel,
                                dim3(gridSize), dim3(blockSize), 0, 0,
                                d_cdf, d_x, d_y, d_x2, d_y2, d_rng,
                                total_weight, N);
+            if (evStart) {
+                HIP_CHECK(hipEventRecord(*evStop, 0));
+                HIP_CHECK(hipEventSynchronize(*evStop));
+                float ms = 0.0f;
+                HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
+                *t_resample += (double)ms;
+            }
 
             // Swap buffers
             float* tmp;
@@ -552,69 +598,63 @@ int main(int argc, char** argv) {
     // -----------------------------------------------------------------------
     for (int w = 0; w < num_warmup; ++w) {
         upload_initial();
-        run_pf();
+        run_pf(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);  // untimed
         HIP_CHECK(hipDeviceSynchronize());
     }
 
     // -----------------------------------------------------------------------
-    // Timed iterations
+    // Timed iterations — each kernel measured separately with its own
+    // accumulator (summed across the TIME_STEPS loop inside run_pf).
     // -----------------------------------------------------------------------
     hipEvent_t evStart, evStop;
     HIP_CHECK(hipEventCreate(&evStart));
     HIP_CHECK(hipEventCreate(&evStop));
 
-    std::vector<double> times(1);
+    double t_update   = 0.0;  // update_particles_kernel
+    double t_weights  = 0.0;  // compute_weights_kernel
+    double t_prefix   = 0.0;  // prefix_sum_kernel
+    double t_addblock = 0.0;  // add_block_sums_kernel
+    double t_resample = 0.0;  // resample_kernel
     for (int i = 0; i < 1; ++i) {
         upload_initial();
-
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        run_pf();
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
+        run_pf(&evStart, &evStop, &t_update, &t_weights, &t_prefix,
+               &t_addblock, &t_resample);
     }
 
     HIP_CHECK(hipEventDestroy(evStart));
     HIP_CHECK(hipEventDestroy(evStop));
 
-    // Compute average time
-    double sum = 0.0;
-    for (int i = 0; i < 1; ++i) sum += times[i];
-    double avg_ms = sum / 1;
+    double total_ms = t_update + t_weights + t_prefix + t_addblock + t_resample;
+    double avg_ms   = total_ms;
 
     // particles/sec = N * TIME_STEPS / time_s
     double particles_per_sec = (double)N * TIME_STEPS / (avg_ms * 1e-3);
 
-    double total_ms = sum;
-
-    // JSON-lines kernel events (one per kernel)
+    // JSON-lines kernel events (one per kernel, each with its OWN measured time)
     printf("{\"type\":\"kernel\",\"name\":\"update_particles_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,"
            "\"num_particles_ratio\":\"%s\",\"seed\":%d}}\n",
-           avg_ms, N, num_particles_ratio, seed_param);
+           t_update, N, num_particles_ratio, seed_param);
 
     printf("{\"type\":\"kernel\",\"name\":\"compute_weights_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,"
            "\"num_particles_ratio\":\"%s\",\"seed\":%d}}\n",
-           avg_ms, N, num_particles_ratio, seed_param);
+           t_weights, N, num_particles_ratio, seed_param);
 
     printf("{\"type\":\"kernel\",\"name\":\"prefix_sum_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,"
            "\"num_particles_ratio\":\"%s\",\"seed\":%d}}\n",
-           avg_ms, N, num_particles_ratio, seed_param);
+           t_prefix, N, num_particles_ratio, seed_param);
 
     printf("{\"type\":\"kernel\",\"name\":\"add_block_sums_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,"
            "\"num_particles_ratio\":\"%s\",\"seed\":%d}}\n",
-           avg_ms, N, num_particles_ratio, seed_param);
+           t_addblock, N, num_particles_ratio, seed_param);
 
     printf("{\"type\":\"kernel\",\"name\":\"resample_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,"
            "\"num_particles_ratio\":\"%s\",\"seed\":%d}}\n",
-           avg_ms, N, num_particles_ratio, seed_param);
+           t_resample, N, num_particles_ratio, seed_param);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
@@ -622,7 +662,8 @@ int main(int argc, char** argv) {
            total_ms, particles_per_sec);
 
     // Human-readable output to stderr
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
+    fprintf(stderr, "Average time: %.4f ms  (update=%.4f weights=%.4f prefix=%.4f addblock=%.4f resample=%.4f)\n",
+            avg_ms, t_update, t_weights, t_prefix, t_addblock, t_resample);
     fprintf(stderr, "Throughput:   %.4f particles/sec\n", particles_per_sec);
 
     // -----------------------------------------------------------------------

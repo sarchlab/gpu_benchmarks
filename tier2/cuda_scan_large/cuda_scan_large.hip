@@ -200,7 +200,12 @@ __global__ void add_block_sums_kernel(
 // Recursive scan for large arrays
 // ---------------------------------------------------------------------------
 
-static void scan_recursive(unsigned int* d_data, int N) {
+// When accumulators are supplied, each kernel launch is timed separately and
+// summed across ALL recursion levels into the corresponding accumulator.
+// Passing nullptr (warmup) runs untimed.
+static void scan_recursive(unsigned int* d_data, int N,
+                           double* block_acc, double* add_acc,
+                           hipEvent_t kStart, hipEvent_t kStop) {
     int numBlocks = (N + ELEMENTS_PER_BLOCK - 1) / ELEMENTS_PER_BLOCK;
 
     unsigned int* d_block_sums = nullptr;
@@ -209,18 +214,40 @@ static void scan_recursive(unsigned int* d_data, int N) {
     }
 
     // Phase 1: Block-level scan
-    hipLaunchKernelGGL(scan_block_kernel,
-                       dim3(numBlocks), dim3(BLOCK_SIZE), 0, 0,
-                       d_data, d_block_sums, N);
+    if (block_acc) {
+        HIP_CHECK(hipEventRecord(kStart, 0));
+        hipLaunchKernelGGL(scan_block_kernel,
+                           dim3(numBlocks), dim3(BLOCK_SIZE), 0, 0,
+                           d_data, d_block_sums, N);
+        HIP_CHECK(hipEventRecord(kStop, 0));
+        HIP_CHECK(hipEventSynchronize(kStop));
+        float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
+        *block_acc += (double)_ms;
+    } else {
+        hipLaunchKernelGGL(scan_block_kernel,
+                           dim3(numBlocks), dim3(BLOCK_SIZE), 0, 0,
+                           d_data, d_block_sums, N);
+    }
 
     if (numBlocks > 1) {
         // Phase 2: Recursively scan the block sums
-        scan_recursive(d_block_sums, numBlocks);
+        scan_recursive(d_block_sums, numBlocks, block_acc, add_acc, kStart, kStop);
 
         // Phase 3: Add scanned block sums back to each block
-        hipLaunchKernelGGL(add_block_sums_kernel,
-                           dim3(numBlocks), dim3(BLOCK_SIZE), 0, 0,
-                           d_data, d_block_sums, N);
+        if (add_acc) {
+            HIP_CHECK(hipEventRecord(kStart, 0));
+            hipLaunchKernelGGL(add_block_sums_kernel,
+                               dim3(numBlocks), dim3(BLOCK_SIZE), 0, 0,
+                               d_data, d_block_sums, N);
+            HIP_CHECK(hipEventRecord(kStop, 0));
+            HIP_CHECK(hipEventSynchronize(kStop));
+            float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
+            *add_acc += (double)_ms;
+        } else {
+            hipLaunchKernelGGL(add_block_sums_kernel,
+                               dim3(numBlocks), dim3(BLOCK_SIZE), 0, 0,
+                               d_data, d_block_sums, N);
+        }
 
         HIP_CHECK(hipFree(d_block_sums));
     }
@@ -298,63 +325,54 @@ int main(int argc, char** argv) {
     unsigned int* d_data;
     HIP_CHECK(hipMalloc(&d_data, bytes));
 
-    // Lambda: run full scan
-    auto run_scan = [&]() {
+    // Per-kernel timing events (used only when accumulators are supplied)
+    hipEvent_t kStart, kStop;
+    HIP_CHECK(hipEventCreate(&kStart));
+    HIP_CHECK(hipEventCreate(&kStop));
+
+    // Lambda: run full scan. When accumulators are supplied, each kernel type
+    // is timed and summed across all recursion levels; nullptr runs untimed.
+    auto run_scan = [&](double* block_acc, double* add_acc) {
         HIP_CHECK(hipMemcpy(d_data, h_input, bytes, hipMemcpyHostToDevice));
-        scan_recursive(d_data, N);
+        scan_recursive(d_data, N, block_acc, add_acc, kStart, kStop);
     };
 
     // -------------------------------------------------------------------
     // Warmup
     // -------------------------------------------------------------------
     for (int w = 0; w < num_warmup; ++w) {
-        run_scan();
+        run_scan(nullptr, nullptr);
         HIP_CHECK(hipDeviceSynchronize());
     }
 
     // -------------------------------------------------------------------
-    // Timed iterations
+    // Timed iterations — each kernel type summed across all recursion levels
     // -------------------------------------------------------------------
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    std::vector<double> times(1);
+    double block_ms = 0.0, add_ms = 0.0;
     for (int i = 0; i < 1; ++i) {
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        run_scan();
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
+        run_scan(&block_ms, &add_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
+    HIP_CHECK(hipEventDestroy(kStart));
+    HIP_CHECK(hipEventDestroy(kStop));
 
-    // Compute average time
-    double sum = 0.0;
-    for (int i = 0; i < 1; ++i) sum += times[i];
-    double avg_ms = sum / 1;
+    double total_ms = block_ms + add_ms;
+    double avg_ms = total_ms;
 
     // GB/s = 2 * N * sizeof(uint) / time_s / 1e9
     double data_bytes = 2.0 * (double)N * sizeof(unsigned int);
     double gbs = data_bytes / (avg_ms * 1e-3) / 1e9;
 
-    double total_ms = sum;
-
     // JSON-lines kernel events
     printf("{\"type\":\"kernel\",\"name\":\"scan_block_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"verify\":\"%s\"}}\n",
-           avg_ms, size, block_size, verify);
+           block_ms, size, block_size, verify);
 
     printf("{\"type\":\"kernel\",\"name\":\"add_block_sums_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"verify\":\"%s\"}}\n",
-           avg_ms, size, block_size, verify);
+           add_ms, size, block_size, verify);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

@@ -295,18 +295,31 @@ int main(int argc, char** argv) {
 
     int gridTri = (num_triangles + block_size - 1) / block_size;
 
-    auto run_dmr = [&]() {
+    // Run the DMR refinement loop. When timing events are supplied, each kernel
+    // launch is wrapped in its own event pair and its elapsed time is added to
+    // the matching accumulator, so each distinct kernel reports its OWN
+    // separately measured GPU time (summed across the refine loop).
+    auto run_dmr = [&](hipEvent_t* evStart, hipEvent_t* evStop,
+                       double* t_check, double* t_refine) {
         HIP_CHECK(hipMemcpy(d_vx, h_vx_bak.data(), vert_bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_vy, h_vy_bak.data(), vert_bytes, hipMemcpyHostToDevice));
 
         for (int r = 0; r < max_refine_iters; ++r) {
             HIP_CHECK(hipMemset(d_worklist_count, 0, sizeof(int)));
 
+            if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
             hipLaunchKernelGGL(dmr_check_kernel, dim3(gridTri), dim3(block_size), 0, 0,
                 d_tri_v0, d_tri_v1, d_tri_v2,
                 d_vx, d_vy,
                 d_worklist, d_worklist_count,
                 min_angle, num_triangles);
+            if (evStart) {
+                HIP_CHECK(hipEventRecord(*evStop, 0));
+                HIP_CHECK(hipEventSynchronize(*evStop));
+                float ms = 0.0f;
+                HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
+                *t_check += (double)ms;
+            }
 
             int h_wl_count = 0;
             HIP_CHECK(hipMemcpy(&h_wl_count, d_worklist_count, sizeof(int),
@@ -315,69 +328,67 @@ int main(int argc, char** argv) {
             if (h_wl_count == 0) break;
 
             int gridWL = (h_wl_count + block_size - 1) / block_size;
+            if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
             hipLaunchKernelGGL(dmr_refine_kernel, dim3(gridWL), dim3(block_size), 0, 0,
                 d_worklist, h_wl_count,
                 d_tri_v0, d_tri_v1, d_tri_v2,
                 d_vx, d_vy,
                 num_vertices, num_triangles);
+            if (evStart) {
+                HIP_CHECK(hipEventRecord(*evStop, 0));
+                HIP_CHECK(hipEventSynchronize(*evStop));
+                float ms = 0.0f;
+                HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
+                *t_refine += (double)ms;
+            }
         }
     };
 
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
-        run_dmr();
+        run_dmr(nullptr, nullptr, nullptr, nullptr);  // untimed full sequence
         HIP_CHECK(hipDeviceSynchronize());
     }
 
-    // Timed iterations
+    // Timed iterations — each kernel measured separately with its own
+    // accumulator (summed across the refine loop inside run_dmr).
     hipEvent_t evStart, evStop;
     HIP_CHECK(hipEventCreate(&evStart));
     HIP_CHECK(hipEventCreate(&evStop));
 
-    std::vector<double> times(1);
+    double t_check = 0.0;   // dmr_check_kernel
+    double t_refine = 0.0;  // dmr_refine_kernel
     for (int i = 0; i < 1; ++i) {
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        run_dmr();
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
+        run_dmr(&evStart, &evStop, &t_check, &t_refine);
     }
 
     HIP_CHECK(hipEventDestroy(evStart));
     HIP_CHECK(hipEventDestroy(evStop));
 
-    double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        sum_ms += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg_ms = sum_ms / 1;
+    double total_ms = t_check + t_refine;
+    double avg_ms = total_ms;
     double mtri_per_sec = (double)num_triangles / (avg_ms * 1e-3) / 1e6;
 
-    fprintf(stderr, "Performance: %.2f Mtri/sec  (avg %.4f ms, min %.4f ms, max %.4f ms)\n",
-            mtri_per_sec, avg_ms, mn, mx);
+    fprintf(stderr, "Performance: %.2f Mtri/sec  (total %.4f ms: check=%.4f refine=%.4f)\n",
+            mtri_per_sec, avg_ms, t_check, t_refine);
 
     printf("{\"type\":\"kernel\",\"name\":\"dmr_check_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"num_triangles\":%d,\"block_size\":%d,"
            "\"min_angle\":%.1f,\"max_refine_iterations\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_ms * 0.5, num_triangles, block_size, min_angle,
+           t_check, num_triangles, block_size, min_angle,
            max_refine_iters, precision);
 
     printf("{\"type\":\"kernel\",\"name\":\"dmr_refine_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"num_triangles\":%d,\"block_size\":%d,"
            "\"min_angle\":%.1f,\"max_refine_iterations\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_ms * 0.5, num_triangles, block_size, min_angle,
+           t_refine, num_triangles, block_size, min_angle,
            max_refine_iters, precision);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"mtri_per_sec\",\"value\":%.2f}]}\n",
-           avg_ms, mtri_per_sec);
+           total_ms, mtri_per_sec);
 
     HIP_CHECK(hipFree(d_vx));
     HIP_CHECK(hipFree(d_vy));

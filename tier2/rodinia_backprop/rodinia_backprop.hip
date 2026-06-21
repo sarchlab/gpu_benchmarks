@@ -299,47 +299,100 @@ int main(int argc, char* argv[])
     dim3 grid2d((input_n  + 15) / 16,
                 (hidden_n + 15) / 16);
 
-    // Lambda: one forward + backward pass
-    auto run_epoch = [&]() {
-        // --- Forward ---
-        forward_hidden<<<grid_hid, BLOCK_SZ>>>(
-            d_input, d_w1, d_b1, d_hidden, input_n, hidden_n);
-        forward_output<<<grid_out, BLOCK_SZ>>>(
-            d_hidden, d_w2, d_b2, d_output, hidden_n, output_n);
-
-        // --- Backward ---
-        backward_output_delta<<<grid_out, BLOCK_SZ>>>(
-            d_output, d_target, d_delta_out, output_n);
-        backward_hidden_delta<<<grid_hid, BLOCK_SZ>>>(
-            d_hidden, d_w2, d_delta_out, d_delta_hid, hidden_n, output_n);
-        update_w1<<<grid2d, block2d>>>(
-            d_w1, d_input, d_delta_hid, input_n, hidden_n, LR);
-        update_w2<<<grid_hid, BLOCK_SZ>>>(
-            d_w2, d_hidden, d_delta_out, hidden_n, output_n, LR);
-    };
-
-    // -----------------------------------------------------------------------
-    // Warmup
-    // -----------------------------------------------------------------------
-    for (int w = 0; w < num_warmup; ++w) {
-        run_epoch();
-        gpuDeviceSynchronize();
-    }
-
-    // -----------------------------------------------------------------------
-    // Timed iterations
-    // -----------------------------------------------------------------------
-    std::vector<float> times(1);
+    // Per-kernel timing events and accumulators
     gpuEvent_t ev_start, ev_stop;
     gpuEventCreate(&ev_start);
     gpuEventCreate(&ev_stop);
 
+    double t_forward_hidden        = 0.0;
+    double t_forward_output        = 0.0;
+    double t_backward_output_delta = 0.0;
+    double t_backward_hidden_delta = 0.0;
+    double t_update_w1             = 0.0;
+    double t_update_w2             = 0.0;
+
+    // Lambda: one forward + backward pass.
+    // When timed==true, each kernel launch is wrapped in its own event pair
+    // and its elapsed time is added to that kernel's accumulator.
+    auto run_epoch = [&](bool timed) {
+        float ms = 0.0f;
+
+        // --- Forward ---
+        if (timed) gpuEventRecord(ev_start, 0);
+        forward_hidden<<<grid_hid, BLOCK_SZ>>>(
+            d_input, d_w1, d_b1, d_hidden, input_n, hidden_n);
+        if (timed) {
+            gpuEventRecord(ev_stop, 0);
+            gpuEventSynchronize(ev_stop);
+            gpuEventElapsedTime(&ms, ev_start, ev_stop);
+            t_forward_hidden += ms;
+        }
+
+        if (timed) gpuEventRecord(ev_start, 0);
+        forward_output<<<grid_out, BLOCK_SZ>>>(
+            d_hidden, d_w2, d_b2, d_output, hidden_n, output_n);
+        if (timed) {
+            gpuEventRecord(ev_stop, 0);
+            gpuEventSynchronize(ev_stop);
+            gpuEventElapsedTime(&ms, ev_start, ev_stop);
+            t_forward_output += ms;
+        }
+
+        // --- Backward ---
+        if (timed) gpuEventRecord(ev_start, 0);
+        backward_output_delta<<<grid_out, BLOCK_SZ>>>(
+            d_output, d_target, d_delta_out, output_n);
+        if (timed) {
+            gpuEventRecord(ev_stop, 0);
+            gpuEventSynchronize(ev_stop);
+            gpuEventElapsedTime(&ms, ev_start, ev_stop);
+            t_backward_output_delta += ms;
+        }
+
+        if (timed) gpuEventRecord(ev_start, 0);
+        backward_hidden_delta<<<grid_hid, BLOCK_SZ>>>(
+            d_hidden, d_w2, d_delta_out, d_delta_hid, hidden_n, output_n);
+        if (timed) {
+            gpuEventRecord(ev_stop, 0);
+            gpuEventSynchronize(ev_stop);
+            gpuEventElapsedTime(&ms, ev_start, ev_stop);
+            t_backward_hidden_delta += ms;
+        }
+
+        if (timed) gpuEventRecord(ev_start, 0);
+        update_w1<<<grid2d, block2d>>>(
+            d_w1, d_input, d_delta_hid, input_n, hidden_n, LR);
+        if (timed) {
+            gpuEventRecord(ev_stop, 0);
+            gpuEventSynchronize(ev_stop);
+            gpuEventElapsedTime(&ms, ev_start, ev_stop);
+            t_update_w1 += ms;
+        }
+
+        if (timed) gpuEventRecord(ev_start, 0);
+        update_w2<<<grid_hid, BLOCK_SZ>>>(
+            d_w2, d_hidden, d_delta_out, hidden_n, output_n, LR);
+        if (timed) {
+            gpuEventRecord(ev_stop, 0);
+            gpuEventSynchronize(ev_stop);
+            gpuEventElapsedTime(&ms, ev_start, ev_stop);
+            t_update_w2 += ms;
+        }
+    };
+
+    // -----------------------------------------------------------------------
+    // Warmup (full kernel sequence, untimed)
+    // -----------------------------------------------------------------------
+    for (int w = 0; w < num_warmup; ++w) {
+        run_epoch(false);
+        gpuDeviceSynchronize();
+    }
+
+    // -----------------------------------------------------------------------
+    // Timed iterations — each kernel timed separately into its accumulator
+    // -----------------------------------------------------------------------
     for (int it = 0; it < 1; it++) {
-        gpuEventRecord(ev_start, 0);
-        run_epoch();
-        gpuEventRecord(ev_stop, 0);
-        gpuEventSynchronize(ev_stop);
-        gpuEventElapsedTime(&times[it], ev_start, ev_stop);
+        run_epoch(true);
     }
 
     gpuEventDestroy(ev_start);
@@ -348,13 +401,10 @@ int main(int argc, char* argv[])
     // -----------------------------------------------------------------------
     // Statistics
     // -----------------------------------------------------------------------
-    double sum_ms = 0.0, mn_ms = times[0], mx_ms = times[0];
-    for (int i = 0; i < 1; i++) {
-        sum_ms += times[i];
-        if (times[i] < mn_ms) mn_ms = times[i];
-        if (times[i] > mx_ms) mx_ms = times[i];
-    }
-    double avg_ms = sum_ms / 1;
+    double sum_ms = t_forward_hidden + t_forward_output +
+                    t_backward_output_delta + t_backward_hidden_delta +
+                    t_update_w1 + t_update_w2;
+    double avg_ms = sum_ms;
 
     // GFLOPS: approximate (forward ≈ 2*INPUT*HIDDEN + 2*HIDDEN*OUTPUT,
     //                       backward ≈ same)
@@ -362,19 +412,28 @@ int main(int argc, char* argv[])
                    4.0 * (double)hidden_n * output_n;
     double gflops = flops / (avg_ms * 1e-3) / 1e9;
 
-    fprintf(stderr, "GFLOPS: %.2f  (avg %.4f ms, min %.4f ms, max %.4f ms)\n",
-            gflops, avg_ms, mn_ms, mx_ms);
+    fprintf(stderr, "GFLOPS: %.2f  (total %.4f ms)\n",
+            gflops, avg_ms);
 
     // JSON-lines kernel events (one per kernel in params.json)
-    const char* kernel_names[] = {
-        "forward_hidden", "forward_output", "backward_output_delta",
-        "backward_hidden_delta", "update_w1", "update_w2"
-    };
-    for (int ki = 0; ki < 6; ki++) {
-        printf("{\"type\":\"kernel\",\"name\":\"%s\",\"time_ms\":%.6f,"
-               "\"params\":{\"input\":%d,\"hidden\":%d,\"output\":%d}}\n",
-               kernel_names[ki], avg_ms, input_n, hidden_n, output_n);
-    }
+    printf("{\"type\":\"kernel\",\"name\":\"forward_hidden\",\"time_ms\":%.6f,"
+           "\"params\":{\"input\":%d,\"hidden\":%d,\"output\":%d}}\n",
+           t_forward_hidden, input_n, hidden_n, output_n);
+    printf("{\"type\":\"kernel\",\"name\":\"forward_output\",\"time_ms\":%.6f,"
+           "\"params\":{\"input\":%d,\"hidden\":%d,\"output\":%d}}\n",
+           t_forward_output, input_n, hidden_n, output_n);
+    printf("{\"type\":\"kernel\",\"name\":\"backward_output_delta\",\"time_ms\":%.6f,"
+           "\"params\":{\"input\":%d,\"hidden\":%d,\"output\":%d}}\n",
+           t_backward_output_delta, input_n, hidden_n, output_n);
+    printf("{\"type\":\"kernel\",\"name\":\"backward_hidden_delta\",\"time_ms\":%.6f,"
+           "\"params\":{\"input\":%d,\"hidden\":%d,\"output\":%d}}\n",
+           t_backward_hidden_delta, input_n, hidden_n, output_n);
+    printf("{\"type\":\"kernel\",\"name\":\"update_w1\",\"time_ms\":%.6f,"
+           "\"params\":{\"input\":%d,\"hidden\":%d,\"output\":%d}}\n",
+           t_update_w1, input_n, hidden_n, output_n);
+    printf("{\"type\":\"kernel\",\"name\":\"update_w2\",\"time_ms\":%.6f,"
+           "\"params\":{\"input\":%d,\"hidden\":%d,\"output\":%d}}\n",
+           t_update_w2, input_n, hidden_n, output_n);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

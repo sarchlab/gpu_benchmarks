@@ -437,57 +437,84 @@ int main(int argc, char** argv) {
 
     char problemSize[64];
     snprintf(problemSize, sizeof(problemSize), "%d", seq_len);
+    (void)problemSize;
 
-    BenchResult r = runBenchmark(
-        "rodinia_nw", problemSize, 1, num_warmup, [&]() {
-            // Reset matrix borders for each timed run
-            HIP_CHECK(hipMemcpy(d_matrix, h_matrix,
-                                matrix_elems * sizeof(int),
-                                hipMemcpyHostToDevice));
+    // Per-kernel timing accumulators.
+    double t_kernel1 = 0.0, t_kernel2 = 0.0;
 
-            // Phase 1: upper-left triangle
-            for (int diag = 0; diag < num_blocks; diag++) {
-                int n_blocks = diag + 1;
-                hipLaunchKernelGGL(nw_kernel1,
-                                   dim3(n_blocks), dim3(block_size),
-                                   shared_mem, 0,
-                                   d_seq, d_matrix, cols, penalty, diag, block_size);
-            }
+    // Runs the full kernel sequence once. When `timed`, Phase 1 and Phase 2 are
+    // each wrapped in their own event pair so each kernel reports its own time.
+    BenchmarkTimer timer;
+    auto run_nw = [&](bool timed) {
+        // Reset matrix borders for each run
+        HIP_CHECK(hipMemcpy(d_matrix, h_matrix,
+                            matrix_elems * sizeof(int),
+                            hipMemcpyHostToDevice));
 
-            // Phase 2: lower-right triangle
-            for (int diag = 0; diag < num_blocks - 1; diag++) {
-                int n_blocks = num_blocks - 1 - diag;
-                hipLaunchKernelGGL(nw_kernel2,
-                                   dim3(n_blocks), dim3(block_size),
-                                   shared_mem, 0,
-                                   d_seq, d_matrix, cols, penalty, diag, num_blocks, block_size);
-            }
+        // Phase 1: upper-left triangle (nw_kernel1)
+        if (timed) timer.record_start();
+        for (int diag = 0; diag < num_blocks; diag++) {
+            int n_blocks = diag + 1;
+            hipLaunchKernelGGL(nw_kernel1,
+                               dim3(n_blocks), dim3(block_size),
+                               shared_mem, 0,
+                               d_seq, d_matrix, cols, penalty, diag, block_size);
+        }
+        if (timed) {
+            timer.record_stop();
+            t_kernel1 += static_cast<double>(timer.elapsed_ms());
+        }
 
-            HIP_CHECK(hipDeviceSynchronize());
-        });
+        // Phase 2: lower-right triangle (nw_kernel2)
+        if (timed) timer.record_start();
+        for (int diag = 0; diag < num_blocks - 1; diag++) {
+            int n_blocks = num_blocks - 1 - diag;
+            hipLaunchKernelGGL(nw_kernel2,
+                               dim3(n_blocks), dim3(block_size),
+                               shared_mem, 0,
+                               d_seq, d_matrix, cols, penalty, diag, num_blocks, block_size);
+        }
+        if (timed) {
+            timer.record_stop();
+            t_kernel2 += static_cast<double>(timer.elapsed_ms());
+        }
+
+        HIP_CHECK(hipDeviceSynchronize());
+    };
+
+    // Warmup — full kernel sequence, untimed
+    for (int w = 0; w < num_warmup; ++w) {
+        run_nw(false);
+    }
+
+    // Timed run — each kernel measured separately
+    for (int i = 0; i < 1; ++i) {
+        run_nw(true);
+    }
+
+    double total_ms = t_kernel1 + t_kernel2;
 
     // Performance metrics
     long cells     = (long)seq_len * seq_len;
-    double gcups   = (double)cells / (r.avg_ms * 1e-3) / 1e9;
-    double eff_bw  = (double)cells * 4 * sizeof(int) / (r.avg_ms * 1e-3) / 1e9;
-    double total_ms = r.avg_ms;
+    double gcups   = (double)cells / (total_ms * 1e-3) / 1e9;
+    double eff_bw  = (double)cells * 4 * sizeof(int) / (total_ms * 1e-3) / 1e9;
 
     // JSON-lines kernel events (one per kernel name in params.json)
     printf("{\"type\":\"kernel\",\"name\":\"nw_kernel1\",\"time_ms\":%.6f,"
            "\"params\":{\"sequence_length\":%d,\"block_size\":%d,\"penalty\":%d}}\n",
-           r.avg_ms, seq_len, block_size, penalty);
+           t_kernel1, seq_len, block_size, penalty);
 
     printf("{\"type\":\"kernel\",\"name\":\"nw_kernel2\",\"time_ms\":%.6f,"
            "\"params\":{\"sequence_length\":%d,\"block_size\":%d,\"penalty\":%d}}\n",
-           r.avg_ms, seq_len, block_size, penalty);
+           t_kernel2, seq_len, block_size, penalty);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"gcups\",\"value\":%.2f},{\"name\":\"effective_gbps\",\"value\":%.2f}]}\n",
            total_ms, gcups, eff_bw);
 
-    fprintf(stderr, "GCUPS: %.2f  |  Effective GB/s: %.2f  (avg %.4f ms)\n",
-            gcups, eff_bw, r.avg_ms);
+    fprintf(stderr, "GCUPS: %.2f  |  Effective GB/s: %.2f  (k1=%.4f k2=%.4f ms)\n",
+            gcups, eff_bw, t_kernel1, t_kernel2);
 
     HIP_CHECK(hipFree(d_seq));
     HIP_CHECK(hipFree(d_matrix));

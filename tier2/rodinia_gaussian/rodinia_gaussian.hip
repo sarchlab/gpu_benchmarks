@@ -275,8 +275,9 @@ int main(int argc, char** argv)
         HIP_CHECK(hipDeviceSynchronize());
     }
 
-    // Timed iterations
-    std::vector<double> times(1);
+    // Timed iterations — fan1 and fan2 timed separately into their own accumulators
+    double t_fan1 = 0.0;
+    double t_fan2 = 0.0;
     BenchmarkTimer timer;
 
     for (int iter = 0; iter < 1; ++iter) {
@@ -285,21 +286,24 @@ int main(int argc, char** argv)
         HIP_CHECK(hipMemcpy(d_b, h_b, bytes_b, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemset(d_m, 0, bytes_a));
 
-        // Time the forward elimination kernel loop
-        timer.record_start();
+        // Time the forward elimination kernel loop, per kernel
         for (int t = 0; t < N - 1; ++t) {
             int remaining = N - t - 1;
             // fan1: compute multipliers
             int grid1 = (remaining + BLOCK1D - 1) / BLOCK1D;
+            timer.record_start();
             hipLaunchKernelGGL(fan1, grid1, BLOCK1D, 0, 0, d_m, d_a, N, t);
+            timer.record_stop();
+            t_fan1 += (double)timer.elapsed_ms();
             // fan2: update submatrix
             dim3 block2(BLOCK2D, BLOCK2D);
             dim3 grid2((remaining + BLOCK2D - 1) / BLOCK2D,
                        (remaining + BLOCK2D - 1) / BLOCK2D);
+            timer.record_start();
             hipLaunchKernelGGL(fan2, grid2, block2, 0, 0, d_m, d_a, d_b, N, t);
+            timer.record_stop();
+            t_fan2 += (double)timer.elapsed_ms();
         }
-        timer.record_stop();
-        times[iter] = (double)timer.elapsed_ms();
     }
 
     // Copy final result from device
@@ -324,39 +328,25 @@ int main(int argc, char** argv)
     fprintf(stderr, "Verification: rel_err = %.2e — %s\n\n",
             rel_err, pass ? "PASS" : "FAIL");
 
-    // Compute statistics
-    double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        sum_ms += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg_ms = sum_ms / 1;
-
-    double variance = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        double d = times[i] - avg_ms;
-        variance += d * d;
-    }
-    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
+    // Compute statistics — total is the sum of the per-kernel accumulators
+    double total_ms = t_fan1 + t_fan2;
+    double avg_ms = total_ms;
 
     // GFLOPS: 2/3 * N^3 floating-point ops for forward elimination
     double flops  = (2.0 / 3.0) * (double)N * (double)N * (double)N;
     double gflops = flops / (avg_ms * 1e-3) / 1e9;
 
-    fprintf(stderr, "Performance: %.2f GFLOPS  (avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
-            gflops, avg_ms, mn, mx, stddev);
-
-    double total_ms = sum_ms;
+    fprintf(stderr, "Performance: %.2f GFLOPS  (total %.4f ms: fan1=%.4f fan2=%.4f)\n",
+            gflops, total_ms, t_fan1, t_fan2);
 
     // JSON-lines kernel events
     printf("{\"type\":\"kernel\",\"name\":\"fan1\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
-           avg_ms, N, block_size_param, verify);
+           t_fan1, N, block_size_param, verify);
 
     printf("{\"type\":\"kernel\",\"name\":\"fan2\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
-           avg_ms, N, block_size_param, verify);
+           t_fan2, N, block_size_param, verify);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

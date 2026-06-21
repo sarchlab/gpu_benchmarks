@@ -280,7 +280,35 @@ int main(int argc, char** argv)
     const int grid_M = (M + block_size - 1) / block_size;
 
     BenchmarkTimer timer;
-    std::vector<double> times((size_t)passes);
+    int num_warmup = 5;
+
+    // Per-kernel time accumulators (summed across k-loop and all passes)
+    double t_norm = 0.0, t_norm_finish = 0.0, t_normalize = 0.0, t_project = 0.0;
+
+    // Warmup — run the full per-pass kernel sequence, untimed
+    for (int w = 0; w < num_warmup; ++w) {
+        HIP_CHECK(hipMemcpy(d_A, h_A_orig, bytes_A, hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemset(d_Q, 0, bytes_Q));
+        HIP_CHECK(hipMemset(d_R, 0, bytes_R));
+        HIP_CHECK(hipDeviceSynchronize());
+
+        for (int k = 0; k < N; ++k) {
+            HIP_CHECK(hipMemsetAsync(d_nrm_buf, 0, sizeof(float), 0));
+            hipLaunchKernelGGL(gram_norm, grid_M, block_size, 0, 0,
+                               d_A, d_nrm_buf, M, N, k);
+            hipLaunchKernelGGL(gram_norm_finish, 1, 1, 0, 0,
+                               d_nrm_buf, d_R, N, k);
+            hipLaunchKernelGGL(gram_normalize, grid_M, block_size, 0, 0,
+                               d_A, d_Q, d_nrm_buf, M, N, k);
+            if (k + 1 < N) {
+                int remaining   = N - k - 1;
+                int grid_proj   = (remaining + block_size - 1) / block_size;
+                hipLaunchKernelGGL(gram_project, grid_proj, block_size, 0, 0,
+                                   d_A, d_Q, d_R, M, N, k);
+            }
+        }
+        HIP_CHECK(hipDeviceSynchronize());
+    }
 
     for (int pass = 0; pass < passes; ++pass) {
         // Restore A from original, zero Q and R (outside timing)
@@ -289,37 +317,42 @@ int main(int argc, char** argv)
         HIP_CHECK(hipMemset(d_R, 0, bytes_R));
         HIP_CHECK(hipDeviceSynchronize());
 
-        // ----- Timed region -----
-        timer.record_start();
-
+        // ----- Timed region — time each kernel separately -----
         for (int k = 0; k < N; ++k) {
             // Step 1: zero nrm_buf, then accumulate ||A[:,k]||^2
             HIP_CHECK(hipMemsetAsync(d_nrm_buf, 0, sizeof(float), 0));
+            timer.record_start();
             hipLaunchKernelGGL(gram_norm, grid_M, block_size, 0, 0,
                                d_A, d_nrm_buf, M, N, k);
+            timer.record_stop();
+            t_norm += static_cast<double>(timer.elapsed_ms());
 
             // Step 2: finalize norm → R[k,k]
+            timer.record_start();
             hipLaunchKernelGGL(gram_norm_finish, 1, 1, 0, 0,
                                d_nrm_buf, d_R, N, k);
+            timer.record_stop();
+            t_norm_finish += static_cast<double>(timer.elapsed_ms());
 
             // Step 3: normalize column k
+            timer.record_start();
             hipLaunchKernelGGL(gram_normalize, grid_M, block_size, 0, 0,
                                d_A, d_Q, d_nrm_buf, M, N, k);
+            timer.record_stop();
+            t_normalize += static_cast<double>(timer.elapsed_ms());
 
             // Step 4: project remaining columns (if any)
             if (k + 1 < N) {
                 int remaining   = N - k - 1;
                 int grid_proj   = (remaining + block_size - 1) / block_size;
+                timer.record_start();
                 hipLaunchKernelGGL(gram_project, grid_proj, block_size, 0, 0,
                                    d_A, d_Q, d_R, M, N, k);
+                timer.record_stop();
+                t_project += static_cast<double>(timer.elapsed_ms());
             }
         }
-
-        timer.record_stop();
         // ----- End timed region -----
-
-        times[pass] = static_cast<double>(timer.elapsed_ms());
-        fprintf(stderr, "  pass %d: %.4f ms\n", pass + 1, times[pass]);
     }
 
     // Copy Q back for orthogonality check
@@ -330,46 +363,33 @@ int main(int argc, char** argv)
     fprintf(stderr, "Orthogonality check (first %d columns): %s\n\n",
             (N < 8 ? N : 8), orth_ok ? "PASS" : "FAIL");
 
-    // Statistics
-    double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < passes; ++i) {
-        sum_ms += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg_ms = sum_ms / passes;
-
-    double variance = 0.0;
-    for (int i = 0; i < passes; ++i) {
-        double d = times[i] - avg_ms;
-        variance += d * d;
-    }
-    double stddev = (passes > 1) ? sqrt(variance / (passes - 1)) : 0.0;
+    // Statistics — total per-kernel times (summed across all passes)
+    double total_ms = t_norm + t_norm_finish + t_normalize + t_project;
 
     // GB/s: 3 * M*N*sizeof(float) per pass (read A, read Q, write A for project)
-    double gb   = 3.0 * (double)M * (double)N * sizeof(float) / 1e9;
-    double gbps = gb / (avg_ms * 1e-3);
+    double gb   = 3.0 * (double)M * (double)N * sizeof(float) / 1e9 * (double)passes;
+    double gbps = gb / (total_ms * 1e-3);
 
     fprintf(stderr,
-            "Bandwidth: %.2f GB/s  (avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
-            gbps, avg_ms, mn, mx, stddev);
+            "Bandwidth: %.2f GB/s  (total %.4f ms: norm=%.4f finish=%.4f normalize=%.4f project=%.4f)\n",
+            gbps, total_ms, t_norm, t_norm_finish, t_normalize, t_project);
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"gram_norm\",\"time_ms\":%.6f,"
            "\"params\":{\"m\":%d,\"n\":%d,\"passes\":%d,\"block_size\":%d}}\n",
-           avg_ms, M, N, passes, block_size_param);
+           t_norm, M, N, passes, block_size_param);
     printf("{\"type\":\"kernel\",\"name\":\"gram_norm_finish\",\"time_ms\":%.6f,"
            "\"params\":{\"m\":%d,\"n\":%d,\"passes\":%d,\"block_size\":%d}}\n",
-           avg_ms, M, N, passes, block_size_param);
+           t_norm_finish, M, N, passes, block_size_param);
     printf("{\"type\":\"kernel\",\"name\":\"gram_normalize\",\"time_ms\":%.6f,"
            "\"params\":{\"m\":%d,\"n\":%d,\"passes\":%d,\"block_size\":%d}}\n",
-           avg_ms, M, N, passes, block_size_param);
+           t_normalize, M, N, passes, block_size_param);
     printf("{\"type\":\"kernel\",\"name\":\"gram_project\",\"time_ms\":%.6f,"
            "\"params\":{\"m\":%d,\"n\":%d,\"passes\":%d,\"block_size\":%d}}\n",
-           avg_ms, M, N, passes, block_size_param);
+           t_project, M, N, passes, block_size_param);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
-           avg_ms, gbps);
+           total_ms, gbps);
 
     // Cleanup
     HIP_CHECK(hipFree(d_A));

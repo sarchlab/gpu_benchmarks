@@ -355,14 +355,36 @@ int main(int argc, char** argv) {
 
     char problemSize[64];
     snprintf(problemSize, sizeof(problemSize), "%dx%d", rows, cols);
+    (void)problemSize;
 
-    BenchResult r = runBenchmark(
-        "rodinia_srad", problemSize, 1, num_warmup, [&]() {
-            // Reset image to original before each timed run
-            HIP_CHECK(hipMemcpy(d_J, h_J_orig, size * sizeof(float),
-                                hipMemcpyHostToDevice));
+    // Per-kernel timing accumulators (summed across the k-loop).
+    double t_srad1 = 0.0, t_srad2 = 0.0;
 
-            for (int k = 0; k < num_iters; ++k) {
+    // Runs the full SRAD sequence once. When `timed`, srad1 and srad2 are each
+    // wrapped in their own event pair inside the k-loop so each kernel reports
+    // its own accumulated time.
+    BenchmarkTimer timer;
+    auto run_srad = [&](bool timed) {
+        // Reset image to original before each run
+        HIP_CHECK(hipMemcpy(d_J, h_J_orig, size * sizeof(float),
+                            hipMemcpyHostToDevice));
+
+        for (int k = 0; k < num_iters; ++k) {
+            if (timed) {
+                timer.record_start();
+                hipLaunchKernelGGL(srad1, grid, block, 0, 0,
+                                   d_J, d_dN, d_dS, d_dW, d_dE, d_c,
+                                   rows, cols, q0sqr);
+                timer.record_stop();
+                t_srad1 += static_cast<double>(timer.elapsed_ms());
+
+                timer.record_start();
+                hipLaunchKernelGGL(srad2, grid, block, 0, 0,
+                                   d_J, d_dN, d_dS, d_dW, d_dE, d_c,
+                                   rows, cols, lambda);
+                timer.record_stop();
+                t_srad2 += static_cast<double>(timer.elapsed_ms());
+            } else {
                 hipLaunchKernelGGL(srad1, grid, block, 0, 0,
                                    d_J, d_dN, d_dS, d_dW, d_dE, d_c,
                                    rows, cols, q0sqr);
@@ -370,31 +392,43 @@ int main(int argc, char** argv) {
                                    d_J, d_dN, d_dS, d_dW, d_dE, d_c,
                                    rows, cols, lambda);
             }
-            HIP_CHECK(hipDeviceSynchronize());
-        });
+        }
+        HIP_CHECK(hipDeviceSynchronize());
+    };
+
+    // Warmup — full kernel sequence, untimed
+    for (int w = 0; w < num_warmup; ++w) {
+        run_srad(false);
+    }
+
+    // Timed run — each kernel measured separately
+    for (int i = 0; i < 1; ++i) {
+        run_srad(true);
+    }
+
+    double total_ms = t_srad1 + t_srad2;
 
     // Effective bandwidth
     double bytes_per_iter = 13.0 * (double)size * sizeof(float);
     double total_bytes    = bytes_per_iter * num_iters;
-    double bw_gb = total_bytes / (r.avg_ms * 1e-3) / 1e9;
-    double total_ms = r.avg_ms;
+    double bw_gb = total_bytes / (total_ms * 1e-3) / 1e9;
 
     // JSON-lines kernel events
     printf("{\"type\":\"kernel\",\"name\":\"srad1\",\"time_ms\":%.6f,"
            "\"params\":{\"image_size\":%d,\"num_iterations\":%d,\"block_size\":%d}}\n",
-           r.avg_ms, image_size, num_iters, block_dim);
+           t_srad1, image_size, num_iters, block_dim);
 
     printf("{\"type\":\"kernel\",\"name\":\"srad2\",\"time_ms\":%.6f,"
            "\"params\":{\"image_size\":%d,\"num_iterations\":%d,\"block_size\":%d}}\n",
-           r.avg_ms, image_size, num_iters, block_dim);
+           t_srad2, image_size, num_iters, block_dim);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"effective_bandwidth_gbps\",\"value\":%.2f}]}\n",
            total_ms, bw_gb);
 
-    fprintf(stderr, "Effective bandwidth: %.2f GB/s  (avg %.4f ms, %d SRAD iters/launch)\n",
-            bw_gb, r.avg_ms, num_iters);
+    fprintf(stderr, "Effective bandwidth: %.2f GB/s  (srad1=%.4f srad2=%.4f ms, %d SRAD iters/launch)\n",
+            bw_gb, t_srad1, t_srad2, num_iters);
 
     HIP_CHECK(hipFree(d_J));
     HIP_CHECK(hipFree(d_dN));

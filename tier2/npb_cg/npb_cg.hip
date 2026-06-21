@@ -263,31 +263,94 @@ int main(int argc, char** argv) {
 
     int smem = block_size * sizeof(float);
 
-    auto run_cg = [&]() {
+    // Per-kernel timing events (used only when accumulators are supplied)
+    hipEvent_t kStart, kStop;
+    HIP_CHECK(hipEventCreate(&kStart));
+    HIP_CHECK(hipEventCreate(&kStop));
+
+    // run_cg accumulates per-kernel GPU time into the supplied accumulators.
+    // Passing nullptr (warmup / verification) runs the kernels untimed.
+    auto run_cg = [&](double* spmv_acc, double* dot_acc, double* axpy_acc) {
         HIP_CHECK(hipMemcpy(d_x, h_x.data(), vec_bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_b, h_b.data(), vec_bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_r, d_b, vec_bytes, hipMemcpyDeviceToDevice));
         HIP_CHECK(hipMemcpy(d_p, d_r, vec_bytes, hipMemcpyDeviceToDevice));
 
-        dot_product_kernel<<<numBlocks, block_size, smem>>>(d_r, d_r, d_partial, N);
+        if (dot_acc) {
+            HIP_CHECK(hipEventRecord(kStart, 0));
+            dot_product_kernel<<<numBlocks, block_size, smem>>>(d_r, d_r, d_partial, N);
+            HIP_CHECK(hipEventRecord(kStop, 0));
+            HIP_CHECK(hipEventSynchronize(kStop));
+            float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
+            *dot_acc += (double)_ms;
+        } else {
+            dot_product_kernel<<<numBlocks, block_size, smem>>>(d_r, d_r, d_partial, N);
+        }
         float rr = finish_dot(d_partial, numBlocks);
 
         for (int iter = 0; iter < max_cg_iters; ++iter) {
-            spmv_kernel<<<gridSize, block_size>>>(d_row_ptr, d_col_idx, d_values, d_p, d_Ap, N);
+            if (spmv_acc) {
+                HIP_CHECK(hipEventRecord(kStart, 0));
+                spmv_kernel<<<gridSize, block_size>>>(d_row_ptr, d_col_idx, d_values, d_p, d_Ap, N);
+                HIP_CHECK(hipEventRecord(kStop, 0));
+                HIP_CHECK(hipEventSynchronize(kStop));
+                float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
+                *spmv_acc += (double)_ms;
+            } else {
+                spmv_kernel<<<gridSize, block_size>>>(d_row_ptr, d_col_idx, d_values, d_p, d_Ap, N);
+            }
 
-            dot_product_kernel<<<numBlocks, block_size, smem>>>(d_p, d_Ap, d_partial, N);
+            if (dot_acc) {
+                HIP_CHECK(hipEventRecord(kStart, 0));
+                dot_product_kernel<<<numBlocks, block_size, smem>>>(d_p, d_Ap, d_partial, N);
+                HIP_CHECK(hipEventRecord(kStop, 0));
+                HIP_CHECK(hipEventSynchronize(kStop));
+                float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
+                *dot_acc += (double)_ms;
+            } else {
+                dot_product_kernel<<<numBlocks, block_size, smem>>>(d_p, d_Ap, d_partial, N);
+            }
             float pAp = finish_dot(d_partial, numBlocks);
             float alpha = rr / fmaxf(pAp, 1e-20f);
 
-            axpy_kernel<<<gridSize, block_size>>>(alpha, d_p, d_x, N);
-            axpy_kernel<<<gridSize, block_size>>>(-alpha, d_Ap, d_r, N);
+            if (axpy_acc) {
+                HIP_CHECK(hipEventRecord(kStart, 0));
+                axpy_kernel<<<gridSize, block_size>>>(alpha, d_p, d_x, N);
+                axpy_kernel<<<gridSize, block_size>>>(-alpha, d_Ap, d_r, N);
+                HIP_CHECK(hipEventRecord(kStop, 0));
+                HIP_CHECK(hipEventSynchronize(kStop));
+                float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
+                *axpy_acc += (double)_ms;
+            } else {
+                axpy_kernel<<<gridSize, block_size>>>(alpha, d_p, d_x, N);
+                axpy_kernel<<<gridSize, block_size>>>(-alpha, d_Ap, d_r, N);
+            }
 
-            dot_product_kernel<<<numBlocks, block_size, smem>>>(d_r, d_r, d_partial, N);
+            if (dot_acc) {
+                HIP_CHECK(hipEventRecord(kStart, 0));
+                dot_product_kernel<<<numBlocks, block_size, smem>>>(d_r, d_r, d_partial, N);
+                HIP_CHECK(hipEventRecord(kStop, 0));
+                HIP_CHECK(hipEventSynchronize(kStop));
+                float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
+                *dot_acc += (double)_ms;
+            } else {
+                dot_product_kernel<<<numBlocks, block_size, smem>>>(d_r, d_r, d_partial, N);
+            }
             float rr_new = finish_dot(d_partial, numBlocks);
 
             float beta = rr_new / fmaxf(rr, 1e-20f);
             scale_kernel<<<gridSize, block_size>>>(beta, d_p, d_p, N);
-            axpy_kernel<<<gridSize, block_size>>>(1.0f, d_r, d_p, N);
+
+            if (axpy_acc) {
+                HIP_CHECK(hipEventRecord(kStart, 0));
+                axpy_kernel<<<gridSize, block_size>>>(1.0f, d_r, d_p, N);
+                HIP_CHECK(hipEventRecord(kStop, 0));
+                HIP_CHECK(hipEventSynchronize(kStop));
+                float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
+                *axpy_acc += (double)_ms;
+            } else {
+                axpy_kernel<<<gridSize, block_size>>>(1.0f, d_r, d_p, N);
+            }
 
             rr = rr_new;
         }
@@ -295,34 +358,21 @@ int main(int argc, char** argv) {
 
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
-        run_cg();
+        run_cg(nullptr, nullptr, nullptr);
         HIP_CHECK(hipDeviceSynchronize());
     }
 
-    // Timed iterations
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    std::vector<double> times((size_t)iters);
+    // Timed iterations — per-kernel accumulators summed across CG iterations
+    double spmv_ms = 0.0, dot_ms = 0.0, axpy_ms = 0.0;
     for (int i = 0; i < iters; ++i) {
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        run_cg();
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
+        run_cg(&spmv_ms, &dot_ms, &axpy_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
+    HIP_CHECK(hipEventDestroy(kStart));
+    HIP_CHECK(hipEventDestroy(kStop));
 
-    double tsum = 0.0;
-    for (int i = 0; i < iters; ++i) tsum += times[i];
-    double avg_ms = tsum / iters;
-    double total_ms = tsum;
+    double total_ms = spmv_ms + dot_ms + axpy_ms;
+    double avg_ms = total_ms / iters;
 
     long long spmv_bytes = ((long long)(N+1)*4 + total_nnz*4 + total_nnz*4 + (long long)N*4 + (long long)N*4);
     double spmv_bw_gb = (double)spmv_bytes * max_cg_iters / (avg_ms * 1e-3) / 1e9;
@@ -330,17 +380,17 @@ int main(int argc, char** argv) {
     printf("{\"type\":\"kernel\",\"name\":\"spmv_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"matrix_size\":%d,\"block_size\":%d,"
            "\"max_cg_iterations\":%d,\"nonzeros_per_row\":%d,\"iterations\":%d}}\n",
-           avg_ms, N, block_size, max_cg_iters, nonzeros_per_row, iters);
+           spmv_ms, N, block_size, max_cg_iters, nonzeros_per_row, iters);
 
     printf("{\"type\":\"kernel\",\"name\":\"dot_product_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"matrix_size\":%d,\"block_size\":%d,"
            "\"max_cg_iterations\":%d,\"nonzeros_per_row\":%d,\"iterations\":%d}}\n",
-           avg_ms, N, block_size, max_cg_iters, nonzeros_per_row, iters);
+           dot_ms, N, block_size, max_cg_iters, nonzeros_per_row, iters);
 
     printf("{\"type\":\"kernel\",\"name\":\"axpy_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"matrix_size\":%d,\"block_size\":%d,"
            "\"max_cg_iterations\":%d,\"nonzeros_per_row\":%d,\"iterations\":%d}}\n",
-           avg_ms, N, block_size, max_cg_iters, nonzeros_per_row, iters);
+           axpy_ms, N, block_size, max_cg_iters, nonzeros_per_row, iters);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"avg_iter_ms\",\"value\":%.4f},"
@@ -352,7 +402,7 @@ int main(int argc, char** argv) {
 
     // Verification
     {
-        run_cg();
+        run_cg(nullptr, nullptr, nullptr);
         HIP_CHECK(hipDeviceSynchronize());
 
         spmv_kernel<<<gridSize, block_size>>>(d_row_ptr, d_col_idx, d_values, d_x, d_Ap, N);

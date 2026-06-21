@@ -259,14 +259,18 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipDeviceSynchronize());
     }
 
-    // Timed iterations
-    std::vector<double> times(1);
+    // Timed iterations — time each kernel separately
+    double t_k1 = 0.0, t_k2 = 0.0;
     for (int it = 0; it < 1; ++it) {
         timer.record_start();
         hipLaunchKernelGGL(mvt_kernel1, grid, block_size, 0, 0, d_A, d_y1, d_x1, n);
+        timer.record_stop();
+        t_k1 += static_cast<double>(timer.elapsed_ms());
+
+        timer.record_start();
         hipLaunchKernelGGL(mvt_kernel2, grid, block_size, 0, 0, d_A, d_y2, d_x2, n);
         timer.record_stop();
-        times[it] = static_cast<double>(timer.elapsed_ms());
+        t_k2 += static_cast<double>(timer.elapsed_ms());
     }
 
     // Copy results back for correctness check
@@ -297,37 +301,24 @@ int main(int argc, char** argv) {
             check_n, pass ? "PASS" : "FAIL");
 
     // Compute statistics
-    double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        sum_ms += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg_ms = sum_ms / 1;
-
-    double variance = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        double d = times[i] - avg_ms;
-        variance += d * d;
-    }
-    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
+    double avg_ms = t_k1 + t_k2;
 
     // GB/s: A is read twice (kernel1 + kernel2), each read is N*N*4 bytes
     double gb   = 2.0 * (double)n * (double)n * sizeof(float) / 1e9;
     double gbps = gb / (avg_ms * 1e-3);
 
-    fprintf(stderr, "Bandwidth: %.2f GB/s  (avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
-            gbps, avg_ms, mn, mx, stddev);
+    fprintf(stderr, "Bandwidth: %.2f GB/s  (total %.4f ms: k1=%.4f k2=%.4f)\n",
+            gbps, avg_ms, t_k1, t_k2);
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"mvt_kernel1\",\"time_ms\":%.6f,"
            "\"params\":{\"n\":%d,\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_ms, n, block_size_param, precision);
+           t_k1, n, block_size_param, precision);
     printf("{\"type\":\"kernel\",\"name\":\"mvt_kernel2\",\"time_ms\":%.6f,"
            "\"params\":{\"n\":%d,\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_ms, n, block_size_param, precision);
+           t_k2, n, block_size_param, precision);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
            avg_ms, gbps);

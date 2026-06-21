@@ -481,84 +481,124 @@ int main(int argc, char** argv) {
 
     float low_t = (float)threshold_low, high_t = (float)threshold_high;
 
-    auto run_cedd = [&]() {
+    // Run the 5-stage CEDD pipeline. When timing events are supplied, each
+    // kernel launch is wrapped in its own event pair and its elapsed time is
+    // added to the matching accumulator, so every kernel reports its OWN
+    // separately measured GPU time.
+    auto run_cedd = [&](hipEvent_t* evStart, hipEvent_t* evStop,
+                        double* t_gauss, double* t_sobel, double* t_magdir,
+                        double* t_nms, double* t_hyst) {
+        if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
         hipLaunchKernelGGL(gaussian_blur_kernel, gridDim, blockDim, 0, 0,
                            d_input, d_blurred, W, H);
+        if (evStart) {
+            HIP_CHECK(hipEventRecord(*evStop, 0));
+            HIP_CHECK(hipEventSynchronize(*evStop));
+            float ms = 0.0f;
+            HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
+            *t_gauss += (double)ms;
+        }
+
+        if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
         hipLaunchKernelGGL(sobel_kernel, gridDim, blockDim, 0, 0,
                            d_blurred, d_gx, d_gy, W, H);
+        if (evStart) {
+            HIP_CHECK(hipEventRecord(*evStop, 0));
+            HIP_CHECK(hipEventSynchronize(*evStop));
+            float ms = 0.0f;
+            HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
+            *t_sobel += (double)ms;
+        }
+
+        if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
         hipLaunchKernelGGL(magnitude_direction_kernel, gridDim, blockDim, 0, 0,
                            d_gx, d_gy, d_mag, d_dir, W, H);
+        if (evStart) {
+            HIP_CHECK(hipEventRecord(*evStop, 0));
+            HIP_CHECK(hipEventSynchronize(*evStop));
+            float ms = 0.0f;
+            HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
+            *t_magdir += (double)ms;
+        }
+
+        if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
         hipLaunchKernelGGL(nms_kernel, gridDim, blockDim, 0, 0,
                            d_mag, d_dir, d_nms, W, H);
+        if (evStart) {
+            HIP_CHECK(hipEventRecord(*evStop, 0));
+            HIP_CHECK(hipEventSynchronize(*evStop));
+            float ms = 0.0f;
+            HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
+            *t_nms += (double)ms;
+        }
+
+        if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
         hipLaunchKernelGGL(hysteresis_kernel, gridDim, blockDim, 0, 0,
                            d_nms, d_edges, W, H, low_t, high_t);
+        if (evStart) {
+            HIP_CHECK(hipEventRecord(*evStop, 0));
+            HIP_CHECK(hipEventSynchronize(*evStop));
+            float ms = 0.0f;
+            HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
+            *t_hyst += (double)ms;
+        }
     };
 
     // -------------------------------------------------------------------
     // Warmup
     // -------------------------------------------------------------------
     for (int w = 0; w < num_warmup; ++w) {
-        run_cedd();
+        run_cedd(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);  // untimed
         HIP_CHECK(hipDeviceSynchronize());
     }
 
     // -------------------------------------------------------------------
-    // Timed iterations
+    // Timed iterations — each kernel measured separately with its own
+    // accumulator.
     // -------------------------------------------------------------------
     hipEvent_t evStart, evStop;
     HIP_CHECK(hipEventCreate(&evStart));
     HIP_CHECK(hipEventCreate(&evStop));
 
-    std::vector<double> times(1);
+    double t_gauss = 0.0, t_sobel = 0.0, t_magdir = 0.0, t_nms = 0.0, t_hyst = 0.0;
     for (int i = 0; i < 1; ++i) {
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        run_cedd();
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
+        run_cedd(&evStart, &evStop, &t_gauss, &t_sobel, &t_magdir, &t_nms, &t_hyst);
     }
 
     HIP_CHECK(hipEventDestroy(evStart));
     HIP_CHECK(hipEventDestroy(evStop));
 
-    // Compute average time
-    double sum = 0.0;
-    for (int i = 0; i < 1; ++i) sum += times[i];
-    double avg_ms = sum / 1;
+    double total_ms = t_gauss + t_sobel + t_magdir + t_nms + t_hyst;
+    double avg_ms   = total_ms;
 
     // Mpixels/sec = W * H / time_s / 1e6
     double mpix_per_sec = (double)npix / (avg_ms * 1e-3) / 1e6;
 
-    double total_ms = sum;
-
-    // JSON-lines kernel events (5 kernels in the pipeline)
+    // JSON-lines kernel events (5 kernels in the pipeline, each with its OWN time)
     printf("{\"type\":\"kernel\",\"name\":\"gaussian_blur_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"width\":%d,\"height\":%d,\"threshold_low\":%d,"
            "\"threshold_high\":%d}}\n",
-           avg_ms, width, height, threshold_low, threshold_high);
+           t_gauss, width, height, threshold_low, threshold_high);
 
     printf("{\"type\":\"kernel\",\"name\":\"sobel_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"width\":%d,\"height\":%d,\"threshold_low\":%d,"
            "\"threshold_high\":%d}}\n",
-           avg_ms, width, height, threshold_low, threshold_high);
+           t_sobel, width, height, threshold_low, threshold_high);
 
     printf("{\"type\":\"kernel\",\"name\":\"magnitude_direction_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"width\":%d,\"height\":%d,\"threshold_low\":%d,"
            "\"threshold_high\":%d}}\n",
-           avg_ms, width, height, threshold_low, threshold_high);
+           t_magdir, width, height, threshold_low, threshold_high);
 
     printf("{\"type\":\"kernel\",\"name\":\"nms_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"width\":%d,\"height\":%d,\"threshold_low\":%d,"
            "\"threshold_high\":%d}}\n",
-           avg_ms, width, height, threshold_low, threshold_high);
+           t_nms, width, height, threshold_low, threshold_high);
 
     printf("{\"type\":\"kernel\",\"name\":\"hysteresis_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"width\":%d,\"height\":%d,\"threshold_low\":%d,"
            "\"threshold_high\":%d}}\n",
-           avg_ms, width, height, threshold_low, threshold_high);
+           t_hyst, width, height, threshold_low, threshold_high);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
@@ -566,7 +606,8 @@ int main(int argc, char** argv) {
            total_ms, mpix_per_sec);
 
     // Human-readable output to stderr
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
+    fprintf(stderr, "Average time: %.4f ms  (gauss=%.4f sobel=%.4f magdir=%.4f nms=%.4f hyst=%.4f)\n",
+            avg_ms, t_gauss, t_sobel, t_magdir, t_nms, t_hyst);
     fprintf(stderr, "Throughput:   %.4f Mpixels/sec\n", mpix_per_sec);
 
     // -------------------------------------------------------------------

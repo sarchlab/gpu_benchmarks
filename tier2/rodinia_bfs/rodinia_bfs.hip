@@ -325,8 +325,22 @@ int main(int argc, char** argv) {
     long long bytes_per_bfs =
         2LL * ((long long)(num_nodes + 1 + num_edges + 3 * num_nodes) * sizeof(int));
 
+    // Per-kernel timing events and accumulators. The lambda below runs once
+    // per warmup pass and once timed; each invocation resets the accumulators
+    // and re-accumulates, so the surviving values reflect the timed pass.
+    hipEvent_t ev_start, ev_stop;
+    HIP_CHECK(hipEventCreate(&ev_start));
+    HIP_CHECK(hipEventCreate(&ev_stop));
+    double t_bfs_kernel = 0.0;
+    double t_bfs_update = 0.0;
+
     BenchResult r = runBenchmark(
         "rodinia_bfs", problemSize, 1, num_warmup, [&]() {
+        // Reset per-kernel accumulators for this pass
+        t_bfs_kernel = 0.0;
+        t_bfs_update = 0.0;
+        float ms = 0.0f;
+
         // Re-initialize BFS state for each timed run
         for (int i = 0; i < num_nodes; ++i) {
             h_cost[i]     = -1;
@@ -346,40 +360,53 @@ int main(int argc, char** argv) {
             h_updated = 0;
             HIP_CHECK(hipMemcpy(d_updated, &h_updated, sizeof(int), hipMemcpyHostToDevice));
 
+            HIP_CHECK(hipEventRecord(ev_start, 0));
             hipLaunchKernelGGL(bfs_kernel, grid, block, 0, 0,
                                d_row_offsets, d_col_indices,
                                d_cost, d_frontier, num_nodes);
-            HIP_CHECK(hipDeviceSynchronize());
+            HIP_CHECK(hipEventRecord(ev_stop, 0));
+            HIP_CHECK(hipEventSynchronize(ev_stop));
+            HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));
+            t_bfs_kernel += ms;
 
             h_updated = 0;
             HIP_CHECK(hipMemcpy(d_updated, &h_updated, sizeof(int), hipMemcpyHostToDevice));
 
+            HIP_CHECK(hipEventRecord(ev_start, 0));
             hipLaunchKernelGGL(bfs_update, grid, block, 0, 0,
                                d_frontier, d_cost, d_visited, d_updated, num_nodes);
-            HIP_CHECK(hipDeviceSynchronize());
+            HIP_CHECK(hipEventRecord(ev_stop, 0));
+            HIP_CHECK(hipEventSynchronize(ev_stop));
+            HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));
+            t_bfs_update += ms;
 
             HIP_CHECK(hipMemcpy(&h_updated, d_updated, sizeof(int), hipMemcpyDeviceToHost));
         }
     });
 
-    double bw_gb = (double)bytes_per_bfs / (r.avg_ms * 1e-3) / 1e9;
-    fprintf(stderr, "Effective bandwidth: %.2f GB/s  (avg %.4f ms/BFS)\n",
-            bw_gb, r.avg_ms);
+    HIP_CHECK(hipEventDestroy(ev_start));
+    HIP_CHECK(hipEventDestroy(ev_stop));
+
+    (void)r;  // BenchResult retained for structure; per-kernel times used below
+    double total_ms = t_bfs_kernel + t_bfs_update;
+    double bw_gb = (double)bytes_per_bfs / (total_ms * 1e-3) / 1e9;
+    fprintf(stderr, "Effective bandwidth: %.2f GB/s  (total %.4f ms/BFS)\n",
+            bw_gb, total_ms);
 
     // JSON-lines output
-    double edges_per_sec = (double)num_edges / (r.avg_ms * 1e-3);
+    double edges_per_sec = (double)num_edges / (total_ms * 1e-3);
     printf("{\"type\":\"kernel\",\"name\":\"bfs_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"num_nodes\":%d,\"edges_per_node\":%d,\"block_size\":%d"
            "}}\n",
-           r.avg_ms, num_nodes, edges_per_node, block_size);
+           t_bfs_kernel, num_nodes, edges_per_node, block_size);
     printf("{\"type\":\"kernel\",\"name\":\"bfs_update\",\"time_ms\":%.6f,"
            "\"params\":{\"num_nodes\":%d,\"edges_per_node\":%d,\"block_size\":%d"
            "}}\n",
-           r.avg_ms, num_nodes, edges_per_node, block_size);
+           t_bfs_update, num_nodes, edges_per_node, block_size);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f},"
            "{\"name\":\"edges_per_sec\",\"value\":%.2f}]}\n",
-           r.avg_ms, bw_gb, edges_per_sec);
+           total_ms, bw_gb, edges_per_sec);
 
     // Cleanup
     HIP_CHECK(hipFree(d_row_offsets));

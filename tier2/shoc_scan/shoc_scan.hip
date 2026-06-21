@@ -208,8 +208,17 @@ __global__ void add_block_sums_kernel(float* __restrict__ data,
 // Recursive multi-block scan
 // ---------------------------------------------------------------------------
 
+// When `timed` is true, each kernel launch (at every recursion level) is wrapped
+// in its own event pair and its elapsed time is accumulated into the matching
+// per-kernel accumulator (*t_scan for scan_block_kernel, *t_add for
+// add_block_sums_kernel). When `timed` is false the kernels run untimed (warmup
+// / verification).
 static void scan_recursive(float* d_output, const float* d_input, int N,
-                            int block_size) {
+                            int block_size,
+                            bool timed = false,
+                            BenchmarkTimer* timer = nullptr,
+                            double* t_scan = nullptr,
+                            double* t_add = nullptr) {
     int elements_per_block = block_size * 2;
     int num_blocks         = (N + elements_per_block - 1) / elements_per_block;
     size_t shared_mem      = (size_t)elements_per_block * sizeof(float);
@@ -219,10 +228,20 @@ static void scan_recursive(float* d_output, const float* d_input, int N,
         HIP_CHECK(hipMalloc(&d_block_sums, (size_t)num_blocks * sizeof(float)));
     }
 
-    hipLaunchKernelGGL(scan_block_kernel,
-                       dim3(num_blocks), dim3(block_size),
-                       shared_mem, 0,
-                       d_output, d_input, d_block_sums, N);
+    if (timed) {
+        timer->record_start();
+        hipLaunchKernelGGL(scan_block_kernel,
+                           dim3(num_blocks), dim3(block_size),
+                           shared_mem, 0,
+                           d_output, d_input, d_block_sums, N);
+        timer->record_stop();
+        *t_scan += static_cast<double>(timer->elapsed_ms());
+    } else {
+        hipLaunchKernelGGL(scan_block_kernel,
+                           dim3(num_blocks), dim3(block_size),
+                           shared_mem, 0,
+                           d_output, d_input, d_block_sums, N);
+    }
 
     if (num_blocks > 1) {
         float* d_scanned_block_sums;
@@ -230,12 +249,22 @@ static void scan_recursive(float* d_output, const float* d_input, int N,
                              (size_t)num_blocks * sizeof(float)));
 
         scan_recursive(d_scanned_block_sums, d_block_sums, num_blocks,
-                       block_size);
+                       block_size, timed, timer, t_scan, t_add);
 
-        hipLaunchKernelGGL(add_block_sums_kernel,
-                           dim3(num_blocks), dim3(block_size),
-                           0, 0,
-                           d_output, d_scanned_block_sums, N);
+        if (timed) {
+            timer->record_start();
+            hipLaunchKernelGGL(add_block_sums_kernel,
+                               dim3(num_blocks), dim3(block_size),
+                               0, 0,
+                               d_output, d_scanned_block_sums, N);
+            timer->record_stop();
+            *t_add += static_cast<double>(timer->elapsed_ms());
+        } else {
+            hipLaunchKernelGGL(add_block_sums_kernel,
+                               dim3(num_blocks), dim3(block_size),
+                               0, 0,
+                               d_output, d_scanned_block_sums, N);
+        }
 
         HIP_CHECK(hipFree(d_scanned_block_sums));
         HIP_CHECK(hipFree(d_block_sums));
@@ -323,25 +352,18 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipDeviceSynchronize());
     }
 
-    // Timed iterations
+    // Timed iterations — each kernel type accumulated separately across all
+    // recursion levels via its own event pair.
     BenchmarkTimer timer;
-    std::vector<double> times(1);
+    double t_scan = 0.0, t_add = 0.0;
     for (int i = 0; i < 1; ++i) {
-        timer.record_start();
-        scan_recursive(d_output, d_input, N_padded, block_size);
-        timer.record_stop();
-        times[i] = static_cast<double>(timer.elapsed_ms());
+        scan_recursive(d_output, d_input, N_padded, block_size,
+                       true, &timer, &t_scan, &t_add);
     }
 
     // Statistics
-    double sum_t = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        sum_t += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg_ms = sum_t / 1;
-    double total_ms = sum_t;
+    double total_ms = t_scan + t_add;
+    double avg_ms = total_ms;
 
     // Effective bandwidth: 1 read + 1 write = 2 × N × sizeof(float)
     double bandwidth_gb = 2.0 * (double)N * sizeof(float)
@@ -351,20 +373,20 @@ int main(int argc, char** argv) {
     printf("{\"type\":\"kernel\",\"name\":\"scan_block_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"array_size\":%d,\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_ms, array_size, block_size, precision);
+           t_scan, array_size, block_size, precision);
 
     printf("{\"type\":\"kernel\",\"name\":\"add_block_sums_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"array_size\":%d,\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_ms, array_size, block_size, precision);
+           t_add, array_size, block_size, precision);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
            total_ms, bandwidth_gb);
 
-    fprintf(stderr, "Effective bandwidth: %.2f GB/s  (avg %.4f ms)\n",
-            bandwidth_gb, avg_ms);
+    fprintf(stderr, "Effective bandwidth: %.2f GB/s  (scan=%.4f add=%.4f ms)\n",
+            bandwidth_gb, t_scan, t_add);
 
     // ---------------------------------------------------------------------------
     // Verification

@@ -274,84 +274,107 @@ int main(int argc, char** argv) {
     int blockSize = block_size;
     int gridKeys  = (N + blockSize - 1) / blockSize;
 
+    // Per-kernel timing events (used only when accumulators are supplied)
+    hipEvent_t kStart, kStop;
+    HIP_CHECK(hipEventCreate(&kStart));
+    HIP_CHECK(hipEventCreate(&kStop));
+
     // Lambda: run full IS (histogram + prefix sum + scatter)
-    auto run_is = [&]() {
+    // When accumulators are supplied, each phase launch is timed separately;
+    // passing nullptr (warmup) runs untimed.
+    auto run_is = [&](double* hist_acc, double* prefix_acc, double* scatter_acc) {
         // Clear histogram
         HIP_CHECK(hipMemset(d_hist, 0, histBytes));
 
         // Phase 1: histogram
-        hipLaunchKernelGGL(histogram_kernel, dim3(gridKeys), dim3(blockSize),
-                           0, 0, d_keys, N, d_hist);
+        if (hist_acc) {
+            HIP_CHECK(hipEventRecord(kStart, 0));
+            hipLaunchKernelGGL(histogram_kernel, dim3(gridKeys), dim3(blockSize),
+                               0, 0, d_keys, N, d_hist);
+            HIP_CHECK(hipEventRecord(kStop, 0));
+            HIP_CHECK(hipEventSynchronize(kStop));
+            float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
+            *hist_acc += (double)_ms;
+        } else {
+            hipLaunchKernelGGL(histogram_kernel, dim3(gridKeys), dim3(blockSize),
+                               0, 0, d_keys, N, d_hist);
+        }
 
         // Phase 2: prefix sum (exclusive scan on histogram)
         // Single-block scan, NUM_BUCKETS threads
-        hipLaunchKernelGGL(prefix_sum_kernel, dim3(1), dim3(NUM_BUCKETS),
-                           NUM_BUCKETS * sizeof(unsigned int), 0,
-                           d_hist, NUM_BUCKETS);
+        if (prefix_acc) {
+            HIP_CHECK(hipEventRecord(kStart, 0));
+            hipLaunchKernelGGL(prefix_sum_kernel, dim3(1), dim3(NUM_BUCKETS),
+                               NUM_BUCKETS * sizeof(unsigned int), 0,
+                               d_hist, NUM_BUCKETS);
+            HIP_CHECK(hipEventRecord(kStop, 0));
+            HIP_CHECK(hipEventSynchronize(kStop));
+            float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
+            *prefix_acc += (double)_ms;
+        } else {
+            hipLaunchKernelGGL(prefix_sum_kernel, dim3(1), dim3(NUM_BUCKETS),
+                               NUM_BUCKETS * sizeof(unsigned int), 0,
+                               d_hist, NUM_BUCKETS);
+        }
 
         // Copy prefix sums to offsets (scatter will modify offsets)
         HIP_CHECK(hipMemcpy(d_offsets, d_hist, histBytes, hipMemcpyDeviceToDevice));
 
         // Phase 3: scatter
-        hipLaunchKernelGGL(scatter_kernel, dim3(gridKeys), dim3(blockSize),
-                           0, 0, d_keys, N, d_offsets, d_sorted);
+        if (scatter_acc) {
+            HIP_CHECK(hipEventRecord(kStart, 0));
+            hipLaunchKernelGGL(scatter_kernel, dim3(gridKeys), dim3(blockSize),
+                               0, 0, d_keys, N, d_offsets, d_sorted);
+            HIP_CHECK(hipEventRecord(kStop, 0));
+            HIP_CHECK(hipEventSynchronize(kStop));
+            float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
+            *scatter_acc += (double)_ms;
+        } else {
+            hipLaunchKernelGGL(scatter_kernel, dim3(gridKeys), dim3(blockSize),
+                               0, 0, d_keys, N, d_offsets, d_sorted);
+        }
     };
 
     // -------------------------------------------------------------------
     // Warmup
     // -------------------------------------------------------------------
     for (int w = 0; w < num_warmup; ++w) {
-        run_is();
+        run_is(nullptr, nullptr, nullptr);
         HIP_CHECK(hipDeviceSynchronize());
     }
 
     // -------------------------------------------------------------------
-    // Timed iterations
+    // Timed iterations — each phase timed into its own accumulator
     // -------------------------------------------------------------------
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    std::vector<double> times(1);
+    double hist_ms = 0.0, prefix_ms = 0.0, scatter_ms = 0.0;
     for (int i = 0; i < 1; ++i) {
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        run_is();
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
+        run_is(&hist_ms, &prefix_ms, &scatter_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
+    HIP_CHECK(hipEventDestroy(kStart));
+    HIP_CHECK(hipEventDestroy(kStop));
 
-    // Compute average time
-    double sum = 0.0;
-    for (int i = 0; i < 1; ++i) sum += times[i];
-    double avg_ms = sum / 1;
+    double total_ms = hist_ms + prefix_ms + scatter_ms;
+    double avg_ms = total_ms;
 
     // M keys/sec = N / time_s / 1e6
     double mkeys_sec = (double)N / (avg_ms * 1e-3) / 1e6;
-
-    double total_ms = sum;
 
     // JSON-lines kernel events (one per kernel)
     printf("{\"type\":\"kernel\",\"name\":\"histogram_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"verify\":\"%s\"}}\n",
-           avg_ms, N, block_size, verify);
+           hist_ms, N, block_size, verify);
 
     printf("{\"type\":\"kernel\",\"name\":\"prefix_sum_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"verify\":\"%s\"}}\n",
-           avg_ms, N, block_size, verify);
+           prefix_ms, N, block_size, verify);
 
     printf("{\"type\":\"kernel\",\"name\":\"scatter_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"verify\":\"%s\"}}\n",
-           avg_ms, N, block_size, verify);
+           scatter_ms, N, block_size, verify);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

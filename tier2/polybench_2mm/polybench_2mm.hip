@@ -205,49 +205,58 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipDeviceSynchronize());
     }
 
-    // Timed iterations
+    // Timed iterations — time each mm_kernel launch separately
     hipEvent_t evStart, evStop;
     HIP_CHECK(hipEventCreate(&evStart));
     HIP_CHECK(hipEventCreate(&evStop));
 
-    std::vector<double> times(1);
+    double t_mm1 = 0.0, t_mm2 = 0.0;
     for (int i = 0; i < 1; ++i) {
+        // Restore D and E inputs (outside timing) before each timed pass
+        HIP_CHECK(hipMemcpy(d_D, h_D, bytes, hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(d_E, h_E, bytes, hipMemcpyHostToDevice));
+
+        // mm_kernel #1: D = alpha*A*B + beta*D
         HIP_CHECK(hipEventRecord(evStart, 0));
-        run_2mm();
+        hipLaunchKernelGGL(mm_kernel, grid, block, 0, 0,
+                           d_A, d_B, d_D, N, alpha, beta);
         HIP_CHECK(hipEventRecord(evStop, 0));
         HIP_CHECK(hipEventSynchronize(evStop));
+        float ms1 = 0.0f;
+        HIP_CHECK(hipEventElapsedTime(&ms1, evStart, evStop));
+        t_mm1 += (double)ms1;
 
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
+        // mm_kernel #2: E = alpha*C*D + beta*E
+        HIP_CHECK(hipEventRecord(evStart, 0));
+        hipLaunchKernelGGL(mm_kernel, grid, block, 0, 0,
+                           d_C, d_D, d_E, N, alpha, beta);
+        HIP_CHECK(hipEventRecord(evStop, 0));
+        HIP_CHECK(hipEventSynchronize(evStop));
+        float ms2 = 0.0f;
+        HIP_CHECK(hipEventElapsedTime(&ms2, evStart, evStop));
+        t_mm2 += (double)ms2;
     }
 
     HIP_CHECK(hipEventDestroy(evStart));
     HIP_CHECK(hipEventDestroy(evStop));
 
-    double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        sum_ms += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg_ms = sum_ms / 1;
+    double avg_ms = t_mm1 + t_mm2;
 
     double gflops = 4.0 * (double)N * (double)N * (double)N
                     / (avg_ms * 1e-3) / 1e9;
 
-    fprintf(stderr, "Performance: %.2f GFLOPS  (avg %.4f ms, min %.4f ms, max %.4f ms)\n",
-            gflops, avg_ms, mn, mx);
+    fprintf(stderr, "Performance: %.2f GFLOPS  (total %.4f ms: mm1=%.4f mm2=%.4f)\n",
+            gflops, avg_ms, t_mm1, t_mm2);
 
     printf("{\"type\":\"kernel\",\"name\":\"mm_kernel_1\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"alpha\":%.2f,\"beta\":%.2f,\"precision\":\"%s\"}}\n",
-           avg_ms * 0.5, N, block_size, alpha, beta, precision);
+           t_mm1, N, block_size, alpha, beta, precision);
 
     printf("{\"type\":\"kernel\",\"name\":\"mm_kernel_2\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"alpha\":%.2f,\"beta\":%.2f,\"precision\":\"%s\"}}\n",
-           avg_ms * 0.5, N, block_size, alpha, beta, precision);
+           t_mm2, N, block_size, alpha, beta, precision);
 
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",

@@ -295,14 +295,45 @@ int main(int argc, char **argv)
 
     dim3 block(BSIZE, BSIZE);
 
-    auto run_lud = [&]() {
+    // Per-kernel timing accumulators (filled only when `timed` is true).
+    double t_diagonal = 0.0, t_perimeter = 0.0, t_internal = 0.0;
+
+    auto run_lud = [&](bool timed) {
         for (int k = 0; k < num_blocks; k++) {
-            hipLaunchKernelGGL(lud_diagonal, dim3(1), block, 0, 0, d_a, N, k);
+            if (timed) {
+                HIP_CHECK(hipEventRecord(ev_start));
+                hipLaunchKernelGGL(lud_diagonal, dim3(1), block, 0, 0, d_a, N, k);
+                HIP_CHECK(hipEventRecord(ev_stop));
+                HIP_CHECK(hipEventSynchronize(ev_stop));
+                float ms = 0.0f;
+                HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));
+                t_diagonal += (double)ms;
+            } else {
+                hipLaunchKernelGGL(lud_diagonal, dim3(1), block, 0, 0, d_a, N, k);
+            }
             int peri  = 2 * (num_blocks - k - 1);
             int intern =     num_blocks - k - 1;
             if (peri > 0) {
-                hipLaunchKernelGGL(lud_perimeter, dim3(peri),         block, 0, 0, d_a, N, k);
-                hipLaunchKernelGGL(lud_internal,  dim3(intern,intern), block, 0, 0, d_a, N, k);
+                if (timed) {
+                    HIP_CHECK(hipEventRecord(ev_start));
+                    hipLaunchKernelGGL(lud_perimeter, dim3(peri),         block, 0, 0, d_a, N, k);
+                    HIP_CHECK(hipEventRecord(ev_stop));
+                    HIP_CHECK(hipEventSynchronize(ev_stop));
+                    float ms = 0.0f;
+                    HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));
+                    t_perimeter += (double)ms;
+
+                    HIP_CHECK(hipEventRecord(ev_start));
+                    hipLaunchKernelGGL(lud_internal,  dim3(intern,intern), block, 0, 0, d_a, N, k);
+                    HIP_CHECK(hipEventRecord(ev_stop));
+                    HIP_CHECK(hipEventSynchronize(ev_stop));
+                    ms = 0.0f;
+                    HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));
+                    t_internal += (double)ms;
+                } else {
+                    hipLaunchKernelGGL(lud_perimeter, dim3(peri),         block, 0, 0, d_a, N, k);
+                    hipLaunchKernelGGL(lud_internal,  dim3(intern,intern), block, 0, 0, d_a, N, k);
+                }
             }
         }
     };
@@ -310,52 +341,45 @@ int main(int argc, char **argv)
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
         HIP_CHECK(hipMemcpy(d_a, h_a, bytes, hipMemcpyHostToDevice));
-        run_lud();
+        run_lud(false);
         HIP_CHECK(hipDeviceSynchronize());
     }
     // Correctness verification (one extra run)
     HIP_CHECK(hipMemcpy(d_a, h_a, bytes, hipMemcpyHostToDevice));
-    run_lud();
+    run_lud(false);
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipMemcpy(h_lu, d_a, bytes, hipMemcpyDeviceToHost));
 
     verify(h_lu, h_a_orig, N);
 
-    // Timed iterations
-    std::vector<double> times(1);
+    // Timed iterations — each kernel timed separately via its own event pair.
     for (int it = 0; it < 1; it++) {
         HIP_CHECK(hipMemcpy(d_a, h_a, bytes, hipMemcpyHostToDevice));
-        HIP_CHECK(hipEventRecord(ev_start));
-        run_lud();
-        HIP_CHECK(hipEventRecord(ev_stop));
-        HIP_CHECK(hipEventSynchronize(ev_stop));
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));
-        times[it] = (double)ms;
-        fprintf(stderr, "  iter %d: %.4f ms\n", it, ms);
+        run_lud(true);
     }
 
     // Statistics
-    double sum_ms = 0.0;
-    for (double t : times) sum_ms += t;
+    double sum_ms = t_diagonal + t_perimeter + t_internal;
     double avg_ms = sum_ms / 1;
     double gflops = (2.0 / 3.0) * (double)N * (double)N * (double)N
                     / (avg_ms * 1e-3) / 1e9;
 
-    fprintf(stderr, "\nAverage: %.4f ms  GFLOPS: %.2f\n", avg_ms, gflops);
+    fprintf(stderr, "\nAverage: %.4f ms  GFLOPS: %.2f"
+                    "  (diagonal=%.4f perimeter=%.4f internal=%.4f)\n",
+            avg_ms, gflops, t_diagonal, t_perimeter, t_internal);
 
     // JSON-lines kernel events
     printf("{\"type\":\"kernel\",\"name\":\"lud_diagonal\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
-           avg_ms, N, block_size_param, verify_mode);
+           t_diagonal, N, block_size_param, verify_mode);
 
     printf("{\"type\":\"kernel\",\"name\":\"lud_perimeter\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
-           avg_ms, N, block_size_param, verify_mode);
+           t_perimeter, N, block_size_param, verify_mode);
 
     printf("{\"type\":\"kernel\",\"name\":\"lud_internal\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
-           avg_ms, N, block_size_param, verify_mode);
+           t_internal, N, block_size_param, verify_mode);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

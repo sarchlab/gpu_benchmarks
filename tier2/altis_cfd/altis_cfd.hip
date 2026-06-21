@@ -484,8 +484,13 @@ int main(int argc, char** argv) {
     // RK coefficients for 2-stage scheme: stage 0 -> coeff=0, stage 1 -> coeff=0.5
     float rk_coeffs[RK_STEPS] = {0.0f, 0.5f};
 
-    // Lambda: run one full RK time step
-    auto run_cfd_step = [&]() {
+    // Lambda: run one full RK time step.
+    // When timing events are supplied, each kernel launch is wrapped in its own
+    // event pair and its elapsed time is accumulated into the matching sum, so
+    // each distinct kernel reports its OWN separately measured GPU time
+    // (accumulated across the RK_STEPS stages).
+    auto run_cfd_step = [&](hipEvent_t* evStart, hipEvent_t* evStop,
+                            double* t_flux, double* t_rk) {
         // Save initial state
         HIP_CHECK(hipMemcpy(d_rho_old,    d_rho,    cell_bytes, hipMemcpyDeviceToDevice));
         HIP_CHECK(hipMemcpy(d_mx_old,     d_mx,     cell_bytes, hipMemcpyDeviceToDevice));
@@ -495,20 +500,36 @@ int main(int argc, char** argv) {
 
         for (int stage = 0; stage < RK_STEPS; ++stage) {
             // Compute fluxes
+            if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
             hipLaunchKernelGGL(compute_flux_kernel, dim3(gridSize), dim3(blockSize),
                                0, 0,
                                d_rho, d_mx, d_my, d_mz, d_energy,
                                d_neighbors, d_normals, d_areas,
                                d_flux_rho, d_flux_mx, d_flux_my, d_flux_mz, d_flux_energy,
                                N);
+            if (evStart) {
+                HIP_CHECK(hipEventRecord(*evStop, 0));
+                HIP_CHECK(hipEventSynchronize(*evStop));
+                float ms = 0.0f;
+                HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
+                *t_flux += (double)ms;
+            }
 
             // RK update
+            if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
             hipLaunchKernelGGL(rk_update_kernel, dim3(gridSize), dim3(blockSize),
                                0, 0,
                                d_rho, d_mx, d_my, d_mz, d_energy,
                                d_rho_old, d_mx_old, d_my_old, d_mz_old, d_energy_old,
                                d_flux_rho, d_flux_mx, d_flux_my, d_flux_mz, d_flux_energy,
                                d_volumes, DT, rk_coeffs[stage], N);
+            if (evStart) {
+                HIP_CHECK(hipEventRecord(*evStop, 0));
+                HIP_CHECK(hipEventSynchronize(*evStop));
+                float ms = 0.0f;
+                HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
+                *t_rk += (double)ms;
+            }
         }
     };
 
@@ -526,54 +547,44 @@ int main(int argc, char** argv) {
     // -----------------------------------------------------------------------
     for (int w = 0; w < num_warmup; ++w) {
         upload_initial();
-        run_cfd_step();
+        run_cfd_step(nullptr, nullptr, nullptr, nullptr);  // untimed full sequence
         HIP_CHECK(hipDeviceSynchronize());
     }
 
     // -----------------------------------------------------------------------
-    // Timed iterations
+    // Timed iterations — each kernel measured separately with its own
+    // accumulator (summed across the RK stages within run_cfd_step).
     // -----------------------------------------------------------------------
     hipEvent_t evStart, evStop;
     HIP_CHECK(hipEventCreate(&evStart));
     HIP_CHECK(hipEventCreate(&evStop));
 
-    std::vector<double> times(1);
+    double t_flux = 0.0;  // compute_flux_kernel
+    double t_rk   = 0.0;  // rk_update_kernel
     for (int i = 0; i < 1; ++i) {
         upload_initial();
-
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        run_cfd_step();
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
+        run_cfd_step(&evStart, &evStop, &t_flux, &t_rk);
     }
 
     HIP_CHECK(hipEventDestroy(evStart));
     HIP_CHECK(hipEventDestroy(evStop));
 
-    // Compute average time
-    double sum = 0.0;
-    for (int i = 0; i < 1; ++i) sum += times[i];
-    double avg_ms = sum / 1;
+    double total_ms = t_flux + t_rk;
+    double avg_ms   = total_ms;
 
     // Mcells/sec = N / time_s / 1e6
     double mcells_per_sec = (double)N / (avg_ms * 1e-3) / 1e6;
 
-    double total_ms = sum;
-
-    // JSON-lines kernel events (one per kernel)
+    // JSON-lines kernel events (one per kernel, each with its OWN measured time)
     printf("{\"type\":\"kernel\",\"name\":\"compute_flux_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_ms, N, block_size, precision);
+           t_flux, N, block_size, precision);
 
     printf("{\"type\":\"kernel\",\"name\":\"rk_update_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"block_size\":%d,"
            "\"precision\":\"%s\"}}\n",
-           avg_ms, N, block_size, precision);
+           t_rk, N, block_size, precision);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
@@ -581,7 +592,7 @@ int main(int argc, char** argv) {
            total_ms, mcells_per_sec);
 
     // Human-readable output to stderr
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
+    fprintf(stderr, "Average time: %.4f ms  (flux=%.4f rk=%.4f)\n", avg_ms, t_flux, t_rk);
     fprintf(stderr, "Throughput:   %.4f Mcells/sec\n", mcells_per_sec);
 
     // -----------------------------------------------------------------------

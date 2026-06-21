@@ -273,26 +273,38 @@ int main(int argc, char** argv)
     }
 
     // -----------------------------------------------------------------------
-    // Main K-Means iteration loop
+    // Main K-Means iteration loop — assign and update timed separately
     // -----------------------------------------------------------------------
-    HIP_CHECK(hipEventRecord(ev_start, 0));
+    double t_assign = 0.0;
+    double t_update = 0.0;
+    float ev_ms = 0.0f;
 
     int iter = 0;
     for (iter = 0; iter < max_iter; ++iter) {
 
         // --- Step 1: assign ---
+        HIP_CHECK(hipEventRecord(ev_start, 0));
         hipLaunchKernelGGL(kmeans_assign_kernel,
                            dim3(grid_size), dim3(block_size), 0, 0,
                            d_points, d_centers, d_membership, N, D, K);
+        HIP_CHECK(hipEventRecord(ev_stop, 0));
+        HIP_CHECK(hipEventSynchronize(ev_stop));
+        HIP_CHECK(hipEventElapsedTime(&ev_ms, ev_start, ev_stop));
+        t_assign += (double)ev_ms;
 
         // --- Step 2: zero accumulators ---
         HIP_CHECK(hipMemset(d_new_centers, 0, centers_bytes));
         HIP_CHECK(hipMemset(d_counts,      0, (size_t)K * sizeof(int)));
 
         // --- Step 3: accumulate ---
+        HIP_CHECK(hipEventRecord(ev_start, 0));
         hipLaunchKernelGGL(kmeans_update_kernel,
                            dim3(grid_size), dim3(block_size), 0, 0,
                            d_points, d_new_centers, d_counts, d_membership, N, D);
+        HIP_CHECK(hipEventRecord(ev_stop, 0));
+        HIP_CHECK(hipEventSynchronize(ev_stop));
+        HIP_CHECK(hipEventElapsedTime(&ev_ms, ev_start, ev_stop));
+        t_update += (double)ev_ms;
 
         // --- Step 4: copy back and divide on CPU ---
         HIP_CHECK(hipMemcpy(h_new_centers, d_new_centers, centers_bytes,   hipMemcpyDeviceToHost));
@@ -330,14 +342,12 @@ int main(int argc, char** argv)
         }
     }
 
-    HIP_CHECK(hipEventRecord(ev_stop, 0));
-    HIP_CHECK(hipEventSynchronize(ev_stop));
-
-    float time_ms = 0.0f;
-    HIP_CHECK(hipEventElapsedTime(&time_ms, ev_start, ev_stop));
+    // Total measured GPU time = sum of per-kernel accumulators
+    double time_ms = t_assign + t_update;
 
     // -----------------------------------------------------------------------
     // Verify convergence: run one extra assign pass, check delta < 1%
+    // (untimed)
     // -----------------------------------------------------------------------
     hipLaunchKernelGGL(kmeans_assign_kernel,
                        dim3(grid_size), dim3(block_size), 0, 0,
@@ -364,11 +374,11 @@ int main(int argc, char** argv)
     // JSON-lines kernel events
     printf("{\"type\":\"kernel\",\"name\":\"kmeans_assign_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"points\":%d,\"dims\":%d,\"clusters\":%d,\"max_iter\":%d}}\n",
-           (double)time_ms, N, D, K, max_iter);
+           t_assign, N, D, K, max_iter);
 
     printf("{\"type\":\"kernel\",\"name\":\"kmeans_update_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"points\":%d,\"dims\":%d,\"clusters\":%d,\"max_iter\":%d}}\n",
-           (double)time_ms, N, D, K, max_iter);
+           t_update, N, D, K, max_iter);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"

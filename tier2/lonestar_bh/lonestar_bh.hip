@@ -482,9 +482,15 @@ int main(int argc, char** argv) {
     QuadTree tree;
 
     // Lambda: run one full simulation (timesteps)
-    // Returns total FLOP estimate
+    // Returns total FLOP estimate.
+    // When timing events are supplied, each kernel launch is wrapped in its own
+    // event pair and its elapsed time is accumulated into the matching sum, so
+    // each distinct kernel reports its OWN separately measured GPU time
+    // (summed across the timesteps loop, and across the timed iterations).
     auto run_simulation = [&](std::vector<float>& px, std::vector<float>& py,
-                              std::vector<float>& vx, std::vector<float>& vy) -> double {
+                              std::vector<float>& vx, std::vector<float>& vy,
+                              hipEvent_t* evStart, hipEvent_t* evStop,
+                              double* t_force, double* t_integrate) -> double {
         double total_flops = 0.0;
 
         HIP_CHECK(hipMemcpy(d_px, px.data(), N * sizeof(float), hipMemcpyHostToDevice));
@@ -504,15 +510,31 @@ int main(int argc, char** argv) {
             upload_tree(tree, &d_tcx, &d_tcy, &d_tmass, &d_tbw, &d_tchild, num_nodes);
 
             // Compute forces on GPU
+            if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
             hipLaunchKernelGGL(bh_force_kernel, dim3(gridSize), dim3(blockSize),
                                0, 0, d_px, d_py, d_mass, d_ax, d_ay,
                                d_tcx, d_tcy, d_tmass, d_tbw, d_tchild,
                                num_nodes, N, theta, eps2);
+            if (evStart) {
+                HIP_CHECK(hipEventRecord(*evStop, 0));
+                HIP_CHECK(hipEventSynchronize(*evStop));
+                float ms = 0.0f;
+                HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
+                *t_force += (double)ms;
+            }
             HIP_CHECK(hipDeviceSynchronize());
 
             // Integrate on GPU
+            if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
             hipLaunchKernelGGL(integrate_kernel, dim3(gridSize), dim3(blockSize),
                                0, 0, d_px, d_py, d_vx, d_vy, d_ax, d_ay, N, dt);
+            if (evStart) {
+                HIP_CHECK(hipEventRecord(*evStop, 0));
+                HIP_CHECK(hipEventSynchronize(*evStop));
+                float ms = 0.0f;
+                HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
+                *t_integrate += (double)ms;
+            }
             HIP_CHECK(hipDeviceSynchronize());
 
             // FLOP estimate: ~20 FLOPs per body-node interaction
@@ -536,57 +558,51 @@ int main(int argc, char** argv) {
     double flops_est = 0.0;
     for (int w = 0; w < num_warmup; ++w) {
         auto wpx = h_px, wpy = h_py, wvx = h_vx, wvy = h_vy;
-        flops_est = run_simulation(wpx, wpy, wvx, wvy);
+        flops_est = run_simulation(wpx, wpy, wvx, wvy,
+                                   nullptr, nullptr, nullptr, nullptr);  // untimed
     }
     fprintf(stderr, "Estimated FLOPs per run: %.2e\n", flops_est);
 
     // -------------------------------------------------------------------
-    // Timed iterations
+    // Timed iterations — each kernel measured separately with its own
+    // accumulator (summed across the timesteps loop and the timed iters).
     // -------------------------------------------------------------------
     hipEvent_t evStart, evStop;
     HIP_CHECK(hipEventCreate(&evStart));
     HIP_CHECK(hipEventCreate(&evStop));
 
-    std::vector<double> times((size_t)iters);
+    double t_force = 0.0;      // bh_force_kernel
+    double t_integrate = 0.0;  // integrate_kernel
     std::vector<double> flops_per_iter((size_t)iters);
     for (int i = 0; i < iters; ++i) {
         auto tpx = h_px, tpy = h_py, tvx = h_vx, tvy = h_vy;
-
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        flops_per_iter[i] = run_simulation(tpx, tpy, tvx, tvy);
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
+        flops_per_iter[i] = run_simulation(tpx, tpy, tvx, tvy,
+                                           &evStart, &evStop, &t_force, &t_integrate);
     }
 
     HIP_CHECK(hipEventDestroy(evStart));
     HIP_CHECK(hipEventDestroy(evStop));
 
-    // Compute average
-    double sum_ms = 0.0, sum_flops = 0.0;
+    // Compute average (per iteration) for FLOPS metric
+    double sum_flops = 0.0;
     for (int i = 0; i < iters; ++i) {
-        sum_ms += times[i];
         sum_flops += flops_per_iter[i];
     }
-    double avg_ms = sum_ms / iters;
+    double total_ms = t_force + t_integrate;     // total measured GPU time
+    double avg_ms = total_ms / iters;            // per-iteration average
     double avg_flops = sum_flops / iters;
     double gflops = avg_flops / (avg_ms * 1e-3) / 1e9;
 
-    double total_ms = sum_ms;
-
-    // JSON-lines kernel events
+    // JSON-lines kernel events (each kernel reports its OWN total measured time)
     printf("{\"type\":\"kernel\",\"name\":\"bh_force_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"bodies\":%d,\"timesteps\":%d,\"theta\":%.6f,"
            "\"iterations\":%d}}\n",
-           avg_ms, bodies, timesteps_p, theta_p, iterations);
+           t_force, bodies, timesteps_p, theta_p, iterations);
 
     printf("{\"type\":\"kernel\",\"name\":\"integrate_kernel\",\"time_ms\":%.6f,"
            "\"params\":{\"bodies\":%d,\"timesteps\":%d,\"theta\":%.6f,"
            "\"iterations\":%d}}\n",
-           avg_ms, bodies, timesteps_p, theta_p, iterations);
+           t_integrate, bodies, timesteps_p, theta_p, iterations);
 
     // JSON-lines summary event
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
@@ -594,7 +610,8 @@ int main(int argc, char** argv) {
            total_ms, gflops);
 
     // Human-readable to stderr
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
+    fprintf(stderr, "Average time: %.4f ms  (force=%.4f integrate=%.4f total)\n",
+            avg_ms, t_force, t_integrate);
     fprintf(stderr, "Throughput:   %.4f GFLOPS\n", gflops);
 
     // -------------------------------------------------------------------

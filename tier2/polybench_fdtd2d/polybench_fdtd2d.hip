@@ -301,44 +301,78 @@ int main(int argc, char** argv) {
     snprintf(problemSize, sizeof(problemSize), "%dx%d", NX, NY);
 
     g_num_warmup = num_warmup;
-    BenchResult r = runBenchmark(
-        "polybench_fdtd2d", problemSize, 1, [&]() {
-            // Reset device arrays from host for reproducibility
-            HIP_CHECK(hipMemcpy(d_ex, h_ex, grid_bytes, hipMemcpyHostToDevice));
-            HIP_CHECK(hipMemcpy(d_ey, h_ey, grid_bytes, hipMemcpyHostToDevice));
-            HIP_CHECK(hipMemcpy(d_hz, h_hz, grid_bytes, hipMemcpyHostToDevice));
+    (void)problemSize;
 
-            for (int t = 0; t < TMAX; ++t) {
-                hipLaunchKernelGGL(fdtd_update_ex, grid2d, block, 0, 0,
-                                   d_ex, d_hz, NX, NY);
-                hipLaunchKernelGGL(fdtd_update_ey, grid2d, block, 0, 0,
-                                   d_ey, d_hz, NX, NY);
-                hipLaunchKernelGGL(fdtd_update_hz, grid2d, block, 0, 0,
-                                   d_ex, d_ey, d_hz, NX, NY);
-            }
-            HIP_CHECK(hipDeviceSynchronize());
-        });
+    BenchmarkTimer timer;
+
+    // Warmup — run the full kernel sequence, untimed
+    for (int w = 0; w < g_num_warmup; ++w) {
+        HIP_CHECK(hipMemcpy(d_ex, h_ex, grid_bytes, hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(d_ey, h_ey, grid_bytes, hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(d_hz, h_hz, grid_bytes, hipMemcpyHostToDevice));
+
+        for (int t = 0; t < TMAX; ++t) {
+            hipLaunchKernelGGL(fdtd_update_ex, grid2d, block, 0, 0,
+                               d_ex, d_hz, NX, NY);
+            hipLaunchKernelGGL(fdtd_update_ey, grid2d, block, 0, 0,
+                               d_ey, d_hz, NX, NY);
+            hipLaunchKernelGGL(fdtd_update_hz, grid2d, block, 0, 0,
+                               d_ex, d_ey, d_hz, NX, NY);
+        }
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Timed region — accumulate each kernel's GPU time across the TMAX steps
+    double t_ex = 0.0, t_ey = 0.0, t_hz = 0.0;
+
+    // Reset device arrays from host for reproducibility
+    HIP_CHECK(hipMemcpy(d_ex, h_ex, grid_bytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_ey, h_ey, grid_bytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_hz, h_hz, grid_bytes, hipMemcpyHostToDevice));
+
+    for (int t = 0; t < TMAX; ++t) {
+        timer.record_start();
+        hipLaunchKernelGGL(fdtd_update_ex, grid2d, block, 0, 0,
+                           d_ex, d_hz, NX, NY);
+        timer.record_stop();
+        t_ex += static_cast<double>(timer.elapsed_ms());
+
+        timer.record_start();
+        hipLaunchKernelGGL(fdtd_update_ey, grid2d, block, 0, 0,
+                           d_ey, d_hz, NX, NY);
+        timer.record_stop();
+        t_ey += static_cast<double>(timer.elapsed_ms());
+
+        timer.record_start();
+        hipLaunchKernelGGL(fdtd_update_hz, grid2d, block, 0, 0,
+                           d_ex, d_ey, d_hz, NX, NY);
+        timer.record_stop();
+        t_hz += static_cast<double>(timer.elapsed_ms());
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+
+    double total_ms = t_ex + t_ey + t_hz;
 
     // Effective bandwidth: 7*NX*NY*sizeof(float) bytes/step across ex/ey/hz updates
     double bytes_per_step = 7.0 * (double)NX * NY * sizeof(float);
     double total_bytes    = bytes_per_step * TMAX;
-    double bw_gb = total_bytes / (r.avg_ms * 1e-3) / 1e9;
-    fprintf(stderr, "Effective bandwidth: %.2f GB/s  (avg %.4f ms, %d steps/iter)\n",
-            bw_gb, r.avg_ms, TMAX);
+    double bw_gb = total_bytes / (total_ms * 1e-3) / 1e9;
+    fprintf(stderr, "Effective bandwidth: %.2f GB/s  (total %.4f ms: ex=%.4f ey=%.4f hz=%.4f, %d steps/iter)\n",
+            bw_gb, total_ms, t_ex, t_ey, t_hz, TMAX);
 
     // JSON-lines output
     printf("{\"type\":\"kernel\",\"name\":\"fdtd_update_ex\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"tmax\":%d,\"block_size\":%d}}\n",
-           r.avg_ms, N, TMAX, block_size);
+           t_ex, N, TMAX, block_size);
     printf("{\"type\":\"kernel\",\"name\":\"fdtd_update_ey\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"tmax\":%d,\"block_size\":%d}}\n",
-           r.avg_ms, N, TMAX, block_size);
+           t_ey, N, TMAX, block_size);
     printf("{\"type\":\"kernel\",\"name\":\"fdtd_update_hz\",\"time_ms\":%.6f,"
            "\"params\":{\"size\":%d,\"tmax\":%d,\"block_size\":%d}}\n",
-           r.avg_ms, N, TMAX, block_size);
+           t_hz, N, TMAX, block_size);
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
-           r.avg_ms, bw_gb);
+           total_ms, bw_gb);
 
     HIP_CHECK(hipFree(d_ex));
     HIP_CHECK(hipFree(d_ey));

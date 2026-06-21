@@ -2,41 +2,57 @@
   "benchmark": "cache_latency",
   "tier": 1,
   "suite": "microbench",
-  "description": "Measures GPU cache/memory latency using single-thread pointer chasing over a random Hamiltonian cycle. Array size determines the targeted cache level (L1, L2, or global DRAM). Reports latency in nanoseconds per access.",
+  "description": "Measures GPU cache/memory latency via single-thread cacheline-stride pointer chasing over a random Hamiltonian cycle (one node per cacheline, so every access is a fresh line). array_bytes (the working-set size) selects the targeted level: small sizes stay resident in L1/L2, mid sizes spill to MALL/Infinity Cache, large sizes to DRAM. num_accesses is derived as reuse_k * array_bytes/cacheline_bytes (K full laps, no cap): ~1 cold miss + (K-1) resident hits per line at sizes that fit a cache level, degrading to all-miss latency once the set exceeds the caches. The access count grows with array_bytes, so the largest points take minutes on hardware. No separate cache warm-up (the timed kernel self-warms; a 1-access primer only absorbs code-object load). Reports latency in nanoseconds per access.",
   "scaling_param": {
     "name": "array_bytes",
-    "description": "Size of the pointer-chasing array in bytes; determines which cache level is targeted",
+    "description": "Working-set size in bytes; selects which level (L1/L2/MALL/DRAM) serves the chase",
     "type": "int",
     "values": [
       4096,
       8192,
       16384,
       32768,
+      49152,
       65536,
       131072,
       262144,
       524288,
       1048576,
       2097152,
+      3145728,
       4194304,
+      6291456,
       8388608,
       16777216,
       33554432,
       67108864,
       134217728,
+      201326592,
       268435456,
+      402653184,
       536870912,
-      1073741824
+      1073741824,
+      2147483648,
+      4294967296
     ]
   },
   "non_scaling_params": [
     {
-      "name": "num_accesses",
-      "description": "Number of pointer-chasing steps per kernel launch",
+      "name": "cacheline_bytes",
+      "description": "Stride between chase nodes; set to the cacheline size so each access hits a fresh line (64 B on gfx942/MI300X)",
       "type": "int",
-      "default": 2000000,
+      "default": 64,
       "values": [
-        2000000
+        64
+      ]
+    },
+    {
+      "name": "reuse_k",
+      "description": "Laps over the working set; K=16 gives ~1 cold miss + 15 hits per line when resident",
+      "type": "int",
+      "default": 16,
+      "values": [
+        16
       ]
     },
     {

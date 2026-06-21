@@ -50,7 +50,7 @@
 static const int DEFAULT_BLOCK_SIZE   = 256;
 static const int DEFAULT_NUM_BLOCKS   = 128;
 static const int DEFAULT_INNER_ITERS  = 1000;
-static const int DEFAULT_WARMUP_ITERS  = 0;
+static const int DEFAULT_WARMUP_ITERS  = 5;
 static const int SMEM_FLOATS          = 12288;         // 48 KB / 4 bytes
 static const double BYTES_PER_GB      = 1e9;
 

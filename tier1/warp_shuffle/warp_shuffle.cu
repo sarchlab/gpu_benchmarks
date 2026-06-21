@@ -61,7 +61,7 @@ static const int DEFAULT_NUM_BLOCKS      = 1024;
 /** Warp size (64 on AMD GCN/CDNA, 32 on NVIDIA). */
 static const int WARP_SIZE = 32;
 
-static const int DEFAULT_NUM_WARMUP = 0;
+static const int DEFAULT_NUM_WARMUP = 5;
 
 // ---------------------------------------------------------------------------
 // Shuffle kernels

@@ -116,7 +116,7 @@ static const int WARP_SIZE = 64;
 static const int WARP_SIZE = 32;
 #endif
 
-static const int DEFAULT_NUM_WARMUP = 0;
+static const int DEFAULT_NUM_WARMUP = 5;
 
 // ---------------------------------------------------------------------------
 // Shuffle kernels

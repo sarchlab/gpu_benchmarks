@@ -56,7 +56,7 @@
 static const size_t   DEFAULT_ARRAY_BYTES  = 2ULL * 1024 * 1024;  // 2 MB
 static const uint32_t DEFAULT_NUM_ACCESSES = 2000000u;
 static const uint32_t DEFAULT_RNG_SEED     = 42u;
-static const int      DEFAULT_NUM_WARMUP   = 0;
+static const int      DEFAULT_NUM_WARMUP   = 5;
 
 // ---------------------------------------------------------------------------
 // Pointer-chasing kernel

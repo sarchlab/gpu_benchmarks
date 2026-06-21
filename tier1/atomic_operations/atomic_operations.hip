@@ -106,7 +106,7 @@
 static const int DEFAULT_OPS_PER_THREAD  = 1024;
 static const int DEFAULT_THREADS_PER_BLK = 256;
 static const int DEFAULT_NUM_BLOCKS      = 1024;
-static const int DEFAULT_NUM_WARMUP      = 0;
+static const int DEFAULT_NUM_WARMUP      = 5;
 
 // ---------------------------------------------------------------------------
 // Atomic kernels

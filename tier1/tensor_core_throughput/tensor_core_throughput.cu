@@ -76,7 +76,7 @@ static const int WMMA_M                    = 16;
 static const int WMMA_N                    = 16;
 static const int WMMA_K                    = 16;
 static const int WARP_SIZE                 = 32;
-static const int DEFAULT_WARMUP_ITERATIONS = 0;
+static const int DEFAULT_WARMUP_ITERATIONS = 5;
 
 // ---------------------------------------------------------------------------
 // FP16 WMMA GEMM kernel

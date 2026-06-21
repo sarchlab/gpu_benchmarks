@@ -90,7 +90,7 @@ static const size_t   TARGET_TRAFFIC_BYTES  = 8ULL * 1024 * 1024 * 1024;  // 8 G
 static const uint32_t MIN_ITERS             = 3u;
 static const uint32_t MAX_ITERS             = 4000000u;
 static const size_t   PRIVATE_ALLOC_CAP     = 4ULL * 1024 * 1024 * 1024;  // 4 GB
-static const int      NUM_WARMUP            = 2;
+static const int      NUM_WARMUP            = 5;
 static const int      NUM_TIMED             = 3;
 
 // ---------------------------------------------------------------------------

@@ -33,7 +33,7 @@
 static const int DEFAULT_DIM               = 4096;
 static const int SIMD_TILE                 = 8;    // 8×8 simdgroup tiles
 static const int SIMDGROUP_SIZE            = 32;   // threads per simdgroup
-static const int DEFAULT_WARMUP_ITERATIONS = 0;
+static const int DEFAULT_WARMUP_ITERATIONS = 5;
 
 // ---------------------------------------------------------------------------
 // Timing helpers

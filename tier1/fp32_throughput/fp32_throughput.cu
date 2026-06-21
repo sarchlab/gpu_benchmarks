@@ -67,7 +67,7 @@ static const int DEFAULT_THREADS_PER_BLOCK = 256;
  */
 static const int DEFAULT_NUM_BLOCKS = 1024;
 
-static const int DEFAULT_NUM_WARMUP = 0;
+static const int DEFAULT_NUM_WARMUP = 5;
 
 // ---------------------------------------------------------------------------
 // FP32 FMA kernel

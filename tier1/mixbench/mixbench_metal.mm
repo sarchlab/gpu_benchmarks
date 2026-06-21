@@ -48,7 +48,7 @@
 static const int    DEFAULT_BUFFER_MB       = 256;
 static const double DEFAULT_FLOPS_PER_BYTE  = 4.0;
 static const int    DEFAULT_THREADS_PER_BLK = 256;
-static const int    DEFAULT_WARMUP_ITERS     = 0;
+static const int    DEFAULT_WARMUP_ITERS     = 5;
 
 // ---------------------------------------------------------------------------
 // Timing helper

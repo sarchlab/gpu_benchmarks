@@ -45,7 +45,7 @@
 // ---------------------------------------------------------------------------
 
 static const int    DEFAULT_BUFFER_MB      = 256;
-static const int    DEFAULT_NUM_WARMUP     = 0;
+static const int    DEFAULT_NUM_WARMUP     = 5;
 static const double BYTES_PER_GB           = 1e9;
 
 // ---------------------------------------------------------------------------

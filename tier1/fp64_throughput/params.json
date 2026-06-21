@@ -28,13 +28,9 @@
       "name": "num_blocks",
       "description": "Number of thread blocks in the grid",
       "type": "int",
-      "default": 1024,
+      "default": 1,
       "values": [
-        1,
-        32,
-        1024,
-        4096,
-        32768
+        1
       ]
     },
     {

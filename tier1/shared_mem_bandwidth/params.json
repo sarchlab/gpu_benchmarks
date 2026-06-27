@@ -2,7 +2,7 @@
   "benchmark": "shared_mem_bandwidth",
   "tier": 1,
   "suite": "microbench",
-  "description": "Measures GPU shared memory (LDS/SMEM) bandwidth with two access patterns: no-conflict (stride-1, zero bank conflicts) and conflict (all warp lanes access the same bank, 32-way bank conflict). Reports bandwidth in GB/s.",
+  "description": "Measures GPU shared-memory (LDS/SMEM) read bandwidth: each thread streams 8 independent LDS reads per iteration into 8 independent accumulators, so many accesses are in flight and the LDS unit can be saturated. Launch many blocks (>= number of CUs) to saturate the device. Two access patterns: no_conflict (stride-1) and conflict (32-way bank conflict). Reports bandwidth in GB/s. (For the dependent-access latency variant see shared_mem_latency.)",
   "scaling_param": {
     "name": "inner_iters",
     "description": "Number of inner-loop iterations per kernel launch; controls total shared memory traffic",
@@ -36,11 +36,11 @@
     },
     {
       "name": "num_blocks",
-      "description": "Number of thread blocks in the grid",
+      "description": "Number of thread blocks in the grid; must be >= number of CUs to saturate the device for a bandwidth measurement",
       "type": "int",
-      "default": 1,
+      "default": 304,
       "values": [
-        1
+        304
       ]
     },
     {

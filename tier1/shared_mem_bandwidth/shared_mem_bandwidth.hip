@@ -1,21 +1,34 @@
 /**
  * shared_mem_bandwidth.hip
  *
- * HIP port of the shared memory bandwidth microbenchmark.
+ * HIP port of the shared memory BANDWIDTH microbenchmark.
  * Compiles for both AMD (ROCm) and NVIDIA (HIP-on-CUDA) targets.
  *
- * Measures GPU shared memory (LDS / SMEM) bandwidth with two access
- * patterns:
- *   - no_conflict : each thread in a warp accesses a different bank
- *                   (stride-1, sequential)
- *   - conflict    : all threads in a warp access the same bank
- *                   (stride-32 between lanes)
+ * Measures GPU shared-memory (LDS / SMEM) read bandwidth. Each thread issues
+ * UNROLL independent LDS reads per iteration into UNROLL independent register
+ * accumulators, so many accesses are in flight at once and the LDS unit can be
+ * saturated -- the throughput test (the predecessor, a single-accumulator
+ * read->add->write recurrence, actually measured latency; it now lives in
+ * shared_mem_latency).
  *
- * Each pattern is timed with HIP events.  5 warmup + 5 timed iterations
- * are performed and the average is reported.
+ * Forcing real LDS read traffic needs two things, because constant, loop-
+ * invariant LDS data gets optimized away:
+ *   1. Stage the buffer from a GLOBAL input (d_in) whose contents are opaque to
+ *      the compiler, so the reads cannot be constant-folded.
+ *   2. Make the read index depend on the loop counter, so the reads are not
+ *      loop-invariant and cannot be hoisted.
+ * d_in is filled with 1.0 on the host, so each block's sink value is exactly
+ * UNROLL*inner_iters (deterministic), but the compiler must still emit
+ * inner_iters*UNROLL real LDS reads.
  *
- * Usage:
- *   ./shared_mem_bandwidth
+ * Two access patterns:
+ *   - no_conflict : consecutive lanes -> consecutive banks (conflict-free)
+ *   - conflict    : 32 lanes -> the same bank (32-way bank conflict)
+ *
+ * For a meaningful bandwidth number launch a full block (>=256 threads) and
+ * many blocks (>= number of CUs); see params.json.
+ *
+ * Each pattern is timed with HIP events. 5 warmup + 1 timed launch.
  *
  * Environment variables (override defaults):
  *   BENCH_PARAM_inner_iters
@@ -61,19 +74,6 @@
 #define hipHostMalloc           cudaMallocHost
 #define hipHostFree             cudaFreeHost
 #define hipHostMallocDefault    cudaHostAllocDefault
-#define hipBlockIdx_x           blockIdx.x
-#define hipBlockIdx_y           blockIdx.y
-#define hipBlockIdx_z           blockIdx.z
-#define hipThreadIdx_x          threadIdx.x
-#define hipThreadIdx_y          threadIdx.y
-#define hipThreadIdx_z          threadIdx.z
-#define hipBlockDim_x           blockDim.x
-#define hipBlockDim_y           blockDim.y
-#define hipBlockDim_z           blockDim.z
-#define hipGridDim_x            gridDim.x
-#define hipGridDim_y            gridDim.y
-#define hipGridDim_z            gridDim.z
-#define __HIP_PLATFORM_AMD__    0
 #define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
     kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
@@ -99,10 +99,11 @@
 // ---------------------------------------------------------------------------
 
 static const int DEFAULT_BLOCK_SIZE   = 256;
-static const int DEFAULT_NUM_BLOCKS   = 128;
+static const int DEFAULT_NUM_BLOCKS   = 304;          // saturate the GPU (>= #CUs)
 static const int DEFAULT_INNER_ITERS  = 1000;
-static const int DEFAULT_WARMUP_ITERS  = 5;
-static const int SMEM_FLOATS          = 12288;         // 48 KB / 4 bytes
+static const int DEFAULT_WARMUP_ITERS = 5;
+static const int UNROLL               = 8;            // independent accumulators
+static const int SMEM_FLOATS          = 8192;         // 32 KB / 4 bytes; >= max block_size*UNROLL
 static const double BYTES_PER_GB      = 1e9;
 
 // ---------------------------------------------------------------------------
@@ -110,96 +111,109 @@ static const double BYTES_PER_GB      = 1e9;
 // ---------------------------------------------------------------------------
 
 /**
- * No-conflict kernel.
+ * No-conflict bandwidth kernel: UNROLL independent reads/iteration, consecutive
+ * lanes -> consecutive banks. it-varying index prevents hoisting; opaque d_in
+ * prevents constant-folding.
  */
-__global__ void smem_bw_no_conflict(float *d_sink, int inner_iters)
+__global__ void smem_bw_no_conflict(const float *d_in, float *d_sink,
+                                    int inner_iters)
 {
     __shared__ float smem[SMEM_FLOATS];
-
     const int tid = threadIdx.x;
     const int n   = blockDim.x;
 
-    // Initialise shared memory
     for (int i = tid; i < SMEM_FLOATS; i += n)
-        smem[i] = 1.0f;
+        smem[i] = d_in[i];
     __syncthreads();
 
-    float acc = 0.0f;
+    float acc[UNROLL];
+#pragma unroll
+    for (int u = 0; u < UNROLL; ++u)
+        acc[u] = 0.0f;
+
     for (int it = 0; it < inner_iters; ++it) {
-        for (int i = tid; i < SMEM_FLOATS; i += n) {
-            acc += smem[i];   // read
-            smem[i] = acc;    // write
+#pragma unroll
+        for (int u = 0; u < UNROLL; ++u) {
+            int idx = (tid + (u + it) * n) % SMEM_FLOATS;
+            acc[u] += smem[idx];
         }
     }
     __syncthreads();
 
-    // Prevent dead-code elimination
-    if (tid == 0) d_sink[blockIdx.x] = acc;
+    float sum = 0.0f;
+#pragma unroll
+    for (int u = 0; u < UNROLL; ++u)
+        sum += acc[u];
+
+    if (tid == 0) d_sink[blockIdx.x] = sum;   // == UNROLL*inner_iters (d_in all 1.0)
 }
 
 /**
- * Conflict kernel.
+ * Conflict bandwidth kernel: all 32 lanes of a warp hit the same bank.
  */
-__global__ void smem_bw_conflict(float *d_sink, int inner_iters)
+__global__ void smem_bw_conflict(const float *d_in, float *d_sink,
+                                 int inner_iters)
 {
     __shared__ float smem[SMEM_FLOATS];
-
     const int tid  = threadIdx.x;
     const int n    = blockDim.x;
     const int lane = tid & 31;
-    const int warp = tid >> 5;
-    const int nw   = n >> 5;              // number of warps
 
-    // Initialise shared memory (normal stride-1)
     for (int i = tid; i < SMEM_FLOATS; i += n)
-        smem[i] = 1.0f;
+        smem[i] = d_in[i];
     __syncthreads();
 
-    const int elems_per_thread = SMEM_FLOATS / n;   // e.g. 48
-    float acc = 0.0f;
+    float acc[UNROLL];
+#pragma unroll
+    for (int u = 0; u < UNROLL; ++u)
+        acc[u] = 0.0f;
 
     for (int it = 0; it < inner_iters; ++it) {
-        for (int j = 0; j < elems_per_thread; ++j) {
-            int idx = (lane * 32 + warp + j * nw) % SMEM_FLOATS;
-            acc += smem[idx];   // read  — all lanes hit same bank
-            smem[idx] = acc;    // write — all lanes hit same bank
+#pragma unroll
+        for (int u = 0; u < UNROLL; ++u) {
+            // stride 32 floats between lanes -> same bank (32-way conflict);
+            // (u+it) shifts the bank and makes the access it-varying.
+            int idx = (lane * 32 + ((u + it) & 31)) % SMEM_FLOATS;
+            acc[u] += smem[idx];
         }
     }
     __syncthreads();
 
-    if (tid == 0) d_sink[blockIdx.x] = acc;
+    float sum = 0.0f;
+#pragma unroll
+    for (int u = 0; u < UNROLL; ++u)
+        sum += acc[u];
+
+    if (tid == 0) d_sink[blockIdx.x] = sum;
 }
 
 // ---------------------------------------------------------------------------
 // Benchmark helper
 // ---------------------------------------------------------------------------
 
-typedef void (*KernelFn)(float *, int);
+typedef void (*KernelFn)(const float *, float *, int);
 
 /**
- * Run a kernel, time it, return average time in ms and bandwidth.
+ * Run a kernel, time it with HIP events, return time in ms and bandwidth (GB/s).
  */
-static double run_benchmark(KernelFn kernel, float *d_sink,
+static double run_benchmark(KernelFn kernel, const float *d_in, float *d_sink,
                             int block_size, int num_blocks, int inner_iters,
-                            int num_warmup,
-                            double *out_bw_GBs)
+                            int num_warmup, double *out_bw_GBs)
 {
-    // Warmup
     for (int i = 0; i < num_warmup; ++i) {
         hipLaunchKernelGGL(kernel, dim3(num_blocks), dim3(block_size),
-                           0, 0, d_sink, inner_iters);
+                           0, 0, d_in, d_sink, inner_iters);
         HIP_CHECK(hipGetLastError());
     }
     HIP_CHECK(hipDeviceSynchronize());
 
-    // Timed iterations
     hipEvent_t start, stop;
     HIP_CHECK(hipEventCreate(&start));
     HIP_CHECK(hipEventCreate(&stop));
 
     HIP_CHECK(hipEventRecord(start, 0));
     hipLaunchKernelGGL(kernel, dim3(num_blocks), dim3(block_size),
-                       0, 0, d_sink, inner_iters);
+                       0, 0, d_in, d_sink, inner_iters);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipEventRecord(stop, 0));
     HIP_CHECK(hipEventSynchronize(stop));
@@ -211,10 +225,11 @@ static double run_benchmark(KernelFn kernel, float *d_sink,
     HIP_CHECK(hipEventDestroy(start));
     HIP_CHECK(hipEventDestroy(stop));
 
-    // Bandwidth calculation
-    double bytes_per_launch = 2.0 * SMEM_FLOATS * sizeof(float)
-                              * (double)inner_iters * num_blocks;
-    double bw_GBs = bytes_per_launch / (avg_ms * 1e-3) / BYTES_PER_GB;
+    // Read-only: each of block_size threads does UNROLL reads per inner-iter,
+    // over num_blocks blocks. 4 bytes per read.
+    double bytes = (double)UNROLL * inner_iters * block_size * num_blocks
+                   * sizeof(float);
+    double bw_GBs = bytes / (avg_ms * 1e-3) / BYTES_PER_GB;
 
     if (out_bw_GBs) *out_bw_GBs = bw_GBs;
     return avg_ms;
@@ -226,12 +241,10 @@ static double run_benchmark(KernelFn kernel, float *d_sink,
 
 int main(int argc, char *argv[])
 {
-    /* Line-buffer stdout so JSON lines are flushed promptly. */
     setvbuf(stdout, NULL, _IOLBF, 0);
 
     const char* env_val;
 
-    /* Read parameters from env vars with defaults. */
     int inner_iters = DEFAULT_INNER_ITERS;
     env_val = getenv("BENCH_PARAM_inner_iters");
     if (env_val) inner_iters = atoi(env_val);
@@ -250,22 +263,29 @@ int main(int argc, char *argv[])
 
     int num_warmup = DEFAULT_WARMUP_ITERS;
 
-    /* Print device info to stderr. */
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
 
     fprintf(stderr, "Device        : %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Shared mem/blk: %zu bytes\n",
-           (size_t)prop.sharedMemPerBlock);
+    fprintf(stderr, "Shared mem/blk: %zu bytes\n", (size_t)prop.sharedMemPerBlock);
     fprintf(stderr, "Block size    : %d threads\n", block_size);
     fprintf(stderr, "Grid size     : %d blocks\n", num_blocks);
     fprintf(stderr, "Inner iters   : %d\n", inner_iters);
     fprintf(stderr, "Access pattern: %s\n", access_pattern);
     fprintf(stderr, "Warmup iters  : %d\n\n", num_warmup);
 
-    /* Allocate device sink buffer. */
+    // Opaque source data: all 1.0, so the result is deterministic but the
+    // compiler can't fold the LDS reads.
+    float *h_in = (float *)malloc(SMEM_FLOATS * sizeof(float));
+    for (int i = 0; i < SMEM_FLOATS; ++i) h_in[i] = 1.0f;
+
+    float *d_in = nullptr;
+    HIP_CHECK(hipMalloc(&d_in, SMEM_FLOATS * sizeof(float)));
+    HIP_CHECK(hipMemcpy(d_in, h_in, SMEM_FLOATS * sizeof(float),
+                        hipMemcpyHostToDevice));
+
     float *d_sink = nullptr;
     HIP_CHECK(hipMalloc(&d_sink, num_blocks * sizeof(float)));
 
@@ -277,10 +297,9 @@ int main(int argc, char *argv[])
     bool run_conflict    = (strcmp(access_pattern, "conflict") == 0 ||
                             strcmp(access_pattern, "both") == 0);
 
-    /* --- No-conflict --- */
     if (run_no_conflict) {
         double nc_bw = 0.0;
-        double nc_ms = run_benchmark(smem_bw_no_conflict, d_sink,
+        double nc_ms = run_benchmark(smem_bw_no_conflict, d_in, d_sink,
                                      block_size, num_blocks, inner_iters,
                                      num_warmup, &nc_bw);
         fprintf(stderr, "no_conflict    : %.3f ms  %.2f GB/s\n", nc_ms, nc_bw);
@@ -293,10 +312,9 @@ int main(int argc, char *argv[])
                nc_ms, inner_iters, block_size, num_blocks, access_pattern);
     }
 
-    /* --- Conflict --- */
     if (run_conflict) {
         double c_bw = 0.0;
-        double c_ms = run_benchmark(smem_bw_conflict, d_sink,
+        double c_ms = run_benchmark(smem_bw_conflict, d_in, d_sink,
                                     block_size, num_blocks, inner_iters,
                                     num_warmup, &c_bw);
         fprintf(stderr, "conflict       : %.3f ms  %.2f GB/s\n", c_ms, c_bw);
@@ -309,12 +327,13 @@ int main(int argc, char *argv[])
                c_ms, inner_iters, block_size, num_blocks, access_pattern);
     }
 
-    /* Summary */
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
            "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
            total_time_ms, max_bw);
 
     HIP_CHECK(hipFree(d_sink));
+    HIP_CHECK(hipFree(d_in));
+    free(h_in);
 
     fprintf(stderr, "\nDone.\n");
     return EXIT_SUCCESS;

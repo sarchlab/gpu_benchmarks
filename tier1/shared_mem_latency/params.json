@@ -1,0 +1,61 @@
+{
+  "benchmark": "shared_mem_latency",
+  "tier": 1,
+  "suite": "microbench",
+  "description": "Measures GPU shared-memory (LDS/SMEM) dependent-access LATENCY: a single-accumulator read->add->write recurrence, so accesses cannot overlap and the kernel time reflects per-access round-trip latency, not bandwidth. (Formerly named shared_mem_bandwidth; renamed because that is what it actually measures. See shared_mem_bandwidth for the throughput test.) Two access patterns: no_conflict (stride-1) and conflict (32-way bank conflict).",
+  "scaling_param": {
+    "name": "inner_iters",
+    "description": "Number of inner-loop iterations per kernel launch; controls total shared memory traffic",
+    "type": "int",
+    "values": [
+      64,
+      128,
+      256,
+      512,
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768,
+      65536
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        32,
+        64,
+        256,
+        1024
+      ]
+    },
+    {
+      "name": "num_blocks",
+      "description": "Number of thread blocks in the grid",
+      "type": "int",
+      "default": 1,
+      "values": [
+        1
+      ]
+    },
+    {
+      "name": "access_pattern",
+      "description": "Shared memory access pattern: no_conflict (stride-1) or conflict (same bank)",
+      "type": "enum",
+      "default": "no_conflict",
+      "values": [
+        "no_conflict",
+        "conflict"
+      ]
+    }
+  ],
+  "kernels": [
+    "smem_lat_no_conflict",
+    "smem_lat_conflict"
+  ]
+}

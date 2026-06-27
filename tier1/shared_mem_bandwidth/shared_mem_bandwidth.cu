@@ -1,3 +1,6 @@
+// TODO(bandwidth-rewrite): this file still contains the OLD single-accumulator
+// (latency) kernel. Port the new multi-accumulator bandwidth kernel from
+// shared_mem_bandwidth.hip. Until then, only the HIP/ROCm backend is correct.
 /**
  * shared_mem_bandwidth.cu
  *

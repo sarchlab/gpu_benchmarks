@@ -641,6 +641,8 @@ type runArgs struct {
 	postProcess     string
 	resumeTrace     bool
 	cleanIncomplete bool
+	rocprof         bool   // time kernels via rocprof (GPU-only HW timestamps)
+	rocprofCmd      string // rocprof invocation template ({OUT}/{OUTDIR}); "" = default
 }
 
 func cmdRun(args runArgs) int {
@@ -1061,10 +1063,29 @@ func cmdRun(args runArgs) int {
 				eprintf("    %s=%-12s rep %d/%d  ",
 					spName, formatValue(cfg.ScalingValue), rep, reps)
 
-				ec, stdoutStr, stderrStr, timedOut := runBenchmarkProc(
-					cmd, env, timeoutSecs, args.verbose)
+				var ec int
+				var stdoutStr, stderrStr string
+				var timedOut bool
+				var rocprofMs map[string]float64
+				if args.rocprof {
+					ec, stdoutStr, stderrStr, timedOut, rocprofMs =
+						runUnderRocprof(cmd, env, timeoutSecs, args.rocprofCmd)
+				} else {
+					ec, stdoutStr, stderrStr, timedOut = runBenchmarkProc(
+						cmd, env, timeoutSecs, args.verbose)
+				}
 
 				kernels, summary, protoErrors := parseOutput(stdoutStr)
+
+				// rocprof overrides the benchmark's hipEvent time_ms with the
+				// GPU-only hardware-timestamp duration for the matching kernel.
+				if args.rocprof {
+					for i := range kernels {
+						if ms, ok := rocprofMs[kernels[i].Name]; ok {
+							kernels[i].TimeMS = ms
+						}
+					}
+				}
 
 				var status, errMsg string
 				if timedOut {

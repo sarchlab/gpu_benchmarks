@@ -128,6 +128,8 @@ func main() {
 			cleanIncomplete, _ := cmd.Flags().GetBool("trace-clean-incomplete")
 			traceSample, _ := cmd.Flags().GetString("trace-sample")
 			traceSizes, _ := cmd.Flags().GetInt("trace-sizes")
+			rocprof, _ := cmd.Flags().GetBool("rocprof")
+			rocprofCmd, _ := cmd.Flags().GetString("rocprof-cmd")
 
 			os.Exit(cmdRun(runArgs{
 				tier:            tier,
@@ -149,6 +151,8 @@ func main() {
 				cleanIncomplete: cleanIncomplete,
 				traceSample:     traceSample,
 				traceSizes:      traceSizes,
+				rocprof:         rocprof,
+				rocprofCmd:      rocprofCmd,
 			}))
 			return nil
 		},
@@ -172,6 +176,8 @@ func main() {
 	runCmd.Flags().Bool("trace-clean-incomplete", false, "When resuming traces, delete incomplete config trace directories before retrying")
 	runCmd.Flags().String("trace-sample", "", "PTRACE_SAMPLE spec for the live-sampling tracer (e.g. 'corner'); empty = full tracing")
 	runCmd.Flags().Int("trace-sizes", 0, "Trace only the N smallest scaling values per benchmark (0 = all configs)")
+	runCmd.Flags().Bool("rocprof", false, "Time kernels via rocprof GPU hardware timestamps (AMD/ROCm) instead of the benchmark's hipEvent timing -- GPU-only time, excludes host launch overhead")
+	runCmd.Flags().String("rocprof-cmd", "", "Override the rocprof invocation template ({OUT}=per-dispatch CSV path, {OUTDIR}=its dir); default targets rocprof v1")
 
 	// --- info command ---
 	infoCmd := &cobra.Command{

@@ -55,10 +55,7 @@
       "type": "int",
       "default": 256,
       "values": [
-        64,
-        128,
-        256,
-        512
+        256
       ]
     },
     {
@@ -67,10 +64,6 @@
       "type": "enum",
       "default": "all",
       "values": [
-        "shfl_xor",
-        "shfl",
-        "shfl_up",
-        "shfl_down",
         "all"
       ]
     }

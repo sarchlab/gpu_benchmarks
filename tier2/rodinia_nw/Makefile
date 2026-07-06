@@ -32,9 +32,9 @@ TARGET := rodinia_nw
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := rodinia_nw.cu
+  SRC    := rodinia_nw.hip
   CUDA_ARCH ?= sm_90
-  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
+  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH) -x cu
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

@@ -16,7 +16,6 @@ Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/project
 
 | File | Description |
 |------|-------------|
-| `polybench_syr2k.cu` | CUDA source — tiled SYR2K kernel + self-contained utilities |
 | `polybench_syr2k.hip` | HIP source — tiled SYR2K kernel with HIP/CUDA compat layer |
 | `polybench_syr2k.metal` | Metal compute shader — tiled SYR2K using threadgroup memory |
 | `polybench_syr2k_metal.mm` | ObjC++ Metal host code |
@@ -63,7 +62,7 @@ Performance: 345.67 GFLOPS  (avg 12.3457 ms, min 12.1000 ms, max 12.6000 ms, std
 
 ## Platform Notes
 
-- **CUDA**: compiled with `nvcc` from `polybench_syr2k.cu`
+- **CUDA**: compiled with `nvcc` from `polybench_syr2k.hip`
 - **ROCm/HIP**: compiled with `hipcc` from `polybench_syr2k.hip`; includes CUDA compat layer for `nvcc` fallback
 - **Metal**: compiled with `clang++` from `polybench_syr2k_metal.mm`; the Metal shader (`polybench_syr2k.metal`) is loaded and compiled at runtime from the same directory as the binary
 

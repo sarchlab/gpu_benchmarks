@@ -70,7 +70,6 @@ latency_ns = total_elapsed_ns / (num_accesses × num_iters)
 
 | File                      | Description                                      |
 |---------------------------|--------------------------------------------------|
-| `cache_latency.cu`        | NVIDIA CUDA implementation                       |
 | `cache_latency.hip`       | HIP implementation (AMD ROCm + NVIDIA HIP-on-CUDA) |
 | `cache_latency_metal.mm`  | Apple Metal host code (Objective-C++)            |
 | `cache_latency.metal`     | Apple Metal shader (Metal Shading Language)      |

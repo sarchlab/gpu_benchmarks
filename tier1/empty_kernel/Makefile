@@ -33,9 +33,9 @@ TARGET := empty_kernel
 
 ifeq ($(PLATFORM),cuda)
   CC      := nvcc
-  SRC     := empty_kernel.cu
+  SRC     := empty_kernel.hip
   CUDA_ARCH ?= sm_90
-  CFLAGS  := -O3 -std=c++14 -arch=$(CUDA_ARCH)
+  CFLAGS  := -O3 -std=c++14 -arch=$(CUDA_ARCH) -x cu
 
 else ifeq ($(PLATFORM),rocm)
   CC      := hipcc

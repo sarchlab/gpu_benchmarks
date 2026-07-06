@@ -24,7 +24,6 @@ Multiple time-steps are run per benchmark iteration using ping-pong buffers.
 
 | File | Description |
 |------|-------------|
-| `rodinia_hotspot3d.cu` | CUDA source — 3D stencil kernel + self-contained utilities |
 | `rodinia_hotspot3d.hip` | HIP source — 3D stencil kernel + self-contained utilities |
 | `rodinia_hotspot3d.metal` | Metal compute shader — 3D stencil kernel |
 | `rodinia_hotspot3d_metal.mm` | ObjC++ Metal host code |

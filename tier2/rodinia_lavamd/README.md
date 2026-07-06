@@ -27,7 +27,6 @@ Each thread block processes one box, and threads within the block compute forces
 
 | File | Description |
 |------|-------------|
-| `rodinia_lavamd.cu` | CUDA source — LJ kernel + self-contained utilities |
 | `rodinia_lavamd.hip` | HIP source — LJ kernel + self-contained utilities |
 | `rodinia_lavamd.metal` | Metal compute shader — LJ kernel |
 | `rodinia_lavamd_metal.mm` | ObjC++ Metal host code |

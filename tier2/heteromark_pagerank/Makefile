@@ -32,9 +32,9 @@ TARGET := heteromark_pagerank
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := heteromark_pagerank.cu
+  SRC    := heteromark_pagerank.hip
   CUDA_ARCH ?= sm_90
-  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
+  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH) -x cu
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

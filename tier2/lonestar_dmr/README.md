@@ -16,7 +16,6 @@ The benchmark exercises irregular memory access patterns (worklist, atomic opera
 
 | File | Description |
 |------|-------------|
-| `lonestar_dmr.cu` | CUDA source — check + refine kernels |
 | `lonestar_dmr.hip` | HIP source — with HIP/CUDA compat layer |
 | `lonestar_dmr.metal` | Metal compute shaders |
 | `lonestar_dmr_metal.mm` | ObjC++ Metal host code |

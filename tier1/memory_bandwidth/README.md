@@ -19,7 +19,7 @@ measures the internal memory copy bandwidth of the GPU.
 
 | Platform | Source file | Compiler |
 |----------|-------------|---------|
-| NVIDIA CUDA | `memory_bandwidth.cu` | `nvcc` |
+| NVIDIA CUDA | `memory_bandwidth.hip` | `nvcc` |
 | AMD ROCm/HIP | `memory_bandwidth.hip` | `hipcc` |
 | Apple Metal | `memory_bandwidth_metal.mm` + `memory_bandwidth.metal` | `clang++` |
 

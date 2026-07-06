@@ -30,19 +30,7 @@
 #include <chrono>
 #include <algorithm>
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetLastError         cudaGetLastError
-#define hipGetErrorString       cudaGetErrorString
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipDeviceProp_t         cudaDeviceProp
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 
 #define HIP_CHECK(call)                                                         \
     do {                                                                        \

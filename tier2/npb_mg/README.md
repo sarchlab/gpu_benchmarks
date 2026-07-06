@@ -19,7 +19,6 @@ Benchmarks a V-cycle multigrid solver from the NAS Parallel Benchmarks. Solves a
 
 | File | Description |
 |------|-------------|
-| `npb_mg.cu` | CUDA implementation |
 | `npb_mg.hip` | HIP/ROCm implementation |
 | `npb_mg_metal.mm` | Metal host code (Objective-C++) |
 | `npb_mg.metal` | Metal compute shaders |

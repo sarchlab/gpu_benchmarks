@@ -32,9 +32,9 @@ TARGET := memory_bandwidth
 
 ifeq ($(PLATFORM),cuda)
   CC      := nvcc
-  SRC     := memory_bandwidth.cu
+  SRC     := memory_bandwidth.hip
   CUDA_ARCH ?= sm_90
-  CFLAGS  := -O3 -std=c++14 -arch=$(CUDA_ARCH)
+  CFLAGS  := -O3 -std=c++14 -arch=$(CUDA_ARCH) -x cu
 
 else ifeq ($(PLATFORM),rocm)
   CC      := hipcc

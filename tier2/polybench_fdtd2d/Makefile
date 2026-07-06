@@ -32,9 +32,9 @@ TARGET := polybench_fdtd2d
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := polybench_fdtd2d.cu
+  SRC    := polybench_fdtd2d.hip
   CUDA_ARCH ?= sm_90
-  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
+  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH) -x cu
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

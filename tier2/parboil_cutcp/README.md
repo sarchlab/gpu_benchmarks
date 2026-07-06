@@ -16,7 +16,6 @@ Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parbo
 
 | File | Description |
 |------|-------------|
-| `parboil_cutcp.cu` | CUDA source — Coulombic potential kernel with cutoff |
 | `parboil_cutcp.hip` | HIP source — portable ROCm/CUDA implementation |
 | `parboil_cutcp.metal` | Metal compute shader — potential kernel |
 | `parboil_cutcp_metal.mm` | ObjC++ Metal host code |

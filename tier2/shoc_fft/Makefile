@@ -32,9 +32,9 @@ TARGET := shoc_fft
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := shoc_fft.cu
+  SRC    := shoc_fft.hip
   CUDA_ARCH ?= sm_90
-  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
+  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH) -x cu
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

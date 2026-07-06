@@ -61,8 +61,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -289,32 +287,28 @@ int main(int argc, char** argv) {
         // Phase 1: histogram
         if (hist_acc) {
             HIP_CHECK(hipEventRecord(kStart, 0));
-            hipLaunchKernelGGL(histogram_kernel, dim3(gridKeys), dim3(blockSize),
-                               0, 0, d_keys, N, d_hist);
+            histogram_kernel<<<dim3(gridKeys), dim3(blockSize)>>>(d_keys, N, d_hist);
             HIP_CHECK(hipEventRecord(kStop, 0));
             HIP_CHECK(hipEventSynchronize(kStop));
             float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
             *hist_acc += (double)_ms;
         } else {
-            hipLaunchKernelGGL(histogram_kernel, dim3(gridKeys), dim3(blockSize),
-                               0, 0, d_keys, N, d_hist);
+            histogram_kernel<<<dim3(gridKeys), dim3(blockSize)>>>(d_keys, N, d_hist);
         }
 
         // Phase 2: prefix sum (exclusive scan on histogram)
         // Single-block scan, NUM_BUCKETS threads
         if (prefix_acc) {
             HIP_CHECK(hipEventRecord(kStart, 0));
-            hipLaunchKernelGGL(prefix_sum_kernel, dim3(1), dim3(NUM_BUCKETS),
-                               NUM_BUCKETS * sizeof(unsigned int), 0,
-                               d_hist, NUM_BUCKETS);
+            prefix_sum_kernel<<<dim3(1), dim3(NUM_BUCKETS), NUM_BUCKETS * sizeof(unsigned int), 0>>>(
+                d_hist, NUM_BUCKETS);
             HIP_CHECK(hipEventRecord(kStop, 0));
             HIP_CHECK(hipEventSynchronize(kStop));
             float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
             *prefix_acc += (double)_ms;
         } else {
-            hipLaunchKernelGGL(prefix_sum_kernel, dim3(1), dim3(NUM_BUCKETS),
-                               NUM_BUCKETS * sizeof(unsigned int), 0,
-                               d_hist, NUM_BUCKETS);
+            prefix_sum_kernel<<<dim3(1), dim3(NUM_BUCKETS), NUM_BUCKETS * sizeof(unsigned int), 0>>>(
+                d_hist, NUM_BUCKETS);
         }
 
         // Copy prefix sums to offsets (scatter will modify offsets)
@@ -323,15 +317,13 @@ int main(int argc, char** argv) {
         // Phase 3: scatter
         if (scatter_acc) {
             HIP_CHECK(hipEventRecord(kStart, 0));
-            hipLaunchKernelGGL(scatter_kernel, dim3(gridKeys), dim3(blockSize),
-                               0, 0, d_keys, N, d_offsets, d_sorted);
+            scatter_kernel<<<dim3(gridKeys), dim3(blockSize)>>>(d_keys, N, d_offsets, d_sorted);
             HIP_CHECK(hipEventRecord(kStop, 0));
             HIP_CHECK(hipEventSynchronize(kStop));
             float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
             *scatter_acc += (double)_ms;
         } else {
-            hipLaunchKernelGGL(scatter_kernel, dim3(gridKeys), dim3(blockSize),
-                               0, 0, d_keys, N, d_offsets, d_sorted);
+            scatter_kernel<<<dim3(gridKeys), dim3(blockSize)>>>(d_keys, N, d_offsets, d_sorted);
         }
     };
 

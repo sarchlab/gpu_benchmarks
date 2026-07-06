@@ -73,8 +73,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -294,17 +292,13 @@ int main(int argc, char** argv)
 
         for (int k = 0; k < N; ++k) {
             HIP_CHECK(hipMemsetAsync(d_nrm_buf, 0, sizeof(float), 0));
-            hipLaunchKernelGGL(gram_norm, grid_M, block_size, 0, 0,
-                               d_A, d_nrm_buf, M, N, k);
-            hipLaunchKernelGGL(gram_norm_finish, 1, 1, 0, 0,
-                               d_nrm_buf, d_R, N, k);
-            hipLaunchKernelGGL(gram_normalize, grid_M, block_size, 0, 0,
-                               d_A, d_Q, d_nrm_buf, M, N, k);
+            gram_norm<<<grid_M, block_size>>>(d_A, d_nrm_buf, M, N, k);
+            gram_norm_finish<<<1, 1>>>(d_nrm_buf, d_R, N, k);
+            gram_normalize<<<grid_M, block_size>>>(d_A, d_Q, d_nrm_buf, M, N, k);
             if (k + 1 < N) {
                 int remaining   = N - k - 1;
                 int grid_proj   = (remaining + block_size - 1) / block_size;
-                hipLaunchKernelGGL(gram_project, grid_proj, block_size, 0, 0,
-                                   d_A, d_Q, d_R, M, N, k);
+                gram_project<<<grid_proj, block_size>>>(d_A, d_Q, d_R, M, N, k);
             }
         }
         HIP_CHECK(hipDeviceSynchronize());
@@ -322,22 +316,19 @@ int main(int argc, char** argv)
             // Step 1: zero nrm_buf, then accumulate ||A[:,k]||^2
             HIP_CHECK(hipMemsetAsync(d_nrm_buf, 0, sizeof(float), 0));
             timer.record_start();
-            hipLaunchKernelGGL(gram_norm, grid_M, block_size, 0, 0,
-                               d_A, d_nrm_buf, M, N, k);
+            gram_norm<<<grid_M, block_size>>>(d_A, d_nrm_buf, M, N, k);
             timer.record_stop();
             t_norm += static_cast<double>(timer.elapsed_ms());
 
             // Step 2: finalize norm → R[k,k]
             timer.record_start();
-            hipLaunchKernelGGL(gram_norm_finish, 1, 1, 0, 0,
-                               d_nrm_buf, d_R, N, k);
+            gram_norm_finish<<<1, 1>>>(d_nrm_buf, d_R, N, k);
             timer.record_stop();
             t_norm_finish += static_cast<double>(timer.elapsed_ms());
 
             // Step 3: normalize column k
             timer.record_start();
-            hipLaunchKernelGGL(gram_normalize, grid_M, block_size, 0, 0,
-                               d_A, d_Q, d_nrm_buf, M, N, k);
+            gram_normalize<<<grid_M, block_size>>>(d_A, d_Q, d_nrm_buf, M, N, k);
             timer.record_stop();
             t_normalize += static_cast<double>(timer.elapsed_ms());
 
@@ -346,8 +337,7 @@ int main(int argc, char** argv)
                 int remaining   = N - k - 1;
                 int grid_proj   = (remaining + block_size - 1) / block_size;
                 timer.record_start();
-                hipLaunchKernelGGL(gram_project, grid_proj, block_size, 0, 0,
-                                   d_A, d_Q, d_R, M, N, k);
+                gram_project<<<grid_proj, block_size>>>(d_A, d_Q, d_R, M, N, k);
                 timer.record_stop();
                 t_project += static_cast<double>(timer.elapsed_ms());
             }

@@ -61,8 +61,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -287,8 +285,7 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_vel, h_vel_orig.data(), bytes, hipMemcpyHostToDevice));
 
         for (int t = 0; t < timesteps; ++t) {
-            hipLaunchKernelGGL(nbody_kernel, dim3(gridSize), dim3(blockSize),
-                               0, 0, d_pos, d_vel, N);
+            nbody_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_pos, d_vel, N);
         }
     };
 
@@ -363,8 +360,7 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_vvel, cpuVel.data(), vbytes, hipMemcpyHostToDevice));
 
         int vgrid = (verifyN + blockSize - 1) / blockSize;
-        hipLaunchKernelGGL(nbody_kernel, dim3(vgrid), dim3(blockSize),
-                           0, 0, d_vpos, d_vvel, verifyN);
+        nbody_kernel<<<dim3(vgrid), dim3(blockSize)>>>(d_vpos, d_vvel, verifyN);
         HIP_CHECK(hipDeviceSynchronize());
 
         std::vector<float4> gpuPos(verifyN);

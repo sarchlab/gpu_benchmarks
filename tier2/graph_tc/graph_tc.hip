@@ -61,8 +61,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -329,9 +327,8 @@ int main(int argc, char** argv) {
 
     auto run_tc = [&]() {
         HIP_CHECK(hipMemset(d_edge_counts, 0, num_edges * sizeof(long long)));
-        hipLaunchKernelGGL(triangle_count_kernel, dim3(gridSize), dim3(blockSize),
-                           0, 0, d_row_ptr, d_col_idx, d_edge_counts,
-                           num_edges, d_edge_src, d_edge_dst);
+        triangle_count_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+            d_row_ptr, d_col_idx, d_edge_counts, num_edges, d_edge_src, d_edge_dst);
     };
 
     // -------------------------------------------------------------------

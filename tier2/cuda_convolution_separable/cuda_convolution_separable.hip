@@ -61,8 +61,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -380,32 +378,28 @@ int main(int argc, char** argv) {
     auto run_conv = [&](double* row_acc, double* col_acc) {
         if (row_acc) {
             HIP_CHECK(hipEventRecord(kStart, 0));
-            hipLaunchKernelGGL(convolution_row_kernel,
-                               rowGrid, rowBlock, rowSmem, 0,
-                               d_input, d_temp, width, height, radius);
+            convolution_row_kernel<<<rowGrid, rowBlock, rowSmem, 0>>>(
+                d_input, d_temp, width, height, radius);
             HIP_CHECK(hipEventRecord(kStop, 0));
             HIP_CHECK(hipEventSynchronize(kStop));
             float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
             *row_acc += (double)_ms;
         } else {
-            hipLaunchKernelGGL(convolution_row_kernel,
-                               rowGrid, rowBlock, rowSmem, 0,
-                               d_input, d_temp, width, height, radius);
+            convolution_row_kernel<<<rowGrid, rowBlock, rowSmem, 0>>>(
+                d_input, d_temp, width, height, radius);
         }
 
         if (col_acc) {
             HIP_CHECK(hipEventRecord(kStart, 0));
-            hipLaunchKernelGGL(convolution_col_kernel,
-                               colGrid, colBlock, colSmem, 0,
-                               d_temp, d_output, width, height, radius);
+            convolution_col_kernel<<<colGrid, colBlock, colSmem, 0>>>(
+                d_temp, d_output, width, height, radius);
             HIP_CHECK(hipEventRecord(kStop, 0));
             HIP_CHECK(hipEventSynchronize(kStop));
             float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
             *col_acc += (double)_ms;
         } else {
-            hipLaunchKernelGGL(convolution_col_kernel,
-                               colGrid, colBlock, colSmem, 0,
-                               d_temp, d_output, width, height, radius);
+            convolution_col_kernel<<<colGrid, colBlock, colSmem, 0>>>(
+                d_temp, d_output, width, height, radius);
         }
     };
 

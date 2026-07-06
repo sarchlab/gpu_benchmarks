@@ -83,8 +83,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -194,17 +192,13 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipEventCreate(&ev_stop));
 
     for (int w = 0; w < num_warmup; ++w) {
-        hipLaunchKernelGGL(fp16_fma_kernel,
-                           dim3(num_blocks), dim3(threads_per_block), 0, 0,
-                           d_out, fmas_per_thread);
+        fp16_fma_kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(d_out, fmas_per_thread);
     }
     HIP_CHECK(hipDeviceSynchronize());
 
     /* Timed kernel launch. */
     HIP_CHECK(hipEventRecord(ev_start, 0));
-    hipLaunchKernelGGL(fp16_fma_kernel,
-                       dim3(num_blocks), dim3(threads_per_block), 0, 0,
-                       d_out, fmas_per_thread);
+    fp16_fma_kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(d_out, fmas_per_thread);
     HIP_CHECK(hipEventRecord(ev_stop, 0));
     HIP_CHECK(hipEventSynchronize(ev_stop));
 

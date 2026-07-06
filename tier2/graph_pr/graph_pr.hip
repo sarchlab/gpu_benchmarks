@@ -62,8 +62,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -239,9 +237,8 @@ static void run_pagerank_gpu(int N, int pr_iters, float damping,
     float* nxt = d_rank_b;
 
     for (int iter = 0; iter < pr_iters; ++iter) {
-        hipLaunchKernelGGL(pagerank_kernel, dim3(gridSize), dim3(blockSize),
-                           0, 0, d_col_offsets, d_row_indices, d_out_degree,
-                           cur, nxt, damping, base_rank, N);
+        pagerank_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+            d_col_offsets, d_row_indices, d_out_degree, cur, nxt, damping, base_rank, N);
         float* tmp = cur; cur = nxt; nxt = tmp;
     }
     HIP_CHECK(hipDeviceSynchronize());

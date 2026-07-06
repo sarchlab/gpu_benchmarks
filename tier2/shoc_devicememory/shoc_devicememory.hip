@@ -55,8 +55,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -269,8 +267,7 @@ int main(int argc, char** argv) {
     // --- Read-only bandwidth ---
     if (run_read || strcmp(transfer_mode, "readwrite") == 0) {
         KernelResult kr = benchKernel(1, [&]() {
-            hipLaunchKernelGGL(readOnly_kernel, dim3(num_blocks), dim3(block_size),
-                               0, 0, d_input, d_output, (int)N);
+            readOnly_kernel<<<dim3(num_blocks), dim3(block_size)>>>(d_input, d_output, (int)N);
         });
         read_bw = (double)bytes / (kr.avg_ms * 1e-3) / 1e9;
         total_all_ms += kr.total_ms;
@@ -286,8 +283,7 @@ int main(int argc, char** argv) {
     // --- Write-only bandwidth ---
     if (run_write || strcmp(transfer_mode, "readwrite") == 0) {
         KernelResult kr = benchKernel(1, [&]() {
-            hipLaunchKernelGGL(writeOnly_kernel, dim3(num_blocks), dim3(block_size),
-                               0, 0, d_output, (int)N);
+            writeOnly_kernel<<<dim3(num_blocks), dim3(block_size)>>>(d_output, (int)N);
         });
         write_bw = (double)bytes / (kr.avg_ms * 1e-3) / 1e9;
         total_all_ms += kr.total_ms;
@@ -310,8 +306,7 @@ int main(int argc, char** argv) {
             free(h_rw);
         }
         KernelResult kr = benchKernel(1, [&]() {
-            hipLaunchKernelGGL(readWrite_kernel, dim3(num_blocks), dim3(block_size),
-                               0, 0, d_input, (int)N);
+            readWrite_kernel<<<dim3(num_blocks), dim3(block_size)>>>(d_input, (int)N);
         });
         rw_bw = 2.0 * (double)bytes / (kr.avg_ms * 1e-3) / 1e9;
         total_all_ms += kr.total_ms;

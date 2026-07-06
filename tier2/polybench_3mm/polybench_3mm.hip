@@ -63,8 +63,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -265,9 +263,9 @@ int main(int argc, char** argv) {
 
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
-        hipLaunchKernelGGL(mm3_kernel1, grid1, block, 0, 0, d_A, d_B, d_E, NI, NK, NJ);
-        hipLaunchKernelGGL(mm3_kernel2, grid2, block, 0, 0, d_C, d_D, d_F, NJ, NM, NL);
-        hipLaunchKernelGGL(mm3_kernel3, grid3, block, 0, 0, d_E, d_F, d_G, NI, NJ, NL);
+        mm3_kernel1<<<grid1, block>>>(d_A, d_B, d_E, NI, NK, NJ);
+        mm3_kernel2<<<grid2, block>>>(d_C, d_D, d_F, NJ, NM, NL);
+        mm3_kernel3<<<grid3, block>>>(d_E, d_F, d_G, NI, NJ, NL);
         HIP_CHECK(hipDeviceSynchronize());
     }
 
@@ -275,17 +273,17 @@ int main(int argc, char** argv) {
     std::vector<double> k1_times(1), k2_times(1), k3_times(1);
     for (int iter = 0; iter < 1; ++iter) {
         timer.record_start();
-        hipLaunchKernelGGL(mm3_kernel1, grid1, block, 0, 0, d_A, d_B, d_E, NI, NK, NJ);
+        mm3_kernel1<<<grid1, block>>>(d_A, d_B, d_E, NI, NK, NJ);
         timer.record_stop();
         k1_times[iter] = static_cast<double>(timer.elapsed_ms());
 
         timer.record_start();
-        hipLaunchKernelGGL(mm3_kernel2, grid2, block, 0, 0, d_C, d_D, d_F, NJ, NM, NL);
+        mm3_kernel2<<<grid2, block>>>(d_C, d_D, d_F, NJ, NM, NL);
         timer.record_stop();
         k2_times[iter] = static_cast<double>(timer.elapsed_ms());
 
         timer.record_start();
-        hipLaunchKernelGGL(mm3_kernel3, grid3, block, 0, 0, d_E, d_F, d_G, NI, NJ, NL);
+        mm3_kernel3<<<grid3, block>>>(d_E, d_F, d_G, NI, NJ, NL);
         timer.record_stop();
         k3_times[iter] = static_cast<double>(timer.elapsed_ms());
     }

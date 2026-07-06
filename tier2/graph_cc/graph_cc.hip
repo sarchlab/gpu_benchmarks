@@ -43,8 +43,6 @@
 #define hipHostMalloc           cudaMallocHost
 #define hipHostFree             cudaFreeHost
 #define hipHostMallocDefault    cudaHostAllocDefault
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -203,8 +201,8 @@ static int run_cc_gpu(int N, int max_iters, int block_size,
         h_changed = 0;
         HIP_CHECK(hipMemcpy(d_changed, &h_changed, sizeof(int), hipMemcpyHostToDevice));
 
-        hipLaunchKernelGGL(cc_propagate_kernel, dim3(gridSize), dim3(block_size),
-                           0, 0, d_row_offsets, d_col_indices, d_labels, d_changed, N);
+        cc_propagate_kernel<<<dim3(gridSize), dim3(block_size)>>>(
+            d_row_offsets, d_col_indices, d_labels, d_changed, N);
         HIP_CHECK(hipDeviceSynchronize());
 
         HIP_CHECK(hipMemcpy(&h_changed, d_changed, sizeof(int), hipMemcpyDeviceToHost));

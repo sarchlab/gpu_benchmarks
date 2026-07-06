@@ -60,8 +60,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -489,8 +487,7 @@ int main(int argc, char** argv) {
                         double* t_gauss, double* t_sobel, double* t_magdir,
                         double* t_nms, double* t_hyst) {
         if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-        hipLaunchKernelGGL(gaussian_blur_kernel, gridDim, blockDim, 0, 0,
-                           d_input, d_blurred, W, H);
+        gaussian_blur_kernel<<<gridDim, blockDim>>>(d_input, d_blurred, W, H);
         if (evStart) {
             HIP_CHECK(hipEventRecord(*evStop, 0));
             HIP_CHECK(hipEventSynchronize(*evStop));
@@ -500,8 +497,7 @@ int main(int argc, char** argv) {
         }
 
         if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-        hipLaunchKernelGGL(sobel_kernel, gridDim, blockDim, 0, 0,
-                           d_blurred, d_gx, d_gy, W, H);
+        sobel_kernel<<<gridDim, blockDim>>>(d_blurred, d_gx, d_gy, W, H);
         if (evStart) {
             HIP_CHECK(hipEventRecord(*evStop, 0));
             HIP_CHECK(hipEventSynchronize(*evStop));
@@ -511,8 +507,7 @@ int main(int argc, char** argv) {
         }
 
         if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-        hipLaunchKernelGGL(magnitude_direction_kernel, gridDim, blockDim, 0, 0,
-                           d_gx, d_gy, d_mag, d_dir, W, H);
+        magnitude_direction_kernel<<<gridDim, blockDim>>>(d_gx, d_gy, d_mag, d_dir, W, H);
         if (evStart) {
             HIP_CHECK(hipEventRecord(*evStop, 0));
             HIP_CHECK(hipEventSynchronize(*evStop));
@@ -522,8 +517,7 @@ int main(int argc, char** argv) {
         }
 
         if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-        hipLaunchKernelGGL(nms_kernel, gridDim, blockDim, 0, 0,
-                           d_mag, d_dir, d_nms, W, H);
+        nms_kernel<<<gridDim, blockDim>>>(d_mag, d_dir, d_nms, W, H);
         if (evStart) {
             HIP_CHECK(hipEventRecord(*evStop, 0));
             HIP_CHECK(hipEventSynchronize(*evStop));
@@ -533,8 +527,7 @@ int main(int argc, char** argv) {
         }
 
         if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-        hipLaunchKernelGGL(hysteresis_kernel, gridDim, blockDim, 0, 0,
-                           d_nms, d_edges, W, H, low_t, high_t);
+        hysteresis_kernel<<<gridDim, blockDim>>>(d_nms, d_edges, W, H, low_t, high_t);
         if (evStart) {
             HIP_CHECK(hipEventRecord(*evStop, 0));
             HIP_CHECK(hipEventSynchronize(*evStop));

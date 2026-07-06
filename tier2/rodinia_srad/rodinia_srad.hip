@@ -66,8 +66,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -372,25 +370,17 @@ int main(int argc, char** argv) {
         for (int k = 0; k < num_iters; ++k) {
             if (timed) {
                 timer.record_start();
-                hipLaunchKernelGGL(srad1, grid, block, 0, 0,
-                                   d_J, d_dN, d_dS, d_dW, d_dE, d_c,
-                                   rows, cols, q0sqr);
+                srad1<<<grid, block>>>(d_J, d_dN, d_dS, d_dW, d_dE, d_c, rows, cols, q0sqr);
                 timer.record_stop();
                 t_srad1 += static_cast<double>(timer.elapsed_ms());
 
                 timer.record_start();
-                hipLaunchKernelGGL(srad2, grid, block, 0, 0,
-                                   d_J, d_dN, d_dS, d_dW, d_dE, d_c,
-                                   rows, cols, lambda);
+                srad2<<<grid, block>>>(d_J, d_dN, d_dS, d_dW, d_dE, d_c, rows, cols, lambda);
                 timer.record_stop();
                 t_srad2 += static_cast<double>(timer.elapsed_ms());
             } else {
-                hipLaunchKernelGGL(srad1, grid, block, 0, 0,
-                                   d_J, d_dN, d_dS, d_dW, d_dE, d_c,
-                                   rows, cols, q0sqr);
-                hipLaunchKernelGGL(srad2, grid, block, 0, 0,
-                                   d_J, d_dN, d_dS, d_dW, d_dE, d_c,
-                                   rows, cols, lambda);
+                srad1<<<grid, block>>>(d_J, d_dN, d_dS, d_dW, d_dE, d_c, rows, cols, q0sqr);
+                srad2<<<grid, block>>>(d_J, d_dN, d_dS, d_dW, d_dE, d_c, rows, cols, lambda);
             }
         }
         HIP_CHECK(hipDeviceSynchronize());

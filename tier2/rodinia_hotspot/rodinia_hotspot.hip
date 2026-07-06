@@ -62,8 +62,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -306,10 +304,8 @@ int main(int argc, char** argv) {
             float* dst = d_temp_dst;
 
             for (int k = 0; k < num_iterations; ++k) {
-                hipLaunchKernelGGL(hotspot_kernel, grid, block, 0, 0,
-                                   src, dst, d_power,
-                                   grid_cols, grid_rows,
-                                   step_div_cap, Rx_1, Ry_1, Rz_1);
+                hotspot_kernel<<<grid, block>>>(
+                    src, dst, d_power, grid_cols, grid_rows, step_div_cap, Rx_1, Ry_1, Rz_1);
                 // Ping-pong buffers
                 float* tmp = src;
                 src = dst;

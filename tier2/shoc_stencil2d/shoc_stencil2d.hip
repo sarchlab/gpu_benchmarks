@@ -74,8 +74,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -223,7 +221,7 @@ static bool correctness_check()
     dim3 block(BLOCK_DIM, BLOCK_DIM);
     dim3 grid((NC - 2 + BLOCK_DIM - 1) / BLOCK_DIM,
               (NC - 2 + BLOCK_DIM - 1) / BLOCK_DIM);
-    hipLaunchKernelGGL(stencil2d_kernel, grid, block, 0, 0, d_in, d_out, NC);
+    stencil2d_kernel<<<grid, block>>>(d_in, d_out, NC);
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipMemcpy(h_out_gpu.data(), d_out, bytes, hipMemcpyDeviceToHost));
 
@@ -313,8 +311,7 @@ int main(int argc, char** argv)
     for (int w = 0; w < num_warmup; ++w) {
         float *in_ptr = d_buf0, *out_ptr = d_buf1;
         for (int it = 0; it < iters; ++it) {
-            hipLaunchKernelGGL(stencil2d_kernel, grid, block, 0, 0,
-                               in_ptr, out_ptr, N);
+            stencil2d_kernel<<<grid, block>>>(in_ptr, out_ptr, N);
             float* tmp = in_ptr; in_ptr = out_ptr; out_ptr = tmp;
         }
         HIP_CHECK(hipDeviceSynchronize());
@@ -331,8 +328,7 @@ int main(int argc, char** argv)
 
         timer.record_start();
         for (int it = 0; it < iters; ++it) {
-            hipLaunchKernelGGL(stencil2d_kernel, grid, block, 0, 0,
-                               in_ptr, out_ptr, N);
+            stencil2d_kernel<<<grid, block>>>(in_ptr, out_ptr, N);
             float* tmp = in_ptr; in_ptr = out_ptr; out_ptr = tmp;
         }
         timer.record_stop();

@@ -68,8 +68,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -312,12 +310,9 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_hz, h_hz, grid_bytes, hipMemcpyHostToDevice));
 
         for (int t = 0; t < TMAX; ++t) {
-            hipLaunchKernelGGL(fdtd_update_ex, grid2d, block, 0, 0,
-                               d_ex, d_hz, NX, NY);
-            hipLaunchKernelGGL(fdtd_update_ey, grid2d, block, 0, 0,
-                               d_ey, d_hz, NX, NY);
-            hipLaunchKernelGGL(fdtd_update_hz, grid2d, block, 0, 0,
-                               d_ex, d_ey, d_hz, NX, NY);
+            fdtd_update_ex<<<grid2d, block>>>(d_ex, d_hz, NX, NY);
+            fdtd_update_ey<<<grid2d, block>>>(d_ey, d_hz, NX, NY);
+            fdtd_update_hz<<<grid2d, block>>>(d_ex, d_ey, d_hz, NX, NY);
         }
     }
     HIP_CHECK(hipDeviceSynchronize());
@@ -332,20 +327,17 @@ int main(int argc, char** argv) {
 
     for (int t = 0; t < TMAX; ++t) {
         timer.record_start();
-        hipLaunchKernelGGL(fdtd_update_ex, grid2d, block, 0, 0,
-                           d_ex, d_hz, NX, NY);
+        fdtd_update_ex<<<grid2d, block>>>(d_ex, d_hz, NX, NY);
         timer.record_stop();
         t_ex += static_cast<double>(timer.elapsed_ms());
 
         timer.record_start();
-        hipLaunchKernelGGL(fdtd_update_ey, grid2d, block, 0, 0,
-                           d_ey, d_hz, NX, NY);
+        fdtd_update_ey<<<grid2d, block>>>(d_ey, d_hz, NX, NY);
         timer.record_stop();
         t_ey += static_cast<double>(timer.elapsed_ms());
 
         timer.record_start();
-        hipLaunchKernelGGL(fdtd_update_hz, grid2d, block, 0, 0,
-                           d_ex, d_ey, d_hz, NX, NY);
+        fdtd_update_hz<<<grid2d, block>>>(d_ex, d_ey, d_hz, NX, NY);
         timer.record_stop();
         t_hz += static_cast<double>(timer.elapsed_ms());
     }

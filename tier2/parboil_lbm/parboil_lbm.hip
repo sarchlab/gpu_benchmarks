@@ -31,8 +31,6 @@
 #define hipDeviceProp_t         cudaDeviceProp
 #define hipError_t              cudaError_t
 #define hipSuccess              cudaSuccess
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -251,9 +249,8 @@ int main(int argc, char** argv) {
 
     auto run_lbm = [&]() {
         for (int t = 0; t < num_timesteps; ++t) {
-            hipLaunchKernelGGL(lbm_collide_stream_kernel,
-                               dim3(gridSize), dim3(block_size), 0, 0,
-                               d_f_src, d_f_dst, Nx, Ny, Nz, omega);
+            lbm_collide_stream_kernel<<<dim3(gridSize), dim3(block_size)>>>(
+                d_f_src, d_f_dst, Nx, Ny, Nz, omega);
             float* tmp = d_f_src;
             d_f_src = d_f_dst;
             d_f_dst = tmp;

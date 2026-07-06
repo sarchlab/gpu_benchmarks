@@ -55,8 +55,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -152,8 +150,7 @@ static void bitonic_sort_gpu(unsigned int* d_data, int N, int block_size) {
     int grid = (N + block_size - 1) / block_size;
     for (int k = 2; k <= N; k <<= 1) {
         for (int j = k >> 1; j > 0; j >>= 1) {
-            hipLaunchKernelGGL(bitonic_step, dim3(grid), dim3(block_size),
-                               0, 0, d_data, j, k);
+            bitonic_step<<<dim3(grid), dim3(block_size)>>>(d_data, j, k);
         }
     }
     HIP_CHECK(hipDeviceSynchronize());

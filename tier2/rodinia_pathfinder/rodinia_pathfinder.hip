@@ -60,8 +60,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -228,8 +226,7 @@ int main(int argc, char** argv) {
         int nblocks = (vcols + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
         for (int t = 1; t < vrows; t++) {
-            hipLaunchKernelGGL(dynproc_kernel, nblocks, BLOCK_SIZE, 0, 0,
-                               gv_wall, gsrc, gdst, vcols, t);
+            dynproc_kernel<<<nblocks, BLOCK_SIZE>>>(gv_wall, gsrc, gdst, vcols, t);
             int* tmp = gsrc; gsrc = gdst; gdst = tmp;
         }
         HIP_CHECK(hipDeviceSynchronize());
@@ -270,8 +267,7 @@ int main(int argc, char** argv) {
         int* src = d_src;
         int* dst = d_dst;
         for (int t = 1; t < rows; t++) {
-            hipLaunchKernelGGL(dynproc_kernel, nblocks, BLOCK_SIZE, 0, 0,
-                               d_wall, src, dst, cols, t);
+            dynproc_kernel<<<nblocks, BLOCK_SIZE>>>(d_wall, src, dst, cols, t);
             int* tmp = src; src = dst; dst = tmp;
         }
         HIP_CHECK(hipDeviceSynchronize());
@@ -294,8 +290,7 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipEventRecord(ev_start, 0));
 
         for (int t = 1; t < rows; t++) {
-            hipLaunchKernelGGL(dynproc_kernel, nblocks, BLOCK_SIZE, 0, 0,
-                               d_wall, src, dst, cols, t);
+            dynproc_kernel<<<nblocks, BLOCK_SIZE>>>(d_wall, src, dst, cols, t);
             int* tmp = src; src = dst; dst = tmp;
         }
 

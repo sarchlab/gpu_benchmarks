@@ -65,8 +65,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -224,7 +222,7 @@ int main(int argc, char** argv)
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
         HIP_CHECK(hipMemset(d_hist, 0, bytes_hist));
-        hipLaunchKernelGGL(histogram_kernel, blocks, BLOCK_SIZE, 0, 0, d_data, d_hist, n);
+        histogram_kernel<<<blocks, BLOCK_SIZE>>>(d_data, d_hist, n);
         HIP_CHECK(hipDeviceSynchronize());
     }
 
@@ -234,7 +232,7 @@ int main(int argc, char** argv)
         // Reset histogram before each iteration
         HIP_CHECK(hipMemset(d_hist, 0, bytes_hist));
         timer.record_start();
-        hipLaunchKernelGGL(histogram_kernel, blocks, BLOCK_SIZE, 0, 0, d_data, d_hist, n);
+        histogram_kernel<<<blocks, BLOCK_SIZE>>>(d_data, d_hist, n);
         timer.record_stop();
         times[iter] = static_cast<double>(timer.elapsed_ms());
     }

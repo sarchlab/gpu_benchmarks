@@ -60,8 +60,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -292,10 +290,8 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_prOld, h_pr.data(), N * sizeof(float), hipMemcpyHostToDevice));
 
         for (int it = 0; it < prIters; ++it) {
-            hipLaunchKernelGGL(pagerank_kernel, dim3(gridSize), dim3(blockSize),
-                               0, 0,
-                               d_rowPtr, d_colIdx, d_outDegree,
-                               d_prOld, d_prNew, N, damping);
+            pagerank_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+                d_rowPtr, d_colIdx, d_outDegree, d_prOld, d_prNew, N, damping);
 
             // Swap pointers
             float* tmp = d_prOld;

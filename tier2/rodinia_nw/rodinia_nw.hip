@@ -63,8 +63,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -455,10 +453,8 @@ int main(int argc, char** argv) {
         if (timed) timer.record_start();
         for (int diag = 0; diag < num_blocks; diag++) {
             int n_blocks = diag + 1;
-            hipLaunchKernelGGL(nw_kernel1,
-                               dim3(n_blocks), dim3(block_size),
-                               shared_mem, 0,
-                               d_seq, d_matrix, cols, penalty, diag, block_size);
+            nw_kernel1<<<dim3(n_blocks), dim3(block_size), shared_mem, 0>>>(
+                d_seq, d_matrix, cols, penalty, diag, block_size);
         }
         if (timed) {
             timer.record_stop();
@@ -469,10 +465,8 @@ int main(int argc, char** argv) {
         if (timed) timer.record_start();
         for (int diag = 0; diag < num_blocks - 1; diag++) {
             int n_blocks = num_blocks - 1 - diag;
-            hipLaunchKernelGGL(nw_kernel2,
-                               dim3(n_blocks), dim3(block_size),
-                               shared_mem, 0,
-                               d_seq, d_matrix, cols, penalty, diag, num_blocks, block_size);
+            nw_kernel2<<<dim3(n_blocks), dim3(block_size), shared_mem, 0>>>(
+                d_seq, d_matrix, cols, penalty, diag, num_blocks, block_size);
         }
         if (timed) {
             timer.record_stop();

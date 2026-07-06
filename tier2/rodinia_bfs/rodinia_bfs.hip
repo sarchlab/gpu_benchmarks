@@ -64,8 +64,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -361,9 +359,7 @@ int main(int argc, char** argv) {
             HIP_CHECK(hipMemcpy(d_updated, &h_updated, sizeof(int), hipMemcpyHostToDevice));
 
             HIP_CHECK(hipEventRecord(ev_start, 0));
-            hipLaunchKernelGGL(bfs_kernel, grid, block, 0, 0,
-                               d_row_offsets, d_col_indices,
-                               d_cost, d_frontier, num_nodes);
+            bfs_kernel<<<grid, block>>>(d_row_offsets, d_col_indices, d_cost, d_frontier, num_nodes);
             HIP_CHECK(hipEventRecord(ev_stop, 0));
             HIP_CHECK(hipEventSynchronize(ev_stop));
             HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));
@@ -373,8 +369,7 @@ int main(int argc, char** argv) {
             HIP_CHECK(hipMemcpy(d_updated, &h_updated, sizeof(int), hipMemcpyHostToDevice));
 
             HIP_CHECK(hipEventRecord(ev_start, 0));
-            hipLaunchKernelGGL(bfs_update, grid, block, 0, 0,
-                               d_frontier, d_cost, d_visited, d_updated, num_nodes);
+            bfs_update<<<grid, block>>>(d_frontier, d_cost, d_visited, d_updated, num_nodes);
             HIP_CHECK(hipEventRecord(ev_stop, 0));
             HIP_CHECK(hipEventSynchronize(ev_stop));
             HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));

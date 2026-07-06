@@ -64,8 +64,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -216,17 +214,13 @@ static void scan_recursive(unsigned int* d_data, int N,
     // Phase 1: Block-level scan
     if (block_acc) {
         HIP_CHECK(hipEventRecord(kStart, 0));
-        hipLaunchKernelGGL(scan_block_kernel,
-                           dim3(numBlocks), dim3(BLOCK_SIZE), 0, 0,
-                           d_data, d_block_sums, N);
+        scan_block_kernel<<<dim3(numBlocks), dim3(BLOCK_SIZE)>>>(d_data, d_block_sums, N);
         HIP_CHECK(hipEventRecord(kStop, 0));
         HIP_CHECK(hipEventSynchronize(kStop));
         float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
         *block_acc += (double)_ms;
     } else {
-        hipLaunchKernelGGL(scan_block_kernel,
-                           dim3(numBlocks), dim3(BLOCK_SIZE), 0, 0,
-                           d_data, d_block_sums, N);
+        scan_block_kernel<<<dim3(numBlocks), dim3(BLOCK_SIZE)>>>(d_data, d_block_sums, N);
     }
 
     if (numBlocks > 1) {
@@ -236,17 +230,13 @@ static void scan_recursive(unsigned int* d_data, int N,
         // Phase 3: Add scanned block sums back to each block
         if (add_acc) {
             HIP_CHECK(hipEventRecord(kStart, 0));
-            hipLaunchKernelGGL(add_block_sums_kernel,
-                               dim3(numBlocks), dim3(BLOCK_SIZE), 0, 0,
-                               d_data, d_block_sums, N);
+            add_block_sums_kernel<<<dim3(numBlocks), dim3(BLOCK_SIZE)>>>(d_data, d_block_sums, N);
             HIP_CHECK(hipEventRecord(kStop, 0));
             HIP_CHECK(hipEventSynchronize(kStop));
             float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
             *add_acc += (double)_ms;
         } else {
-            hipLaunchKernelGGL(add_block_sums_kernel,
-                               dim3(numBlocks), dim3(BLOCK_SIZE), 0, 0,
-                               d_data, d_block_sums, N);
+            add_block_sums_kernel<<<dim3(numBlocks), dim3(BLOCK_SIZE)>>>(d_data, d_block_sums, N);
         }
 
         HIP_CHECK(hipFree(d_block_sums));

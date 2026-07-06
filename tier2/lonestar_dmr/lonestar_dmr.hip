@@ -28,8 +28,6 @@
 #define hipDeviceProp_t         cudaDeviceProp
 #define hipError_t              cudaError_t
 #define hipSuccess              cudaSuccess
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -308,11 +306,8 @@ int main(int argc, char** argv) {
             HIP_CHECK(hipMemset(d_worklist_count, 0, sizeof(int)));
 
             if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            hipLaunchKernelGGL(dmr_check_kernel, dim3(gridTri), dim3(block_size), 0, 0,
-                d_tri_v0, d_tri_v1, d_tri_v2,
-                d_vx, d_vy,
-                d_worklist, d_worklist_count,
-                min_angle, num_triangles);
+            dmr_check_kernel<<<dim3(gridTri), dim3(block_size)>>>(
+                d_tri_v0, d_tri_v1, d_tri_v2, d_vx, d_vy, d_worklist, d_worklist_count, min_angle, num_triangles);
             if (evStart) {
                 HIP_CHECK(hipEventRecord(*evStop, 0));
                 HIP_CHECK(hipEventSynchronize(*evStop));
@@ -329,11 +324,8 @@ int main(int argc, char** argv) {
 
             int gridWL = (h_wl_count + block_size - 1) / block_size;
             if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            hipLaunchKernelGGL(dmr_refine_kernel, dim3(gridWL), dim3(block_size), 0, 0,
-                d_worklist, h_wl_count,
-                d_tri_v0, d_tri_v1, d_tri_v2,
-                d_vx, d_vy,
-                num_vertices, num_triangles);
+            dmr_refine_kernel<<<dim3(gridWL), dim3(block_size)>>>(
+                d_worklist, h_wl_count, d_tri_v0, d_tri_v1, d_tri_v2, d_vx, d_vy, num_vertices, num_triangles);
             if (evStart) {
                 HIP_CHECK(hipEventRecord(*evStop, 0));
                 HIP_CHECK(hipEventSynchronize(*evStop));

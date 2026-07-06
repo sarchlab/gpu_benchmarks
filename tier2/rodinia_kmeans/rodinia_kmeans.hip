@@ -64,8 +64,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -266,9 +264,8 @@ int main(int argc, char** argv)
 
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
-        hipLaunchKernelGGL(kmeans_assign_kernel,
-                           dim3(grid_size), dim3(block_size), 0, 0,
-                           d_points, d_centers, d_membership, N, D, K);
+        kmeans_assign_kernel<<<dim3(grid_size), dim3(block_size)>>>(
+            d_points, d_centers, d_membership, N, D, K);
         HIP_CHECK(hipDeviceSynchronize());
     }
 
@@ -284,9 +281,8 @@ int main(int argc, char** argv)
 
         // --- Step 1: assign ---
         HIP_CHECK(hipEventRecord(ev_start, 0));
-        hipLaunchKernelGGL(kmeans_assign_kernel,
-                           dim3(grid_size), dim3(block_size), 0, 0,
-                           d_points, d_centers, d_membership, N, D, K);
+        kmeans_assign_kernel<<<dim3(grid_size), dim3(block_size)>>>(
+            d_points, d_centers, d_membership, N, D, K);
         HIP_CHECK(hipEventRecord(ev_stop, 0));
         HIP_CHECK(hipEventSynchronize(ev_stop));
         HIP_CHECK(hipEventElapsedTime(&ev_ms, ev_start, ev_stop));
@@ -298,9 +294,8 @@ int main(int argc, char** argv)
 
         // --- Step 3: accumulate ---
         HIP_CHECK(hipEventRecord(ev_start, 0));
-        hipLaunchKernelGGL(kmeans_update_kernel,
-                           dim3(grid_size), dim3(block_size), 0, 0,
-                           d_points, d_new_centers, d_counts, d_membership, N, D);
+        kmeans_update_kernel<<<dim3(grid_size), dim3(block_size)>>>(
+            d_points, d_new_centers, d_counts, d_membership, N, D);
         HIP_CHECK(hipEventRecord(ev_stop, 0));
         HIP_CHECK(hipEventSynchronize(ev_stop));
         HIP_CHECK(hipEventElapsedTime(&ev_ms, ev_start, ev_stop));
@@ -349,9 +344,8 @@ int main(int argc, char** argv)
     // Verify convergence: run one extra assign pass, check delta < 1%
     // (untimed)
     // -----------------------------------------------------------------------
-    hipLaunchKernelGGL(kmeans_assign_kernel,
-                       dim3(grid_size), dim3(block_size), 0, 0,
-                       d_points, d_centers, d_membership, N, D, K);
+    kmeans_assign_kernel<<<dim3(grid_size), dim3(block_size)>>>(
+        d_points, d_centers, d_membership, N, D, K);
     HIP_CHECK(hipMemcpy(h_membership, d_membership, (size_t)N * sizeof(int), hipMemcpyDeviceToHost));
 
     int final_changed = 0;

@@ -95,8 +95,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -292,8 +290,7 @@ int main(int argc, char *argv[])
      * measures steady-state hits, not the cold fill) and loads the kernel code
      * object. Capped at the largest cache, so the DRAM end pays only a partial
      * fill it doesn't need anyway. Excluded from timing. */
-    hipLaunchKernelGGL(pointer_chase_kernel, dim3(1), dim3(1), 0, 0,
-                       d_arr, start_idx, num_warmup, d_result);
+    pointer_chase_kernel<<<dim3(1), dim3(1)>>>(d_arr, start_idx, num_warmup, d_result);
     HIP_CHECK(hipDeviceSynchronize());
 
     /* Timed runs. */
@@ -302,8 +299,7 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipEventCreate(&ev_stop));
 
     HIP_CHECK(hipEventRecord(ev_start, 0));
-    hipLaunchKernelGGL(pointer_chase_kernel, dim3(1), dim3(1), 0, 0,
-                       d_arr, start_idx, num_timed, d_result);
+    pointer_chase_kernel<<<dim3(1), dim3(1)>>>(d_arr, start_idx, num_timed, d_result);
     HIP_CHECK(hipEventRecord(ev_stop, 0));
     HIP_CHECK(hipEventSynchronize(ev_stop));
 

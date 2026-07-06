@@ -26,8 +26,6 @@
 #define hipDeviceProp_t         cudaDeviceProp
 #define hipError_t              cudaError_t
 #define hipSuccess              cudaSuccess
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -193,10 +191,8 @@ int main(int argc, char** argv) {
     auto run_2mm = [&]() {
         HIP_CHECK(hipMemcpy(d_D, h_D, bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_E, h_E, bytes, hipMemcpyHostToDevice));
-        hipLaunchKernelGGL(mm_kernel, grid, block, 0, 0,
-                           d_A, d_B, d_D, N, alpha, beta);
-        hipLaunchKernelGGL(mm_kernel, grid, block, 0, 0,
-                           d_C, d_D, d_E, N, alpha, beta);
+        mm_kernel<<<grid, block>>>(d_A, d_B, d_D, N, alpha, beta);
+        mm_kernel<<<grid, block>>>(d_C, d_D, d_E, N, alpha, beta);
     };
 
     // Warmup
@@ -218,8 +214,7 @@ int main(int argc, char** argv) {
 
         // mm_kernel #1: D = alpha*A*B + beta*D
         HIP_CHECK(hipEventRecord(evStart, 0));
-        hipLaunchKernelGGL(mm_kernel, grid, block, 0, 0,
-                           d_A, d_B, d_D, N, alpha, beta);
+        mm_kernel<<<grid, block>>>(d_A, d_B, d_D, N, alpha, beta);
         HIP_CHECK(hipEventRecord(evStop, 0));
         HIP_CHECK(hipEventSynchronize(evStop));
         float ms1 = 0.0f;
@@ -228,8 +223,7 @@ int main(int argc, char** argv) {
 
         // mm_kernel #2: E = alpha*C*D + beta*E
         HIP_CHECK(hipEventRecord(evStart, 0));
-        hipLaunchKernelGGL(mm_kernel, grid, block, 0, 0,
-                           d_C, d_D, d_E, N, alpha, beta);
+        mm_kernel<<<grid, block>>>(d_C, d_D, d_E, N, alpha, beta);
         HIP_CHECK(hipEventRecord(evStop, 0));
         HIP_CHECK(hipEventSynchronize(evStop));
         float ms2 = 0.0f;

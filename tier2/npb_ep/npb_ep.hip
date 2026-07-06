@@ -60,8 +60,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -239,8 +237,7 @@ int main(int argc, char** argv) {
     // Lambda: run EP kernel
     auto run_ep = [&]() {
         HIP_CHECK(hipMemset(d_bins, 0, NUM_BINS * sizeof(unsigned long long)));
-        hipLaunchKernelGGL(ep_kernel, dim3(gridSize), dim3(blockSize),
-                           0, 0, N, d_bins);
+        ep_kernel<<<dim3(gridSize), dim3(blockSize)>>>(N, d_bins);
     };
 
     // -------------------------------------------------------------------
@@ -313,8 +310,7 @@ int main(int argc, char** argv) {
     if (verifyN != N) {
         int vGridSize = (verifyN + blockSize - 1) / blockSize;
         HIP_CHECK(hipMemset(d_bins, 0, NUM_BINS * sizeof(unsigned long long)));
-        hipLaunchKernelGGL(ep_kernel, dim3(vGridSize), dim3(blockSize),
-                           0, 0, verifyN, d_bins);
+        ep_kernel<<<dim3(vGridSize), dim3(blockSize)>>>(verifyN, d_bins);
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipMemcpy(h_verify_gpu, d_bins, NUM_BINS * sizeof(unsigned long long),
                             hipMemcpyDeviceToHost));

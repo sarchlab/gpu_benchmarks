@@ -62,8 +62,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -405,8 +403,7 @@ int main(int argc, char** argv) {
     int gridSize  = (total_pixels + blockSize - 1) / blockSize;
 
     auto run_raytrace = [&]() {
-        hipLaunchKernelGGL(raytrace_kernel, dim3(gridSize), dim3(blockSize),
-                           0, 0, d_image, d_spheres, W, H, nSph);
+        raytrace_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_image, d_spheres, W, H, nSph);
     };
 
     // -------------------------------------------------------------------

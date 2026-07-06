@@ -59,8 +59,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -398,8 +396,7 @@ int main(int argc, char** argv) {
 
     // Lambda: run AES encryption
     auto run_aes = [&]() {
-        hipLaunchKernelGGL(aes256_encrypt_kernel, dim3(gridSize), dim3(blockSize),
-                           0, 0, d_data, d_keys, N);
+        aes256_encrypt_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_data, d_keys, N);
     };
 
     // -------------------------------------------------------------------

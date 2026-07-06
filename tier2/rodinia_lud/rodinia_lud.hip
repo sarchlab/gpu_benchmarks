@@ -62,8 +62,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -302,21 +300,21 @@ int main(int argc, char **argv)
         for (int k = 0; k < num_blocks; k++) {
             if (timed) {
                 HIP_CHECK(hipEventRecord(ev_start));
-                hipLaunchKernelGGL(lud_diagonal, dim3(1), block, 0, 0, d_a, N, k);
+                lud_diagonal<<<dim3(1), block>>>(d_a, N, k);
                 HIP_CHECK(hipEventRecord(ev_stop));
                 HIP_CHECK(hipEventSynchronize(ev_stop));
                 float ms = 0.0f;
                 HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));
                 t_diagonal += (double)ms;
             } else {
-                hipLaunchKernelGGL(lud_diagonal, dim3(1), block, 0, 0, d_a, N, k);
+                lud_diagonal<<<dim3(1), block>>>(d_a, N, k);
             }
             int peri  = 2 * (num_blocks - k - 1);
             int intern =     num_blocks - k - 1;
             if (peri > 0) {
                 if (timed) {
                     HIP_CHECK(hipEventRecord(ev_start));
-                    hipLaunchKernelGGL(lud_perimeter, dim3(peri),         block, 0, 0, d_a, N, k);
+                    lud_perimeter<<<dim3(peri), block>>>(d_a, N, k);
                     HIP_CHECK(hipEventRecord(ev_stop));
                     HIP_CHECK(hipEventSynchronize(ev_stop));
                     float ms = 0.0f;
@@ -324,15 +322,15 @@ int main(int argc, char **argv)
                     t_perimeter += (double)ms;
 
                     HIP_CHECK(hipEventRecord(ev_start));
-                    hipLaunchKernelGGL(lud_internal,  dim3(intern,intern), block, 0, 0, d_a, N, k);
+                    lud_internal<<<dim3(intern,intern), block>>>(d_a, N, k);
                     HIP_CHECK(hipEventRecord(ev_stop));
                     HIP_CHECK(hipEventSynchronize(ev_stop));
                     ms = 0.0f;
                     HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));
                     t_internal += (double)ms;
                 } else {
-                    hipLaunchKernelGGL(lud_perimeter, dim3(peri),         block, 0, 0, d_a, N, k);
-                    hipLaunchKernelGGL(lud_internal,  dim3(intern,intern), block, 0, 0, d_a, N, k);
+                    lud_perimeter<<<dim3(peri), block>>>(d_a, N, k);
+                    lud_internal<<<dim3(intern,intern), block>>>(d_a, N, k);
                 }
             }
         }

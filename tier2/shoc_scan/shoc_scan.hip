@@ -56,8 +56,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -230,17 +228,13 @@ static void scan_recursive(float* d_output, const float* d_input, int N,
 
     if (timed) {
         timer->record_start();
-        hipLaunchKernelGGL(scan_block_kernel,
-                           dim3(num_blocks), dim3(block_size),
-                           shared_mem, 0,
-                           d_output, d_input, d_block_sums, N);
+        scan_block_kernel<<<dim3(num_blocks), dim3(block_size), shared_mem, 0>>>(
+            d_output, d_input, d_block_sums, N);
         timer->record_stop();
         *t_scan += static_cast<double>(timer->elapsed_ms());
     } else {
-        hipLaunchKernelGGL(scan_block_kernel,
-                           dim3(num_blocks), dim3(block_size),
-                           shared_mem, 0,
-                           d_output, d_input, d_block_sums, N);
+        scan_block_kernel<<<dim3(num_blocks), dim3(block_size), shared_mem, 0>>>(
+            d_output, d_input, d_block_sums, N);
     }
 
     if (num_blocks > 1) {
@@ -253,17 +247,13 @@ static void scan_recursive(float* d_output, const float* d_input, int N,
 
         if (timed) {
             timer->record_start();
-            hipLaunchKernelGGL(add_block_sums_kernel,
-                               dim3(num_blocks), dim3(block_size),
-                               0, 0,
-                               d_output, d_scanned_block_sums, N);
+            add_block_sums_kernel<<<dim3(num_blocks), dim3(block_size)>>>(
+                d_output, d_scanned_block_sums, N);
             timer->record_stop();
             *t_add += static_cast<double>(timer->elapsed_ms());
         } else {
-            hipLaunchKernelGGL(add_block_sums_kernel,
-                               dim3(num_blocks), dim3(block_size),
-                               0, 0,
-                               d_output, d_scanned_block_sums, N);
+            add_block_sums_kernel<<<dim3(num_blocks), dim3(block_size)>>>(
+                d_output, d_scanned_block_sums, N);
         }
 
         HIP_CHECK(hipFree(d_scanned_block_sums));

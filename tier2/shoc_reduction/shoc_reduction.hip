@@ -55,8 +55,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -172,9 +170,7 @@ static void gpu_reduce(const float* d_input, float* d_partial,
     int num_blocks      = (N + elems_per_block - 1) / elems_per_block;
     int shared_bytes    = block_size * sizeof(float);
 
-    hipLaunchKernelGGL(reduce_kernel, dim3(num_blocks), dim3(block_size),
-                       shared_bytes, 0,
-                       d_input, d_partial, N);
+    reduce_kernel<<<dim3(num_blocks), dim3(block_size), shared_bytes, 0>>>(d_input, d_partial, N);
 
     if (num_blocks == 1) {
         HIP_CHECK(hipMemcpy(d_result, d_partial, sizeof(float),
@@ -193,18 +189,16 @@ static void gpu_reduce(const float* d_input, float* d_partial,
         int next_blocks  = (remaining + elems_per_block - 1) / elems_per_block;
 
         if (next_blocks == 1) {
-            hipLaunchKernelGGL(reduce_kernel, dim3(1), dim3(block_size),
-                               shared_bytes, 0,
-                               d_src, d_result, remaining);
+            reduce_kernel<<<dim3(1), dim3(block_size), shared_bytes, 0>>>(
+                d_src, d_result, remaining);
             remaining = 1;
         } else {
             if (!allocated_temp) {
                 HIP_CHECK(hipMalloc(&d_temp, next_blocks * sizeof(float)));
                 allocated_temp = true;
             }
-            hipLaunchKernelGGL(reduce_kernel, dim3(next_blocks), dim3(block_size),
-                               shared_bytes, 0,
-                               d_src, d_temp, remaining);
+            reduce_kernel<<<dim3(next_blocks), dim3(block_size), shared_bytes, 0>>>(
+                d_src, d_temp, remaining);
             d_src     = d_temp;
             remaining = next_blocks;
         }

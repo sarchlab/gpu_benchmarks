@@ -65,8 +65,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -304,8 +302,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemset(d_odata, 0, bytes));
 
     double naive_ms = runTransposeBench([&]() {
-        hipLaunchKernelGGL(transpose_naive, grid, block, 0, 0,
-                           d_idata, d_odata, N, N);
+        transpose_naive<<<grid, block>>>(d_idata, d_odata, N, N);
     });
 
     double naive_gbs = data_bytes / (naive_ms * 1e-3) / 1e9;
@@ -336,8 +333,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemset(d_odata, 0, bytes));
 
     double opt_ms = runTransposeBench([&]() {
-        hipLaunchKernelGGL(transpose_optimized, grid, block, 0, 0,
-                           d_idata, d_odata, N, N);
+        transpose_optimized<<<grid, block>>>(d_idata, d_odata, N, N);
     });
 
     double opt_gbs = data_bytes / (opt_ms * 1e-3) / 1e9;

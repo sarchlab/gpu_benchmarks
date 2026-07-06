@@ -62,8 +62,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -242,8 +240,7 @@ int main(int argc, char** argv) {
 
     // Lambda: run FIR filter
     auto run_fir = [&]() {
-        hipLaunchKernelGGL(fir_filter_kernel, dim3(gridSize), dim3(blockSize),
-                           0, 0, d_input, d_output, d_coeff, N, taps);
+        fir_filter_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_input, d_output, d_coeff, N, taps);
     };
 
     // -------------------------------------------------------------------

@@ -63,8 +63,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -495,9 +493,7 @@ int main(int argc, char** argv) {
         for (int t = 0; t < TIME_STEPS; ++t) {
             // Kernel 1: update positions
             if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            hipLaunchKernelGGL(update_particles_kernel,
-                               dim3(gridSize), dim3(blockSize), 0, 0,
-                               d_x, d_y, d_rng, N);
+            update_particles_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_x, d_y, d_rng, N);
             if (evStart) {
                 HIP_CHECK(hipEventRecord(*evStop, 0));
                 HIP_CHECK(hipEventSynchronize(*evStop));
@@ -508,9 +504,8 @@ int main(int argc, char** argv) {
 
             // Kernel 2: compute weights
             if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            hipLaunchKernelGGL(compute_weights_kernel,
-                               dim3(gridSize), dim3(blockSize), 0, 0,
-                               d_x, d_y, d_weights, obs_x[t], obs_y[t], N);
+            compute_weights_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+                d_x, d_y, d_weights, obs_x[t], obs_y[t], N);
             if (evStart) {
                 HIP_CHECK(hipEventRecord(*evStop, 0));
                 HIP_CHECK(hipEventSynchronize(*evStop));
@@ -524,10 +519,8 @@ int main(int argc, char** argv) {
 
             // Prefix sum (in-place on d_cdf)
             if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            hipLaunchKernelGGL(prefix_sum_kernel,
-                               dim3(numScanBlocks), dim3(scanBlock),
-                               scanElements * sizeof(float), 0,
-                               d_cdf, d_block_sums, N);
+            prefix_sum_kernel<<<dim3(numScanBlocks), dim3(scanBlock), scanElements * sizeof(float), 0>>>(
+                d_cdf, d_block_sums, N);
             if (evStart) {
                 HIP_CHECK(hipEventRecord(*evStop, 0));
                 HIP_CHECK(hipEventSynchronize(*evStop));
@@ -546,9 +539,8 @@ int main(int argc, char** argv) {
                                      hipMemcpyHostToDevice));
 
                 if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-                hipLaunchKernelGGL(add_block_sums_kernel,
-                                   dim3(numScanBlocks), dim3(scanBlock), 0, 0,
-                                   d_cdf, d_block_sums, N);
+                add_block_sums_kernel<<<dim3(numScanBlocks), dim3(scanBlock)>>>(
+                    d_cdf, d_block_sums, N);
                 if (evStart) {
                     HIP_CHECK(hipEventRecord(*evStop, 0));
                     HIP_CHECK(hipEventSynchronize(*evStop));
@@ -574,10 +566,8 @@ int main(int argc, char** argv) {
 
             // Kernel 3: resample
             if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            hipLaunchKernelGGL(resample_kernel,
-                               dim3(gridSize), dim3(blockSize), 0, 0,
-                               d_cdf, d_x, d_y, d_x2, d_y2, d_rng,
-                               total_weight, N);
+            resample_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+                d_cdf, d_x, d_y, d_x2, d_y2, d_rng, total_weight, N);
             if (evStart) {
                 HIP_CHECK(hipEventRecord(*evStop, 0));
                 HIP_CHECK(hipEventSynchronize(*evStop));
@@ -703,18 +693,13 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMalloc(&d_vblock_sums, vBlockSumBytes));
 
         for (int t = 0; t < TIME_STEPS; ++t) {
-            hipLaunchKernelGGL(update_particles_kernel,
-                               dim3(vGridSize), dim3(blockSize), 0, 0,
-                               d_x, d_y, d_rng, verify_n);
-            hipLaunchKernelGGL(compute_weights_kernel,
-                               dim3(vGridSize), dim3(blockSize), 0, 0,
-                               d_x, d_y, d_weights, obs_x[t], obs_y[t], verify_n);
+            update_particles_kernel<<<dim3(vGridSize), dim3(blockSize)>>>(d_x, d_y, d_rng, verify_n);
+            compute_weights_kernel<<<dim3(vGridSize), dim3(blockSize)>>>(
+                d_x, d_y, d_weights, obs_x[t], obs_y[t], verify_n);
             HIP_CHECK(hipMemcpy(d_cdf, d_weights, verify_n * sizeof(float), hipMemcpyDeviceToDevice));
 
-            hipLaunchKernelGGL(prefix_sum_kernel,
-                               dim3(vScanBlocks), dim3(scanBlock),
-                               scanElements * sizeof(float), 0,
-                               d_cdf, d_vblock_sums, verify_n);
+            prefix_sum_kernel<<<dim3(vScanBlocks), dim3(scanBlock), scanElements * sizeof(float), 0>>>(
+                d_cdf, d_vblock_sums, verify_n);
 
             if (vScanBlocks > 1) {
                 std::vector<float> h_bsums(vScanBlocks);
@@ -723,9 +708,8 @@ int main(int argc, char** argv) {
                 host_prefix_sum(h_bsums.data(), vScanBlocks);
                 HIP_CHECK(hipMemcpy(d_vblock_sums, h_bsums.data(), vBlockSumBytes,
                                      hipMemcpyHostToDevice));
-                hipLaunchKernelGGL(add_block_sums_kernel,
-                                   dim3(vScanBlocks), dim3(scanBlock), 0, 0,
-                                   d_cdf, d_vblock_sums, verify_n);
+                add_block_sums_kernel<<<dim3(vScanBlocks), dim3(scanBlock)>>>(
+                    d_cdf, d_vblock_sums, verify_n);
             }
 
             float total_weight = 0.0f;
@@ -739,10 +723,8 @@ int main(int argc, char** argv) {
             }
             if (total_weight < 1e-30f) total_weight = 1.0f;
 
-            hipLaunchKernelGGL(resample_kernel,
-                               dim3(vGridSize), dim3(blockSize), 0, 0,
-                               d_cdf, d_x, d_y, d_x2, d_y2, d_rng,
-                               total_weight, verify_n);
+            resample_kernel<<<dim3(vGridSize), dim3(blockSize)>>>(
+                d_cdf, d_x, d_y, d_x2, d_y2, d_rng, total_weight, verify_n);
 
             float* tmp;
             tmp = d_x; d_x = d_x2; d_x2 = tmp;

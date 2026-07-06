@@ -31,8 +31,6 @@
 #define hipDeviceProp_t         cudaDeviceProp
 #define hipError_t              cudaError_t
 #define hipSuccess              cudaSuccess
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -199,8 +197,7 @@ int main(int argc, char** argv) {
 
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
-        hipLaunchKernelGGL(conv3d_kernel, grid, block, 0, 0,
-                           d_input, d_filter, d_output, N, filter_size);
+        conv3d_kernel<<<grid, block>>>(d_input, d_filter, d_output, N, filter_size);
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -208,8 +205,7 @@ int main(int argc, char** argv) {
     std::vector<double> times(1);
     for (int i = 0; i < 1; ++i) {
         timer.record_start();
-        hipLaunchKernelGGL(conv3d_kernel, grid, block, 0, 0,
-                           d_input, d_filter, d_output, N, filter_size);
+        conv3d_kernel<<<grid, block>>>(d_input, d_filter, d_output, N, filter_size);
         timer.record_stop();
         times[i] = static_cast<double>(timer.elapsed_ms());
     }

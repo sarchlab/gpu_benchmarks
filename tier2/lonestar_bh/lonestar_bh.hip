@@ -61,8 +61,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -511,10 +509,8 @@ int main(int argc, char** argv) {
 
             // Compute forces on GPU
             if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            hipLaunchKernelGGL(bh_force_kernel, dim3(gridSize), dim3(blockSize),
-                               0, 0, d_px, d_py, d_mass, d_ax, d_ay,
-                               d_tcx, d_tcy, d_tmass, d_tbw, d_tchild,
-                               num_nodes, N, theta, eps2);
+            bh_force_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+                d_px, d_py, d_mass, d_ax, d_ay, d_tcx, d_tcy, d_tmass, d_tbw, d_tchild, num_nodes, N, theta, eps2);
             if (evStart) {
                 HIP_CHECK(hipEventRecord(*evStop, 0));
                 HIP_CHECK(hipEventSynchronize(*evStop));
@@ -526,8 +522,8 @@ int main(int argc, char** argv) {
 
             // Integrate on GPU
             if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            hipLaunchKernelGGL(integrate_kernel, dim3(gridSize), dim3(blockSize),
-                               0, 0, d_px, d_py, d_vx, d_vy, d_ax, d_ay, N, dt);
+            integrate_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+                d_px, d_py, d_vx, d_vy, d_ax, d_ay, N, dt);
             if (evStart) {
                 HIP_CHECK(hipEventRecord(*evStop, 0));
                 HIP_CHECK(hipEventSynchronize(*evStop));
@@ -627,10 +623,8 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_py, h_py.data(), N * sizeof(float), hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_mass, h_mass.data(), N * sizeof(float), hipMemcpyHostToDevice));
 
-        hipLaunchKernelGGL(bh_force_kernel, dim3(gridSize), dim3(blockSize),
-                           0, 0, d_px, d_py, d_mass, d_ax, d_ay,
-                           d_tcx, d_tcy, d_tmass, d_tbw, d_tchild,
-                           num_nodes, N, theta, eps2);
+        bh_force_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+            d_px, d_py, d_mass, d_ax, d_ay, d_tcx, d_tcy, d_tmass, d_tbw, d_tchild, num_nodes, N, theta, eps2);
         HIP_CHECK(hipDeviceSynchronize());
 
         std::vector<float> gpu_ax(N), gpu_ay(N);

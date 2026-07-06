@@ -60,8 +60,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -257,8 +255,7 @@ int main(int argc, char** argv)
 
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
-        hipLaunchKernelGGL(sgemm_kernel, grid, block, 0, 0,
-                           d_A, d_B, d_C, N, alpha, beta);
+        sgemm_kernel<<<grid, block>>>(d_A, d_B, d_C, N, alpha, beta);
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipMemcpy(d_C, h_C, bytes, hipMemcpyHostToDevice));
     }
@@ -271,8 +268,7 @@ int main(int argc, char** argv)
         // Reset C to initial state so beta accumulation is consistent
         HIP_CHECK(hipMemcpy(d_C, h_C, bytes, hipMemcpyHostToDevice));
         timer.begin();
-        hipLaunchKernelGGL(sgemm_kernel, grid, block, 0, 0,
-                           d_A, d_B, d_C, N, alpha, beta);
+        sgemm_kernel<<<grid, block>>>(d_A, d_B, d_C, N, alpha, beta);
         float ms = timer.end();
         times[i] = (double)ms;
     }

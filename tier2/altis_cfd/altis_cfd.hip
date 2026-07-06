@@ -60,8 +60,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -501,12 +499,8 @@ int main(int argc, char** argv) {
         for (int stage = 0; stage < RK_STEPS; ++stage) {
             // Compute fluxes
             if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            hipLaunchKernelGGL(compute_flux_kernel, dim3(gridSize), dim3(blockSize),
-                               0, 0,
-                               d_rho, d_mx, d_my, d_mz, d_energy,
-                               d_neighbors, d_normals, d_areas,
-                               d_flux_rho, d_flux_mx, d_flux_my, d_flux_mz, d_flux_energy,
-                               N);
+            compute_flux_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+                d_rho, d_mx, d_my, d_mz, d_energy, d_neighbors, d_normals, d_areas, d_flux_rho, d_flux_mx, d_flux_my, d_flux_mz, d_flux_energy, N);
             if (evStart) {
                 HIP_CHECK(hipEventRecord(*evStop, 0));
                 HIP_CHECK(hipEventSynchronize(*evStop));
@@ -517,12 +511,8 @@ int main(int argc, char** argv) {
 
             // RK update
             if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            hipLaunchKernelGGL(rk_update_kernel, dim3(gridSize), dim3(blockSize),
-                               0, 0,
-                               d_rho, d_mx, d_my, d_mz, d_energy,
-                               d_rho_old, d_mx_old, d_my_old, d_mz_old, d_energy_old,
-                               d_flux_rho, d_flux_mx, d_flux_my, d_flux_mz, d_flux_energy,
-                               d_volumes, DT, rk_coeffs[stage], N);
+            rk_update_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+                d_rho, d_mx, d_my, d_mz, d_energy, d_rho_old, d_mx_old, d_my_old, d_mz_old, d_energy_old, d_flux_rho, d_flux_mx, d_flux_my, d_flux_mz, d_flux_energy, d_volumes, DT, rk_coeffs[stage], N);
             if (evStart) {
                 HIP_CHECK(hipEventRecord(*evStop, 0));
                 HIP_CHECK(hipEventSynchronize(*evStop));
@@ -603,12 +593,8 @@ int main(int argc, char** argv) {
 
         // Re-upload initial state and compute one flux pass on GPU
         upload_initial();
-        hipLaunchKernelGGL(compute_flux_kernel, dim3(gridSize), dim3(blockSize),
-                           0, 0,
-                           d_rho, d_mx, d_my, d_mz, d_energy,
-                           d_neighbors, d_normals, d_areas,
-                           d_flux_rho, d_flux_mx, d_flux_my, d_flux_mz, d_flux_energy,
-                           N);
+        compute_flux_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+            d_rho, d_mx, d_my, d_mz, d_energy, d_neighbors, d_normals, d_areas, d_flux_rho, d_flux_mx, d_flux_my, d_flux_mz, d_flux_energy, N);
         HIP_CHECK(hipDeviceSynchronize());
 
         // Download GPU flux

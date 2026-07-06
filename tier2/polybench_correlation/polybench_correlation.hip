@@ -31,8 +31,6 @@
 #define hipDeviceProp_t         cudaDeviceProp
 #define hipError_t              cudaError_t
 #define hipSuccess              cudaSuccess
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -247,14 +245,10 @@ int main(int argc, char** argv) {
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
         HIP_CHECK(hipMemcpy(d_data, h_data, data_bytes, hipMemcpyHostToDevice));
-        hipLaunchKernelGGL(mean_kernel, dim3(blocks_n), dim3(threads1d), 0, 0,
-                           d_data, d_mean, M, N);
-        hipLaunchKernelGGL(stddev_kernel, dim3(blocks_n), dim3(threads1d), 0, 0,
-                           d_data, d_mean, d_stddev, M, N);
-        hipLaunchKernelGGL(normalize_kernel, dim3(blocks_mn), dim3(threads1d), 0, 0,
-                           d_data, d_mean, d_stddev, M, N);
-        hipLaunchKernelGGL(correlation_kernel, corr_grid, corr_block, 0, 0,
-                           d_data, d_corr, M, N);
+        mean_kernel<<<dim3(blocks_n), dim3(threads1d)>>>(d_data, d_mean, M, N);
+        stddev_kernel<<<dim3(blocks_n), dim3(threads1d)>>>(d_data, d_mean, d_stddev, M, N);
+        normalize_kernel<<<dim3(blocks_mn), dim3(threads1d)>>>(d_data, d_mean, d_stddev, M, N);
+        correlation_kernel<<<corr_grid, corr_block>>>(d_data, d_corr, M, N);
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -265,26 +259,22 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_data, h_data, data_bytes, hipMemcpyHostToDevice));
 
         timer.record_start();
-        hipLaunchKernelGGL(mean_kernel, dim3(blocks_n), dim3(threads1d), 0, 0,
-                           d_data, d_mean, M, N);
+        mean_kernel<<<dim3(blocks_n), dim3(threads1d)>>>(d_data, d_mean, M, N);
         timer.record_stop();
         t_mean[it] = (double)timer.elapsed_ms();
 
         timer.record_start();
-        hipLaunchKernelGGL(stddev_kernel, dim3(blocks_n), dim3(threads1d), 0, 0,
-                           d_data, d_mean, d_stddev, M, N);
+        stddev_kernel<<<dim3(blocks_n), dim3(threads1d)>>>(d_data, d_mean, d_stddev, M, N);
         timer.record_stop();
         t_stddev[it] = (double)timer.elapsed_ms();
 
         timer.record_start();
-        hipLaunchKernelGGL(normalize_kernel, dim3(blocks_mn), dim3(threads1d), 0, 0,
-                           d_data, d_mean, d_stddev, M, N);
+        normalize_kernel<<<dim3(blocks_mn), dim3(threads1d)>>>(d_data, d_mean, d_stddev, M, N);
         timer.record_stop();
         t_norm[it] = (double)timer.elapsed_ms();
 
         timer.record_start();
-        hipLaunchKernelGGL(correlation_kernel, corr_grid, corr_block, 0, 0,
-                           d_data, d_corr, M, N);
+        correlation_kernel<<<corr_grid, corr_block>>>(d_data, d_corr, M, N);
         timer.record_stop();
         t_corr[it] = (double)timer.elapsed_ms();
     }

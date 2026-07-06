@@ -61,8 +61,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -262,8 +260,7 @@ int main(int argc, char** argv) {
 
     // Warmup (not measured)
     for (int w = 0; w < num_warmup; ++w) {
-        hipLaunchKernelGGL(syr2k_kernel, grid, block, 0, 0,
-                           d_A, d_B, d_C, N, M, alpha, beta);
+        syr2k_kernel<<<grid, block>>>(d_A, d_B, d_C, N, M, alpha, beta);
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -275,8 +272,7 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 1; ++i) {
         HIP_CHECK(hipMemcpy(d_C, h_C, bytes_C, hipMemcpyHostToDevice));
         timer.record_start();
-        hipLaunchKernelGGL(syr2k_kernel, grid, block, 0, 0,
-                           d_A, d_B, d_C, N, M, alpha, beta);
+        syr2k_kernel<<<grid, block>>>(d_A, d_B, d_C, N, M, alpha, beta);
         timer.record_stop();
         times[i] = static_cast<double>(timer.elapsed_ms());
     }

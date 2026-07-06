@@ -42,8 +42,6 @@
 #define hipHostMalloc           cudaMallocHost
 #define hipHostFree             cudaFreeHost
 #define hipHostMallocDefault    cudaHostAllocDefault
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -179,8 +177,8 @@ int main(int argc, char** argv) {
     // -----------------------------------------------------------------------
     for (int w = 0; w < num_warmup; ++w) {
         reset_table();
-        hipLaunchKernelGGL(gups_kernel, dim3(gridSize), dim3(block_size),
-                           0, 0, d_table, table_size, num_updates, seed_base);
+        gups_kernel<<<dim3(gridSize), dim3(block_size)>>>(
+            d_table, table_size, num_updates, seed_base);
         HIP_CHECK(hipDeviceSynchronize());
     }
 
@@ -196,8 +194,8 @@ int main(int argc, char** argv) {
         reset_table();
 
         HIP_CHECK(hipEventRecord(evStart, 0));
-        hipLaunchKernelGGL(gups_kernel, dim3(gridSize), dim3(block_size),
-                           0, 0, d_table, table_size, num_updates, seed_base);
+        gups_kernel<<<dim3(gridSize), dim3(block_size)>>>(
+            d_table, table_size, num_updates, seed_base);
         HIP_CHECK(hipEventRecord(evStop, 0));
         HIP_CHECK(hipEventSynchronize(evStop));
 
@@ -236,8 +234,8 @@ int main(int argc, char** argv) {
     // -----------------------------------------------------------------------
     {
         reset_table();
-        hipLaunchKernelGGL(gups_kernel, dim3(gridSize), dim3(block_size),
-                           0, 0, d_table, table_size, num_updates, seed_base);
+        gups_kernel<<<dim3(gridSize), dim3(block_size)>>>(
+            d_table, table_size, num_updates, seed_base);
         HIP_CHECK(hipDeviceSynchronize());
 
         std::vector<unsigned long long> gpu_table(table_size);

@@ -61,8 +61,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -235,9 +233,8 @@ static int run_sssp_gpu(int N, int num_edges,
         int h_changed = 0;
         HIP_CHECK(hipMemcpy(d_changed, &h_changed, sizeof(int), hipMemcpyHostToDevice));
 
-        hipLaunchKernelGGL(bellman_ford_kernel, dim3(gridSize), dim3(blockSize),
-                           0, 0, d_row_offsets, d_col_indices, d_weights,
-                           d_dist, d_changed, N);
+        bellman_ford_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+            d_row_offsets, d_col_indices, d_weights, d_dist, d_changed, N);
         HIP_CHECK(hipDeviceSynchronize());
 
         HIP_CHECK(hipMemcpy(&h_changed, d_changed, sizeof(int), hipMemcpyDeviceToHost));

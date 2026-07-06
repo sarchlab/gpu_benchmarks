@@ -62,8 +62,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -228,8 +226,7 @@ int main(int argc, char** argv) {
 
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
-        hipLaunchKernelGGL(polybench_gemm_kernel, grid, block, 0, 0,
-                           d_A, d_B, d_C, N, alpha, beta);
+        polybench_gemm_kernel<<<grid, block>>>(d_A, d_B, d_C, N, alpha, beta);
         HIP_CHECK(hipDeviceSynchronize());
     }
 
@@ -237,8 +234,7 @@ int main(int argc, char** argv) {
     std::vector<double> times(1);
     for (int i = 0; i < 1; ++i) {
         timer.record_start();
-        hipLaunchKernelGGL(polybench_gemm_kernel, grid, block, 0, 0,
-                           d_A, d_B, d_C, N, alpha, beta);
+        polybench_gemm_kernel<<<grid, block>>>(d_A, d_B, d_C, N, alpha, beta);
         timer.record_stop();
         times[i] = static_cast<double>(timer.elapsed_ms());
     }

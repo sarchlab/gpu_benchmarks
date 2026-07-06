@@ -59,8 +59,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -278,11 +276,9 @@ int main(int argc, char** argv) {
 
     // Lambda: run a full FFT (bit-reversal + all butterfly stages)
     auto run_fft = [&]() {
-        hipLaunchKernelGGL(bit_reverse_kernel, dim3(gridBitRev), dim3(blockSize),
-                           0, 0, d_data, N, log2N);
+        bit_reverse_kernel<<<dim3(gridBitRev), dim3(blockSize)>>>(d_data, N, log2N);
         for (int s = 0; s < log2N; ++s) {
-            hipLaunchKernelGGL(fft_butterfly_kernel, dim3(gridButterfly),
-                               dim3(blockSize), 0, 0, d_data, N, s);
+            fft_butterfly_kernel<<<dim3(gridButterfly), dim3(blockSize)>>>(d_data, N, s);
         }
     };
 
@@ -309,8 +305,7 @@ int main(int argc, char** argv) {
 
         // Time bit-reverse kernel
         HIP_CHECK(hipEventRecord(evStart, 0));
-        hipLaunchKernelGGL(bit_reverse_kernel, dim3(gridBitRev), dim3(blockSize),
-                           0, 0, d_data, N, log2N);
+        bit_reverse_kernel<<<dim3(gridBitRev), dim3(blockSize)>>>(d_data, N, log2N);
         HIP_CHECK(hipEventRecord(evStop, 0));
         HIP_CHECK(hipEventSynchronize(evStop));
         float ms = 0.0f;
@@ -320,8 +315,7 @@ int main(int argc, char** argv) {
         // Time all butterfly stages
         HIP_CHECK(hipEventRecord(evStart, 0));
         for (int s = 0; s < log2N; ++s) {
-            hipLaunchKernelGGL(fft_butterfly_kernel, dim3(gridButterfly),
-                               dim3(blockSize), 0, 0, d_data, N, s);
+            fft_butterfly_kernel<<<dim3(gridButterfly), dim3(blockSize)>>>(d_data, N, s);
         }
         HIP_CHECK(hipEventRecord(evStop, 0));
         HIP_CHECK(hipEventSynchronize(evStop));

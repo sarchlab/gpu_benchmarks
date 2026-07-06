@@ -61,8 +61,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -291,8 +289,8 @@ int main(int argc, char** argv) {
     // Warmup
     // -------------------------------------------------------------------
     for (int w = 0; w < num_warmup; ++w) {
-        hipLaunchKernelGGL(binomial_kernel, dim3(gridSize), dim3(blockSize),
-                           sharedBytes, 0, d_options, d_prices, numSteps);
+        binomial_kernel<<<dim3(gridSize), dim3(blockSize), sharedBytes, 0>>>(
+            d_options, d_prices, numSteps);
         HIP_CHECK(hipDeviceSynchronize());
     }
 
@@ -306,8 +304,8 @@ int main(int argc, char** argv) {
     std::vector<double> times(1);
     for (int i = 0; i < 1; ++i) {
         HIP_CHECK(hipEventRecord(evStart, 0));
-        hipLaunchKernelGGL(binomial_kernel, dim3(gridSize), dim3(blockSize),
-                           sharedBytes, 0, d_options, d_prices, numSteps);
+        binomial_kernel<<<dim3(gridSize), dim3(blockSize), sharedBytes, 0>>>(
+            d_options, d_prices, numSteps);
         HIP_CHECK(hipEventRecord(evStop, 0));
         HIP_CHECK(hipEventSynchronize(evStop));
 

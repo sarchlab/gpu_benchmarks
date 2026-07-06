@@ -67,8 +67,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -218,7 +216,7 @@ int main(int argc, char** argv) {
     for (int w = 0; w < num_warmup; ++w) {
         float *src = d_A, *dst = d_B;
         for (int t = 0; t < TSTEPS; ++t) {
-            hipLaunchKernelGGL(jacobi2d_kernel, grid, block, 0, 0, src, dst, N);
+            jacobi2d_kernel<<<grid, block>>>(src, dst, N);
             float* tmp = src; src = dst; dst = tmp;
         }
         HIP_CHECK(hipDeviceSynchronize());
@@ -238,7 +236,7 @@ int main(int argc, char** argv) {
         float *src = d_A, *dst = d_B;
         timer.record_start();
         for (int t = 0; t < TSTEPS; ++t) {
-            hipLaunchKernelGGL(jacobi2d_kernel, grid, block, 0, 0, src, dst, N);
+            jacobi2d_kernel<<<grid, block>>>(src, dst, N);
             float* tmp = src; src = dst; dst = tmp;
         }
         timer.record_stop();
@@ -284,7 +282,7 @@ int main(int argc, char** argv) {
 
         float *csrc = cd_A, *cdst = cd_B;
         for (int t = 0; t < TSTEPS; ++t) {
-            hipLaunchKernelGGL(jacobi2d_kernel, cgrid, cblock, 0, 0, csrc, cdst, CN);
+            jacobi2d_kernel<<<cgrid, cblock>>>(csrc, cdst, CN);
             float* tmp = csrc; csrc = cdst; cdst = tmp;
         }
         HIP_CHECK(hipDeviceSynchronize());

@@ -74,8 +74,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -186,8 +184,7 @@ static double run_benchmark(KernelFn kernel, float *d_sink,
 {
     // Warmup
     for (int i = 0; i < num_warmup; ++i) {
-        hipLaunchKernelGGL(kernel, dim3(num_blocks), dim3(block_size),
-                           0, 0, d_sink, inner_iters);
+        kernel<<<dim3(num_blocks), dim3(block_size)>>>(d_sink, inner_iters);
         HIP_CHECK(hipGetLastError());
     }
     HIP_CHECK(hipDeviceSynchronize());
@@ -198,8 +195,7 @@ static double run_benchmark(KernelFn kernel, float *d_sink,
     HIP_CHECK(hipEventCreate(&stop));
 
     HIP_CHECK(hipEventRecord(start, 0));
-    hipLaunchKernelGGL(kernel, dim3(num_blocks), dim3(block_size),
-                       0, 0, d_sink, inner_iters);
+    kernel<<<dim3(num_blocks), dim3(block_size)>>>(d_sink, inner_iters);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipEventRecord(stop, 0));
     HIP_CHECK(hipEventSynchronize(stop));

@@ -67,8 +67,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -240,8 +238,8 @@ int main(int argc, char** argv) {
 
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
-        hipLaunchKernelGGL(atax_kernel1, grid1, block_size, 0, 0, d_A, d_x, d_tmp, nx, ny);
-        hipLaunchKernelGGL(atax_kernel2, grid2, block_size, 0, 0, d_A, d_tmp, d_y, nx, ny);
+        atax_kernel1<<<grid1, block_size>>>(d_A, d_x, d_tmp, nx, ny);
+        atax_kernel2<<<grid2, block_size>>>(d_A, d_tmp, d_y, nx, ny);
         HIP_CHECK(hipDeviceSynchronize());
     }
 
@@ -249,12 +247,12 @@ int main(int argc, char** argv) {
     std::vector<double> k1_times(1), k2_times(1);
     for (int i = 0; i < 1; ++i) {
         timer.record_start();
-        hipLaunchKernelGGL(atax_kernel1, grid1, block_size, 0, 0, d_A, d_x, d_tmp, nx, ny);
+        atax_kernel1<<<grid1, block_size>>>(d_A, d_x, d_tmp, nx, ny);
         timer.record_stop();
         k1_times[i] = static_cast<double>(timer.elapsed_ms());
 
         timer.record_start();
-        hipLaunchKernelGGL(atax_kernel2, grid2, block_size, 0, 0, d_A, d_tmp, d_y, nx, ny);
+        atax_kernel2<<<grid2, block_size>>>(d_A, d_tmp, d_y, nx, ny);
         timer.record_stop();
         k2_times[i] = static_cast<double>(timer.elapsed_ms());
     }

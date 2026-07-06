@@ -55,8 +55,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -252,8 +250,8 @@ int main(int argc, char** argv)
 
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
-        hipLaunchKernelGGL(spmv_csr_kernel, grid_size, BLOCK_SIZE, 0, 0,
-                           d_row_ptr, d_col_idx, d_values, d_x, d_y, num_rows);
+        spmv_csr_kernel<<<grid_size, BLOCK_SIZE>>>(
+            d_row_ptr, d_col_idx, d_values, d_x, d_y, num_rows);
         HIP_CHECK(hipDeviceSynchronize());
     }
 
@@ -261,8 +259,8 @@ int main(int argc, char** argv)
     std::vector<double> times(1);
     for (int iter = 0; iter < 1; ++iter) {
         timer.record_start();
-        hipLaunchKernelGGL(spmv_csr_kernel, grid_size, BLOCK_SIZE, 0, 0,
-                           d_row_ptr, d_col_idx, d_values, d_x, d_y, num_rows);
+        spmv_csr_kernel<<<grid_size, BLOCK_SIZE>>>(
+            d_row_ptr, d_col_idx, d_values, d_x, d_y, num_rows);
         timer.record_stop();
         times[iter] = static_cast<double>(timer.elapsed_ms());
         fprintf(stderr, "  iter %d: %.4f ms\n", iter, times[iter]);

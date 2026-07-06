@@ -64,8 +64,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -265,12 +263,12 @@ int main(int argc, char** argv)
             int remaining = N - t - 1;
             // fan1
             int grid1 = (remaining + BLOCK1D - 1) / BLOCK1D;
-            hipLaunchKernelGGL(fan1, grid1, BLOCK1D, 0, 0, d_m, d_a, N, t);
+            fan1<<<grid1, BLOCK1D>>>(d_m, d_a, N, t);
             // fan2
             dim3 block2(BLOCK2D, BLOCK2D);
             dim3 grid2((remaining + BLOCK2D - 1) / BLOCK2D,
                        (remaining + BLOCK2D - 1) / BLOCK2D);
-            hipLaunchKernelGGL(fan2, grid2, block2, 0, 0, d_m, d_a, d_b, N, t);
+            fan2<<<grid2, block2>>>(d_m, d_a, d_b, N, t);
         }
         HIP_CHECK(hipDeviceSynchronize());
     }
@@ -292,7 +290,7 @@ int main(int argc, char** argv)
             // fan1: compute multipliers
             int grid1 = (remaining + BLOCK1D - 1) / BLOCK1D;
             timer.record_start();
-            hipLaunchKernelGGL(fan1, grid1, BLOCK1D, 0, 0, d_m, d_a, N, t);
+            fan1<<<grid1, BLOCK1D>>>(d_m, d_a, N, t);
             timer.record_stop();
             t_fan1 += (double)timer.elapsed_ms();
             // fan2: update submatrix
@@ -300,7 +298,7 @@ int main(int argc, char** argv)
             dim3 grid2((remaining + BLOCK2D - 1) / BLOCK2D,
                        (remaining + BLOCK2D - 1) / BLOCK2D);
             timer.record_start();
-            hipLaunchKernelGGL(fan2, grid2, block2, 0, 0, d_m, d_a, d_b, N, t);
+            fan2<<<grid2, block2>>>(d_m, d_a, d_b, N, t);
             timer.record_stop();
             t_fan2 += (double)timer.elapsed_ms();
         }

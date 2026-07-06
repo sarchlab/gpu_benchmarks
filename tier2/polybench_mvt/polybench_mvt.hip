@@ -70,8 +70,6 @@
 #define hipGridDim_y            gridDim.y
 #define hipGridDim_z            gridDim.z
 #define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
 #else
 #include <hip/hip_runtime.h>
 #endif
@@ -254,8 +252,8 @@ int main(int argc, char** argv) {
 
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
-        hipLaunchKernelGGL(mvt_kernel1, grid, block_size, 0, 0, d_A, d_y1, d_x1, n);
-        hipLaunchKernelGGL(mvt_kernel2, grid, block_size, 0, 0, d_A, d_y2, d_x2, n);
+        mvt_kernel1<<<grid, block_size>>>(d_A, d_y1, d_x1, n);
+        mvt_kernel2<<<grid, block_size>>>(d_A, d_y2, d_x2, n);
         HIP_CHECK(hipDeviceSynchronize());
     }
 
@@ -263,12 +261,12 @@ int main(int argc, char** argv) {
     double t_k1 = 0.0, t_k2 = 0.0;
     for (int it = 0; it < 1; ++it) {
         timer.record_start();
-        hipLaunchKernelGGL(mvt_kernel1, grid, block_size, 0, 0, d_A, d_y1, d_x1, n);
+        mvt_kernel1<<<grid, block_size>>>(d_A, d_y1, d_x1, n);
         timer.record_stop();
         t_k1 += static_cast<double>(timer.elapsed_ms());
 
         timer.record_start();
-        hipLaunchKernelGGL(mvt_kernel2, grid, block_size, 0, 0, d_A, d_y2, d_x2, n);
+        mvt_kernel2<<<grid, block_size>>>(d_A, d_y2, d_x2, n);
         timer.record_stop();
         t_k2 += static_cast<double>(timer.elapsed_ms());
     }

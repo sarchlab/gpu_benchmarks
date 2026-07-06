@@ -17,6 +17,8 @@
 #ifndef HIP_CUDA_COMPAT_H
 #define HIP_CUDA_COMPAT_H
 
+#include <cstdint>
+
 #if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
 
 #include <cuda_runtime.h>
@@ -59,6 +61,16 @@
 #define hipDeviceProp_t         cudaDeviceProp
 #define hipError_t              cudaError_t
 #define hipSuccess              cudaSuccess
+
+/* Symbol addressing (identity on CUDA) */
+#define HIP_SYMBOL(x)           x
+
+/* HIP keeps the pre-Volta shuffle names; CUDA requires the _sync forms.
+ * All benchmark kernels are warp-converged, so a full mask is correct. */
+#define __shfl(...)             __shfl_sync(0xffffffff, __VA_ARGS__)
+#define __shfl_up(...)          __shfl_up_sync(0xffffffff, __VA_ARGS__)
+#define __shfl_down(...)        __shfl_down_sync(0xffffffff, __VA_ARGS__)
+#define __shfl_xor(...)         __shfl_xor_sync(0xffffffff, __VA_ARGS__)
 
 /* Legacy hip* thread/block index aliases */
 #define hipBlockIdx_x           blockIdx.x

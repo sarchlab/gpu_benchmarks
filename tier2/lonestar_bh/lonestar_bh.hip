@@ -15,57 +15,7 @@
 // Output (stdout): CSV — lonestar_bh,<N_bodies>,<time_ms>,<GFLOPS>
 // Output (stderr): human-readable results
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemcpyAsync          cudaMemcpyAsync
-#define hipMemset               cudaMemset
-#define hipMemsetAsync          cudaMemsetAsync
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
-#define hipMemcpyDeviceToDevice cudaMemcpyDeviceToDevice
-#define hipMemcpyToSymbol       cudaMemcpyToSymbol
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetLastError         cudaGetLastError
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipStream_t             cudaStream_t
-#define hipStreamCreate         cudaStreamCreate
-#define hipStreamDestroy        cudaStreamDestroy
-#define hipStreamSynchronize    cudaStreamSynchronize
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipHostMalloc           cudaMallocHost
-#define hipHostFree             cudaFreeHost
-#define hipHostMallocDefault    cudaHostAllocDefault
-#define hipBlockIdx_x           blockIdx.x
-#define hipBlockIdx_y           blockIdx.y
-#define hipBlockIdx_z           blockIdx.z
-#define hipThreadIdx_x          threadIdx.x
-#define hipThreadIdx_y          threadIdx.y
-#define hipThreadIdx_z          threadIdx.z
-#define hipBlockDim_x           blockDim.x
-#define hipBlockDim_y           blockDim.y
-#define hipBlockDim_z           blockDim.z
-#define hipGridDim_x            gridDim.x
-#define hipGridDim_y            gridDim.y
-#define hipGridDim_z            gridDim.z
-#define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -511,10 +461,8 @@ int main(int argc, char** argv) {
 
             // Compute forces on GPU
             if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            hipLaunchKernelGGL(bh_force_kernel, dim3(gridSize), dim3(blockSize),
-                               0, 0, d_px, d_py, d_mass, d_ax, d_ay,
-                               d_tcx, d_tcy, d_tmass, d_tbw, d_tchild,
-                               num_nodes, N, theta, eps2);
+            bh_force_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+                d_px, d_py, d_mass, d_ax, d_ay, d_tcx, d_tcy, d_tmass, d_tbw, d_tchild, num_nodes, N, theta, eps2);
             if (evStart) {
                 HIP_CHECK(hipEventRecord(*evStop, 0));
                 HIP_CHECK(hipEventSynchronize(*evStop));
@@ -526,8 +474,8 @@ int main(int argc, char** argv) {
 
             // Integrate on GPU
             if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            hipLaunchKernelGGL(integrate_kernel, dim3(gridSize), dim3(blockSize),
-                               0, 0, d_px, d_py, d_vx, d_vy, d_ax, d_ay, N, dt);
+            integrate_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+                d_px, d_py, d_vx, d_vy, d_ax, d_ay, N, dt);
             if (evStart) {
                 HIP_CHECK(hipEventRecord(*evStop, 0));
                 HIP_CHECK(hipEventSynchronize(*evStop));
@@ -627,10 +575,8 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_py, h_py.data(), N * sizeof(float), hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_mass, h_mass.data(), N * sizeof(float), hipMemcpyHostToDevice));
 
-        hipLaunchKernelGGL(bh_force_kernel, dim3(gridSize), dim3(blockSize),
-                           0, 0, d_px, d_py, d_mass, d_ax, d_ay,
-                           d_tcx, d_tcy, d_tmass, d_tbw, d_tchild,
-                           num_nodes, N, theta, eps2);
+        bh_force_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+            d_px, d_py, d_mass, d_ax, d_ay, d_tcx, d_tcy, d_tmass, d_tbw, d_tchild, num_nodes, N, theta, eps2);
         HIP_CHECK(hipDeviceSynchronize());
 
         std::vector<float> gpu_ax(N), gpu_ay(N);

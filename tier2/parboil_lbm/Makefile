@@ -32,9 +32,9 @@ TARGET := parboil_lbm
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := parboil_lbm.cu
+  SRC    := parboil_lbm.hip
   CUDA_ARCH ?= sm_90
-  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
+  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH) -x cu
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

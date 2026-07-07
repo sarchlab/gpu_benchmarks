@@ -18,7 +18,7 @@ paging overhead and obtain the best possible transfer throughput.
 
 | Platform | Source file | Compiler |
 |----------|-------------|---------|
-| NVIDIA CUDA | `pcie_bandwidth.cu` | `nvcc` |
+| NVIDIA CUDA | `pcie_bandwidth.hip` | `nvcc` |
 | AMD ROCm/HIP | `pcie_bandwidth.hip` | `hipcc` |
 | Apple Metal | `pcie_bandwidth_metal.mm` | `clang++` |
 

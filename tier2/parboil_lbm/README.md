@@ -18,7 +18,6 @@ Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parbo
 
 | File | Description |
 |------|-------------|
-| `parboil_lbm.cu` | CUDA source — D3Q19 LBM collide-stream kernel |
 | `parboil_lbm.hip` | HIP source — portable ROCm/CUDA implementation |
 | `parboil_lbm.metal` | Metal compute shader — LBM kernel |
 | `parboil_lbm_metal.mm` | ObjC++ Metal host code |

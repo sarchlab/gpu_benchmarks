@@ -10,57 +10,7 @@
 // Output (stdout): JSON-lines protocol
 // Output (stderr): Human-readable diagnostics
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemcpyAsync          cudaMemcpyAsync
-#define hipMemset               cudaMemset
-#define hipMemsetAsync          cudaMemsetAsync
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
-#define hipMemcpyDeviceToDevice cudaMemcpyDeviceToDevice
-#define hipMemcpyToSymbol       cudaMemcpyToSymbol
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetLastError         cudaGetLastError
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipStream_t             cudaStream_t
-#define hipStreamCreate         cudaStreamCreate
-#define hipStreamDestroy        cudaStreamDestroy
-#define hipStreamSynchronize    cudaStreamSynchronize
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipHostMalloc           cudaMallocHost
-#define hipHostFree             cudaFreeHost
-#define hipHostMallocDefault    cudaHostAllocDefault
-#define hipBlockIdx_x           blockIdx.x
-#define hipBlockIdx_y           blockIdx.y
-#define hipBlockIdx_z           blockIdx.z
-#define hipThreadIdx_x          threadIdx.x
-#define hipThreadIdx_y          threadIdx.y
-#define hipThreadIdx_z          threadIdx.z
-#define hipBlockDim_x           blockDim.x
-#define hipBlockDim_y           blockDim.y
-#define hipBlockDim_z           blockDim.z
-#define hipGridDim_x            gridDim.x
-#define hipGridDim_y            gridDim.y
-#define hipGridDim_z            gridDim.z
-#define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -230,17 +180,13 @@ static void scan_recursive(float* d_output, const float* d_input, int N,
 
     if (timed) {
         timer->record_start();
-        hipLaunchKernelGGL(scan_block_kernel,
-                           dim3(num_blocks), dim3(block_size),
-                           shared_mem, 0,
-                           d_output, d_input, d_block_sums, N);
+        scan_block_kernel<<<dim3(num_blocks), dim3(block_size), shared_mem, 0>>>(
+            d_output, d_input, d_block_sums, N);
         timer->record_stop();
         *t_scan += static_cast<double>(timer->elapsed_ms());
     } else {
-        hipLaunchKernelGGL(scan_block_kernel,
-                           dim3(num_blocks), dim3(block_size),
-                           shared_mem, 0,
-                           d_output, d_input, d_block_sums, N);
+        scan_block_kernel<<<dim3(num_blocks), dim3(block_size), shared_mem, 0>>>(
+            d_output, d_input, d_block_sums, N);
     }
 
     if (num_blocks > 1) {
@@ -253,17 +199,13 @@ static void scan_recursive(float* d_output, const float* d_input, int N,
 
         if (timed) {
             timer->record_start();
-            hipLaunchKernelGGL(add_block_sums_kernel,
-                               dim3(num_blocks), dim3(block_size),
-                               0, 0,
-                               d_output, d_scanned_block_sums, N);
+            add_block_sums_kernel<<<dim3(num_blocks), dim3(block_size)>>>(
+                d_output, d_scanned_block_sums, N);
             timer->record_stop();
             *t_add += static_cast<double>(timer->elapsed_ms());
         } else {
-            hipLaunchKernelGGL(add_block_sums_kernel,
-                               dim3(num_blocks), dim3(block_size),
-                               0, 0,
-                               d_output, d_scanned_block_sums, N);
+            add_block_sums_kernel<<<dim3(num_blocks), dim3(block_size)>>>(
+                d_output, d_scanned_block_sums, N);
         }
 
         HIP_CHECK(hipFree(d_scanned_block_sums));

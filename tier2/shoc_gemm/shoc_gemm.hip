@@ -9,57 +9,7 @@
 // Output (stdout): JSON-lines protocol
 // Output (stderr): Human-readable diagnostics
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemcpyAsync          cudaMemcpyAsync
-#define hipMemset               cudaMemset
-#define hipMemsetAsync          cudaMemsetAsync
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
-#define hipMemcpyDeviceToDevice cudaMemcpyDeviceToDevice
-#define hipMemcpyToSymbol       cudaMemcpyToSymbol
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetLastError         cudaGetLastError
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipStream_t             cudaStream_t
-#define hipStreamCreate         cudaStreamCreate
-#define hipStreamDestroy        cudaStreamDestroy
-#define hipStreamSynchronize    cudaStreamSynchronize
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipHostMalloc           cudaMallocHost
-#define hipHostFree             cudaFreeHost
-#define hipHostMallocDefault    cudaHostAllocDefault
-#define hipBlockIdx_x           blockIdx.x
-#define hipBlockIdx_y           blockIdx.y
-#define hipBlockIdx_z           blockIdx.z
-#define hipThreadIdx_x          threadIdx.x
-#define hipThreadIdx_y          threadIdx.y
-#define hipThreadIdx_z          threadIdx.z
-#define hipBlockDim_x           blockDim.x
-#define hipBlockDim_y           blockDim.y
-#define hipBlockDim_z           blockDim.z
-#define hipGridDim_x            gridDim.x
-#define hipGridDim_y            gridDim.y
-#define hipGridDim_z            gridDim.z
-#define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -253,8 +203,7 @@ int main(int argc, char** argv) {
 
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
-        hipLaunchKernelGGL(gemm_kernel, grid, block, 0, 0,
-                           d_A, d_B, d_C, M, N, K, alpha, beta);
+        gemm_kernel<<<grid, block>>>(d_A, d_B, d_C, M, N, K, alpha, beta);
         HIP_CHECK(hipDeviceSynchronize());
     }
 
@@ -263,8 +212,7 @@ int main(int argc, char** argv) {
     std::vector<double> times(1);
     for (int i = 0; i < 1; ++i) {
         timer.record_start();
-        hipLaunchKernelGGL(gemm_kernel, grid, block, 0, 0,
-                           d_A, d_B, d_C, M, N, K, alpha, beta);
+        gemm_kernel<<<grid, block>>>(d_A, d_B, d_C, M, N, K, alpha, beta);
         timer.record_stop();
         times[i] = static_cast<double>(timer.elapsed_ms());
     }

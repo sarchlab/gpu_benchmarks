@@ -6,33 +6,7 @@
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemset               cudaMemset
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipStream_t             cudaStream_t
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -308,11 +282,8 @@ int main(int argc, char** argv) {
             HIP_CHECK(hipMemset(d_worklist_count, 0, sizeof(int)));
 
             if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            hipLaunchKernelGGL(dmr_check_kernel, dim3(gridTri), dim3(block_size), 0, 0,
-                d_tri_v0, d_tri_v1, d_tri_v2,
-                d_vx, d_vy,
-                d_worklist, d_worklist_count,
-                min_angle, num_triangles);
+            dmr_check_kernel<<<dim3(gridTri), dim3(block_size)>>>(
+                d_tri_v0, d_tri_v1, d_tri_v2, d_vx, d_vy, d_worklist, d_worklist_count, min_angle, num_triangles);
             if (evStart) {
                 HIP_CHECK(hipEventRecord(*evStop, 0));
                 HIP_CHECK(hipEventSynchronize(*evStop));
@@ -329,11 +300,8 @@ int main(int argc, char** argv) {
 
             int gridWL = (h_wl_count + block_size - 1) / block_size;
             if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            hipLaunchKernelGGL(dmr_refine_kernel, dim3(gridWL), dim3(block_size), 0, 0,
-                d_worklist, h_wl_count,
-                d_tri_v0, d_tri_v1, d_tri_v2,
-                d_vx, d_vy,
-                num_vertices, num_triangles);
+            dmr_refine_kernel<<<dim3(gridWL), dim3(block_size)>>>(
+                d_worklist, h_wl_count, d_tri_v0, d_tri_v1, d_tri_v2, d_vx, d_vy, num_vertices, num_triangles);
             if (evStart) {
                 HIP_CHECK(hipEventRecord(*evStop, 0));
                 HIP_CHECK(hipEventSynchronize(*evStop));

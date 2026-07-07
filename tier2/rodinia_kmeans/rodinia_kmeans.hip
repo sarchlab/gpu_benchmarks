@@ -18,57 +18,7 @@
 // Output (stdout): CSV row — kmeans,N,K,D,<iterations>,<time_ms>,<Gpoints_per_s>
 // Output (stderr): Per-iteration delta, convergence status, PASS/FAIL
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemcpyAsync          cudaMemcpyAsync
-#define hipMemset               cudaMemset
-#define hipMemsetAsync          cudaMemsetAsync
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
-#define hipMemcpyDeviceToDevice cudaMemcpyDeviceToDevice
-#define hipMemcpyToSymbol       cudaMemcpyToSymbol
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetLastError         cudaGetLastError
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipStream_t             cudaStream_t
-#define hipStreamCreate         cudaStreamCreate
-#define hipStreamDestroy        cudaStreamDestroy
-#define hipStreamSynchronize    cudaStreamSynchronize
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipHostMalloc           cudaMallocHost
-#define hipHostFree             cudaFreeHost
-#define hipHostMallocDefault    cudaHostAllocDefault
-#define hipBlockIdx_x           blockIdx.x
-#define hipBlockIdx_y           blockIdx.y
-#define hipBlockIdx_z           blockIdx.z
-#define hipThreadIdx_x          threadIdx.x
-#define hipThreadIdx_y          threadIdx.y
-#define hipThreadIdx_z          threadIdx.z
-#define hipBlockDim_x           blockDim.x
-#define hipBlockDim_y           blockDim.y
-#define hipBlockDim_z           blockDim.z
-#define hipGridDim_x            gridDim.x
-#define hipGridDim_y            gridDim.y
-#define hipGridDim_z            gridDim.z
-#define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -266,9 +216,8 @@ int main(int argc, char** argv)
 
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
-        hipLaunchKernelGGL(kmeans_assign_kernel,
-                           dim3(grid_size), dim3(block_size), 0, 0,
-                           d_points, d_centers, d_membership, N, D, K);
+        kmeans_assign_kernel<<<dim3(grid_size), dim3(block_size)>>>(
+            d_points, d_centers, d_membership, N, D, K);
         HIP_CHECK(hipDeviceSynchronize());
     }
 
@@ -284,9 +233,8 @@ int main(int argc, char** argv)
 
         // --- Step 1: assign ---
         HIP_CHECK(hipEventRecord(ev_start, 0));
-        hipLaunchKernelGGL(kmeans_assign_kernel,
-                           dim3(grid_size), dim3(block_size), 0, 0,
-                           d_points, d_centers, d_membership, N, D, K);
+        kmeans_assign_kernel<<<dim3(grid_size), dim3(block_size)>>>(
+            d_points, d_centers, d_membership, N, D, K);
         HIP_CHECK(hipEventRecord(ev_stop, 0));
         HIP_CHECK(hipEventSynchronize(ev_stop));
         HIP_CHECK(hipEventElapsedTime(&ev_ms, ev_start, ev_stop));
@@ -298,9 +246,8 @@ int main(int argc, char** argv)
 
         // --- Step 3: accumulate ---
         HIP_CHECK(hipEventRecord(ev_start, 0));
-        hipLaunchKernelGGL(kmeans_update_kernel,
-                           dim3(grid_size), dim3(block_size), 0, 0,
-                           d_points, d_new_centers, d_counts, d_membership, N, D);
+        kmeans_update_kernel<<<dim3(grid_size), dim3(block_size)>>>(
+            d_points, d_new_centers, d_counts, d_membership, N, D);
         HIP_CHECK(hipEventRecord(ev_stop, 0));
         HIP_CHECK(hipEventSynchronize(ev_stop));
         HIP_CHECK(hipEventElapsedTime(&ev_ms, ev_start, ev_stop));
@@ -349,9 +296,8 @@ int main(int argc, char** argv)
     // Verify convergence: run one extra assign pass, check delta < 1%
     // (untimed)
     // -----------------------------------------------------------------------
-    hipLaunchKernelGGL(kmeans_assign_kernel,
-                       dim3(grid_size), dim3(block_size), 0, 0,
-                       d_points, d_centers, d_membership, N, D, K);
+    kmeans_assign_kernel<<<dim3(grid_size), dim3(block_size)>>>(
+        d_points, d_centers, d_membership, N, D, K);
     HIP_CHECK(hipMemcpy(h_membership, d_membership, (size_t)N * sizeof(int), hipMemcpyDeviceToHost));
 
     int final_changed = 0;

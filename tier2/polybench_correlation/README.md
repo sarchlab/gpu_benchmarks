@@ -17,7 +17,6 @@ The correlation kernel uses tiled shared-memory multiplication (16×16 tiles).
 
 | File | Description |
 |------|-------------|
-| `polybench_correlation.cu` | CUDA implementation |
 | `polybench_correlation.hip` | HIP/ROCm implementation |
 | `polybench_correlation_metal.mm` | ObjC++ Metal host code |
 | `polybench_correlation.metal` | Metal compute shaders (4 kernels) |

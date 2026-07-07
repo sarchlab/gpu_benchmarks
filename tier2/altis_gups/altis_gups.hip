@@ -9,44 +9,7 @@
 // Output (stdout): JSON-lines protocol
 // Output (stderr): human-readable results
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemcpyAsync          cudaMemcpyAsync
-#define hipMemset               cudaMemset
-#define hipMemsetAsync          cudaMemsetAsync
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
-#define hipMemcpyDeviceToDevice cudaMemcpyDeviceToDevice
-#define hipMemcpyToSymbol       cudaMemcpyToSymbol
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetLastError         cudaGetLastError
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipStream_t             cudaStream_t
-#define hipStreamCreate         cudaStreamCreate
-#define hipStreamDestroy        cudaStreamDestroy
-#define hipStreamSynchronize    cudaStreamSynchronize
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipHostMalloc           cudaMallocHost
-#define hipHostFree             cudaFreeHost
-#define hipHostMallocDefault    cudaHostAllocDefault
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -179,8 +142,8 @@ int main(int argc, char** argv) {
     // -----------------------------------------------------------------------
     for (int w = 0; w < num_warmup; ++w) {
         reset_table();
-        hipLaunchKernelGGL(gups_kernel, dim3(gridSize), dim3(block_size),
-                           0, 0, d_table, table_size, num_updates, seed_base);
+        gups_kernel<<<dim3(gridSize), dim3(block_size)>>>(
+            d_table, table_size, num_updates, seed_base);
         HIP_CHECK(hipDeviceSynchronize());
     }
 
@@ -196,8 +159,8 @@ int main(int argc, char** argv) {
         reset_table();
 
         HIP_CHECK(hipEventRecord(evStart, 0));
-        hipLaunchKernelGGL(gups_kernel, dim3(gridSize), dim3(block_size),
-                           0, 0, d_table, table_size, num_updates, seed_base);
+        gups_kernel<<<dim3(gridSize), dim3(block_size)>>>(
+            d_table, table_size, num_updates, seed_base);
         HIP_CHECK(hipEventRecord(evStop, 0));
         HIP_CHECK(hipEventSynchronize(evStop));
 
@@ -236,8 +199,8 @@ int main(int argc, char** argv) {
     // -----------------------------------------------------------------------
     {
         reset_table();
-        hipLaunchKernelGGL(gups_kernel, dim3(gridSize), dim3(block_size),
-                           0, 0, d_table, table_size, num_updates, seed_base);
+        gups_kernel<<<dim3(gridSize), dim3(block_size)>>>(
+            d_table, table_size, num_updates, seed_base);
         HIP_CHECK(hipDeviceSynchronize());
 
         std::vector<unsigned long long> gpu_table(table_size);

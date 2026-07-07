@@ -16,57 +16,7 @@
 // Output (stdout): CSV row — graph_pr,<N_vertices>,<time_ms>,<GTEPS>
 // Output (stderr): human-readable results
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemcpyAsync          cudaMemcpyAsync
-#define hipMemset               cudaMemset
-#define hipMemsetAsync          cudaMemsetAsync
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
-#define hipMemcpyDeviceToDevice cudaMemcpyDeviceToDevice
-#define hipMemcpyToSymbol       cudaMemcpyToSymbol
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetLastError         cudaGetLastError
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipStream_t             cudaStream_t
-#define hipStreamCreate         cudaStreamCreate
-#define hipStreamDestroy        cudaStreamDestroy
-#define hipStreamSynchronize    cudaStreamSynchronize
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipHostMalloc           cudaMallocHost
-#define hipHostFree             cudaFreeHost
-#define hipHostMallocDefault    cudaHostAllocDefault
-#define hipBlockIdx_x           blockIdx.x
-#define hipBlockIdx_y           blockIdx.y
-#define hipBlockIdx_z           blockIdx.z
-#define hipThreadIdx_x          threadIdx.x
-#define hipThreadIdx_y          threadIdx.y
-#define hipThreadIdx_z          threadIdx.z
-#define hipBlockDim_x           blockDim.x
-#define hipBlockDim_y           blockDim.y
-#define hipBlockDim_z           blockDim.z
-#define hipGridDim_x            gridDim.x
-#define hipGridDim_y            gridDim.y
-#define hipGridDim_z            gridDim.z
-#define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -239,9 +189,8 @@ static void run_pagerank_gpu(int N, int pr_iters, float damping,
     float* nxt = d_rank_b;
 
     for (int iter = 0; iter < pr_iters; ++iter) {
-        hipLaunchKernelGGL(pagerank_kernel, dim3(gridSize), dim3(blockSize),
-                           0, 0, d_col_offsets, d_row_indices, d_out_degree,
-                           cur, nxt, damping, base_rank, N);
+        pagerank_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+            d_col_offsets, d_row_indices, d_out_degree, cur, nxt, damping, base_rank, N);
         float* tmp = cur; cur = nxt; nxt = tmp;
     }
     HIP_CHECK(hipDeviceSynchronize());

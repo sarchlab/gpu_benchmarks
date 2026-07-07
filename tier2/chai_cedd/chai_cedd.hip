@@ -14,57 +14,7 @@
 // Output (stdout): CSV row — chai_cedd,<WxH>,<time_ms>,<Mpixels_per_sec>
 // Output (stderr): human-readable results
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemcpyAsync          cudaMemcpyAsync
-#define hipMemset               cudaMemset
-#define hipMemsetAsync          cudaMemsetAsync
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
-#define hipMemcpyDeviceToDevice cudaMemcpyDeviceToDevice
-#define hipMemcpyToSymbol       cudaMemcpyToSymbol
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetLastError         cudaGetLastError
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipStream_t             cudaStream_t
-#define hipStreamCreate         cudaStreamCreate
-#define hipStreamDestroy        cudaStreamDestroy
-#define hipStreamSynchronize    cudaStreamSynchronize
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipHostMalloc           cudaMallocHost
-#define hipHostFree             cudaFreeHost
-#define hipHostMallocDefault    cudaHostAllocDefault
-#define hipBlockIdx_x           blockIdx.x
-#define hipBlockIdx_y           blockIdx.y
-#define hipBlockIdx_z           blockIdx.z
-#define hipThreadIdx_x          threadIdx.x
-#define hipThreadIdx_y          threadIdx.y
-#define hipThreadIdx_z          threadIdx.z
-#define hipBlockDim_x           blockDim.x
-#define hipBlockDim_y           blockDim.y
-#define hipBlockDim_z           blockDim.z
-#define hipGridDim_x            gridDim.x
-#define hipGridDim_y            gridDim.y
-#define hipGridDim_z            gridDim.z
-#define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -489,8 +439,7 @@ int main(int argc, char** argv) {
                         double* t_gauss, double* t_sobel, double* t_magdir,
                         double* t_nms, double* t_hyst) {
         if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-        hipLaunchKernelGGL(gaussian_blur_kernel, gridDim, blockDim, 0, 0,
-                           d_input, d_blurred, W, H);
+        gaussian_blur_kernel<<<gridDim, blockDim>>>(d_input, d_blurred, W, H);
         if (evStart) {
             HIP_CHECK(hipEventRecord(*evStop, 0));
             HIP_CHECK(hipEventSynchronize(*evStop));
@@ -500,8 +449,7 @@ int main(int argc, char** argv) {
         }
 
         if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-        hipLaunchKernelGGL(sobel_kernel, gridDim, blockDim, 0, 0,
-                           d_blurred, d_gx, d_gy, W, H);
+        sobel_kernel<<<gridDim, blockDim>>>(d_blurred, d_gx, d_gy, W, H);
         if (evStart) {
             HIP_CHECK(hipEventRecord(*evStop, 0));
             HIP_CHECK(hipEventSynchronize(*evStop));
@@ -511,8 +459,7 @@ int main(int argc, char** argv) {
         }
 
         if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-        hipLaunchKernelGGL(magnitude_direction_kernel, gridDim, blockDim, 0, 0,
-                           d_gx, d_gy, d_mag, d_dir, W, H);
+        magnitude_direction_kernel<<<gridDim, blockDim>>>(d_gx, d_gy, d_mag, d_dir, W, H);
         if (evStart) {
             HIP_CHECK(hipEventRecord(*evStop, 0));
             HIP_CHECK(hipEventSynchronize(*evStop));
@@ -522,8 +469,7 @@ int main(int argc, char** argv) {
         }
 
         if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-        hipLaunchKernelGGL(nms_kernel, gridDim, blockDim, 0, 0,
-                           d_mag, d_dir, d_nms, W, H);
+        nms_kernel<<<gridDim, blockDim>>>(d_mag, d_dir, d_nms, W, H);
         if (evStart) {
             HIP_CHECK(hipEventRecord(*evStop, 0));
             HIP_CHECK(hipEventSynchronize(*evStop));
@@ -533,8 +479,7 @@ int main(int argc, char** argv) {
         }
 
         if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-        hipLaunchKernelGGL(hysteresis_kernel, gridDim, blockDim, 0, 0,
-                           d_nms, d_edges, W, H, low_t, high_t);
+        hysteresis_kernel<<<gridDim, blockDim>>>(d_nms, d_edges, W, H, low_t, high_t);
         if (evStart) {
             HIP_CHECK(hipEventRecord(*evStop, 0));
             HIP_CHECK(hipEventSynchronize(*evStop));

@@ -9,57 +9,7 @@
 // Output (stdout): JSON-lines protocol
 // Output (stderr): Human-readable diagnostics
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemcpyAsync          cudaMemcpyAsync
-#define hipMemset               cudaMemset
-#define hipMemsetAsync          cudaMemsetAsync
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
-#define hipMemcpyDeviceToDevice cudaMemcpyDeviceToDevice
-#define hipMemcpyToSymbol       cudaMemcpyToSymbol
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetLastError         cudaGetLastError
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipStream_t             cudaStream_t
-#define hipStreamCreate         cudaStreamCreate
-#define hipStreamDestroy        cudaStreamDestroy
-#define hipStreamSynchronize    cudaStreamSynchronize
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipHostMalloc           cudaMallocHost
-#define hipHostFree             cudaFreeHost
-#define hipHostMallocDefault    cudaHostAllocDefault
-#define hipBlockIdx_x           blockIdx.x
-#define hipBlockIdx_y           blockIdx.y
-#define hipBlockIdx_z           blockIdx.z
-#define hipThreadIdx_x          threadIdx.x
-#define hipThreadIdx_y          threadIdx.y
-#define hipThreadIdx_z          threadIdx.z
-#define hipBlockDim_x           blockDim.x
-#define hipBlockDim_y           blockDim.y
-#define hipBlockDim_z           blockDim.z
-#define hipGridDim_x            gridDim.x
-#define hipGridDim_y            gridDim.y
-#define hipGridDim_z            gridDim.z
-#define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -172,9 +122,7 @@ static void gpu_reduce(const float* d_input, float* d_partial,
     int num_blocks      = (N + elems_per_block - 1) / elems_per_block;
     int shared_bytes    = block_size * sizeof(float);
 
-    hipLaunchKernelGGL(reduce_kernel, dim3(num_blocks), dim3(block_size),
-                       shared_bytes, 0,
-                       d_input, d_partial, N);
+    reduce_kernel<<<dim3(num_blocks), dim3(block_size), shared_bytes, 0>>>(d_input, d_partial, N);
 
     if (num_blocks == 1) {
         HIP_CHECK(hipMemcpy(d_result, d_partial, sizeof(float),
@@ -193,18 +141,16 @@ static void gpu_reduce(const float* d_input, float* d_partial,
         int next_blocks  = (remaining + elems_per_block - 1) / elems_per_block;
 
         if (next_blocks == 1) {
-            hipLaunchKernelGGL(reduce_kernel, dim3(1), dim3(block_size),
-                               shared_bytes, 0,
-                               d_src, d_result, remaining);
+            reduce_kernel<<<dim3(1), dim3(block_size), shared_bytes, 0>>>(
+                d_src, d_result, remaining);
             remaining = 1;
         } else {
             if (!allocated_temp) {
                 HIP_CHECK(hipMalloc(&d_temp, next_blocks * sizeof(float)));
                 allocated_temp = true;
             }
-            hipLaunchKernelGGL(reduce_kernel, dim3(next_blocks), dim3(block_size),
-                               shared_bytes, 0,
-                               d_src, d_temp, remaining);
+            reduce_kernel<<<dim3(next_blocks), dim3(block_size), shared_bytes, 0>>>(
+                d_src, d_temp, remaining);
             d_src     = d_temp;
             remaining = next_blocks;
         }

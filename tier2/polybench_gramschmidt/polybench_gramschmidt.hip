@@ -27,57 +27,7 @@
 // Output (stdout): CSV — gramschmidt,<M>,<N>,<time_ms>,<GBs>
 // Output (stderr): device info, timing details, orthogonality check
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemcpyAsync          cudaMemcpyAsync
-#define hipMemset               cudaMemset
-#define hipMemsetAsync          cudaMemsetAsync
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
-#define hipMemcpyDeviceToDevice cudaMemcpyDeviceToDevice
-#define hipMemcpyToSymbol       cudaMemcpyToSymbol
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetLastError         cudaGetLastError
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipStream_t             cudaStream_t
-#define hipStreamCreate         cudaStreamCreate
-#define hipStreamDestroy        cudaStreamDestroy
-#define hipStreamSynchronize    cudaStreamSynchronize
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipHostMalloc           cudaMallocHost
-#define hipHostFree             cudaFreeHost
-#define hipHostMallocDefault    cudaHostAllocDefault
-#define hipBlockIdx_x           blockIdx.x
-#define hipBlockIdx_y           blockIdx.y
-#define hipBlockIdx_z           blockIdx.z
-#define hipThreadIdx_x          threadIdx.x
-#define hipThreadIdx_y          threadIdx.y
-#define hipThreadIdx_z          threadIdx.z
-#define hipBlockDim_x           blockDim.x
-#define hipBlockDim_y           blockDim.y
-#define hipBlockDim_z           blockDim.z
-#define hipGridDim_x            gridDim.x
-#define hipGridDim_y            gridDim.y
-#define hipGridDim_z            gridDim.z
-#define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -294,17 +244,13 @@ int main(int argc, char** argv)
 
         for (int k = 0; k < N; ++k) {
             HIP_CHECK(hipMemsetAsync(d_nrm_buf, 0, sizeof(float), 0));
-            hipLaunchKernelGGL(gram_norm, grid_M, block_size, 0, 0,
-                               d_A, d_nrm_buf, M, N, k);
-            hipLaunchKernelGGL(gram_norm_finish, 1, 1, 0, 0,
-                               d_nrm_buf, d_R, N, k);
-            hipLaunchKernelGGL(gram_normalize, grid_M, block_size, 0, 0,
-                               d_A, d_Q, d_nrm_buf, M, N, k);
+            gram_norm<<<grid_M, block_size>>>(d_A, d_nrm_buf, M, N, k);
+            gram_norm_finish<<<1, 1>>>(d_nrm_buf, d_R, N, k);
+            gram_normalize<<<grid_M, block_size>>>(d_A, d_Q, d_nrm_buf, M, N, k);
             if (k + 1 < N) {
                 int remaining   = N - k - 1;
                 int grid_proj   = (remaining + block_size - 1) / block_size;
-                hipLaunchKernelGGL(gram_project, grid_proj, block_size, 0, 0,
-                                   d_A, d_Q, d_R, M, N, k);
+                gram_project<<<grid_proj, block_size>>>(d_A, d_Q, d_R, M, N, k);
             }
         }
         HIP_CHECK(hipDeviceSynchronize());
@@ -322,22 +268,19 @@ int main(int argc, char** argv)
             // Step 1: zero nrm_buf, then accumulate ||A[:,k]||^2
             HIP_CHECK(hipMemsetAsync(d_nrm_buf, 0, sizeof(float), 0));
             timer.record_start();
-            hipLaunchKernelGGL(gram_norm, grid_M, block_size, 0, 0,
-                               d_A, d_nrm_buf, M, N, k);
+            gram_norm<<<grid_M, block_size>>>(d_A, d_nrm_buf, M, N, k);
             timer.record_stop();
             t_norm += static_cast<double>(timer.elapsed_ms());
 
             // Step 2: finalize norm → R[k,k]
             timer.record_start();
-            hipLaunchKernelGGL(gram_norm_finish, 1, 1, 0, 0,
-                               d_nrm_buf, d_R, N, k);
+            gram_norm_finish<<<1, 1>>>(d_nrm_buf, d_R, N, k);
             timer.record_stop();
             t_norm_finish += static_cast<double>(timer.elapsed_ms());
 
             // Step 3: normalize column k
             timer.record_start();
-            hipLaunchKernelGGL(gram_normalize, grid_M, block_size, 0, 0,
-                               d_A, d_Q, d_nrm_buf, M, N, k);
+            gram_normalize<<<grid_M, block_size>>>(d_A, d_Q, d_nrm_buf, M, N, k);
             timer.record_stop();
             t_normalize += static_cast<double>(timer.elapsed_ms());
 
@@ -346,8 +289,7 @@ int main(int argc, char** argv)
                 int remaining   = N - k - 1;
                 int grid_proj   = (remaining + block_size - 1) / block_size;
                 timer.record_start();
-                hipLaunchKernelGGL(gram_project, grid_proj, block_size, 0, 0,
-                                   d_A, d_Q, d_R, M, N, k);
+                gram_project<<<grid_proj, block_size>>>(d_A, d_Q, d_R, M, N, k);
                 timer.record_stop();
                 t_project += static_cast<double>(timer.elapsed_ms());
             }

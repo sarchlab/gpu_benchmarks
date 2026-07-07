@@ -40,32 +40,7 @@
 #include <cstdint>
 #include <algorithm>
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemset               cudaMemset
-#define hipMemGetInfo           cudaMemGetInfo
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 
 #define HIP_CHECK(call)                                                         \
     do {                                                                        \
@@ -223,8 +198,8 @@ int main(int argc, char *argv[])
 
     // Warm-up.
     for (int w = 0; w < NUM_WARMUP; ++w) {
-        hipLaunchKernelGGL(bw_read_kernel, dim3(num_blocks), dim3(tpb), 0, 0,
-                           d_buf, vecs_per_window, windows, iters, shared_mode, d_sink);
+        bw_read_kernel<<<dim3(num_blocks), dim3(tpb)>>>(
+            d_buf, vecs_per_window, windows, iters, shared_mode, d_sink);
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -236,8 +211,8 @@ int main(int argc, char *argv[])
     float best_ms = -1.0f;
     for (int t = 0; t < NUM_TIMED; ++t) {
         HIP_CHECK(hipEventRecord(ev_start, 0));
-        hipLaunchKernelGGL(bw_read_kernel, dim3(num_blocks), dim3(tpb), 0, 0,
-                           d_buf, vecs_per_window, windows, iters, shared_mode, d_sink);
+        bw_read_kernel<<<dim3(num_blocks), dim3(tpb)>>>(
+            d_buf, vecs_per_window, windows, iters, shared_mode, d_sink);
         HIP_CHECK(hipEventRecord(ev_stop, 0));
         HIP_CHECK(hipEventSynchronize(ev_stop));
         float ms = 0.0f;

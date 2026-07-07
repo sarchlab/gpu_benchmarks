@@ -32,9 +32,9 @@ TARGET := heteromark_fir
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := heteromark_fir.cu
+  SRC    := heteromark_fir.hip
   CUDA_ARCH ?= sm_90
-  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
+  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH) -x cu
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

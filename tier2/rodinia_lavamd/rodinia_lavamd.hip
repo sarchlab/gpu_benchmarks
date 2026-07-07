@@ -9,33 +9,7 @@
 // Output (stdout): JSON-lines
 // Output (stderr): human-readable results
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemset               cudaMemset
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
-#define hipMemcpyDeviceToDevice cudaMemcpyDeviceToDevice
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -269,11 +243,8 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemset(d_force_z, 0, force_bytes));
         HIP_CHECK(hipMemset(d_energy,  0, force_bytes));
 
-        hipLaunchKernelGGL(lavamd_kernel, grid, block, 0, 0,
-            d_pos_x, d_pos_y, d_pos_z,
-            d_force_x, d_force_y, d_force_z, d_energy,
-            d_neighbor_list, d_neighbor_count,
-            particles_per_box, total_boxes);
+        lavamd_kernel<<<grid, block>>>(
+            d_pos_x, d_pos_y, d_pos_z, d_force_x, d_force_y, d_force_z, d_energy, d_neighbor_list, d_neighbor_count, particles_per_box, total_boxes);
         HIP_CHECK(hipDeviceSynchronize());
     }
 
@@ -289,11 +260,8 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemset(d_energy,  0, force_bytes));
 
         HIP_CHECK(hipEventRecord(evStart, 0));
-        hipLaunchKernelGGL(lavamd_kernel, grid, block, 0, 0,
-            d_pos_x, d_pos_y, d_pos_z,
-            d_force_x, d_force_y, d_force_z, d_energy,
-            d_neighbor_list, d_neighbor_count,
-            particles_per_box, total_boxes);
+        lavamd_kernel<<<grid, block>>>(
+            d_pos_x, d_pos_y, d_pos_z, d_force_x, d_force_y, d_force_z, d_energy, d_neighbor_list, d_neighbor_count, particles_per_box, total_boxes);
         HIP_CHECK(hipEventRecord(evStop, 0));
         HIP_CHECK(hipEventSynchronize(evStop));
 

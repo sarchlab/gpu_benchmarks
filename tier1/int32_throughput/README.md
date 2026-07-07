@@ -18,7 +18,7 @@ GIOPS = (num_threads × mads_per_thread × 2) / elapsed_seconds / 1e9
 
 | Platform | Source file | Compiler |
 |----------|-------------|---------|
-| NVIDIA CUDA | `int32_throughput.cu` | `nvcc` |
+| NVIDIA CUDA | `int32_throughput.hip` | `nvcc` |
 | AMD ROCm/HIP | `int32_throughput.hip` | `hipcc` |
 | Apple Metal | `int32_throughput_metal.mm` + `int32_throughput.metal` | `clang++` |
 

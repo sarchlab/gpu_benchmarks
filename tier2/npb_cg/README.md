@@ -18,7 +18,6 @@ Benchmarks a sparse iterative Conjugate Gradient (CG) solver from the NAS Parall
 
 | File | Description |
 |------|-------------|
-| `npb_cg.cu` | CUDA implementation |
 | `npb_cg.hip` | HIP/ROCm implementation |
 | `npb_cg_metal.mm` | Metal host code (Objective-C++) |
 | `npb_cg.metal` | Metal compute shaders |

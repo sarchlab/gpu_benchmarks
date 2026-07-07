@@ -14,57 +14,7 @@
 // Output (stdout): CSV — benchmark,rows,cols,time_ms,GBs
 // Output (stderr): Verification result and device info
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemcpyAsync          cudaMemcpyAsync
-#define hipMemset               cudaMemset
-#define hipMemsetAsync          cudaMemsetAsync
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
-#define hipMemcpyDeviceToDevice cudaMemcpyDeviceToDevice
-#define hipMemcpyToSymbol       cudaMemcpyToSymbol
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetLastError         cudaGetLastError
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipStream_t             cudaStream_t
-#define hipStreamCreate         cudaStreamCreate
-#define hipStreamDestroy        cudaStreamDestroy
-#define hipStreamSynchronize    cudaStreamSynchronize
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipHostMalloc           cudaMallocHost
-#define hipHostFree             cudaFreeHost
-#define hipHostMallocDefault    cudaHostAllocDefault
-#define hipBlockIdx_x           blockIdx.x
-#define hipBlockIdx_y           blockIdx.y
-#define hipBlockIdx_z           blockIdx.z
-#define hipThreadIdx_x          threadIdx.x
-#define hipThreadIdx_y          threadIdx.y
-#define hipThreadIdx_z          threadIdx.z
-#define hipBlockDim_x           blockDim.x
-#define hipBlockDim_y           blockDim.y
-#define hipBlockDim_z           blockDim.z
-#define hipGridDim_x            gridDim.x
-#define hipGridDim_y            gridDim.y
-#define hipGridDim_z            gridDim.z
-#define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -228,8 +178,7 @@ int main(int argc, char** argv) {
         int nblocks = (vcols + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
         for (int t = 1; t < vrows; t++) {
-            hipLaunchKernelGGL(dynproc_kernel, nblocks, BLOCK_SIZE, 0, 0,
-                               gv_wall, gsrc, gdst, vcols, t);
+            dynproc_kernel<<<nblocks, BLOCK_SIZE>>>(gv_wall, gsrc, gdst, vcols, t);
             int* tmp = gsrc; gsrc = gdst; gdst = tmp;
         }
         HIP_CHECK(hipDeviceSynchronize());
@@ -270,8 +219,7 @@ int main(int argc, char** argv) {
         int* src = d_src;
         int* dst = d_dst;
         for (int t = 1; t < rows; t++) {
-            hipLaunchKernelGGL(dynproc_kernel, nblocks, BLOCK_SIZE, 0, 0,
-                               d_wall, src, dst, cols, t);
+            dynproc_kernel<<<nblocks, BLOCK_SIZE>>>(d_wall, src, dst, cols, t);
             int* tmp = src; src = dst; dst = tmp;
         }
         HIP_CHECK(hipDeviceSynchronize());
@@ -294,8 +242,7 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipEventRecord(ev_start, 0));
 
         for (int t = 1; t < rows; t++) {
-            hipLaunchKernelGGL(dynproc_kernel, nblocks, BLOCK_SIZE, 0, 0,
-                               d_wall, src, dst, cols, t);
+            dynproc_kernel<<<nblocks, BLOCK_SIZE>>>(d_wall, src, dst, cols, t);
             int* tmp = src; src = dst; dst = tmp;
         }
 

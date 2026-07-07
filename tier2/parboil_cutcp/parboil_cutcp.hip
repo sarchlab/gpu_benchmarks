@@ -9,31 +9,7 @@
 // Output (stdout): JSON-lines
 // Output (stderr): human-readable results
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -207,10 +183,8 @@ int main(int argc, char** argv) {
     int gridSize = (total_grid_points + block_size - 1) / block_size;
 
     auto run_cutcp = [&]() {
-        hipLaunchKernelGGL(cutcp_kernel, dim3(gridSize), dim3(block_size),
-                           0, 0,
-                           d_atoms, d_potential, num_atoms,
-                           grid_side, grid_spacing, cutoff, cutoff2);
+        cutcp_kernel<<<dim3(gridSize), dim3(block_size)>>>(
+            d_atoms, d_potential, num_atoms, grid_side, grid_spacing, cutoff, cutoff2);
     };
 
     // Warmup

@@ -9,32 +9,7 @@
 // Output (stdout): JSON-lines
 // Output (stderr): human-readable results
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
-#define hipMemcpyDeviceToDevice cudaMemcpyDeviceToDevice
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -228,9 +203,8 @@ int main(int argc, char** argv) {
         float* src = d_temp_src;
         float* dst = d_temp_dst;
         for (int k = 0; k < num_iterations; ++k) {
-            hipLaunchKernelGGL(hotspot3d_kernel, grid_dim_val, block, 0, 0,
-                               src, dst, d_power, nx, ny, nz,
-                               step_div_cap, Rx_1, Ry_1, Rz_1, Ra_1, amb_temp);
+            hotspot3d_kernel<<<grid_dim_val, block>>>(
+                src, dst, d_power, nx, ny, nz, step_div_cap, Rx_1, Ry_1, Rz_1, Ra_1, amb_temp);
             float* tmp = src; src = dst; dst = tmp;
         }
         HIP_CHECK(hipDeviceSynchronize());
@@ -250,9 +224,8 @@ int main(int argc, char** argv) {
 
         HIP_CHECK(hipEventRecord(evStart, 0));
         for (int k = 0; k < num_iterations; ++k) {
-            hipLaunchKernelGGL(hotspot3d_kernel, grid_dim_val, block, 0, 0,
-                               src, dst, d_power, nx, ny, nz,
-                               step_div_cap, Rx_1, Ry_1, Rz_1, Ra_1, amb_temp);
+            hotspot3d_kernel<<<grid_dim_val, block>>>(
+                src, dst, d_power, nx, ny, nz, step_div_cap, Rx_1, Ry_1, Rz_1, Ra_1, amb_temp);
             float* tmp = src; src = dst; dst = tmp;
         }
         HIP_CHECK(hipEventRecord(evStop, 0));

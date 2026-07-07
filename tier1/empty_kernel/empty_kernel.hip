@@ -30,21 +30,7 @@
 #include <chrono>
 #include <algorithm>
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetLastError         cudaGetLastError
-#define hipGetErrorString       cudaGetErrorString
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 
 #define HIP_CHECK(call)                                                         \
     do {                                                                        \
@@ -126,14 +112,14 @@ int main(int argc, char *argv[])
 
     /* Warm-up. */
     for (int w = 0; w < NUM_WARMUP; ++w) {
-        hipLaunchKernelGGL(empty_kernel, dim3(num_blocks), dim3(block_size), 0, 0);
+        empty_kernel<<<dim3(num_blocks), dim3(block_size)>>>();
     }
     HIP_CHECK(hipDeviceSynchronize());
 
     /* Round-trip latency (launch + synchronize each iteration). */
     auto c0 = clock_type::now();
     for (int i = 0; i < CAL_ITERS; ++i) {
-        hipLaunchKernelGGL(empty_kernel, dim3(num_blocks), dim3(block_size), 0, 0);
+        empty_kernel<<<dim3(num_blocks), dim3(block_size)>>>();
         HIP_CHECK(hipDeviceSynchronize());
     }
     const int rt_iters = pick_iters(us_since(c0) / CAL_ITERS);
@@ -142,7 +128,7 @@ int main(int argc, char *argv[])
     for (int pass = 0; pass < MEASURE_PASSES; ++pass) {
         auto t0 = clock_type::now();
         for (int i = 0; i < rt_iters; ++i) {
-            hipLaunchKernelGGL(empty_kernel, dim3(num_blocks), dim3(block_size), 0, 0);
+            empty_kernel<<<dim3(num_blocks), dim3(block_size)>>>();
             HIP_CHECK(hipDeviceSynchronize());
         }
         double per = us_since(t0) / rt_iters;
@@ -157,7 +143,7 @@ int main(int argc, char *argv[])
     for (int pass = 0; pass < MEASURE_PASSES; ++pass) {
         auto t0 = clock_type::now();
         for (int i = 0; i < rt_iters; ++i) {
-            hipLaunchKernelGGL(empty_kernel, dim3(num_blocks), dim3(block_size), 0, 0);
+            empty_kernel<<<dim3(num_blocks), dim3(block_size)>>>();
         }
         double per = us_since(t0) / rt_iters;
         HIP_CHECK(hipDeviceSynchronize());

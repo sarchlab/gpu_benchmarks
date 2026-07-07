@@ -18,57 +18,7 @@
 // Output (stdout): CSV — gaussian,<N>,<time_ms>,<GFLOPS>
 // Output (stderr): device info, timing details, verification result
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemcpyAsync          cudaMemcpyAsync
-#define hipMemset               cudaMemset
-#define hipMemsetAsync          cudaMemsetAsync
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
-#define hipMemcpyDeviceToDevice cudaMemcpyDeviceToDevice
-#define hipMemcpyToSymbol       cudaMemcpyToSymbol
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetLastError         cudaGetLastError
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipStream_t             cudaStream_t
-#define hipStreamCreate         cudaStreamCreate
-#define hipStreamDestroy        cudaStreamDestroy
-#define hipStreamSynchronize    cudaStreamSynchronize
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipHostMalloc           cudaMallocHost
-#define hipHostFree             cudaFreeHost
-#define hipHostMallocDefault    cudaHostAllocDefault
-#define hipBlockIdx_x           blockIdx.x
-#define hipBlockIdx_y           blockIdx.y
-#define hipBlockIdx_z           blockIdx.z
-#define hipThreadIdx_x          threadIdx.x
-#define hipThreadIdx_y          threadIdx.y
-#define hipThreadIdx_z          threadIdx.z
-#define hipBlockDim_x           blockDim.x
-#define hipBlockDim_y           blockDim.y
-#define hipBlockDim_z           blockDim.z
-#define hipGridDim_x            gridDim.x
-#define hipGridDim_y            gridDim.y
-#define hipGridDim_z            gridDim.z
-#define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -265,12 +215,12 @@ int main(int argc, char** argv)
             int remaining = N - t - 1;
             // fan1
             int grid1 = (remaining + BLOCK1D - 1) / BLOCK1D;
-            hipLaunchKernelGGL(fan1, grid1, BLOCK1D, 0, 0, d_m, d_a, N, t);
+            fan1<<<grid1, BLOCK1D>>>(d_m, d_a, N, t);
             // fan2
             dim3 block2(BLOCK2D, BLOCK2D);
             dim3 grid2((remaining + BLOCK2D - 1) / BLOCK2D,
                        (remaining + BLOCK2D - 1) / BLOCK2D);
-            hipLaunchKernelGGL(fan2, grid2, block2, 0, 0, d_m, d_a, d_b, N, t);
+            fan2<<<grid2, block2>>>(d_m, d_a, d_b, N, t);
         }
         HIP_CHECK(hipDeviceSynchronize());
     }
@@ -292,7 +242,7 @@ int main(int argc, char** argv)
             // fan1: compute multipliers
             int grid1 = (remaining + BLOCK1D - 1) / BLOCK1D;
             timer.record_start();
-            hipLaunchKernelGGL(fan1, grid1, BLOCK1D, 0, 0, d_m, d_a, N, t);
+            fan1<<<grid1, BLOCK1D>>>(d_m, d_a, N, t);
             timer.record_stop();
             t_fan1 += (double)timer.elapsed_ms();
             // fan2: update submatrix
@@ -300,7 +250,7 @@ int main(int argc, char** argv)
             dim3 grid2((remaining + BLOCK2D - 1) / BLOCK2D,
                        (remaining + BLOCK2D - 1) / BLOCK2D);
             timer.record_start();
-            hipLaunchKernelGGL(fan2, grid2, block2, 0, 0, d_m, d_a, d_b, N, t);
+            fan2<<<grid2, block2>>>(d_m, d_a, d_b, N, t);
             timer.record_stop();
             t_fan2 += (double)timer.elapsed_ms();
         }

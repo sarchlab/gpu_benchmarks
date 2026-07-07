@@ -14,57 +14,7 @@
 // Output (stdout): CSV row — altis_cfd,<N>,<time_ms>,<Mcells_per_sec>
 // Output (stderr): human-readable results
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemcpyAsync          cudaMemcpyAsync
-#define hipMemset               cudaMemset
-#define hipMemsetAsync          cudaMemsetAsync
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
-#define hipMemcpyDeviceToDevice cudaMemcpyDeviceToDevice
-#define hipMemcpyToSymbol       cudaMemcpyToSymbol
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetLastError         cudaGetLastError
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipStream_t             cudaStream_t
-#define hipStreamCreate         cudaStreamCreate
-#define hipStreamDestroy        cudaStreamDestroy
-#define hipStreamSynchronize    cudaStreamSynchronize
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipHostMalloc           cudaMallocHost
-#define hipHostFree             cudaFreeHost
-#define hipHostMallocDefault    cudaHostAllocDefault
-#define hipBlockIdx_x           blockIdx.x
-#define hipBlockIdx_y           blockIdx.y
-#define hipBlockIdx_z           blockIdx.z
-#define hipThreadIdx_x          threadIdx.x
-#define hipThreadIdx_y          threadIdx.y
-#define hipThreadIdx_z          threadIdx.z
-#define hipBlockDim_x           blockDim.x
-#define hipBlockDim_y           blockDim.y
-#define hipBlockDim_z           blockDim.z
-#define hipGridDim_x            gridDim.x
-#define hipGridDim_y            gridDim.y
-#define hipGridDim_z            gridDim.z
-#define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -501,12 +451,8 @@ int main(int argc, char** argv) {
         for (int stage = 0; stage < RK_STEPS; ++stage) {
             // Compute fluxes
             if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            hipLaunchKernelGGL(compute_flux_kernel, dim3(gridSize), dim3(blockSize),
-                               0, 0,
-                               d_rho, d_mx, d_my, d_mz, d_energy,
-                               d_neighbors, d_normals, d_areas,
-                               d_flux_rho, d_flux_mx, d_flux_my, d_flux_mz, d_flux_energy,
-                               N);
+            compute_flux_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+                d_rho, d_mx, d_my, d_mz, d_energy, d_neighbors, d_normals, d_areas, d_flux_rho, d_flux_mx, d_flux_my, d_flux_mz, d_flux_energy, N);
             if (evStart) {
                 HIP_CHECK(hipEventRecord(*evStop, 0));
                 HIP_CHECK(hipEventSynchronize(*evStop));
@@ -517,12 +463,8 @@ int main(int argc, char** argv) {
 
             // RK update
             if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            hipLaunchKernelGGL(rk_update_kernel, dim3(gridSize), dim3(blockSize),
-                               0, 0,
-                               d_rho, d_mx, d_my, d_mz, d_energy,
-                               d_rho_old, d_mx_old, d_my_old, d_mz_old, d_energy_old,
-                               d_flux_rho, d_flux_mx, d_flux_my, d_flux_mz, d_flux_energy,
-                               d_volumes, DT, rk_coeffs[stage], N);
+            rk_update_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+                d_rho, d_mx, d_my, d_mz, d_energy, d_rho_old, d_mx_old, d_my_old, d_mz_old, d_energy_old, d_flux_rho, d_flux_mx, d_flux_my, d_flux_mz, d_flux_energy, d_volumes, DT, rk_coeffs[stage], N);
             if (evStart) {
                 HIP_CHECK(hipEventRecord(*evStop, 0));
                 HIP_CHECK(hipEventSynchronize(*evStop));
@@ -603,12 +545,8 @@ int main(int argc, char** argv) {
 
         // Re-upload initial state and compute one flux pass on GPU
         upload_initial();
-        hipLaunchKernelGGL(compute_flux_kernel, dim3(gridSize), dim3(blockSize),
-                           0, 0,
-                           d_rho, d_mx, d_my, d_mz, d_energy,
-                           d_neighbors, d_normals, d_areas,
-                           d_flux_rho, d_flux_mx, d_flux_my, d_flux_mz, d_flux_energy,
-                           N);
+        compute_flux_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+            d_rho, d_mx, d_my, d_mz, d_energy, d_neighbors, d_normals, d_areas, d_flux_rho, d_flux_mx, d_flux_my, d_flux_mz, d_flux_energy, N);
         HIP_CHECK(hipDeviceSynchronize());
 
         // Download GPU flux

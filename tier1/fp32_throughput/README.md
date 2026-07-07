@@ -18,7 +18,7 @@ GFLOPS = (num_threads × fmas_per_thread × 2) / elapsed_seconds / 1e9
 
 | Platform | Source file | Compiler |
 |----------|-------------|---------|
-| NVIDIA CUDA | `fp32_throughput.cu` | `nvcc` |
+| NVIDIA CUDA | `fp32_throughput.hip` | `nvcc` |
 | AMD ROCm/HIP | `fp32_throughput.hip` | `hipcc` |
 | Apple Metal | `fp32_throughput_metal.mm` + `fp32_throughput.metal` | `clang++` |
 

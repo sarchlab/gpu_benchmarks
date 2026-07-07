@@ -19,7 +19,6 @@ Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/project
 
 | File | Description |
 |------|-------------|
-| `polybench_2mm.cu` | CUDA source — tiled 2MM kernel |
 | `polybench_2mm.hip` | HIP source — tiled 2MM kernel with HIP/CUDA compat |
 | `polybench_2mm.metal` | Metal compute shader — tiled MM using threadgroup memory |
 | `polybench_2mm_metal.mm` | ObjC++ Metal host code |

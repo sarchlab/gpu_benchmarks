@@ -18,7 +18,7 @@ bandwidth numbers.
 
 | Platform | Source file | Compiler |
 |----------|-------------|---------|
-| NVIDIA CUDA | `shared_mem_bandwidth.cu` | `nvcc` |
+| NVIDIA CUDA | `shared_mem_bandwidth.hip` | `nvcc` |
 | AMD ROCm/HIP | `shared_mem_bandwidth.hip` | `hipcc` |
 | Apple Metal | `shared_mem_bandwidth_metal.mm` + `shared_mem_bandwidth.metal` | `clang++` |
 

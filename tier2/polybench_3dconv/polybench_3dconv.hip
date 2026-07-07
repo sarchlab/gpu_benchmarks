@@ -9,33 +9,7 @@
 // Output (stdout): JSON-lines
 // Output (stderr): device info, timing details
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetLastError         cudaGetLastError
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipStream_t             cudaStream_t
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -199,8 +173,7 @@ int main(int argc, char** argv) {
 
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
-        hipLaunchKernelGGL(conv3d_kernel, grid, block, 0, 0,
-                           d_input, d_filter, d_output, N, filter_size);
+        conv3d_kernel<<<grid, block>>>(d_input, d_filter, d_output, N, filter_size);
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -208,8 +181,7 @@ int main(int argc, char** argv) {
     std::vector<double> times(1);
     for (int i = 0; i < 1; ++i) {
         timer.record_start();
-        hipLaunchKernelGGL(conv3d_kernel, grid, block, 0, 0,
-                           d_input, d_filter, d_output, N, filter_size);
+        conv3d_kernel<<<grid, block>>>(d_input, d_filter, d_output, N, filter_size);
         timer.record_stop();
         times[i] = static_cast<double>(timer.elapsed_ms());
     }

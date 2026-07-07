@@ -15,57 +15,7 @@
 // Output (stdout): CSV row — cuda_convolution_separable,<WxH>,<time_ms>,<GBs>
 // Output (stderr): human-readable results
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemcpyAsync          cudaMemcpyAsync
-#define hipMemset               cudaMemset
-#define hipMemsetAsync          cudaMemsetAsync
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
-#define hipMemcpyDeviceToDevice cudaMemcpyDeviceToDevice
-#define hipMemcpyToSymbol       cudaMemcpyToSymbol
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetLastError         cudaGetLastError
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipStream_t             cudaStream_t
-#define hipStreamCreate         cudaStreamCreate
-#define hipStreamDestroy        cudaStreamDestroy
-#define hipStreamSynchronize    cudaStreamSynchronize
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipHostMalloc           cudaMallocHost
-#define hipHostFree             cudaFreeHost
-#define hipHostMallocDefault    cudaHostAllocDefault
-#define hipBlockIdx_x           blockIdx.x
-#define hipBlockIdx_y           blockIdx.y
-#define hipBlockIdx_z           blockIdx.z
-#define hipThreadIdx_x          threadIdx.x
-#define hipThreadIdx_y          threadIdx.y
-#define hipThreadIdx_z          threadIdx.z
-#define hipBlockDim_x           blockDim.x
-#define hipBlockDim_y           blockDim.y
-#define hipBlockDim_z           blockDim.z
-#define hipGridDim_x            gridDim.x
-#define hipGridDim_y            gridDim.y
-#define hipGridDim_z            gridDim.z
-#define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -380,32 +330,28 @@ int main(int argc, char** argv) {
     auto run_conv = [&](double* row_acc, double* col_acc) {
         if (row_acc) {
             HIP_CHECK(hipEventRecord(kStart, 0));
-            hipLaunchKernelGGL(convolution_row_kernel,
-                               rowGrid, rowBlock, rowSmem, 0,
-                               d_input, d_temp, width, height, radius);
+            convolution_row_kernel<<<rowGrid, rowBlock, rowSmem, 0>>>(
+                d_input, d_temp, width, height, radius);
             HIP_CHECK(hipEventRecord(kStop, 0));
             HIP_CHECK(hipEventSynchronize(kStop));
             float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
             *row_acc += (double)_ms;
         } else {
-            hipLaunchKernelGGL(convolution_row_kernel,
-                               rowGrid, rowBlock, rowSmem, 0,
-                               d_input, d_temp, width, height, radius);
+            convolution_row_kernel<<<rowGrid, rowBlock, rowSmem, 0>>>(
+                d_input, d_temp, width, height, radius);
         }
 
         if (col_acc) {
             HIP_CHECK(hipEventRecord(kStart, 0));
-            hipLaunchKernelGGL(convolution_col_kernel,
-                               colGrid, colBlock, colSmem, 0,
-                               d_temp, d_output, width, height, radius);
+            convolution_col_kernel<<<colGrid, colBlock, colSmem, 0>>>(
+                d_temp, d_output, width, height, radius);
             HIP_CHECK(hipEventRecord(kStop, 0));
             HIP_CHECK(hipEventSynchronize(kStop));
             float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
             *col_acc += (double)_ms;
         } else {
-            hipLaunchKernelGGL(convolution_col_kernel,
-                               colGrid, colBlock, colSmem, 0,
-                               d_temp, d_output, width, height, radius);
+            convolution_col_kernel<<<colGrid, colBlock, colSmem, 0>>>(
+                d_temp, d_output, width, height, radius);
         }
     };
 

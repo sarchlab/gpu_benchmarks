@@ -32,9 +32,9 @@ TARGET := lonestar_bh
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := lonestar_bh.cu
+  SRC    := lonestar_bh.hip
   CUDA_ARCH ?= sm_90
-  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
+  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH) -x cu
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

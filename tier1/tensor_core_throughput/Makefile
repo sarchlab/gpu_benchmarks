@@ -35,9 +35,9 @@ TARGET := tensor_core_throughput
 
 ifeq ($(PLATFORM),cuda)
   CC      := nvcc
-  SRC     := tensor_core_throughput.cu
+  SRC     := tensor_core_throughput.hip
   CUDA_ARCH ?= sm_90
-  CFLAGS  := -O3 -std=c++14 -arch=$(CUDA_ARCH)
+  CFLAGS  := -O3 -std=c++14 -arch=$(CUDA_ARCH) -x cu -DUSE_CUDA
 
 else ifeq ($(PLATFORM),rocm)
   CC      := hipcc

@@ -15,7 +15,6 @@ Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/project
 
 | File | Description |
 |------|-------------|
-| `polybench_3dconv.cu` | CUDA implementation |
 | `polybench_3dconv.hip` | HIP/ROCm implementation |
 | `polybench_3dconv_metal.mm` | ObjC++ Metal host code |
 | `polybench_3dconv.metal` | Metal compute shader |

@@ -49,57 +49,7 @@
 #include <algorithm>
 #include <random>
 
-#if defined(__NVCC__) && !__has_include(<hip/hip_runtime.h>)
-#include <cuda_runtime.h>
-#define hipMalloc               cudaMalloc
-#define hipFree                 cudaFree
-#define hipMemcpy               cudaMemcpy
-#define hipMemcpyAsync          cudaMemcpyAsync
-#define hipMemset               cudaMemset
-#define hipMemsetAsync          cudaMemsetAsync
-#define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
-#define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
-#define hipMemcpyDeviceToDevice cudaMemcpyDeviceToDevice
-#define hipMemcpyToSymbol       cudaMemcpyToSymbol
-#define hipDeviceSynchronize    cudaDeviceSynchronize
-#define hipGetDevice            cudaGetDevice
-#define hipGetDeviceProperties  cudaGetDeviceProperties
-#define hipGetLastError         cudaGetLastError
-#define hipGetErrorString       cudaGetErrorString
-#define hipEvent_t              cudaEvent_t
-#define hipEventCreate          cudaEventCreate
-#define hipEventDestroy         cudaEventDestroy
-#define hipEventRecord          cudaEventRecord
-#define hipEventSynchronize     cudaEventSynchronize
-#define hipEventElapsedTime     cudaEventElapsedTime
-#define hipStream_t             cudaStream_t
-#define hipStreamCreate         cudaStreamCreate
-#define hipStreamDestroy        cudaStreamDestroy
-#define hipStreamSynchronize    cudaStreamSynchronize
-#define hipDeviceProp_t         cudaDeviceProp
-#define hipError_t              cudaError_t
-#define hipSuccess              cudaSuccess
-#define hipHostMalloc           cudaMallocHost
-#define hipHostFree             cudaFreeHost
-#define hipHostMallocDefault    cudaHostAllocDefault
-#define hipBlockIdx_x           blockIdx.x
-#define hipBlockIdx_y           blockIdx.y
-#define hipBlockIdx_z           blockIdx.z
-#define hipThreadIdx_x          threadIdx.x
-#define hipThreadIdx_y          threadIdx.y
-#define hipThreadIdx_z          threadIdx.z
-#define hipBlockDim_x           blockDim.x
-#define hipBlockDim_y           blockDim.y
-#define hipBlockDim_z           blockDim.z
-#define hipGridDim_x            gridDim.x
-#define hipGridDim_y            gridDim.y
-#define hipGridDim_z            gridDim.z
-#define __HIP_PLATFORM_AMD__    0
-#define hipLaunchKernelGGL(kernel, grid, block, smem, stream, ...) \
-    kernel<<<grid, block, smem, stream>>>(__VA_ARGS__)
-#else
-#include <hip/hip_runtime.h>
-#endif
+#include "../../common/hip_cuda_compat.h"
 
 // ---------------------------------------------------------------------------
 // Error-checking macro
@@ -292,8 +242,7 @@ int main(int argc, char *argv[])
      * measures steady-state hits, not the cold fill) and loads the kernel code
      * object. Capped at the largest cache, so the DRAM end pays only a partial
      * fill it doesn't need anyway. Excluded from timing. */
-    hipLaunchKernelGGL(pointer_chase_kernel, dim3(1), dim3(1), 0, 0,
-                       d_arr, start_idx, num_warmup, d_result);
+    pointer_chase_kernel<<<dim3(1), dim3(1)>>>(d_arr, start_idx, num_warmup, d_result);
     HIP_CHECK(hipDeviceSynchronize());
 
     /* Timed runs. */
@@ -302,8 +251,7 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipEventCreate(&ev_stop));
 
     HIP_CHECK(hipEventRecord(ev_start, 0));
-    hipLaunchKernelGGL(pointer_chase_kernel, dim3(1), dim3(1), 0, 0,
-                       d_arr, start_idx, num_timed, d_result);
+    pointer_chase_kernel<<<dim3(1), dim3(1)>>>(d_arr, start_idx, num_timed, d_result);
     HIP_CHECK(hipEventRecord(ev_stop, 0));
     HIP_CHECK(hipEventSynchronize(ev_stop));
 

@@ -160,7 +160,6 @@ FP32 Throughput : 2328.45 GFLOPS  (FP64 proxy — Apple GPUs lack native FP64)
 
 | File | Purpose |
 |---|---|
-| `fp64_throughput.cu` | CUDA source — kernel + driver code |
 | `fp64_throughput.hip` | HIP source — AMD ROCm + NVIDIA HIP-on-CUDA |
 | `fp64_throughput_metal.mm` | Apple Metal host code (Objective-C++) |
 | `fp64_throughput.metal` | Metal compute kernel (FP32 FMA — Apple FP64 proxy) |

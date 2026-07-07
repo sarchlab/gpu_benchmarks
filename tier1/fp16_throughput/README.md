@@ -118,7 +118,6 @@ Done.
 
 | File | Purpose |
 |---|---|
-| `fp16_throughput.cu` | CUDA source — kernel + driver code |
 | `fp16_throughput.hip` | HIP source — same kernel, AMD ROCm/HIP APIs |
 | `fp16_throughput_metal.mm` | Metal host code (Objective-C++) |
 | `fp16_throughput.metal` | Metal shader — `half2` FP16 FMA kernel |

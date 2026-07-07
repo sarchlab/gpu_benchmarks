@@ -32,9 +32,9 @@ TARGET := polybench_correlation
 
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
-  SRC    := polybench_correlation.cu
+  SRC    := polybench_correlation.hip
   CUDA_ARCH ?= sm_90
-  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
+  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH) -x cu
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc

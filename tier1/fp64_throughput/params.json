@@ -2,7 +2,7 @@
   "benchmark": "fp64_throughput",
   "tier": 1,
   "suite": "microbench",
-  "description": "Measures peak double-precision (FP64) floating-point compute throughput using a long chain of fused multiply-add (FMA) instructions via fma(). All values live in registers; reports GFLOPS.",
+  "description": "Measures peak double-precision (FP64) floating-point compute throughput using a long chain of fused multiply-add (FMA) instructions via fma(). All values live in registers. Emits per-iteration GPU event time and host time records (total = sum of kernel times); GFLOPS is derived downstream.",
   "scaling_param": {
     "name": "fmas_per_thread",
     "description": "Number of FMA operations per thread per kernel invocation; controls total compute work",

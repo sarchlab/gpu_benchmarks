@@ -5,11 +5,16 @@ import (
 	"strings"
 )
 
-// KernelResult represents a parsed kernel event.
+// KernelResult represents a parsed kernel event. Benchmarks that loop the
+// measurement in-program emit one kernel event per timed iteration, carrying
+// the iteration index and the host-side wall-clock time alongside the GPU
+// event time.
 type KernelResult struct {
-	Name    string  `json:"name"`
-	TimeMS  float64 `json:"time_ms"`
-	Ordinal int     `json:"-"`
+	Name       string   `json:"name"`
+	TimeMS     float64  `json:"time_ms"`
+	HostTimeMS *float64 `json:"host_time_ms"`
+	Iteration  *int     `json:"iter"`
+	Ordinal    int      `json:"-"`
 }
 
 // SummaryResult represents a parsed summary event.
@@ -44,6 +49,16 @@ func parseOutput(stdoutData string) ([]KernelResult, *SummaryResult, []ErrorResu
 
 		var obj map[string]interface{}
 		if err := json.Unmarshal([]byte(line), &obj); err != nil {
+			// A line that looks like a protocol record but doesn't parse
+			// means lost results (e.g. truncated params) — say so instead
+			// of silently dropping it.
+			if strings.HasPrefix(line, "{") {
+				preview := line
+				if len(preview) > 120 {
+					preview = preview[:120] + "..."
+				}
+				eprintf("warning: skipping malformed JSON line: %s\n", preview)
+			}
 			continue
 		}
 
@@ -58,11 +73,19 @@ func parseOutput(stdoutData string) ([]KernelResult, *SummaryResult, []ErrorResu
 			if t, ok := obj["time_ms"].(float64); ok {
 				timeMS = t
 			}
-			kernels = append(kernels, KernelResult{
+			kr := KernelResult{
 				Name:    name,
 				TimeMS:  timeMS,
 				Ordinal: ordinal,
-			})
+			}
+			if h, ok := obj["host_time_ms"].(float64); ok {
+				kr.HostTimeMS = &h
+			}
+			if it, ok := obj["iter"].(float64); ok {
+				i := int(it)
+				kr.Iteration = &i
+			}
+			kernels = append(kernels, kr)
 			ordinal++
 
 		case "summary":

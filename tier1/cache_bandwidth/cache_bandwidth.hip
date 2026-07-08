@@ -22,16 +22,20 @@
  *                     Measures per-unit bandwidth without cross-unit sharing;
  *                     report bandwidth_gbps / num_blocks for the per-unit figure.
  *
- * Reported bandwidth_gbps is the aggregate delivered bandwidth in both modes
- * (bytes = num_blocks * working_set_bytes * iters). per_block_gbps divides by
- * the block count for the per-unit view.
- *
  * Usage:
  *   ./cache_bandwidth [working_set_bytes]
  *
  * Environment variables (override argv):
  *   BENCH_PARAM_working_set_bytes
  *   BENCH_PARAM_mode             ("shared" | "private")
+ *   BENCH_PARAM_num_warmup       (warmup launches, default 3)
+ *   BENCH_PARAM_num_iters        (timed launches, each recorded, default 7)
+ *
+ * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
+ * the GPU event time and host wall-clock time, then a summary whose
+ * total_time_ms is the SUM of all iterations' GPU event times. Bandwidth is
+ * derived downstream: bytes = num_blocks * working_set_bytes * iters (all in
+ * the record params) over time_ms.
  */
 
 #include <cstdio>
@@ -40,17 +44,9 @@
 #include <cstdint>
 #include <algorithm>
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 
-#define HIP_CHECK(call)                                                         \
-    do {                                                                        \
-        hipError_t _err = (call);                                               \
-        if (_err != hipSuccess) {                                               \
-            fprintf(stderr, "HIP error at %s:%d — %s\n",                       \
-                    __FILE__, __LINE__, hipGetErrorString(_err));               \
-            exit(EXIT_FAILURE);                                                 \
-        }                                                                       \
-    } while (0)
+#define HIP_CHECK(call) BENCH_TIMING_CHECK(call)
 
 // ---------------------------------------------------------------------------
 // Constants (defaults)
@@ -65,8 +61,6 @@ static const size_t   TARGET_TRAFFIC_BYTES  = 8ULL * 1024 * 1024 * 1024;  // 8 G
 static const uint32_t MIN_ITERS             = 3u;
 static const uint32_t MAX_ITERS             = 4000000u;
 static const size_t   PRIVATE_ALLOC_CAP     = 4ULL * 1024 * 1024 * 1024;  // 4 GB
-static const int      NUM_WARMUP            = 5;
-static const int      NUM_TIMED             = 3;
 
 // ---------------------------------------------------------------------------
 // Streaming-read kernel
@@ -196,52 +190,28 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipMalloc(&d_sink, (size_t)num_blocks * tpb * sizeof(float)));
     HIP_CHECK(hipMemset(d_buf, 1, alloc_bytes));
 
-    // Warm-up.
-    for (int w = 0; w < NUM_WARMUP; ++w) {
-        bw_read_kernel<<<dim3(num_blocks), dim3(tpb)>>>(
-            d_buf, vecs_per_window, windows, iters, shared_mode, d_sink);
-    }
-    HIP_CHECK(hipDeviceSynchronize());
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
-    // Timed launches: keep the best (lowest time -> peak bandwidth).
-    hipEvent_t ev_start, ev_stop;
-    HIP_CHECK(hipEventCreate(&ev_start));
-    HIP_CHECK(hipEventCreate(&ev_stop));
+    char params[256];
+    snprintf(params, sizeof(params),
+             "\"working_set_bytes\":%zu,\"mode\":\"%s\","
+             "\"blocks_per_cu\":%d,\"num_blocks\":%d,\"iters\":%u",
+             working_set_bytes, shared_mode ? "shared" : "private",
+             blocks_per_cu, num_blocks, iters);
 
-    float best_ms = -1.0f;
-    for (int t = 0; t < NUM_TIMED; ++t) {
-        HIP_CHECK(hipEventRecord(ev_start, 0));
-        bw_read_kernel<<<dim3(num_blocks), dim3(tpb)>>>(
-            d_buf, vecs_per_window, windows, iters, shared_mode, d_sink);
-        HIP_CHECK(hipEventRecord(ev_stop, 0));
-        HIP_CHECK(hipEventSynchronize(ev_stop));
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));
-        if (best_ms < 0.0f || ms < best_ms) best_ms = ms;
-    }
+    // Warmup (each launch synced, so the working set is resident before the
+    // first timed iteration) + timed iterations, each recorded individually.
+    double total_gpu_ms =
+        bench_run_loop("bw_read_kernel", num_warmup, num_iters, params, [&]() {
+            bw_read_kernel<<<dim3(num_blocks), dim3(tpb)>>>(
+                d_buf, vecs_per_window, windows, iters, shared_mode, d_sink);
+        });
 
-    const double bytes_moved =
-        (double)num_blocks * (double)working_set_bytes * (double)iters;
-    const double bw_gbps     = bytes_moved / (best_ms * 1e-3) / 1e9;
-    const double per_cu_gbps = bw_gbps / (double)prop.multiProcessorCount;
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
+            total_gpu_ms, num_iters);
 
-    fprintf(stderr, "WS %zu KB (%s): %.1f GB/s aggregate (%.1f GB/s per CU)\n",
-            working_set_bytes / 1024, shared_mode ? "shared" : "private",
-            bw_gbps, per_cu_gbps);
-
-    printf("{\"type\":\"kernel\",\"name\":\"bw_read_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"working_set_bytes\":%zu,\"mode\":\"%s\","
-           "\"blocks_per_cu\":%d,\"num_blocks\":%d,\"iters\":%u}}\n",
-           (double)best_ms, working_set_bytes, shared_mode ? "shared" : "private",
-           blocks_per_cu, num_blocks, iters);
-
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f},"
-           "{\"name\":\"per_cu_gbps\",\"value\":%.4f}]}\n",
-           (double)best_ms, bw_gbps, per_cu_gbps);
-
-    HIP_CHECK(hipEventDestroy(ev_start));
-    HIP_CHECK(hipEventDestroy(ev_stop));
     HIP_CHECK(hipFree(d_buf));
     HIP_CHECK(hipFree(d_sink));
 

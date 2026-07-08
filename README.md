@@ -175,8 +175,6 @@ gpu_benchmarks/
 │   ├── gptj_inference/
 │   ├── retinanet_inference/
 │   └── unet3d_inference/
-├── community_results/              # Community-submitted benchmark results
-│   └── README.md
 ├── cmd/
 │   └── gpubench/                   # gpubench CLI (Go)
 └── docs/                          # Detailed specifications
@@ -537,7 +535,7 @@ BENCH_PARAM_matrix_size=1024 BENCH_PARAM_block_size=16 ./benchmark
 - [`docs/output_protocol.md`](docs/output_protocol.md) — JSON-lines output protocol specification
 - [`docs/parameter_selection.md`](docs/parameter_selection.md) — Consolidated default parameter selections for all benchmarks
 - [`docs/params_format.md`](docs/params_format.md) — `params.json` format specification
-- [`docs/result_sharing.md`](docs/result_sharing.md) — Result export and community sharing guide
+- [`docs/result_sharing.md`](docs/result_sharing.md) — Result export guide (JSON format spec)
 - [`docs/schema.sql`](docs/schema.sql) — SQLite results database schema
 - [`spec.md`](spec.md) — Project specification
 - [`roadmap.md`](roadmap.md) — Development roadmap and milestones

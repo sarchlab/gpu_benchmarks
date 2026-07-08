@@ -27,27 +27,27 @@
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_threads_per_block
  *   BENCH_PARAM_atomic_op   ("atomicAdd", "atomicCAS", "atomicMin")
+ *   BENCH_PARAM_num_warmup  (warmup launches, default 3)
+ *   BENCH_PARAM_num_iters   (timed launches, each recorded, default 7)
+ *
+ * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
+ * the GPU event time and host wall-clock time, then a summary whose
+ * total_time_ms is the SUM of all iterations' GPU event times. Derived
+ * metrics (Gops/s) are intentionally not computed here — derive them
+ * downstream from time and the work-descriptor params.
  */
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 
 // ---------------------------------------------------------------------------
 // Error-checking helper
 // ---------------------------------------------------------------------------
 
-#define HIP_CHECK(call)                                                        \
-    do {                                                                       \
-        hipError_t _err = (call);                                              \
-        if (_err != hipSuccess) {                                              \
-            fprintf(stderr, "HIP error at %s:%d — %s\n",                      \
-                    __FILE__, __LINE__, hipGetErrorString(_err));              \
-            exit(EXIT_FAILURE);                                                \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(call) BENCH_TIMING_CHECK(call)
 
 // ---------------------------------------------------------------------------
 // Tuning constants (defaults)
@@ -56,7 +56,6 @@
 static const int DEFAULT_OPS_PER_THREAD  = 1024;
 static const int DEFAULT_THREADS_PER_BLK = 256;
 static const int DEFAULT_NUM_BLOCKS      = 1024;
-static const int DEFAULT_NUM_WARMUP      = 5;
 
 // ---------------------------------------------------------------------------
 // Atomic kernels
@@ -92,71 +91,33 @@ __global__ void atomicMin_kernel(unsigned int *counter, int ops_per_thread)
 typedef void (*KernelFunc)(unsigned int *, int);
 
 /**
- * Run a single atomic benchmark: warmup + timed iterations.
- * Returns average kernel time in ms and Gops/s via out parameter.
+ * Run a single atomic benchmark: warmup + per-iteration timed launches.
+ * Emits one kernel JSON line per timed iteration and returns the sum of all
+ * iterations' GPU event times in ms.
  */
-static void run_benchmark(const char *kernel_name,
-                          KernelFunc kernel, unsigned int *d_counter,
-                          int ops_per_thread, int num_blocks,
-                          int threads_per_block, const char *atomic_op,
-                          int num_warmup,
-                          double *out_avg_ms, double *out_gops)
+static double run_benchmark(const char *kernel_name,
+                            KernelFunc kernel, unsigned int *d_counter,
+                            int ops_per_thread, int num_blocks,
+                            int threads_per_block, const char *atomic_op,
+                            int num_warmup, int num_iters)
 {
-    /* Reset counter. */
+    /* Reset counter once, outside the timed region. Counter accumulation
+     * across warmup/timed iterations does not affect timing, so no per-loop
+     * reset is needed. */
     unsigned int zero = 0;
     HIP_CHECK(hipMemcpy(d_counter, &zero, sizeof(unsigned int),
                         hipMemcpyHostToDevice));
 
-    /* Warm-up launches. */
-    for (int w = 0; w < num_warmup; ++w) {
-        kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(d_counter, ops_per_thread);
-    }
-    HIP_CHECK(hipDeviceSynchronize());
+    char params[192];
+    snprintf(params, sizeof(params),
+             "\"ops_per_thread\":%d,\"num_blocks\":%d,"
+             "\"threads_per_block\":%d,\"atomic_op\":\"%s\"",
+             ops_per_thread, num_blocks, threads_per_block, atomic_op);
 
-    /* Reset counter before timed run. */
-    HIP_CHECK(hipMemcpy(d_counter, &zero, sizeof(unsigned int),
-                        hipMemcpyHostToDevice));
-
-    /* Create HIP timing events. */
-    hipEvent_t ev_start, ev_stop;
-    HIP_CHECK(hipEventCreate(&ev_start));
-    HIP_CHECK(hipEventCreate(&ev_stop));
-
-    /* Timed kernel launch. */
-    HIP_CHECK(hipEventRecord(ev_start, 0));
-    kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(d_counter, ops_per_thread);
-    HIP_CHECK(hipEventRecord(ev_stop, 0));
-    HIP_CHECK(hipEventSynchronize(ev_stop));
-
-    float elapsed_ms = 0.0f;
-    HIP_CHECK(hipEventElapsedTime(&elapsed_ms, ev_start, ev_stop));
-
-    long long num_threads = static_cast<long long>(num_blocks)
-                            * threads_per_block;
-    long long total_ops   = num_threads
-                            * static_cast<long long>(ops_per_thread);
-    double elapsed_s      = static_cast<double>(elapsed_ms) * 1e-3;
-    double gops           = static_cast<double>(total_ops) / elapsed_s / 1e9;
-
-    
-
-    /* Human-readable output to stderr. */
-    fprintf(stderr, "%-12s : %.3f ms total, %.3f ms/kernel, %.2f Gops/s\n",
-            kernel_name, (double)elapsed_ms, (double)elapsed_ms, gops);
-
-    /* JSON-lines output to stdout: kernel event */
-    printf("{\"type\":\"kernel\",\"name\":\"%s\",\"time_ms\":%.6f,"
-           "\"params\":{\"ops_per_thread\":%d,\"num_blocks\":%d,"
-           "\"threads_per_block\":%d,\"atomic_op\":\"%s\"}}\n",
-           kernel_name, (double)elapsed_ms, ops_per_thread, num_blocks,
-           threads_per_block, atomic_op);
-
-    *out_avg_ms = (double)elapsed_ms;
-    *out_gops   = gops;
-
-    /* Clean up events. */
-    HIP_CHECK(hipEventDestroy(ev_start));
-    HIP_CHECK(hipEventDestroy(ev_stop));
+    return bench_run_loop(kernel_name, num_warmup, num_iters, params, [&]() {
+        kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(d_counter,
+                                                              ops_per_thread);
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +162,8 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    int num_warmup = DEFAULT_NUM_WARMUP;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     /* Print device information to stderr. */
     int device_id = 0;
@@ -216,53 +178,45 @@ int main(int argc, char *argv[])
             num_blocks * threads_per_block);
     fprintf(stderr, "Ops / thread    : %d\n", ops_per_thread);
     fprintf(stderr, "Atomic op       : %s\n", atomic_op);
-    fprintf(stderr, "Warmup iters    : %d\n\n", num_warmup);
+    fprintf(stderr, "Warmup / iters  : %d / %d\n\n", num_warmup, num_iters);
 
     /* Allocate a single unsigned int on the device as the shared counter. */
     unsigned int *d_counter = nullptr;
     HIP_CHECK(hipMalloc(&d_counter, sizeof(unsigned int)));
 
-    double total_time_ms = 0.0;
-    double max_gops = 0.0;
+    double total_gpu_ms = 0.0;
 
     bool run_add = (strcmp(atomic_op, "atomicAdd") == 0);
     bool run_cas = (strcmp(atomic_op, "atomicCAS") == 0);
     bool run_min = (strcmp(atomic_op, "atomicMin") == 0);
 
     if (run_add) {
-        double avg_ms, gops;
-        run_benchmark("atomicAdd_kernel",
-                      (KernelFunc)atomicAdd_kernel, d_counter,
-                      ops_per_thread, num_blocks, threads_per_block, atomic_op,
-                      num_warmup, &avg_ms, &gops);
-        total_time_ms += avg_ms;
-        if (gops > max_gops) max_gops = gops;
+        total_gpu_ms += run_benchmark("atomicAdd_kernel",
+                                      (KernelFunc)atomicAdd_kernel, d_counter,
+                                      ops_per_thread, num_blocks,
+                                      threads_per_block, atomic_op,
+                                      num_warmup, num_iters);
     }
 
     if (run_cas) {
-        double avg_ms, gops;
-        run_benchmark("atomicCAS_kernel",
-                      (KernelFunc)atomicCAS_kernel, d_counter,
-                      ops_per_thread, num_blocks, threads_per_block, atomic_op,
-                      num_warmup, &avg_ms, &gops);
-        total_time_ms += avg_ms;
-        if (gops > max_gops) max_gops = gops;
+        total_gpu_ms += run_benchmark("atomicCAS_kernel",
+                                      (KernelFunc)atomicCAS_kernel, d_counter,
+                                      ops_per_thread, num_blocks,
+                                      threads_per_block, atomic_op,
+                                      num_warmup, num_iters);
     }
 
     if (run_min) {
-        double avg_ms, gops;
-        run_benchmark("atomicMin_kernel",
-                      (KernelFunc)atomicMin_kernel, d_counter,
-                      ops_per_thread, num_blocks, threads_per_block, atomic_op,
-                      num_warmup, &avg_ms, &gops);
-        total_time_ms += avg_ms;
-        if (gops > max_gops) max_gops = gops;
+        total_gpu_ms += run_benchmark("atomicMin_kernel",
+                                      (KernelFunc)atomicMin_kernel, d_counter,
+                                      ops_per_thread, num_blocks,
+                                      threads_per_block, atomic_op,
+                                      num_warmup, num_iters);
     }
 
-    /* Summary */
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"giga_ops_per_sec\",\"value\":%.2f}]}\n",
-           total_time_ms, max_gops);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time  : %.3f ms over %d iterations\n",
+            total_gpu_ms, num_iters);
 
     /* Clean up. */
     HIP_CHECK(hipFree(d_counter));

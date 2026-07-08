@@ -142,10 +142,20 @@ def trace_complete(trace_cfg_dir: Path) -> bool:
 
 
 def load_runs(db_path: Path) -> pd.DataFrame:
+    # Benchmarks with in-program measurement loops store one kernel_results
+    # row per timed iteration. Average within each (run, kernel) before
+    # summing across kernels, so a run's total means "one pass over every
+    # kernel" regardless of how many iterations were recorded — keeping new
+    # per-iteration runs comparable to older single-row-per-kernel runs in
+    # the same database.
     query = """
         WITH kernel_totals AS (
-            SELECT run_id, SUM(time_ms) AS total_kernel_time_ms
-            FROM kernel_results
+            SELECT run_id, SUM(avg_ms) AS total_kernel_time_ms
+            FROM (
+                SELECT run_id, kernel_name, AVG(time_ms) AS avg_ms
+                FROM kernel_results
+                GROUP BY run_id, kernel_name
+            )
             GROUP BY run_id
         )
         SELECT

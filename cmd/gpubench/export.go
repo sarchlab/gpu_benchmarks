@@ -49,10 +49,14 @@ type ExportRun struct {
 	Metrics           []ExportMetric `json:"metrics"`
 }
 
-// ExportKernel holds kernel timing data.
+// ExportKernel holds kernel timing data. Benchmarks with in-program
+// measurement loops export one entry per timed iteration, distinguished
+// by the iteration index and carrying the host wall-clock time.
 type ExportKernel struct {
-	Name   string  `json:"name"`
-	TimeMS float64 `json:"time_ms"`
+	Name       string   `json:"name"`
+	TimeMS     float64  `json:"time_ms"`
+	HostTimeMS *float64 `json:"host_time_ms,omitempty"`
+	Iteration  *int64   `json:"iteration,omitempty"`
 }
 
 // ExportMetric holds a named metric value.
@@ -230,7 +234,8 @@ func queryRuns(db *sql.DB, sessionID int64) ([]ExportRun, error) {
 
 func queryKernels(db *sql.DB, runID int64) ([]ExportKernel, error) {
 	rows, err := db.Query(
-		"SELECT kernel_name, time_ms FROM kernel_results WHERE run_id = ? ORDER BY ordinal",
+		"SELECT kernel_name, time_ms, host_time_ms, iteration "+
+			"FROM kernel_results WHERE run_id = ? ORDER BY ordinal",
 		runID,
 	)
 	if err != nil {
@@ -241,8 +246,16 @@ func queryKernels(db *sql.DB, runID int64) ([]ExportKernel, error) {
 	var kernels []ExportKernel
 	for rows.Next() {
 		var k ExportKernel
-		if err := rows.Scan(&k.Name, &k.TimeMS); err != nil {
+		var hostTime sql.NullFloat64
+		var iteration sql.NullInt64
+		if err := rows.Scan(&k.Name, &k.TimeMS, &hostTime, &iteration); err != nil {
 			return nil, err
+		}
+		if hostTime.Valid {
+			k.HostTimeMS = &hostTime.Float64
+		}
+		if iteration.Valid {
+			k.Iteration = &iteration.Int64
 		}
 		kernels = append(kernels, k)
 	}

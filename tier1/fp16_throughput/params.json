@@ -2,7 +2,7 @@
   "benchmark": "fp16_throughput",
   "tier": 1,
   "suite": "microbench",
-  "description": "Measures peak half-precision (FP16) floating-point compute throughput using packed __hfma2() intrinsics on __half2 values. Each __hfma2 delivers 4 FLOPs (2 packed elements x 2 ops). Reports GFLOPS.",
+  "description": "Measures peak half-precision (FP16) floating-point compute throughput using packed __hfma2() intrinsics on __half2 values. Each __hfma2 delivers 4 FLOPs (2 packed elements x 2 ops). Emits per-iteration GPU event time and host time records (total = sum of kernel times); GFLOPS is derived downstream.",
   "scaling_param": {
     "name": "fmas_per_thread",
     "description": "Number of __hfma2 operations per thread per kernel invocation; controls total compute work",

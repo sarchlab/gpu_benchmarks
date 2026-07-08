@@ -66,6 +66,9 @@ FP64 throughput varies significantly by GPU class:
 | FLOPs per FMA | **2** (1 multiply + 1 add) |
 | GFLOPS formula | `(threads × fmas_per_thread × 2) / elapsed_s / 1e9` |
 
+The binary does not print GFLOPS; it is derived downstream from each
+recorded iteration's `time_ms` and params using the formula above.
+
 ---
 
 ## Build
@@ -102,57 +105,36 @@ Requirements by platform:
 |---|---|---|
 | `fmas_per_thread` | `4096` | Number of FMA iterations per thread. Increase on HPC GPUs where FP64 is fast (kernel should run ≥5 ms for a stable measurement). Decrease on consumer GPUs where FP64 is rate-limited. |
 
+Parameters can also be set via environment variables
+(`BENCH_PARAM_fmas_per_thread`, `BENCH_PARAM_num_blocks`,
+`BENCH_PARAM_threads_per_block`), plus the measurement-harness controls:
+
+| Env var | Default | Description |
+|---|---|---|
+| `BENCH_PARAM_num_warmup` | `3` | Warm-up kernel launches (not timed) |
+| `BENCH_PARAM_num_iters` | `7` | Timed kernel launches, each recorded individually |
+
 ---
 
 ## Example output
 
-### Datacenter GPU — NVIDIA A100-SXM4-80GB (CUDA/HIP)
+Progress and device info go to stderr; stdout carries JSON lines — one record
+per timed iteration plus a final summary:
 
 ```
-Device          : NVIDIA A100-SXM4-80GB (id=0)
-CUs             : 108
-Grid            : 1024 blocks × 256 threads = 262144 total threads
-FMAs / thread   : 4096
-Kernel repeats  : 10
-
-Elapsed time    : 119.872 ms (11.987 ms / kernel)
-Total FLOPs     : 21474836480
-FP64 Throughput : 179.16 GFLOPS
+{"type":"kernel","name":"fp64_fma_kernel","iter":0,"time_ms":11.987120,"host_time_ms":12.104532,"params":{"fmas_per_thread":4096,"num_blocks":1,"threads_per_block":256}}
+...
+{"type":"summary","total_time_ms":83.910041}
 ```
 
-### Consumer GPU — NVIDIA GeForce RTX 3080 (CUDA/HIP)
-
-```
-Device          : NVIDIA GeForce RTX 3080 (id=0)
-CUs             : 68
-Grid            : 1024 blocks × 256 threads = 262144 total threads
-FMAs / thread   : 4096
-Kernel repeats  : 10
-
-Elapsed time    : 3241.500 ms (324.150 ms / kernel)
-Total FLOPs     : 21474836480
-FP64 Throughput : 6.63 GFLOPS
-```
+Every timed iteration is emitted individually (no averaging); `time_ms` is
+the GPU event time, `host_time_ms` the host wall-clock around launch + sync,
+and `total_time_ms` is the sum of all iterations' GPU event times. No GFLOPS
+figure is printed — it is derived downstream.
 
 > **Note:** On consumer GPUs, FP64 throughput is severely limited by hardware.
 > Consider reducing `fmas_per_thread` (e.g. to 256 or 512) to keep the
 > benchmark runtime reasonable.
-
-### Apple M-series GPU (Metal — FP32 proxy)
-
-```
-Device          : Apple M3 Pro
-NOTE            : Apple GPUs lack native FP64 hardware.
-                  Measuring FP32 throughput as proxy.
-
-Grid            : 1024 blocks × 256 threads = 262144 total threads
-FMAs / thread   : 4096
-Kernel repeats  : 10
-
-Elapsed time    : 9.231 ms (0.923 ms / kernel)
-Total FLOPs     : 21474836480
-FP32 Throughput : 2328.45 GFLOPS  (FP64 proxy — Apple GPUs lack native FP64)
-```
 
 ---
 

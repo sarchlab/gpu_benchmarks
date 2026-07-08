@@ -2,7 +2,7 @@
   "benchmark": "warp_shuffle",
   "tier": 1,
   "suite": "microbench",
-  "description": "Measures warp/wave shuffle instruction throughput for four variants: __shfl_xor (butterfly), __shfl (indexed), __shfl_up (shift up), and __shfl_down (shift down). Each thread performs a dependency chain of shuffle ops. Reports effective data movement rate in GB/s.",
+  "description": "Measures warp/wave shuffle instruction throughput for four variants: __shfl_xor (butterfly), __shfl (indexed), __shfl_up (shift up), and __shfl_down (shift down). Each thread performs a dependency chain of shuffle ops. Emits per-iteration GPU event time and host time records (total = sum of kernel times); the effective data movement rate in GB/s is derived downstream.",
   "scaling_param": {
     "name": "ops_per_thread",
     "description": "Number of shuffle operations each thread performs per kernel invocation",

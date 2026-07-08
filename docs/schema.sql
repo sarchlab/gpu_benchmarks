@@ -94,13 +94,18 @@ CREATE INDEX IF NOT EXISTS idx_run_scaling    ON runs(benchmark, scaling_param_n
 -- kernel_results — One row per kernel invocation within a run
 -- -----------------------------------------------------------------------------
 -- Stores kernel-level timing from "kernel" events in the output protocol.
+-- Benchmarks that loop the measurement in-program (tier1) emit one event per
+-- timed iteration, so a run holds num_iters rows per kernel, each with the
+-- GPU event time, the matching host wall-clock time, and the iteration index.
 
 CREATE TABLE IF NOT EXISTS kernel_results (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id      INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-    kernel_name TEXT    NOT NULL,           -- e.g., "gemm_kernel", "forward", "backward"
-    time_ms     REAL    NOT NULL,          -- kernel execution time in milliseconds
-    ordinal     INTEGER NOT NULL DEFAULT 0 -- order of emission (0-based), for multi-kernel benchmarks
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id       INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    kernel_name  TEXT    NOT NULL,           -- e.g., "gemm_kernel", "forward", "backward"
+    time_ms      REAL    NOT NULL,           -- GPU event time in milliseconds
+    ordinal      INTEGER NOT NULL DEFAULT 0, -- order of emission (0-based)
+    host_time_ms REAL,                       -- host wall-clock for the same iteration (launch + completion)
+    iteration    INTEGER                     -- 0-based in-program iteration index, NULL if not emitted
 );
 
 CREATE INDEX IF NOT EXISTS idx_kernel_run  ON kernel_results(run_id);

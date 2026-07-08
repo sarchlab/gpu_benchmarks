@@ -1,6 +1,6 @@
 # Result Sharing Guide
 
-This document describes how to export benchmark results from the GPU Benchmark Suite and share them with the community.
+This document describes how to export benchmark results from the GPU Benchmark Suite as portable JSON, e.g. for moving results between machines or sharing a dataset with collaborators.
 
 ## Exporting Results
 
@@ -55,6 +55,7 @@ The exported JSON follows this structure:
           "kernels": [
             {"name": "gemm_kernel", "time_ms": 1.23}
           ],
+          "_comment": "tier1 benchmarks emit one kernel entry per timed iteration, e.g. {\"name\": \"fp32_fma_kernel\", \"time_ms\": 0.52, \"host_time_ms\": 0.60, \"iteration\": 0} ... \"iteration\": 6",
           "metrics": [
             {"name": "GFLOPS", "value": 143.2}
           ]
@@ -87,32 +88,11 @@ The exported JSON follows this structure:
 | `sessions[].runs[].suite` | string | Benchmark suite name |
 | `sessions[].runs[].scaling_param_value` | string | Value of the scaling parameter |
 | `sessions[].runs[].status` | string | Run status: `ok`, `error`, `timeout` |
-| `sessions[].runs[].kernels` | array | Kernel timing results |
-| `sessions[].runs[].metrics` | array | Computed metrics (e.g., GFLOPS) |
+| `sessions[].runs[].kernels` | array | Kernel timing results. Benchmarks with in-program measurement loops (tier1) emit one entry per timed iteration, with `iteration` (0-based index) and `host_time_ms` (host wall-clock for the same iteration) alongside `time_ms` (GPU event time). |
+| `sessions[].runs[].metrics` | array | Computed metrics (e.g., GFLOPS). Empty for tier1, whose metrics are derived downstream from kernel times and params. |
 
-## Submitting Results to the Community
-
-We welcome benchmark results from the community! To contribute:
-
-1. **Fork** this repository on GitHub.
-2. **Export** your results:
-   ```bash
-   gpubench export --db results.db > community_results/<gpu_model>_<platform>_<date>.json
-   ```
-3. **Follow the naming convention**:
-   ```
-   community_results/<gpu_model>_<platform>_<YYYY-MM-DD>.json
-   ```
-   Examples:
-   - `community_results/rtx4090_cuda_2024-03-15.json`
-   - `community_results/rx7900xtx_rocm_2024-03-15.json`
-   - `community_results/m2ultra_metal_2024-03-15.json`
-4. **Open a Pull Request** with your JSON file added to the `community_results/` directory.
-
-### Guidelines
+## Guidelines for Comparable Results
 
 - Run benchmarks on an **idle system** for consistent results.
 - Use the **default repetitions** (7) unless you have a specific reason to change.
-- Include **all tiers** if possible, or specify which tiers you ran.
 - Do not modify the JSON structure — the export command produces the correct format.
-- One file per GPU/platform/date combination.

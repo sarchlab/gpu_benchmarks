@@ -75,65 +75,47 @@ make clean
 ./shared_mem_bandwidth
 ```
 
-No command-line arguments are needed.  All parameters are compile-time
-constants.
+No command-line arguments are needed.  Parameters are set via
+`BENCH_PARAM_*` environment variables (see below).
 
 ## Example Output
 
-### CUDA / HIP
+Progress and device info go to stderr; stdout carries JSON lines — one record
+per timed iteration of each selected pattern, plus a final summary:
 
 ```
-Device        : NVIDIA A100-SXM4-80GB (id=0)
-Shared mem/blk: 49152 bytes
-Block size    : 256 threads
-Grid size     : 128 blocks
-Inner iters   : 1000
-Warmup iters  : 5
-Timed iters   : 5
-
-no_conflict    :    5.432 ms  2302.45 GB/s
-conflict       :   78.901 ms   158.63 GB/s
-shared_mem_bw,no_conflict,5.432,2302.45
-shared_mem_bw,conflict,78.901,158.63
-
-Done.
+{"type":"kernel","name":"smem_bw_no_conflict","iter":0,"time_ms":5.432101,"host_time_ms":5.541234,"params":{"inner_iters":1000,"block_size":256,"num_blocks":128,"access_pattern":"both"}}
+...
+{"type":"kernel","name":"smem_bw_conflict","iter":0,"time_ms":78.901234,"host_time_ms":79.012345,"params":{...}}
+...
+{"type":"summary","total_time_ms":590.334012}
 ```
 
-### Metal (Apple M3)
-
-```
-Device        : Apple M3 Max
-Block size    : 256 threads
-Grid size     : 128 groups
-Shared mem    : 49152 bytes (12288 floats)
-Inner iters   : 1000
-Warmup iters  : 5
-Timed iters   : 5
-
-no_conflict    :    8.123 ms  1540.12 GB/s
-conflict       :   95.456 ms   131.03 GB/s
-shared_mem_bw,no_conflict,8.123,1540.12
-shared_mem_bw,conflict,95.456,131.03
-
-Done.
-```
+- Each pattern emits one record per timed iteration — no averaging.
+- `time_ms` is the GPU event time for that launch; `host_time_ms` is the
+  host wall-clock around launch + sync.
+- `total_time_ms` is the sum of all emitted iterations' GPU event times
+  across every pattern that ran.
+- GB/s is not printed; it is derived downstream from `time_ms` and the
+  params in each record.
 
 ## Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `BLOCK_SIZE` | 256 | Threads per block / threadgroup |
-| `NUM_BLOCKS` | 128 | Number of blocks / threadgroups |
-| `INNER_ITERS` | 1000 | Inner-loop iterations per kernel launch |
-| `SMEM_FLOATS` | 12288 | Shared memory array size in floats (48 KB) |
-| `WARMUP_ITERS` | 5 | Outer warmup kernel launches |
-| `TIMED_ITERS` | 5 | Outer timed kernel launches |
+| `BENCH_PARAM_block_size` | 256 | Threads per block / threadgroup |
+| `BENCH_PARAM_num_blocks` | 128 | Number of blocks / threadgroups |
+| `BENCH_PARAM_inner_iters` | 1000 | Inner-loop iterations per kernel launch |
+| `BENCH_PARAM_access_pattern` | both | Pattern(s) to run (`no_conflict`, `conflict`, `both`) |
+| `BENCH_PARAM_num_warmup` | 3 | Outer warmup kernel launches (not timed) |
+| `BENCH_PARAM_num_iters` | 7 | Outer timed kernel launches, each recorded individually |
+| `SMEM_FLOATS` (compile-time) | 12288 | Shared memory array size in floats (48 KB) |
 
 ## Notes
 
-- Results are in SI gigabytes per second (1 GB = 10⁹ bytes).
-- Bandwidth accounts for both reads and writes:
-  `GB/s = 2 × SMEM_FLOATS × 4 × INNER_ITERS × NUM_BLOCKS / time_s / 1e9`
+- Bandwidth in SI gigabytes per second (1 GB = 10⁹ bytes) is derived
+  downstream from the recorded times, accounting for both reads and writes:
+  `GB/s = 2 × SMEM_FLOATS × 4 × inner_iters × num_blocks / time_s / 1e9`
 - The **no_conflict** kernel uses a simple stride-`blockDim.x` loop where
   consecutive threads access consecutive shared memory addresses.
 - The **conflict** kernel remaps indices so that within each warp, all 32

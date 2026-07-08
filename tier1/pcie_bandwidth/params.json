@@ -2,7 +2,7 @@
   "benchmark": "pcie_bandwidth",
   "tier": 1,
   "suite": "microbench",
-  "description": "Measures PCIe transfer bandwidth between host and device in three modes: unidirectional H2D, unidirectional D2H, and bidirectional (concurrent H2D+D2H on two streams). Uses pinned host memory for maximum throughput. Reports GB/s.",
+  "description": "Measures PCIe transfer bandwidth between host and device in three modes: unidirectional H2D, unidirectional D2H, and bidirectional (concurrent H2D+D2H on two streams). Uses pinned host memory for maximum throughput. Emits per-iteration GPU event time and host time records (total = sum of transfer times); GB/s is derived downstream.",
   "scaling_param": {
     "name": "buffer_size_mb",
     "description": "Transfer buffer size in MiB per direction; controls total data volume",

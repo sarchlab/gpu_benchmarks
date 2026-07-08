@@ -36,6 +36,7 @@
 #define hipMemset               cudaMemset
 #define hipMemsetAsync          cudaMemsetAsync
 #define hipMemGetInfo           cudaMemGetInfo
+#define hipMemcpyKind           cudaMemcpyKind
 #define hipMemcpyHostToDevice   cudaMemcpyHostToDevice
 #define hipMemcpyDeviceToHost   cudaMemcpyDeviceToHost
 #define hipMemcpyDeviceToDevice cudaMemcpyDeviceToDevice

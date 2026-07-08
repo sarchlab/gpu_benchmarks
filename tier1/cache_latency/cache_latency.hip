@@ -27,9 +27,6 @@
  *   measure all-miss (DRAM) latency, and the count is bounded so every point
  *   runs in seconds regardless of array size.
  *
- * Output:
- *   Latency in ns per access (steady-state; the cold fill lap is excluded).
- *
  * Usage:
  *   ./cache_latency [array_bytes]
  *
@@ -39,6 +36,14 @@
  *   BENCH_PARAM_measure_laps      (default 4 timed laps of steady-state hits)
  *   BENCH_PARAM_num_accesses      (overrides the timed-access count)
  *   BENCH_PARAM_rng_seed
+ *   BENCH_PARAM_num_warmup        (untimed cold-fill launches, default 3)
+ *   BENCH_PARAM_num_iters         (timed launches, each recorded, default 7)
+ *
+ * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
+ * the GPU event time and host wall-clock time, then a summary whose
+ * total_time_ms is the SUM of all iterations' GPU event times. Latency per
+ * access is derived downstream as time_ms*1e6 / num_accesses (both are in
+ * the record).
  */
 
 #include <cstdio>
@@ -49,21 +54,13 @@
 #include <algorithm>
 #include <random>
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 
 // ---------------------------------------------------------------------------
 // Error-checking macro
 // ---------------------------------------------------------------------------
 
-#define HIP_CHECK(call)                                                         \
-    do {                                                                        \
-        hipError_t _err = (call);                                               \
-        if (_err != hipSuccess) {                                               \
-            fprintf(stderr, "HIP error at %s:%d — %s\n",                       \
-                    __FILE__, __LINE__, hipGetErrorString(_err));               \
-            exit(EXIT_FAILURE);                                                 \
-        }                                                                       \
-    } while (0)
+#define HIP_CHECK(call) BENCH_TIMING_CHECK(call)
 
 // ---------------------------------------------------------------------------
 // Constants (defaults)
@@ -238,50 +235,42 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipMemcpy(d_arr, h_arr.data(), array_bytes,
                         hipMemcpyHostToDevice));
 
-    /* Untimed warm-up lap: makes the working set resident (so the timed run
-     * measures steady-state hits, not the cold fill) and loads the kernel code
-     * object. Capped at the largest cache, so the DRAM end pays only a partial
-     * fill it doesn't need anyway. Excluded from timing. */
-    pointer_chase_kernel<<<dim3(1), dim3(1)>>>(d_arr, start_idx, num_warmup, d_result);
-    HIP_CHECK(hipDeviceSynchronize());
+    /* Untimed warm-up launches: the first makes the working set resident (so
+     * timed runs measure steady-state hits, not the cold fill) and loads the
+     * kernel code object; later ones are cheap steady-state laps. Capped at
+     * the largest cache, so the DRAM end pays only a partial fill it doesn't
+     * need anyway. Excluded from timing. */
+    const int warmup_launches = bench_num_warmup();
+    const int num_iters       = bench_num_iters();
+    for (int w = 0; w < warmup_launches; ++w) {
+        pointer_chase_kernel<<<dim3(1), dim3(1)>>>(d_arr, start_idx, num_warmup, d_result);
+        HIP_CHECK(hipDeviceSynchronize());
+    }
 
-    /* Timed runs. */
-    hipEvent_t ev_start, ev_stop;
-    HIP_CHECK(hipEventCreate(&ev_start));
-    HIP_CHECK(hipEventCreate(&ev_stop));
+    char params[256];
+    snprintf(params, sizeof(params),
+             "\"array_bytes\":%zu,\"num_accesses\":%llu,"
+             "\"warmup_accesses\":%llu,\"measure_laps\":%u,"
+             "\"cacheline_bytes\":%u,\"rng_seed\":%u",
+             array_bytes, (unsigned long long)num_timed,
+             (unsigned long long)num_warmup, measure_laps,
+             cacheline_bytes, rng_seed);
 
-    HIP_CHECK(hipEventRecord(ev_start, 0));
-    pointer_chase_kernel<<<dim3(1), dim3(1)>>>(d_arr, start_idx, num_timed, d_result);
-    HIP_CHECK(hipEventRecord(ev_stop, 0));
-    HIP_CHECK(hipEventSynchronize(ev_stop));
+    /* Warmup is done separately above (it chases num_warmup cold-fill accesses,
+     * a different count than the timed num_timed), so run the timed loop with
+     * num_warmup=0. Each timed launch chases num_timed accesses and is recorded
+     * individually; the working set stays resident so every iteration measures
+     * the same steady state. */
+    double total_gpu_ms =
+        bench_run_loop("pointer_chase_kernel", 0, num_iters, params, [&]() {
+            pointer_chase_kernel<<<dim3(1), dim3(1)>>>(d_arr, start_idx, num_timed, d_result);
+        });
 
-    float total_ms = 0.0f;
-    HIP_CHECK(hipEventElapsedTime(&total_ms, ev_start, ev_stop));
-
-    /* Latency (ns) = total_time_ns / timed accesses (cold fill lap excluded) */
-    const double latency_ns = static_cast<double>(total_ms) * 1e6
-                              / static_cast<double>(num_timed);
-
-    fprintf(stderr, "Array %zu KB: latency = %.2f ns\n",
-            array_bytes / 1024, latency_ns);
-
-    /* JSON-lines output to stdout: kernel event */
-    printf("{\"type\":\"kernel\",\"name\":\"pointer_chase_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"array_bytes\":%zu,\"num_accesses\":%llu,"
-           "\"warmup_accesses\":%llu,\"measure_laps\":%u,"
-           "\"cacheline_bytes\":%u,\"rng_seed\":%u}}\n",
-           (double)total_ms, array_bytes, (unsigned long long)num_timed,
-           (unsigned long long)num_warmup, measure_laps,
-           cacheline_bytes, rng_seed);
-
-    /* JSON-lines output to stdout: summary */
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"latency_ns\",\"value\":%.2f}]}\n",
-           (double)total_ms, latency_ns);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
+            total_gpu_ms, num_iters);
 
     /* Cleanup. */
-    HIP_CHECK(hipEventDestroy(ev_start));
-    HIP_CHECK(hipEventDestroy(ev_stop));
     HIP_CHECK(hipFree(d_arr));
     HIP_CHECK(hipFree(d_result));
 

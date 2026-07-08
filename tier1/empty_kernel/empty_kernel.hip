@@ -4,16 +4,16 @@
  * HIP port of the empty_kernel launch-overhead microbenchmark.
  * Compiles for both AMD (ROCm) and NVIDIA (HIP-on-CUDA) targets.
  *
- * Measures the time to launch a single empty kernel, averaged over a fixed
- * number of iterations. The kernel does no work, so the measured time is
- * pure launch / dispatch / grid-scheduling cost. Sweeping num_blocks and
- * block_size shows how that overhead grows with grid geometry.
+ * Measures the time to launch a single empty kernel. The kernel does no
+ * work, so the measured time is pure launch / dispatch / grid-scheduling
+ * cost. Sweeping num_blocks and block_size shows how that overhead grows
+ * with grid geometry.
  *
- * Two timings per launch:
- *   - launch_sync_us : host wall-clock for launch + device synchronize —
- *                      the full round trip as seen by the host.
- *   - gpu_event_us   : GPU event time bracketing the launch — the
- *                      device-side dispatch / grid-scheduling cost.
+ * Two timings per launch, recorded for every iteration:
+ *   - host_time_ms : host wall-clock for launch + completion — the full
+ *                    round trip as seen by the host.
+ *   - time_ms      : GPU event time bracketing the launch — the
+ *                    device-side dispatch / grid-scheduling cost.
  *
  * Usage:
  *   ./empty_kernel [num_blocks] [block_size]
@@ -21,35 +21,23 @@
  * Environment variables (override argv):
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_block_size
+ *   BENCH_PARAM_num_warmup   (warmup launches, default 3)
+ *   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
+ *
+ * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
+ * the GPU event time and host wall-clock time, then a summary whose
+ * total_time_ms is the SUM of all iterations' GPU event times.
  */
 
 #include <cstdio>
 #include <cstdlib>
-#include <chrono>
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 
-#define HIP_CHECK(call)                                                         \
-    do {                                                                        \
-        hipError_t _err = (call);                                               \
-        if (_err != hipSuccess) {                                               \
-            fprintf(stderr, "HIP error at %s:%d — %s\n",                       \
-                    __FILE__, __LINE__, hipGetErrorString(_err));               \
-            exit(EXIT_FAILURE);                                                 \
-        }                                                                       \
-    } while (0)
-
-using clock_type = std::chrono::high_resolution_clock;
-static double us_since(const clock_type::time_point &t0)
-{
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(
-               clock_type::now() - t0).count() / 1e3;
-}
+#define HIP_CHECK(call) BENCH_TIMING_CHECK(call)
 
 static const int DEFAULT_NUM_BLOCKS = 1024;
 static const int DEFAULT_BLOCK_SIZE = 256;
-static const int NUM_WARMUP         = 10;
-static const int NUM_ITERS          = 100;
 
 __global__ void empty_kernel() {}
 
@@ -71,6 +59,9 @@ int main(int argc, char *argv[])
     else if (argc >= 3) block_size = atoi(argv[2]);
     if (block_size <= 0 || block_size > 1024) { fprintf(stderr, "Invalid block_size\n"); return EXIT_FAILURE; }
 
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
+
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     hipDeviceProp_t prop;
@@ -79,52 +70,21 @@ int main(int argc, char *argv[])
     fprintf(stderr, "=== empty_kernel launch-overhead microbenchmark ===\n");
     fprintf(stderr, "Device : %s (id=%d, %d CUs)\n", prop.name, device_id, prop.multiProcessorCount);
     fprintf(stderr, "Grid   : %d blocks x %d threads\n", num_blocks, block_size);
-    fprintf(stderr, "Iters  : %d (+%d warmup)\n", NUM_ITERS, NUM_WARMUP);
+    fprintf(stderr, "Iters  : %d (+%d warmup)\n", num_iters, num_warmup);
 
-    for (int w = 0; w < NUM_WARMUP; ++w) {
-        empty_kernel<<<dim3(num_blocks), dim3(block_size)>>>();
-        HIP_CHECK(hipDeviceSynchronize());
-    }
+    char params[96];
+    snprintf(params, sizeof(params), "\"num_blocks\":%d,\"block_size\":%d",
+             num_blocks, block_size);
 
-    /* Host wall-clock: launch + synchronize round trip. */
-    auto t0 = clock_type::now();
-    for (int i = 0; i < NUM_ITERS; ++i) {
-        empty_kernel<<<dim3(num_blocks), dim3(block_size)>>>();
-        HIP_CHECK(hipDeviceSynchronize());
-    }
-    const double launch_sync_us = us_since(t0) / NUM_ITERS;
+    /* Warmup + timed iterations, each recorded individually. */
+    double total_gpu_ms =
+        bench_run_loop("empty_kernel", num_warmup, num_iters, params, [&]() {
+            empty_kernel<<<dim3(num_blocks), dim3(block_size)>>>();
+        });
 
-    /* GPU events: device-side time bracketing each launch. */
-    hipEvent_t ev_start, ev_stop;
-    HIP_CHECK(hipEventCreate(&ev_start));
-    HIP_CHECK(hipEventCreate(&ev_stop));
-
-    double gpu_us_sum = 0.0;
-    for (int i = 0; i < NUM_ITERS; ++i) {
-        HIP_CHECK(hipEventRecord(ev_start, 0));
-        empty_kernel<<<dim3(num_blocks), dim3(block_size)>>>();
-        HIP_CHECK(hipEventRecord(ev_stop, 0));
-        HIP_CHECK(hipEventSynchronize(ev_stop));
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));
-        gpu_us_sum += ms * 1e3;
-    }
-    const double gpu_event_us = gpu_us_sum / NUM_ITERS;
-
-    HIP_CHECK(hipEventDestroy(ev_start));
-    HIP_CHECK(hipEventDestroy(ev_stop));
-
-    fprintf(stderr, "Grid %d x %d: launch+sync = %.2f us, gpu event = %.2f us\n",
-            num_blocks, block_size, launch_sync_us, gpu_event_us);
-
-    printf("{\"type\":\"kernel\",\"name\":\"empty_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_blocks\":%d,\"block_size\":%d}}\n",
-           gpu_event_us / 1e3, num_blocks, block_size);
-
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"launch_sync_us\",\"value\":%.3f},"
-           "{\"name\":\"gpu_event_us\",\"value\":%.3f}]}\n",
-           gpu_event_us / 1e3, launch_sync_us, gpu_event_us);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d launches\n",
+            total_gpu_ms, num_iters);
 
     fprintf(stderr, "\nDone.\n");
     return EXIT_SUCCESS;

@@ -10,6 +10,9 @@ Because each MAD counts as **2 integer operations** (1 multiply + 1 add), and
 all values live in registers (no memory traffic), the result directly reflects
 the arithmetic throughput of the GPU rather than memory bandwidth.
 
+The binary emits raw per-iteration kernel times; GIOPS is derived downstream
+from each record's `time_ms` and params:
+
 ```
 GIOPS = (num_threads × mads_per_thread × 2) / elapsed_seconds / 1e9
 ```
@@ -80,63 +83,36 @@ make clean
 
 ## Example Output
 
-### CUDA / HIP
+Human-readable diagnostic output goes to **stderr**; **stdout** carries JSON
+lines — one record per timed iteration plus a final summary:
 
 ```
-Device          : NVIDIA RTX 4090 (id=0)
-SMs             : 128
-Grid            : 1024 blocks × 256 threads = 262144 total threads
-MADs / thread   : 4096
-Warmup iters    : 5
-Timed iters     : 5
-
-Elapsed time    : 2.620 ms (0.524 ms / kernel)
-Total INT ops   : 10737418240
-INT32 Throughput : 4097.82 GIOPS
-
-Done.
+{"type":"kernel","name":"int32_mad_kernel","iter":0,"time_ms":0.524128,"host_time_ms":0.598342,"params":{"mads_per_thread":4096,"num_blocks":1,"threads_per_block":256}}
+...
+{"type":"summary","total_time_ms":3.668901}
 ```
 
-### Metal (Apple M3)
-
-```
-Device          : Apple M3 Max
-Grid            : 1024 blocks × 256 threads = 262144 total threads
-MADs / thread   : 4096
-Warmup iters    : 5
-Timed iters     : 5
-
-Elapsed time    : 4.307 ms (0.861 ms / kernel)
-Total INT ops   : 10737418240
-INT32 Throughput : 2493.11 GIOPS
-
-Done.
-```
-
-## CSV Output
-
-The benchmark writes a single CSV line to **stdout** for machine parsing:
-
-```
-int32_throughput,<total_ops>,<time_ms>,<GIOPS>
-```
-
-All human-readable diagnostic output goes to **stderr**.
+- `time_ms` is the GPU event time for that single kernel launch;
+  `host_time_ms` is the host wall-clock around launch + sync.
+- Every timed iteration is emitted individually — no averaging.
+- `total_time_ms` is the sum of all iterations' GPU event times.
+- GIOPS is not printed; it is derived downstream from `time_ms` and params.
 
 ## Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `mads_per_thread` (argv[1]) | 4096 | MAD iterations per thread (rounded to nearest multiple of 4) |
-| `THREADS_PER_BLOCK` (compile-time) | 256 | Threads per block / threadgroup |
-| `NUM_BLOCKS` (compile-time) | 1024 | Number of blocks in the dispatch grid |
-| `NUM_WARMUP` (compile-time) | 5 | Warmup kernel launches before timing |
-| `NUM_ITERATIONS` (compile-time) | 5 | Kernel repetitions averaged for timing |
+| `BENCH_PARAM_mads_per_thread` (or argv[1]) | 4096 | MAD iterations per thread (rounded to nearest multiple of 4) |
+| `BENCH_PARAM_threads_per_block` | 256 | Threads per block / threadgroup |
+| `BENCH_PARAM_num_blocks` | 1024 | Number of blocks in the dispatch grid (params.json pins 1 for harness sweeps) |
+| `BENCH_PARAM_num_warmup` | 3 | Warm-up kernel launches (not timed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed kernel launches, each recorded individually |
 
 ## Notes
 
-- Results are in GIOPS (10⁹ integer operations per second).
-- Five warm-up kernel launches are performed before timing to exclude driver
+- GIOPS (10⁹ integer operations per second) is derived downstream from the
+  recorded times; the binary itself only emits raw times.
+- Warm-up kernel launches are performed before timing to exclude driver
   and JIT compilation overhead.
 - **CUDA/HIP**: CUDA/HIP events are used for high-resolution GPU-side timing.
 - **Metal**: `mach_absolute_time()` wall-clock timing is used; command buffers

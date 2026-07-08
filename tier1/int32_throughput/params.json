@@ -2,7 +2,7 @@
   "benchmark": "int32_throughput",
   "tier": 1,
   "suite": "microbench",
-  "description": "Measures peak 32-bit integer (INT32) compute throughput using a long chain of integer multiply-add (MAD) instructions. All values live in registers; reports GIOPS.",
+  "description": "Measures peak 32-bit integer (INT32) compute throughput using a long chain of integer multiply-add (MAD) instructions. All values live in registers. Emits per-iteration GPU event time and host time records (total = sum of kernel times); GIOPS is derived downstream.",
   "scaling_param": {
     "name": "mads_per_thread",
     "description": "Number of integer MAD operations per thread per kernel invocation; controls total compute work",

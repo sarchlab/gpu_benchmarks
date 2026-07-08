@@ -12,7 +12,9 @@ atomic operations are benchmarked:
 | atomicCAS   | `atomicCAS()`      | `atomic_compare_exchange_weak_explicit()`     |
 | atomicMin   | `atomicMin()`      | `atomic_fetch_min_explicit()`                 |
 
-The achieved throughput in Giga-Operations per second is:
+The binary reports raw per-iteration kernel times; throughput in
+Giga-Operations per second is derived downstream from the recorded `time_ms`
+and params:
 
 ```
 Gops = (num_threads × ops_per_thread) / elapsed_seconds / 1e9
@@ -32,8 +34,9 @@ Gops = (num_threads × ops_per_thread) / elapsed_seconds / 1e9
   atomically update a single global memory location. This measures the peak
   throughput of the GPU's atomic hardware units (L2 cache atomics on NVIDIA,
   dedicated atomic units on AMD/Apple).
-- Each operation type is benchmarked independently with 5 warmup and 5 timed
-  iterations for stable results.
+- Each operation type is benchmarked independently with `BENCH_PARAM_num_warmup`
+  (default 3) warmup launches and `BENCH_PARAM_num_iters` (default 7) timed
+  iterations; every timed iteration is recorded individually.
 
 ## Build
 
@@ -85,46 +88,38 @@ make clean
 
 ## Output Format
 
-### Human-readable (stderr)
+Progress and device info go to stderr; stdout carries JSON lines, one record
+per timed iteration plus a final summary:
 
 ```
-Device          : Apple M3 Max
-Grid            : 1024 blocks × 256 threads = 262144 total threads
-Ops / thread    : 1024
-Warmup iters    : 5
-Timed iters     : 5
-
-atomicAdd    : 125.432 ms total, 25.086 ms/kernel, 10.72 Gops/s
-atomicCAS    : 198.765 ms total, 39.753 ms/kernel, 6.78 Gops/s
-atomicMin    : 134.210 ms total, 26.842 ms/kernel, 10.03 Gops/s
-
-Done.
+{"type":"kernel","name":"atomicAdd_kernel","iter":0,"time_ms":25.086432,"host_time_ms":25.201004,"params":{"ops_per_thread":1024,"num_blocks":2048,"threads_per_block":256,"atomic_op":"atomicAdd"}}
+...
+{"type":"summary","total_time_ms":175.605024}
 ```
 
-### CSV (stdout)
-
-```
-atomic_ops,atomicAdd_global,25.086,10.72
-atomic_ops,atomicCAS_global,39.753,6.78
-atomic_ops,atomicMin_global,26.842,10.03
-```
-
-CSV columns: `benchmark_name,operation_memory,avg_time_ms,Gops`
+- `time_ms` is the GPU event time for that single kernel launch;
+  `host_time_ms` is the host wall-clock around launch + sync.
+- Every iteration is emitted individually — no averaging or min-keeping.
+- `total_time_ms` is the sum of all iterations' GPU event times.
+- No derived metrics are printed; Gops/s is computed downstream from
+  `time_ms` and the params in each record.
 
 ## Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `ops_per_thread` (argv[1]) | 1024 | Number of atomic operations each thread performs |
-| `THREADS_PER_BLOCK` (compile-time) | 256 | Threads per block / threadgroup |
-| `NUM_BLOCKS` (compile-time) | 1024 | Number of blocks in the dispatch grid |
-| `NUM_WARMUP` (compile-time) | 5 | Warm-up kernel launches (not timed) |
-| `NUM_ITERATIONS` (compile-time) | 5 | Timed kernel repetitions for averaging |
+| `BENCH_PARAM_ops_per_thread` (or argv[1]) | 1024 | Number of atomic operations each thread performs |
+| `BENCH_PARAM_threads_per_block` | 256 | Threads per block / threadgroup |
+| `BENCH_PARAM_num_blocks` | 2048 | Number of blocks in the dispatch grid |
+| `BENCH_PARAM_atomic_op` | atomicAdd | Atomic operation to benchmark (`atomicAdd`, `atomicCAS`, `atomicMin`) |
+| `BENCH_PARAM_num_warmup` | 3 | Warm-up kernel launches (not timed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed kernel launches, each recorded individually |
 
 ## Notes
 
-- Results are in Gops/s (10⁹ atomic operations per second).
-- 5 warm-up launches are performed before timing to exclude driver and JIT
+- Gops/s (10⁹ atomic operations per second) is derived downstream from the
+  recorded times; the binary itself only emits raw times.
+- Warm-up launches are performed before timing to exclude driver and JIT
   compilation overhead.
 - **CUDA/HIP**: HIP events are used for high-resolution GPU-side timing.
 - **Metal**: `mach_absolute_time()` wall-clock timing is used; command buffers

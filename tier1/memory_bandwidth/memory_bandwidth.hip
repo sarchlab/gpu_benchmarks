@@ -4,13 +4,16 @@
  * HIP port of the memory_bandwidth microbenchmark.
  * Compiles for both AMD (ROCm) and NVIDIA (HIP-on-CUDA) targets.
  *
- * Measures GPU memory bandwidth in three directions:
+ * Measures GPU memory copy time in three directions:
  *   - Host-to-Device (H2D)
  *   - Device-to-Host (D2H)
  *   - Device-to-Device (D2D)
  *
- * Each transfer is timed with HIP events and repeated multiple times to
- * obtain a stable average.  Results are reported in GB/s (10^9 bytes/s).
+ * Each hipMemcpyAsync is timed with HIP events (device time) and host
+ * wall-clock. Warmup copies absorb one-time costs (e.g. MI300A charges a
+ * large DMA-registration cost to the first transfer touching a fresh pinned
+ * buffer); every timed iteration is then recorded individually, so any
+ * residual first-iteration effect stays visible in the data.
  *
  * Usage:
  *   ./memory_bandwidth [buffer_size_mb]
@@ -19,155 +22,32 @@
  *   BENCH_PARAM_buffer_size_mb
  *   BENCH_PARAM_transfer_type     (h2d, d2h, d2d, all)
  *   BENCH_PARAM_use_pinned_memory (true, false)
+ *   BENCH_PARAM_num_warmup        (warmup copies per direction, default 3)
+ *   BENCH_PARAM_num_iters         (timed copies per direction, each recorded, default 7)
+ *
+ * Output: one {"type":"kernel",...} JSON line per timed copy carrying the
+ * GPU event time and host wall-clock time, then a summary whose
+ * total_time_ms is the SUM of all recorded copies' GPU event times.
+ * Bandwidth is derived downstream from buffer_size_mb and time_ms.
  */
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 
 // ---------------------------------------------------------------------------
 // Error-checking helpers
 // ---------------------------------------------------------------------------
 
-#define HIP_CHECK(call)                                                        \
-    do {                                                                       \
-        hipError_t _err = (call);                                              \
-        if (_err != hipSuccess) {                                              \
-            fprintf(stderr, "HIP error at %s:%d — %s\n",                      \
-                    __FILE__, __LINE__, hipGetErrorString(_err));              \
-            exit(EXIT_FAILURE);                                                \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(call) BENCH_TIMING_CHECK(call)
 
 // ---------------------------------------------------------------------------
 // Constants (defaults)
 // ---------------------------------------------------------------------------
 
-static const int    DEFAULT_BUFFER_MB      = 256;
-static const int    DEFAULT_NUM_WARMUP     = 5;
-// Report the peak bandwidth over several timed iterations. A single timed copy
-// is unreliable on some platforms (e.g. MI300A charges a large one-time DMA
-// registration cost to the first transfer that touches a freshly-allocated
-// pinned buffer), which collapses the measured D2H bandwidth. Taking the best
-// of many iterations filters that one-time cost out, matching rocm-bandwidth-test.
-static const int    DEFAULT_NUM_ITERS      = 20;
-static const double BYTES_PER_GB           = 1e9;
-
-// ---------------------------------------------------------------------------
-// Result struct
-// ---------------------------------------------------------------------------
-
-struct BenchResult {
-    double bandwidth_gbps;
-    double total_ms;
-};
-
-// ---------------------------------------------------------------------------
-// Timing helpers
-// ---------------------------------------------------------------------------
-
-static float hip_elapsed_ms(hipEvent_t start, hipEvent_t stop)
-{
-    float ms = 0.0f;
-    HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-    return ms;
-}
-
-// ---------------------------------------------------------------------------
-// Benchmark functions
-// ---------------------------------------------------------------------------
-
-static BenchResult benchmark_h2d(const void *h_buf, void *d_buf,
-                                  size_t bytes,
-                                  int num_warmup)
-{
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
-
-    for (int w = 0; w < num_warmup; ++w) {
-        HIP_CHECK(hipMemcpyAsync(d_buf, h_buf, bytes, hipMemcpyHostToDevice, 0));
-    }
-    HIP_CHECK(hipDeviceSynchronize());
-
-    float total_ms = -1.0f;
-    for (int it = 0; it < DEFAULT_NUM_ITERS; ++it) {
-        HIP_CHECK(hipEventRecord(start, 0));
-        HIP_CHECK(hipMemcpyAsync(d_buf, h_buf, bytes, hipMemcpyHostToDevice, 0));
-        HIP_CHECK(hipEventRecord(stop, 0));
-        HIP_CHECK(hipEventSynchronize(stop));
-        float ms = hip_elapsed_ms(start, stop);
-        if (total_ms < 0.0f || ms < total_ms) total_ms = ms;
-    }
-    double bw_GBs  = static_cast<double>(bytes)
-                     / (total_ms * 1e-3) / BYTES_PER_GB;
-
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
-    return {bw_GBs, (double)total_ms};
-}
-
-static BenchResult benchmark_d2h(const void *d_buf, void *h_buf,
-                                  size_t bytes,
-                                  int num_warmup)
-{
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
-
-    for (int w = 0; w < num_warmup; ++w) {
-        HIP_CHECK(hipMemcpyAsync(h_buf, d_buf, bytes, hipMemcpyDeviceToHost, 0));
-    }
-    HIP_CHECK(hipDeviceSynchronize());
-
-    float total_ms = -1.0f;
-    for (int it = 0; it < DEFAULT_NUM_ITERS; ++it) {
-        HIP_CHECK(hipEventRecord(start, 0));
-        HIP_CHECK(hipMemcpyAsync(h_buf, d_buf, bytes, hipMemcpyDeviceToHost, 0));
-        HIP_CHECK(hipEventRecord(stop, 0));
-        HIP_CHECK(hipEventSynchronize(stop));
-        float ms = hip_elapsed_ms(start, stop);
-        if (total_ms < 0.0f || ms < total_ms) total_ms = ms;
-    }
-    double bw_GBs  = static_cast<double>(bytes)
-                     / (total_ms * 1e-3) / BYTES_PER_GB;
-
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
-    return {bw_GBs, (double)total_ms};
-}
-
-static BenchResult benchmark_d2d(const void *d_src, void *d_dst,
-                                  size_t bytes,
-                                  int num_warmup)
-{
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
-
-    for (int w = 0; w < num_warmup; ++w) {
-        HIP_CHECK(hipMemcpyAsync(d_dst, d_src, bytes, hipMemcpyDeviceToDevice, 0));
-    }
-    HIP_CHECK(hipDeviceSynchronize());
-
-    float total_ms = -1.0f;
-    for (int it = 0; it < DEFAULT_NUM_ITERS; ++it) {
-        HIP_CHECK(hipEventRecord(start, 0));
-        HIP_CHECK(hipMemcpyAsync(d_dst, d_src, bytes, hipMemcpyDeviceToDevice, 0));
-        HIP_CHECK(hipEventRecord(stop, 0));
-        HIP_CHECK(hipEventSynchronize(stop));
-        float ms = hip_elapsed_ms(start, stop);
-        if (total_ms < 0.0f || ms < total_ms) total_ms = ms;
-    }
-    double bw_GBs  = static_cast<double>(bytes)
-                     / (total_ms * 1e-3) / BYTES_PER_GB;
-
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
-    return {bw_GBs, (double)total_ms};
-}
+static const int DEFAULT_BUFFER_MB = 256;
 
 // ---------------------------------------------------------------------------
 // main
@@ -192,16 +72,24 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-
+    /* Validate string params against their known sets, so the values echoed
+     * into the JSON records are always canonical literals (no escaping
+     * needed and no malformed output from arbitrary env content). */
     const char* transfer_type = "all";
     env_val = getenv("BENCH_PARAM_transfer_type");
     if (env_val) transfer_type = env_val;
+    if (strcmp(transfer_type, "all") != 0 && strcmp(transfer_type, "h2d") != 0 &&
+        strcmp(transfer_type, "d2h") != 0 && strcmp(transfer_type, "d2d") != 0) {
+        fprintf(stderr, "Invalid transfer_type '%s' (use h2d, d2h, d2d, all)\n", transfer_type);
+        return EXIT_FAILURE;
+    }
 
     const char* use_pinned_memory = "true";
     env_val = getenv("BENCH_PARAM_use_pinned_memory");
     if (env_val) use_pinned_memory = env_val;
 
-    int num_warmup = DEFAULT_NUM_WARMUP;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     bool pinned = (strcmp(use_pinned_memory, "false") != 0);
     bool run_h2d = (strcmp(transfer_type, "all") == 0 || strcmp(transfer_type, "h2d") == 0);
@@ -219,7 +107,7 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Transfer size: %d MiB (%zu bytes)\n", buffer_mb, bytes);
     fprintf(stderr, "Transfer type: %s\n", transfer_type);
     fprintf(stderr, "Pinned memory: %s\n", use_pinned_memory);
-    fprintf(stderr, "Warmup iters: %d\n\n", num_warmup);
+    fprintf(stderr, "Warmup / iters: %d / %d per direction\n\n", num_warmup, num_iters);
 
     /* Allocate host memory. */
     void *h_src = nullptr;
@@ -245,72 +133,34 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipMalloc(&d_src, bytes));
     HIP_CHECK(hipMalloc(&d_dst, bytes));
 
+    /* Setup copy — outside any timed region. */
     HIP_CHECK(hipMemcpy(d_src, h_src, bytes, hipMemcpyHostToDevice));
 
-    double total_time_ms = 0.0;
-    double h2d_bw = 0.0, d2h_bw = 0.0, d2d_bw = 0.0;
+    char params[192];
+    snprintf(params, sizeof(params),
+             "\"buffer_size_mb\":%d,\"transfer_type\":\"%s\","
+             "\"use_pinned_memory\":\"%s\"",
+             buffer_mb, transfer_type, pinned ? "true" : "false");
 
-    /* ----- H2D ----- */
+    double total_gpu_ms = 0.0;
     if (run_h2d) {
-        BenchResult r = benchmark_h2d(h_src, d_src, bytes, num_warmup);
-        h2d_bw = r.bandwidth_gbps;
-        
-        total_time_ms += r.total_ms;
-        fprintf(stderr, "H2D bandwidth : %8.2f GB/s\n", h2d_bw);
-
-        printf("{\"type\":\"kernel\",\"name\":\"memcpy_h2d\",\"time_ms\":%.6f,"
-               "\"params\":{\"buffer_size_mb\":%d,"
-               "\"transfer_type\":\"%s\",\"use_pinned_memory\":\"%s\"}}\n",
-               r.total_ms, buffer_mb, transfer_type, use_pinned_memory);
-    }
-
-    /* ----- D2H ----- */
-    if (run_d2h) {
-        BenchResult r = benchmark_d2h(d_src, h_dst, bytes, num_warmup);
-        d2h_bw = r.bandwidth_gbps;
-        
-        total_time_ms += r.total_ms;
-        fprintf(stderr, "D2H bandwidth : %8.2f GB/s\n", d2h_bw);
-
-        printf("{\"type\":\"kernel\",\"name\":\"memcpy_d2h\",\"time_ms\":%.6f,"
-               "\"params\":{\"buffer_size_mb\":%d,"
-               "\"transfer_type\":\"%s\",\"use_pinned_memory\":\"%s\"}}\n",
-               r.total_ms, buffer_mb, transfer_type, use_pinned_memory);
-    }
-
-    /* ----- D2D ----- */
-    if (run_d2d) {
-        BenchResult r = benchmark_d2d(d_src, d_dst, bytes, num_warmup);
-        d2d_bw = r.bandwidth_gbps;
-        
-        total_time_ms += r.total_ms;
-        fprintf(stderr, "D2D bandwidth : %8.2f GB/s\n", d2d_bw);
-
-        printf("{\"type\":\"kernel\",\"name\":\"memcpy_d2d\",\"time_ms\":%.6f,"
-               "\"params\":{\"buffer_size_mb\":%d,"
-               "\"transfer_type\":\"%s\",\"use_pinned_memory\":\"%s\"}}\n",
-               r.total_ms, buffer_mb, transfer_type, use_pinned_memory);
-    }
-
-    /* Summary with bandwidth metrics for each direction tested. */
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,\"metrics\":[", total_time_ms);
-    bool first_metric = true;
-    if (run_h2d) {
-        if (!first_metric) printf(",");
-        printf("{\"name\":\"h2d_bandwidth_gbps\",\"value\":%.2f}", h2d_bw);
-        first_metric = false;
+        total_gpu_ms += bench_run_memcpy("memcpy_h2d", d_src, h_src, bytes,
+                                         hipMemcpyHostToDevice,
+                                         num_warmup, num_iters, params);
     }
     if (run_d2h) {
-        if (!first_metric) printf(",");
-        printf("{\"name\":\"d2h_bandwidth_gbps\",\"value\":%.2f}", d2h_bw);
-        first_metric = false;
+        total_gpu_ms += bench_run_memcpy("memcpy_d2h", h_dst, d_src, bytes,
+                                         hipMemcpyDeviceToHost,
+                                         num_warmup, num_iters, params);
     }
     if (run_d2d) {
-        if (!first_metric) printf(",");
-        printf("{\"name\":\"d2d_bandwidth_gbps\",\"value\":%.2f}", d2d_bw);
-        first_metric = false;
+        total_gpu_ms += bench_run_memcpy("memcpy_d2d", d_dst, d_src, bytes,
+                                         hipMemcpyDeviceToDevice,
+                                         num_warmup, num_iters, params);
     }
-    printf("]}\n");
+
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     /* Clean up. */
     if (pinned) {

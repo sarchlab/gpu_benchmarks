@@ -104,7 +104,7 @@ lines — one record per timed iteration plus a final summary:
 |-----------|---------|-------------|
 | `BENCH_PARAM_mads_per_thread` (or argv[1]) | 4096 | MAD iterations per thread (rounded to nearest multiple of 4) |
 | `BENCH_PARAM_threads_per_block` | 256 | Threads per block / threadgroup |
-| `BENCH_PARAM_num_blocks` | 1 | Number of blocks in the dispatch grid |
+| `BENCH_PARAM_num_blocks` | 1024 | Number of blocks in the dispatch grid (params.json pins 1 for harness sweeps) |
 | `BENCH_PARAM_num_warmup` | 3 | Warm-up kernel launches (not timed) |
 | `BENCH_PARAM_num_iters` | 7 | Timed kernel launches, each recorded individually |
 

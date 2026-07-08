@@ -66,15 +66,9 @@ using namespace nvcuda;
 #define gpuMemcpyHostToDevice  cudaMemcpyHostToDevice
 #define gpuMemcpyDeviceToHost  cudaMemcpyDeviceToHost
 #define gpuDeviceSynchronize   cudaDeviceSynchronize
-#define gpuEventCreate         cudaEventCreate
-#define gpuEventRecord         cudaEventRecord
-#define gpuEventSynchronize    cudaEventSynchronize
-#define gpuEventElapsedTime    cudaEventElapsedTime
-#define gpuEventDestroy        cudaEventDestroy
 #define gpuGetDevice           cudaGetDevice
 #define gpuGetDeviceProperties cudaGetDeviceProperties
 
-typedef cudaEvent_t      gpuEvent_t;
 typedef cudaDeviceProp   gpuDeviceProp_t;
 
 #else  /* USE_ROCM (default) */
@@ -100,15 +94,9 @@ typedef cudaDeviceProp   gpuDeviceProp_t;
 #define gpuMemcpyHostToDevice  hipMemcpyHostToDevice
 #define gpuMemcpyDeviceToHost  hipMemcpyDeviceToHost
 #define gpuDeviceSynchronize   hipDeviceSynchronize
-#define gpuEventCreate         hipEventCreate
-#define gpuEventRecord         hipEventRecord
-#define gpuEventSynchronize    hipEventSynchronize
-#define gpuEventElapsedTime    hipEventElapsedTime
-#define gpuEventDestroy        hipEventDestroy
 #define gpuGetDevice           hipGetDevice
 #define gpuGetDeviceProperties hipGetDeviceProperties
 
-typedef hipEvent_t       gpuEvent_t;
 typedef hipDeviceProp_t  gpuDeviceProp_t;
 
 #endif
@@ -222,35 +210,13 @@ static double benchmark_kernel(const char *kernel_name, const char *precision_st
                                int matrix_dim,
                                LaunchFn launch_fn)
 {
-    /* Warmup launches — each synced. */
-    for (int i = 0; i < num_warmup; ++i) {
-        launch_fn();
-        GPU_CHECK(gpuDeviceSynchronize());
-    }
-
     char params[128];
     snprintf(params, sizeof(params),
              "\"matrix_dim\":%d,\"precision\":\"%s\"",
              matrix_dim, precision_str);
 
-    /* Timed iterations — each recorded individually. */
-    bench_timer_t timer;
-    bench_timer_create(&timer);
-
-    double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        bench_lap_begin(&timer, 0);
-        launch_fn();
-        bench_lap_t lap = bench_lap_end(&timer, 0);
-
-        bench_emit_iter(kernel_name, i, &lap, params);
-        total_gpu_ms += lap.gpu_ms;
-        fprintf(stderr, "%-8s iter %d: gpu = %.3f ms, host = %.3f ms\n",
-                precision_str, i, lap.gpu_ms, lap.host_ms);
-    }
-
-    bench_timer_destroy(&timer);
-    return total_gpu_ms;
+    return bench_run_loop(kernel_name, num_warmup, num_iters, params,
+                          launch_fn);
 }
 
 // ---------------------------------------------------------------------------

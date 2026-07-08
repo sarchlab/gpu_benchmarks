@@ -36,22 +36,23 @@
 #define BENCH_DEFAULT_NUM_WARMUP 3
 #define BENCH_DEFAULT_NUM_ITERS  7
 
-static inline int bench_env_int(const char *name, int fallback)
+static inline int bench_env_int(const char *name, int fallback, int min_val)
 {
     const char *v = getenv(name);
     if (!v || !*v) return fallback;
     int n = atoi(v);
-    return n > 0 ? n : fallback;
+    return n >= min_val ? n : fallback;
 }
 
+/* Warmup may legitimately be 0 (e.g. trace collection); iters must be >= 1. */
 static inline int bench_num_warmup(void)
 {
-    return bench_env_int("BENCH_PARAM_num_warmup", BENCH_DEFAULT_NUM_WARMUP);
+    return bench_env_int("BENCH_PARAM_num_warmup", BENCH_DEFAULT_NUM_WARMUP, 0);
 }
 
 static inline int bench_num_iters(void)
 {
-    return bench_env_int("BENCH_PARAM_num_iters", BENCH_DEFAULT_NUM_ITERS);
+    return bench_env_int("BENCH_PARAM_num_iters", BENCH_DEFAULT_NUM_ITERS, 1);
 }
 
 /* One iteration's measurement. */
@@ -133,6 +134,57 @@ static inline void bench_emit_iter(const char *name, int iter,
 static inline void bench_emit_summary(double total_gpu_ms)
 {
     printf("{\"type\":\"summary\",\"total_time_ms\":%.6f}\n", total_gpu_ms);
+}
+
+/**
+ * bench_run_loop — the measurement contract in one place.
+ *
+ * Warm up `num_warmup` times (each launch synced), then run `num_iters`
+ * recorded iterations. `launch` is a callable that enqueues exactly the
+ * operation under test on the null stream (a kernel launch or an async
+ * copy) and nothing else. Emits one JSON record per iteration plus a
+ * per-iteration stderr line, and returns the sum of the recorded GPU
+ * event times (ms) for the caller to accumulate into the summary.
+ */
+template <typename LaunchFn>
+static inline double bench_run_loop(const char *name, int num_warmup,
+                                    int num_iters, const char *params,
+                                    LaunchFn launch)
+{
+    for (int w = 0; w < num_warmup; ++w) {
+        launch();
+        BENCH_TIMING_CHECK(hipDeviceSynchronize());
+    }
+
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        bench_lap_begin(&timer, 0);
+        launch();
+        bench_lap_t lap = bench_lap_end(&timer, 0);
+
+        bench_emit_iter(name, i, &lap, params);
+        total_gpu_ms += lap.gpu_ms;
+        fprintf(stderr, "%s iter %d: gpu = %.3f ms, host = %.3f ms\n",
+                name, i, lap.gpu_ms, lap.host_ms);
+    }
+
+    bench_timer_destroy(&timer);
+    return total_gpu_ms;
+}
+
+/** bench_run_memcpy — shared runner for memcpy-based benchmarks
+ *  (memory_bandwidth, pcie_bandwidth unidirectional tests). */
+static inline double bench_run_memcpy(const char *name, void *dst,
+                                      const void *src, size_t bytes,
+                                      hipMemcpyKind kind, int num_warmup,
+                                      int num_iters, const char *params)
+{
+    return bench_run_loop(name, num_warmup, num_iters, params, [&]() {
+        BENCH_TIMING_CHECK(hipMemcpyAsync(dst, src, bytes, kind, 0));
+    });
 }
 
 #endif /* BENCH_TIMING_H */

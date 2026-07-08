@@ -55,6 +55,7 @@ The exported JSON follows this structure:
           "kernels": [
             {"name": "gemm_kernel", "time_ms": 1.23}
           ],
+          "_comment": "tier1 benchmarks emit one kernel entry per timed iteration, e.g. {\"name\": \"fp32_fma_kernel\", \"time_ms\": 0.52, \"host_time_ms\": 0.60, \"iteration\": 0} ... \"iteration\": 6",
           "metrics": [
             {"name": "GFLOPS", "value": 143.2}
           ]
@@ -87,8 +88,8 @@ The exported JSON follows this structure:
 | `sessions[].runs[].suite` | string | Benchmark suite name |
 | `sessions[].runs[].scaling_param_value` | string | Value of the scaling parameter |
 | `sessions[].runs[].status` | string | Run status: `ok`, `error`, `timeout` |
-| `sessions[].runs[].kernels` | array | Kernel timing results |
-| `sessions[].runs[].metrics` | array | Computed metrics (e.g., GFLOPS) |
+| `sessions[].runs[].kernels` | array | Kernel timing results. Benchmarks with in-program measurement loops (tier1) emit one entry per timed iteration, with `iteration` (0-based index) and `host_time_ms` (host wall-clock for the same iteration) alongside `time_ms` (GPU event time). |
+| `sessions[].runs[].metrics` | array | Computed metrics (e.g., GFLOPS). Empty for tier1, whose metrics are derived downstream from kernel times and params. |
 
 ## Submitting Results to the Community
 

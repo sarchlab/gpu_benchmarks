@@ -34,15 +34,7 @@
 
 #include "../../common/bench_timing.h"
 
-#define HIP_CHECK(call)                                                         \
-    do {                                                                        \
-        hipError_t _err = (call);                                               \
-        if (_err != hipSuccess) {                                               \
-            fprintf(stderr, "HIP error at %s:%d — %s\n",                       \
-                    __FILE__, __LINE__, hipGetErrorString(_err));               \
-            exit(EXIT_FAILURE);                                                 \
-        }                                                                       \
-    } while (0)
+#define HIP_CHECK(call) BENCH_TIMING_CHECK(call)
 
 static const int DEFAULT_NUM_BLOCKS = 1024;
 static const int DEFAULT_BLOCK_SIZE = 256;
@@ -80,35 +72,19 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Grid   : %d blocks x %d threads\n", num_blocks, block_size);
     fprintf(stderr, "Iters  : %d (+%d warmup)\n", num_iters, num_warmup);
 
-    for (int w = 0; w < num_warmup; ++w) {
-        empty_kernel<<<dim3(num_blocks), dim3(block_size)>>>();
-        HIP_CHECK(hipDeviceSynchronize());
-    }
-
-    bench_timer_t timer;
-    bench_timer_create(&timer);
-
     char params[96];
     snprintf(params, sizeof(params), "\"num_blocks\":%d,\"block_size\":%d",
              num_blocks, block_size);
 
-    double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        bench_lap_begin(&timer, 0);
-        empty_kernel<<<dim3(num_blocks), dim3(block_size)>>>();
-        bench_lap_t lap = bench_lap_end(&timer, 0);
-
-        bench_emit_iter("empty_kernel", i, &lap, params);
-        total_gpu_ms += lap.gpu_ms;
-        fprintf(stderr, "iter %d: gpu = %.2f us, host = %.2f us\n",
-                i, lap.gpu_ms * 1e3, lap.host_ms * 1e3);
-    }
+    /* Warmup + timed iterations, each recorded individually. */
+    double total_gpu_ms =
+        bench_run_loop("empty_kernel", num_warmup, num_iters, params, [&]() {
+            empty_kernel<<<dim3(num_blocks), dim3(block_size)>>>();
+        });
 
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms over %d launches\n",
             total_gpu_ms, num_iters);
-
-    bench_timer_destroy(&timer);
 
     fprintf(stderr, "\nDone.\n");
     return EXIT_SUCCESS;

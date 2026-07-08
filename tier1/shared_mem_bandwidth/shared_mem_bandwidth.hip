@@ -43,15 +43,7 @@
 // Error-checking helpers
 // ---------------------------------------------------------------------------
 
-#define HIP_CHECK(call)                                                        \
-    do {                                                                       \
-        hipError_t _err = (call);                                              \
-        if (_err != hipSuccess) {                                              \
-            fprintf(stderr, "HIP error at %s:%d — %s\n",                      \
-                    __FILE__, __LINE__, hipGetErrorString(_err));              \
-            exit(EXIT_FAILURE);                                                \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(call) BENCH_TIMING_CHECK(call)
 
 // ---------------------------------------------------------------------------
 // Constants (defaults)
@@ -142,36 +134,17 @@ static double run_benchmark(const char *kernel_name,
                             KernelFn kernel, float *d_sink,
                             int block_size, int num_blocks, int inner_iters,
                             const char *access_pattern,
-                            int num_warmup, int num_iters,
-                            bench_timer_t *timer)
+                            int num_warmup, int num_iters)
 {
-    /* Warm-up launches — not timed. */
-    for (int w = 0; w < num_warmup; ++w) {
-        kernel<<<dim3(num_blocks), dim3(block_size)>>>(d_sink, inner_iters);
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-    }
-
     char params[192];
     snprintf(params, sizeof(params),
              "\"inner_iters\":%d,\"block_size\":%d,\"num_blocks\":%d,"
              "\"access_pattern\":\"%s\"",
              inner_iters, block_size, num_blocks, access_pattern);
 
-    /* Timed iterations — each recorded individually. */
-    double pattern_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        bench_lap_begin(timer, 0);
+    return bench_run_loop(kernel_name, num_warmup, num_iters, params, [&]() {
         kernel<<<dim3(num_blocks), dim3(block_size)>>>(d_sink, inner_iters);
-        bench_lap_t lap = bench_lap_end(timer, 0);
-
-        bench_emit_iter(kernel_name, i, &lap, params);
-        pattern_gpu_ms += lap.gpu_ms;
-        fprintf(stderr, "%s iter %d: gpu = %.3f ms, host = %.3f ms\n",
-                kernel_name, i, lap.gpu_ms, lap.host_ms);
-    }
-
-    return pattern_gpu_ms;
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -224,9 +197,6 @@ int main(int argc, char *argv[])
     float *d_sink = nullptr;
     HIP_CHECK(hipMalloc(&d_sink, num_blocks * sizeof(float)));
 
-    bench_timer_t timer;
-    bench_timer_create(&timer);
-
     bool run_no_conflict = (strcmp(access_pattern, "no_conflict") == 0 ||
                             strcmp(access_pattern, "both") == 0);
     bool run_conflict    = (strcmp(access_pattern, "conflict") == 0 ||
@@ -240,7 +210,7 @@ int main(int argc, char *argv[])
                                       smem_bw_no_conflict, d_sink,
                                       block_size, num_blocks, inner_iters,
                                       access_pattern,
-                                      num_warmup, num_iters, &timer);
+                                      num_warmup, num_iters);
     }
 
     /* --- Conflict --- */
@@ -249,14 +219,13 @@ int main(int argc, char *argv[])
                                       smem_bw_conflict, d_sink,
                                       block_size, num_blocks, inner_iters,
                                       access_pattern,
-                                      num_warmup, num_iters, &timer);
+                                      num_warmup, num_iters);
     }
 
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     /* Clean up. */
-    bench_timer_destroy(&timer);
     HIP_CHECK(hipFree(d_sink));
 
     fprintf(stderr, "\nDone.\n");

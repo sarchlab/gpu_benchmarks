@@ -41,6 +41,15 @@
         "shared",
         "private"
       ]
+    },
+    {
+      "name": "num_iters",
+      "description": "Timed iterations; pinned to 3 because each launch moves ~8 GB",
+      "type": "int",
+      "default": 3,
+      "values": [
+        3
+      ]
     }
   ],
   "kernels": [

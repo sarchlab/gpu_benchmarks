@@ -49,6 +49,16 @@ func parseOutput(stdoutData string) ([]KernelResult, *SummaryResult, []ErrorResu
 
 		var obj map[string]interface{}
 		if err := json.Unmarshal([]byte(line), &obj); err != nil {
+			// A line that looks like a protocol record but doesn't parse
+			// means lost results (e.g. truncated params) — say so instead
+			// of silently dropping it.
+			if strings.HasPrefix(line, "{") {
+				preview := line
+				if len(preview) > 120 {
+					preview = preview[:120] + "..."
+				}
+				eprintf("warning: skipping malformed JSON line: %s\n", preview)
+			}
 			continue
 		}
 

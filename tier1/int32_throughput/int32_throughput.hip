@@ -44,15 +44,7 @@
 // Error-checking helper
 // ---------------------------------------------------------------------------
 
-#define HIP_CHECK(call)                                                        \
-    do {                                                                       \
-        hipError_t _err = (call);                                              \
-        if (_err != hipSuccess) {                                              \
-            fprintf(stderr, "HIP error at %s:%d — %s\n",                      \
-                    __FILE__, __LINE__, hipGetErrorString(_err));              \
-            exit(EXIT_FAILURE);                                                \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(call) BENCH_TIMING_CHECK(call)
 
 // ---------------------------------------------------------------------------
 // Tuning constants (defaults)
@@ -139,39 +131,23 @@ int main(int argc, char *argv[])
     int *d_out = nullptr;
     HIP_CHECK(hipMalloc(&d_out, sizeof(int)));
 
-    /* Warm-up launches — not timed. */
-    for (int w = 0; w < num_warmup; ++w) {
-        int32_mad_kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(d_out, mads_per_thread);
-        HIP_CHECK(hipDeviceSynchronize());
-    }
-
-    /* Timed iterations — each recorded individually. */
-    bench_timer_t timer;
-    bench_timer_create(&timer);
-
     char params[160];
     snprintf(params, sizeof(params),
              "\"mads_per_thread\":%d,\"num_blocks\":%d,\"threads_per_block\":%d",
              mads_per_thread, num_blocks, threads_per_block);
 
-    double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        bench_lap_begin(&timer, 0);
-        int32_mad_kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(d_out, mads_per_thread);
-        bench_lap_t lap = bench_lap_end(&timer, 0);
-
-        bench_emit_iter("int32_mad_kernel", i, &lap, params);
-        total_gpu_ms += lap.gpu_ms;
-        fprintf(stderr, "iter %d: gpu = %.3f ms, host = %.3f ms\n",
-                i, lap.gpu_ms, lap.host_ms);
-    }
+    /* Warmup + timed iterations, each recorded individually. */
+    double total_gpu_ms =
+        bench_run_loop("int32_mad_kernel", num_warmup, num_iters, params, [&]() {
+            int32_mad_kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(
+                d_out, mads_per_thread);
+        });
 
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time  : %.3f ms over %d iterations\n",
             total_gpu_ms, num_iters);
 
     /* Clean up. */
-    bench_timer_destroy(&timer);
     HIP_CHECK(hipFree(d_out));
 
     fprintf(stderr, "\nDone.\n");

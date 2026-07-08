@@ -47,15 +47,7 @@
 // Error-checking helper
 // ---------------------------------------------------------------------------
 
-#define HIP_CHECK(call)                                                        \
-    do {                                                                       \
-        hipError_t _err = (call);                                              \
-        if (_err != hipSuccess) {                                              \
-            fprintf(stderr, "HIP error at %s:%d — %s\n",                      \
-                    __FILE__, __LINE__, hipGetErrorString(_err));              \
-            exit(EXIT_FAILURE);                                                \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(call) BENCH_TIMING_CHECK(call)
 
 // ---------------------------------------------------------------------------
 // Tuning constants (defaults)
@@ -109,24 +101,12 @@ static double run_benchmark(const char *kernel_name,
                             int threads_per_block, const char *atomic_op,
                             int num_warmup, int num_iters)
 {
-    /* Reset counter. */
+    /* Reset counter once, outside the timed region. Counter accumulation
+     * across warmup/timed iterations does not affect timing, so no per-loop
+     * reset is needed. */
     unsigned int zero = 0;
     HIP_CHECK(hipMemcpy(d_counter, &zero, sizeof(unsigned int),
                         hipMemcpyHostToDevice));
-
-    /* Warm-up launches — not timed. */
-    for (int w = 0; w < num_warmup; ++w) {
-        kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(d_counter, ops_per_thread);
-        HIP_CHECK(hipDeviceSynchronize());
-    }
-
-    /* Reset counter before timed runs. */
-    HIP_CHECK(hipMemcpy(d_counter, &zero, sizeof(unsigned int),
-                        hipMemcpyHostToDevice));
-
-    /* Timed iterations — each recorded individually. */
-    bench_timer_t timer;
-    bench_timer_create(&timer);
 
     char params[192];
     snprintf(params, sizeof(params),
@@ -134,20 +114,10 @@ static double run_benchmark(const char *kernel_name,
              "\"threads_per_block\":%d,\"atomic_op\":\"%s\"",
              ops_per_thread, num_blocks, threads_per_block, atomic_op);
 
-    double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        bench_lap_begin(&timer, 0);
-        kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(d_counter, ops_per_thread);
-        bench_lap_t lap = bench_lap_end(&timer, 0);
-
-        bench_emit_iter(kernel_name, i, &lap, params);
-        total_gpu_ms += lap.gpu_ms;
-        fprintf(stderr, "iter %d: gpu = %.3f ms, host = %.3f ms\n",
-                i, lap.gpu_ms, lap.host_ms);
-    }
-
-    bench_timer_destroy(&timer);
-    return total_gpu_ms;
+    return bench_run_loop(kernel_name, num_warmup, num_iters, params, [&]() {
+        kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(d_counter,
+                                                              ops_per_thread);
+    });
 }
 
 // ---------------------------------------------------------------------------

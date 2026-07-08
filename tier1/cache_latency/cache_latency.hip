@@ -60,15 +60,7 @@
 // Error-checking macro
 // ---------------------------------------------------------------------------
 
-#define HIP_CHECK(call)                                                         \
-    do {                                                                        \
-        hipError_t _err = (call);                                               \
-        if (_err != hipSuccess) {                                               \
-            fprintf(stderr, "HIP error at %s:%d — %s\n",                       \
-                    __FILE__, __LINE__, hipGetErrorString(_err));               \
-            exit(EXIT_FAILURE);                                                 \
-        }                                                                       \
-    } while (0)
+#define HIP_CHECK(call) BENCH_TIMING_CHECK(call)
 
 // ---------------------------------------------------------------------------
 // Constants (defaults)
@@ -255,12 +247,6 @@ int main(int argc, char *argv[])
         HIP_CHECK(hipDeviceSynchronize());
     }
 
-    /* Timed iterations — each launch chases num_timed accesses and is
-     * recorded individually. The working set stays resident between
-     * iterations, so every iteration measures the same steady state. */
-    bench_timer_t timer;
-    bench_timer_create(&timer);
-
     char params[256];
     snprintf(params, sizeof(params),
              "\"array_bytes\":%zu,\"num_accesses\":%llu,"
@@ -270,24 +256,21 @@ int main(int argc, char *argv[])
              (unsigned long long)num_warmup, measure_laps,
              cacheline_bytes, rng_seed);
 
-    double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        bench_lap_begin(&timer, 0);
-        pointer_chase_kernel<<<dim3(1), dim3(1)>>>(d_arr, start_idx, num_timed, d_result);
-        bench_lap_t lap = bench_lap_end(&timer, 0);
-
-        bench_emit_iter("pointer_chase_kernel", i, &lap, params);
-        total_gpu_ms += lap.gpu_ms;
-        fprintf(stderr, "iter %d: gpu = %.3f ms (%.2f ns/access), host = %.3f ms\n",
-                i, lap.gpu_ms, lap.gpu_ms * 1e6 / (double)num_timed, lap.host_ms);
-    }
+    /* Warmup is done separately above (it chases num_warmup cold-fill accesses,
+     * a different count than the timed num_timed), so run the timed loop with
+     * num_warmup=0. Each timed launch chases num_timed accesses and is recorded
+     * individually; the working set stays resident so every iteration measures
+     * the same steady state. */
+    double total_gpu_ms =
+        bench_run_loop("pointer_chase_kernel", 0, num_iters, params, [&]() {
+            pointer_chase_kernel<<<dim3(1), dim3(1)>>>(d_arr, start_idx, num_timed, d_result);
+        });
 
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
             total_gpu_ms, num_iters);
 
     /* Cleanup. */
-    bench_timer_destroy(&timer);
     HIP_CHECK(hipFree(d_arr));
     HIP_CHECK(hipFree(d_result));
 

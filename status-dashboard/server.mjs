@@ -540,10 +540,20 @@ async function getChartData(queryParams) {
   const usesKernelName = xField === "kernel_name" || colorFields.includes("kernel_name") || Boolean(filters.kernel_name?.length);
   const yMode = usesKernelName ? "kernel" : "total";
   const includeKernelRows = usesKernelName;
+  // Per-iteration timing stores one kernel_results row per timed iteration.
+  // Average within each (run, kernel) before summing across kernels so runs
+  // recorded before and after that change chart on the same scale, and so
+  // kernel-level mode shows one point per kernel per run instead of one per
+  // iteration.
   const rows = await runSql(`
-    WITH kernel_totals AS (
-      SELECT run_id, SUM(time_ms) AS total_kernel_time_ms
+    WITH kernel_avgs AS (
+      SELECT run_id, kernel_name, AVG(time_ms) AS avg_time_ms, MIN(ordinal) AS first_ordinal
       FROM kernel_results
+      GROUP BY run_id, kernel_name
+    ),
+    kernel_totals AS (
+      SELECT run_id, SUM(avg_time_ms) AS total_kernel_time_ms
+      FROM kernel_avgs
       GROUP BY run_id
     )
     SELECT
@@ -555,14 +565,14 @@ async function getChartData(queryParams) {
       r.status,
       COALESCE(kt.total_kernel_time_ms, r.total_time_ms) AS total_time_ms,
       ${includeKernelRows ? "k.kernel_name" : "NULL AS kernel_name"},
-      ${includeKernelRows ? "k.time_ms" : "NULL"} AS kernel_time_ms
+      ${includeKernelRows ? "k.avg_time_ms" : "NULL"} AS kernel_time_ms
     FROM runs r
     LEFT JOIN kernel_totals kt ON kt.run_id = r.id
-    ${includeKernelRows ? "LEFT JOIN kernel_results k ON k.run_id = r.id" : ""}
+    ${includeKernelRows ? "LEFT JOIN kernel_avgs k ON k.run_id = r.id" : ""}
     WHERE r.benchmark = ${sqlString(benchmark)}
       AND r.status = 'ok'
       AND COALESCE(kt.total_kernel_time_ms, r.total_time_ms) IS NOT NULL
-    ORDER BY r.id${includeKernelRows ? ", k.ordinal" : ""};
+    ORDER BY r.id${includeKernelRows ? ", k.first_ordinal" : ""};
   `);
 
   const grouped = new Map();

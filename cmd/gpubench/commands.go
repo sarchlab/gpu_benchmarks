@@ -900,6 +900,12 @@ func cmdRun(args runArgs) int {
 						fmt.Sprintf("LD_PRELOAD=%s", args.collectTrace),
 						"USER_DEFINED_FOLDERS=1",
 						fmt.Sprintf("TRACES_FOLDER=%s", cfgTraceDir),
+						// Trace collection wants one launch per kernel, not the
+						// timing harness's warmup + repeated iterations: nvbit
+						// slows every launch, and duplicate launches multiply
+						// trace size and timeout risk without adding coverage.
+						"BENCH_PARAM_num_warmup=0",
+						"BENCH_PARAM_num_iters=1",
 					)
 					if args.traceSample != "" {
 						env = append(env, fmt.Sprintf("PTRACE_SAMPLE=%s", args.traceSample))
@@ -1114,7 +1120,16 @@ func cmdRun(args runArgs) int {
 				}
 
 				func() {
-					res, err := db.Exec(
+					// One transaction per run: per-iteration timing writes
+					// 7-28 kernel rows per run, and per-row autocommit would
+					// fsync the WAL for each.
+					tx, err := db.Begin()
+					if err != nil {
+						eprintf("DB error: %v\n", err)
+						return
+					}
+					defer func() { _ = tx.Rollback() }()
+					res, err := tx.Exec(
 						"INSERT INTO runs (session_id,tier,suite,benchmark,"+
 							"scaling_param_name,scaling_param_value,"+
 							"non_scaling_params_json,repetition,status,"+
@@ -1140,7 +1155,7 @@ func cmdRun(args runArgs) int {
 						if kr.Iteration != nil {
 							iteration = sql.NullInt64{Int64: int64(*kr.Iteration), Valid: true}
 						}
-						_, _ = db.Exec(
+						_, _ = tx.Exec(
 							"INSERT INTO kernel_results (run_id,kernel_name,time_ms,ordinal,"+
 								"host_time_ms,iteration) VALUES (?,?,?,?,?,?)",
 							runID, kr.Name, kr.TimeMS, kr.Ordinal, hostTime, iteration,
@@ -1148,12 +1163,15 @@ func cmdRun(args runArgs) int {
 					}
 					if summary != nil {
 						for _, m := range summary.Metrics {
-							_, _ = db.Exec(
+							_, _ = tx.Exec(
 								"INSERT INTO metrics (run_id,metric_name,metric_value) "+
 									"VALUES (?,?,?)",
 								runID, m.Name, m.Value,
 							)
 						}
+					}
+					if err := tx.Commit(); err != nil {
+						eprintf("DB error: %v\n", err)
 					}
 				}()
 

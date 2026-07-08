@@ -1,28 +1,34 @@
 // rodinia_hotspot.hip — Rodinia Hotspot benchmark (HIP, self-contained)
 //
-// Iterative 2D stencil thermal simulation for chip temperature estimation.
-// Each cell's temperature is updated based on its four neighbors (N/S/E/W),
+// Transient thermal simulation of a chip: an iterative 2D structured-grid
+// stencil where each cell's temperature is updated from its four neighbours,
 // the local power density, and thermal resistances.
+//
+// This is a faithful port of the Rodinia 3.1 CUDA Hotspot: the device kernel
+// (calculate_temp) and its pyramidal / ghost-zone temporal-blocking scheme
+// are the original — each launch advances `pyramid_height` time steps for a
+// block loaded once into shared memory, with a halo (border) so neighbouring
+// blocks stay consistent. Only the host driver is restructured for the
+// per-iteration timing harness and JSON output.
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
 // Usage:
-//   ./rodinia_hotspot [--grid_size N] [--block_size B] [--num_iterations K]
+//   ./rodinia_hotspot [--grid_size N] [--total_iterations T] [--pyramid_height P]
 //
-//   --grid_size N       Grid dimension (N×N)         (default: 512)
-//   --block_size B      Thread-block dimension (B×B) (default: 16)
-//   --num_iterations K  Stencil time-steps per timed launch (default: 10)
+//   --grid_size N        Grid dimension (N×N)               (default: 1024)
+//   --total_iterations T Total thermal time steps simulated (default: 360)
+//   --pyramid_height P    Time steps advanced per launch     (default: 2)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_grid_size, BENCH_PARAM_block_size, BENCH_PARAM_num_iterations
+//   BENCH_PARAM_grid_size, BENCH_PARAM_total_iterations, BENCH_PARAM_pyramid_height
 //   BENCH_PARAM_num_warmup   (warmup passes, default 3)
 //   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
-// hotspot_kernel carrying the accumulated GPU event time of all stencil steps
-// within the pass plus host wall-clock time, then a summary whose
-// total_time_ms is the SUM of all recorded GPU event times. Effective
-// bandwidth is derived downstream from time_ms and params.
+// calculate_temp carrying the accumulated GPU event time of all pyramidal
+// launches within the pass plus host wall-clock time, then a summary whose
+// total_time_ms is the SUM of all recorded GPU event times.
 // Output (stderr): human-readable results
 
 #include "../../common/bench_timing.h"
@@ -44,43 +50,129 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
 }
 
 // ---------------------------------------------------------------------------
-// Chip thermal constants (Rodinia defaults)
+// Constants and kernel — verbatim from Rodinia 3.1 cuda/hotspot/hotspot.cu
 // ---------------------------------------------------------------------------
-#define AMB_TEMP    80.0f
-#define CHIP_HEIGHT 0.016f
-#define CHIP_WIDTH  0.016f
-#define T_CHIP      0.0005f
-#define K_SI        100.0f
-#define C_SI        1.75e6f
+#define BLOCK_SIZE      16
+#define MAX_PD          (3.0e6)
+#define PRECISION       0.001
+#define SPEC_HEAT_SI    1.75e6
+#define K_SI            100
+#define FACTOR_CHIP     0.5
+#define EXPAND_RATE     2  // add one iteration extends the pyramid base by 2 per border
 
-// ---------------------------------------------------------------------------
-// Hotspot stencil kernel
-// ---------------------------------------------------------------------------
-__global__ void hotspot_kernel(const float* __restrict__ temp_src,
-                                float* __restrict__ temp_dst,
-                                const float* __restrict__ power,
-                                int grid_cols, int grid_rows,
-                                float step_div_cap,
-                                float Rx_1, float Ry_1, float Rz_1) {
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
+#define IN_RANGE(x, min, max)   ((x)>=(min) && (x)<=(max))
+#define MIN(a, b) ((a)<=(b) ? (a) : (b))
 
-    if (col < grid_cols && row < grid_rows) {
-        int idx = row * grid_cols + col;
+/* chip parameters */
+static const float t_chip     = 0.0005f;
+static const float chip_height = 0.016f;
+static const float chip_width  = 0.016f;
+static const float amb_temp   = 80.0f;
 
-        float temp_c = temp_src[idx];
-        float temp_n = (row > 0)             ? temp_src[(row - 1) * grid_cols + col] : temp_c;
-        float temp_s = (row < grid_rows - 1) ? temp_src[(row + 1) * grid_cols + col] : temp_c;
-        float temp_w = (col > 0)             ? temp_src[row * grid_cols + (col - 1)] : temp_c;
-        float temp_e = (col < grid_cols - 1) ? temp_src[row * grid_cols + (col + 1)] : temp_c;
+__global__ void calculate_temp(int iteration,   // number of iterations
+                               float *power,     // power input
+                               float *temp_src,  // temperature input/output
+                               float *temp_dst,  // temperature input/output
+                               int grid_cols,    // Col of grid
+                               int grid_rows,    // Row of grid
+                               int border_cols,  // border offset
+                               int border_rows,  // border offset
+                               float Cap,         // Capacitance
+                               float Rx,
+                               float Ry,
+                               float Rz,
+                               float step,
+                               float time_elapsed) {
 
-        float delta = step_div_cap *
-            (power[idx]
-             + (temp_n + temp_s - 2.0f * temp_c) * Ry_1
-             + (temp_w + temp_e - 2.0f * temp_c) * Rx_1
-             + (AMB_TEMP - temp_c) * Rz_1);
+    __shared__ float temp_on_cuda[BLOCK_SIZE][BLOCK_SIZE];
+    __shared__ float power_on_cuda[BLOCK_SIZE][BLOCK_SIZE];
+    __shared__ float temp_t[BLOCK_SIZE][BLOCK_SIZE]; // saving temporary temperature result
 
-        temp_dst[idx] = temp_c + delta;
+    float amb_temp = 80.0f;
+    float step_div_Cap;
+    float Rx_1, Ry_1, Rz_1;
+
+    int bx = blockIdx.x;
+    int by = blockIdx.y;
+
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+
+    step_div_Cap = step / Cap;
+
+    Rx_1 = 1 / Rx;
+    Ry_1 = 1 / Ry;
+    Rz_1 = 1 / Rz;
+
+    // each block finally computes result for a small block after N iterations.
+    // it is the non-overlapping small blocks that cover all the input data
+
+    // calculate the small block size
+    int small_block_rows = BLOCK_SIZE - iteration * 2; // EXPAND_RATE
+    int small_block_cols = BLOCK_SIZE - iteration * 2; // EXPAND_RATE
+
+    // calculate the boundary for the block according to the boundary of its small block
+    int blkY = small_block_rows * by - border_rows;
+    int blkX = small_block_cols * bx - border_cols;
+    int blkYmax = blkY + BLOCK_SIZE - 1;
+    int blkXmax = blkX + BLOCK_SIZE - 1;
+
+    // calculate the global thread coordination
+    int yidx = blkY + ty;
+    int xidx = blkX + tx;
+
+    // load data if it is within the valid input range
+    int loadYidx = yidx, loadXidx = xidx;
+    int index = grid_cols * loadYidx + loadXidx;
+
+    if (IN_RANGE(loadYidx, 0, grid_rows - 1) && IN_RANGE(loadXidx, 0, grid_cols - 1)) {
+        temp_on_cuda[ty][tx] = temp_src[index];  // Load the temperature data from global memory to shared memory
+        power_on_cuda[ty][tx] = power[index];    // Load the power data from global memory to shared memory
+    }
+    __syncthreads();
+
+    // effective range within this block that falls within the valid range of the
+    // input data used to rule out computation outside the boundary.
+    int validYmin = (blkY < 0) ? -blkY : 0;
+    int validYmax = (blkYmax > grid_rows - 1) ? BLOCK_SIZE - 1 - (blkYmax - grid_rows + 1) : BLOCK_SIZE - 1;
+    int validXmin = (blkX < 0) ? -blkX : 0;
+    int validXmax = (blkXmax > grid_cols - 1) ? BLOCK_SIZE - 1 - (blkXmax - grid_cols + 1) : BLOCK_SIZE - 1;
+
+    int N = ty - 1;
+    int S = ty + 1;
+    int W = tx - 1;
+    int E = tx + 1;
+
+    N = (N < validYmin) ? validYmin : N;
+    S = (S > validYmax) ? validYmax : S;
+    W = (W < validXmin) ? validXmin : W;
+    E = (E > validXmax) ? validXmax : E;
+
+    bool computed;
+    for (int i = 0; i < iteration; i++) {
+        computed = false;
+        if (IN_RANGE(tx, i + 1, BLOCK_SIZE - i - 2) &&
+            IN_RANGE(ty, i + 1, BLOCK_SIZE - i - 2) &&
+            IN_RANGE(tx, validXmin, validXmax) &&
+            IN_RANGE(ty, validYmin, validYmax)) {
+            computed = true;
+            temp_t[ty][tx] = temp_on_cuda[ty][tx] + step_div_Cap * (power_on_cuda[ty][tx] +
+                (temp_on_cuda[S][tx] + temp_on_cuda[N][tx] - 2.0f * temp_on_cuda[ty][tx]) * Ry_1 +
+                (temp_on_cuda[ty][E] + temp_on_cuda[ty][W] - 2.0f * temp_on_cuda[ty][tx]) * Rx_1 +
+                (amb_temp - temp_on_cuda[ty][tx]) * Rz_1);
+        }
+        __syncthreads();
+        if (i == iteration - 1)
+            break;
+        if (computed) // Assign the computation range
+            temp_on_cuda[ty][tx] = temp_t[ty][tx];
+        __syncthreads();
+    }
+
+    // update the global memory: after the last iteration, only threads
+    // coordinated within the small block perform the calculation.
+    if (computed) {
+        temp_dst[index] = temp_t[ty][tx];
     }
 }
 
@@ -90,101 +182,103 @@ __global__ void hotspot_kernel(const float* __restrict__ temp_src,
 int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
-    int grid_size      = parseIntParam(argc, argv, "--grid_size",      512);
-    int block_dim      = parseIntParam(argc, argv, "--block_size",      16);
-    int num_iterations = parseIntParam(argc, argv, "--num_iterations",  10);
+    int grid_size        = parseIntParam(argc, argv, "--grid_size",        1024);
+    int total_iterations = parseIntParam(argc, argv, "--total_iterations",  360);
+    int pyramid_height   = parseIntParam(argc, argv, "--pyramid_height",      2);
 
     const char* env_val;
-    env_val = getenv("BENCH_PARAM_grid_size");
-    if (env_val) grid_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_dim = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_num_iterations");
-    if (env_val) num_iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_grid_size");        if (env_val) grid_size = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_total_iterations"); if (env_val) total_iterations = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_pyramid_height");   if (env_val) pyramid_height = atoi(env_val);
     const int num_warmup = bench_num_warmup();
     const int num_iters  = bench_num_iters();
 
-    int grid_rows  = grid_size;
-    int grid_cols  = grid_size;
+    // pyramid_height must keep the small-block size positive.
+    if (pyramid_height * EXPAND_RATE >= BLOCK_SIZE) {
+        fprintf(stderr, "pyramid_height too large for BLOCK_SIZE=%d (need pyramid_height < %d)\n",
+                BLOCK_SIZE, BLOCK_SIZE / EXPAND_RATE);
+        return EXIT_FAILURE;
+    }
+
+    int grid_rows = grid_size;
+    int grid_cols = grid_size;
     int total_cells = grid_rows * grid_cols;
 
-    // Compute thermal parameters
-    float grid_height = CHIP_HEIGHT / grid_rows;
-    float grid_width  = CHIP_WIDTH  / grid_cols;
-    float cap         = C_SI * T_CHIP * grid_height * grid_width;
-    float Rx          = grid_width  / (2.0f * K_SI * T_CHIP * grid_height);
-    float Ry          = grid_height / (2.0f * K_SI * T_CHIP * grid_width);
-    float Rz          = T_CHIP / (K_SI * grid_height * grid_width);
-    float max_slope   = K_SI / (0.5f * T_CHIP * C_SI);
-    float step        = 0.001f / max_slope;
-    float step_div_cap = step / cap;
-    float Rx_1        = 1.0f / Rx;
-    float Ry_1        = 1.0f / Ry;
-    float Rz_1        = 1.0f / Rz;
+    // Pyramid geometry (original compute_tran_temp setup)
+    int borderCols = (pyramid_height) * EXPAND_RATE / 2;
+    int borderRows = (pyramid_height) * EXPAND_RATE / 2;
+    int smallBlockCol = BLOCK_SIZE - (pyramid_height) * EXPAND_RATE;
+    int smallBlockRow = BLOCK_SIZE - (pyramid_height) * EXPAND_RATE;
+    int blockCols = grid_cols / smallBlockCol + ((grid_cols % smallBlockCol == 0) ? 0 : 1);
+    int blockRows = grid_rows / smallBlockRow + ((grid_rows % smallBlockRow == 0) ? 0 : 1);
 
-    // Print device info
+    // Thermal coefficients (original compute_tran_temp)
+    float grid_height = chip_height / grid_rows;
+    float grid_width  = chip_width  / grid_cols;
+    float Cap = FACTOR_CHIP * SPEC_HEAT_SI * t_chip * grid_width * grid_height;
+    float Rx  = grid_width  / (2.0f * K_SI * t_chip * grid_height);
+    float Ry  = grid_height / (2.0f * K_SI * t_chip * grid_width);
+    float Rz  = t_chip / (K_SI * grid_height * grid_width);
+    float max_slope = MAX_PD / (FACTOR_CHIP * t_chip * SPEC_HEAT_SI);
+    float step = PRECISION / max_slope;
+    float time_elapsed = 0.001f;
+
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Grid: %d×%d  |  Block: %d×%d  |  Steps/launch: %d\n\n",
-            grid_rows, grid_cols, block_dim, block_dim, num_iterations);
+    fprintf(stderr, "Grid: %d×%d  |  pyramid_height: %d  |  total_iterations: %d\n",
+            grid_rows, grid_cols, pyramid_height, total_iterations);
+    fprintf(stderr, "Grid of blocks: %d×%d (BLOCK_SIZE=%d)\n\n", blockCols, blockRows, BLOCK_SIZE);
 
-    // Host allocations
+    // Host allocations + synthetic temperature / power grids
     float* h_temp  = (float*)malloc(total_cells * sizeof(float));
     float* h_power = (float*)malloc(total_cells * sizeof(float));
-
-    // Generate synthetic temperature and power grids
     srand(42);
     for (int i = 0; i < total_cells; ++i) {
-        h_temp[i]  = AMB_TEMP + (float)(rand() % 200) / 10.0f;
+        h_temp[i]  = amb_temp + (float)(rand() % 200) / 10.0f;
         h_power[i] = (float)(rand() % 100) / 500.0f;
     }
 
-    // Device allocations
-    float *d_temp_src, *d_temp_dst, *d_power;
-    HIP_CHECK(hipMalloc(&d_temp_src, total_cells * sizeof(float)));
-    HIP_CHECK(hipMalloc(&d_temp_dst, total_cells * sizeof(float)));
-    HIP_CHECK(hipMalloc(&d_power,    total_cells * sizeof(float)));
-
+    float* MatrixTemp[2];
+    float* d_power;
+    HIP_CHECK(hipMalloc(&MatrixTemp[0], total_cells * sizeof(float)));
+    HIP_CHECK(hipMalloc(&MatrixTemp[1], total_cells * sizeof(float)));
+    HIP_CHECK(hipMalloc(&d_power,       total_cells * sizeof(float)));
     HIP_CHECK(hipMemcpy(d_power, h_power, total_cells * sizeof(float), hipMemcpyHostToDevice));
 
-    dim3 block(block_dim, block_dim);
-    dim3 grid((grid_cols + block_dim - 1) / block_dim,
-              (grid_rows + block_dim - 1) / block_dim);
+    dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
+    dim3 dimGrid(blockCols, blockRows);
 
-    char params[160];
+    char params[192];
     snprintf(params, sizeof(params),
-             "\"grid_size\":%d,\"block_size\":%d,\"num_iterations\":%d",
-             grid_size, block_dim, num_iterations);
+             "\"grid_size\":%d,\"total_iterations\":%d,\"pyramid_height\":%d,\"block_size\":%d",
+             grid_size, total_iterations, pyramid_height, BLOCK_SIZE);
 
     bench_timer_t timer;
     bench_timer_create(&timer);
-    bench_lap_t acc_hotspot;
+    bench_lap_t acc;
 
-    // One full pass = num_iterations ping-pong stencil steps. The initial
-    // temperature grid is re-uploaded at the start of every pass (untimed),
-    // as the pre-conversion code did, so each pass simulates the same
-    // trajectory regardless of what earlier passes left in the buffers.
+    // One recorded pass = a full transient simulation of total_iterations time
+    // steps, advanced pyramid_height steps per launch (original compute_tran_temp
+    // loop). Every pyramidal launch is timed and accumulated into one
+    // calculate_temp record. The temperature grid is re-uploaded (untimed) at
+    // the start of each pass so every pass simulates the identical trajectory.
     auto run_pass = [&]() {
-        bench_lap_reset(&acc_hotspot);
-
-        HIP_CHECK(hipMemcpy(d_temp_src, h_temp,
+        bench_lap_reset(&acc);
+        HIP_CHECK(hipMemcpy(MatrixTemp[0], h_temp,
                             total_cells * sizeof(float), hipMemcpyHostToDevice));
-
-        float* src = d_temp_src;
-        float* dst = d_temp_dst;
-
-        for (int k = 0; k < num_iterations; ++k) {
-            bench_lap_add(&acc_hotspot, bench_time_op(&timer, [&]() {
-                hotspot_kernel<<<grid, block>>>(
-                    src, dst, d_power, grid_cols, grid_rows, step_div_cap, Rx_1, Ry_1, Rz_1);
+        int src = 1, dst = 0;
+        for (int t = 0; t < total_iterations; t += pyramid_height) {
+            int tmp = src; src = dst; dst = tmp;
+            int it = MIN(pyramid_height, total_iterations - t);
+            bench_lap_add(&acc, bench_time_op(&timer, [&]() {
+                calculate_temp<<<dimGrid, dimBlock>>>(
+                    it, d_power, MatrixTemp[src], MatrixTemp[dst],
+                    grid_cols, grid_rows, borderCols, borderRows,
+                    Cap, Rx, Ry, Rz, step, time_elapsed);
             }));
-            // Ping-pong buffers
-            float* tmp = src;
-            src = dst;
-            dst = tmp;
         }
     };
 
@@ -195,19 +289,19 @@ int main(int argc, char** argv) {
     double total_gpu_ms = 0.0;
     for (int i = 0; i < num_iters; ++i) {
         run_pass();
-        bench_emit_iter("hotspot_kernel", i, &acc_hotspot, params);
-        total_gpu_ms += acc_hotspot.gpu_ms;
-        fprintf(stderr, "pass %d: hotspot_kernel gpu = %.3f ms, host = %.3f ms\n",
-                i, acc_hotspot.gpu_ms, acc_hotspot.host_ms);
+        bench_emit_iter("calculate_temp", i, &acc, params);
+        total_gpu_ms += acc.gpu_ms;
+        fprintf(stderr, "pass %d: calculate_temp gpu = %.3f ms, host = %.3f ms\n",
+                i, acc.gpu_ms, acc.host_ms);
     }
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms over %d passes (%d steps/pass)\n",
-            total_gpu_ms, num_iters, num_iterations);
+            total_gpu_ms, num_iters, total_iterations);
 
-    HIP_CHECK(hipFree(d_temp_src));
-    HIP_CHECK(hipFree(d_temp_dst));
+    HIP_CHECK(hipFree(MatrixTemp[0]));
+    HIP_CHECK(hipFree(MatrixTemp[1]));
     HIP_CHECK(hipFree(d_power));
     free(h_temp);
     free(h_power);

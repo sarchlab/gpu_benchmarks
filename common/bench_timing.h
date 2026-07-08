@@ -104,6 +104,10 @@ static inline void bench_lap_begin(bench_timer_t *t, hipStream_t stream)
 
 static inline bench_lap_t bench_lap_end(bench_timer_t *t, hipStream_t stream)
 {
+    /* Catch a failed launch inside the bracket (e.g. an invalid launch config)
+     * before it is recorded as a bogus time. hipGetLastError clears and returns
+     * the error the async launch left pending. */
+    BENCH_TIMING_CHECK(hipGetLastError());
     BENCH_TIMING_CHECK(hipEventRecord(t->ev_stop, stream));
     BENCH_TIMING_CHECK(hipEventSynchronize(t->ev_stop));
     bench_lap_t lap;

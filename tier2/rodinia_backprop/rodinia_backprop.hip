@@ -163,7 +163,7 @@ __global__ void bpnn_adjust_weights_cuda(float * delta,
 int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
-    int input_n = parseIntParam(argc, argv, "--input", 1048576);
+    int input_n = parseIntParam(argc, argv, "--input", 1000000);
     const char* env_val = getenv("BENCH_PARAM_input");
     if (env_val) input_n = atoi(env_val);
 

@@ -134,7 +134,9 @@ __global__ void convolution_row_kernel(
 // ---------------------------------------------------------------------------
 
 #define COL_TILE_W 16
-#define COL_TILE_H 128
+// COL_TILE_W * COL_TILE_H is the column-kernel block size and must stay
+// within the 1024 threads/block hardware limit: 16 * 64 = 1024.
+#define COL_TILE_H 64
 
 __global__ void convolution_col_kernel(
     const float* __restrict__ input,

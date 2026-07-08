@@ -6,38 +6,30 @@
 //   G = E * F  (NI×NJ · NJ×NL → NI×NL)
 //
 // Default matrix sizes: NI=NJ=NK=NL=NM=256 (all square 256×256)
-// Reports GFLOPS = total_flops / time_s / 1e9
-//   total_flops = 2*NI*NK*NJ + 2*NJ*NM*NL + 2*NI*NJ*NL
 //
 // Usage:
 //   ./polybench_3mm [--size N]
 //
 //   --size N         Matrix dimension N (NxN for all matrices) (default: 256)
 //
-// Output (stdout): JSON-lines protocol
-// Output (stderr): device info, timing details
+// Environment variables (override argv):
+//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// kernel (mm3_kernel1/2/3) carrying that kernel's GPU event time and host
+// wall-clock time within the pass, then a summary whose total_time_ms is the
+// SUM of all recorded GPU event times. GFLOPS
+// (total_flops = 2*NI*NK*NJ + 2*NJ*NM*NL + 2*NI*NJ*NL) is derived downstream.
+// Output (stderr): device info, per-pass timing
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
-#include <cfloat>
-#include <vector>
 
-// ---------------------------------------------------------------------------
-// Error checking
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -53,34 +45,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     }
     return defaultVal;
 }
-
-// ---------------------------------------------------------------------------
-// Timing helper
-// ---------------------------------------------------------------------------
-
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
 
 // ---------------------------------------------------------------------------
 // GPU Kernels
@@ -151,7 +115,15 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
-    int num_warmup = 5;
+    // Validate string params so the values echoed into the JSON records are
+    // always canonical literals (never raw env text).
+    if (strcmp(precision, "half") != 0 && strcmp(precision, "float") != 0 &&
+        strcmp(precision, "double") != 0) {
+        fprintf(stderr, "Invalid precision '%s' (use half, float, double)\n", precision);
+        return EXIT_FAILURE;
+    }
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     // All matrices are N×N
     const int NI = N, NJ = N, NK = N, NL = N, NM = N;
@@ -211,69 +183,54 @@ int main(int argc, char** argv) {
     // Kernel 3: G = E*F  grid over (NL, NI)
     dim3 grid3((NL + 15) / 16, (NI + 15) / 16);
 
-    BenchmarkTimer timer;
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
+             N, block_size, precision);
 
-    // Warmup
+    // Per-kernel accumulators: each pass launches the three kernels once.
+    // No state reset is needed between passes — inputs A/B/C/D are read-only
+    // and E/F/G are fully overwritten every pass, so every pass does
+    // identical work on identical data.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_k1, acc_k2, acc_k3;
+
+    auto run_3mm_pass = [&]() {
+        bench_lap_reset(&acc_k1);
+        bench_lap_reset(&acc_k2);
+        bench_lap_reset(&acc_k3);
+
+        bench_lap_add(&acc_k1, bench_time_op(&timer, [&]() {
+            mm3_kernel1<<<grid1, block>>>(d_A, d_B, d_E, NI, NK, NJ);
+        }));
+        bench_lap_add(&acc_k2, bench_time_op(&timer, [&]() {
+            mm3_kernel2<<<grid2, block>>>(d_C, d_D, d_F, NJ, NM, NL);
+        }));
+        bench_lap_add(&acc_k3, bench_time_op(&timer, [&]() {
+            mm3_kernel3<<<grid3, block>>>(d_E, d_F, d_G, NI, NJ, NL);
+        }));
+    };
+
     for (int w = 0; w < num_warmup; ++w) {
-        mm3_kernel1<<<grid1, block>>>(d_A, d_B, d_E, NI, NK, NJ);
-        mm3_kernel2<<<grid2, block>>>(d_C, d_D, d_F, NJ, NM, NL);
-        mm3_kernel3<<<grid3, block>>>(d_E, d_F, d_G, NI, NJ, NL);
-        HIP_CHECK(hipDeviceSynchronize());
+        run_3mm_pass();
     }
 
-    // Timed iterations — time each kernel separately
-    std::vector<double> k1_times(1), k2_times(1), k3_times(1);
-    for (int iter = 0; iter < 1; ++iter) {
-        timer.record_start();
-        mm3_kernel1<<<grid1, block>>>(d_A, d_B, d_E, NI, NK, NJ);
-        timer.record_stop();
-        k1_times[iter] = static_cast<double>(timer.elapsed_ms());
-
-        timer.record_start();
-        mm3_kernel2<<<grid2, block>>>(d_C, d_D, d_F, NJ, NM, NL);
-        timer.record_stop();
-        k2_times[iter] = static_cast<double>(timer.elapsed_ms());
-
-        timer.record_start();
-        mm3_kernel3<<<grid3, block>>>(d_E, d_F, d_G, NI, NJ, NL);
-        timer.record_stop();
-        k3_times[iter] = static_cast<double>(timer.elapsed_ms());
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_3mm_pass();
+        bench_emit_iter("mm3_kernel1", i, &acc_k1, params);
+        bench_emit_iter("mm3_kernel2", i, &acc_k2, params);
+        bench_emit_iter("mm3_kernel3", i, &acc_k3, params);
+        total_gpu_ms += acc_k1.gpu_ms + acc_k2.gpu_ms + acc_k3.gpu_ms;
+        fprintf(stderr, "pass %d: k1 gpu = %.3f ms, k2 gpu = %.3f ms, k3 gpu = %.3f ms\n",
+                i, acc_k1.gpu_ms, acc_k2.gpu_ms, acc_k3.gpu_ms);
     }
 
-    // Compute statistics
-    double k1_sum = 0.0, k2_sum = 0.0, k3_sum = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        k1_sum += k1_times[i];
-        k2_sum += k2_times[i];
-        k3_sum += k3_times[i];
-    }
-    double k1_avg = k1_sum / 1;
-    double k2_avg = k2_sum / 1;
-    double k3_avg = k3_sum / 1;
-    double total_avg_ms = k1_avg + k2_avg + k3_avg;
-
-    // total_flops = 2*NI*NK*NJ + 2*NJ*NM*NL + 2*NI*NJ*NL
-    double total_flops = 2.0 * ((double)NI * NK * NJ +
-                                (double)NJ * NM * NL +
-                                (double)NI * NJ * NL);
-    double gflops = total_flops / (total_avg_ms * 1e-3) / 1e9;
-
-    fprintf(stderr, "Performance: %.2f GFLOPS  (total avg %.4f ms: k1=%.4f k2=%.4f k3=%.4f)\n",
-            gflops, total_avg_ms, k1_avg, k2_avg, k3_avg);
-
-    // JSON-lines output
-    printf("{\"type\":\"kernel\",\"name\":\"mm3_kernel1\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"}}\n",
-           k1_avg, N, block_size, precision);
-    printf("{\"type\":\"kernel\",\"name\":\"mm3_kernel2\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"}}\n",
-           k2_avg, N, block_size, precision);
-    printf("{\"type\":\"kernel\",\"name\":\"mm3_kernel3\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"}}\n",
-           k3_avg, N, block_size, precision);
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
-           total_avg_ms, gflops);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // Cleanup
     HIP_CHECK(hipFree(d_A));

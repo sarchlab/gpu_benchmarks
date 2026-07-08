@@ -1,6 +1,6 @@
 # tier2/npb_cg — NPB Conjugate Gradient
 
-Benchmarks a sparse iterative Conjugate Gradient (CG) solver from the NAS Parallel Benchmarks. Solves Ax = b where A is a synthetic sparse matrix in CSR format. Measures SpMV bandwidth and solve throughput.
+Benchmarks a sparse iterative Conjugate Gradient (CG) solver from the NAS Parallel Benchmarks. Solves Ax = b where A is a synthetic sparse matrix in CSR format. Emits per-solve, per-kernel GPU times; SpMV bandwidth and solve throughput are derived downstream.
 
 ## Algorithm
 
@@ -12,7 +12,19 @@ Benchmarks a sparse iterative Conjugate Gradient (CG) solver from the NAS Parall
   3. **AXPY** — `x = x + alpha * p`, `r = r - alpha * Ap`
   4. **Dot product** — `rr_new = dot(r, r)` for convergence check
   5. **Scale + AXPY** — direction update `p = r + beta * p`
-- Default: 25 CG iterations per solve, 5 warmup + 5 timed runs
+- Default: 25 CG iterations per solve, 3 warmup + 7 timed solves
+  (`BENCH_PARAM_num_warmup` / `BENCH_PARAM_num_iters`)
+
+## Parameters
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `BENCH_PARAM_matrix_size` | 50000 | Matrix rows/columns |
+| `BENCH_PARAM_block_size` | 256 | Threads per block |
+| `BENCH_PARAM_max_cg_iterations` | 25 | CG iterations per solve |
+| `BENCH_PARAM_nonzeros_per_row` | 7 | Nonzeros per matrix row |
+| `BENCH_PARAM_num_warmup` | 3 | Warmup CG solves (untimed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed CG solves, each recorded |
 
 ## Files
 
@@ -43,12 +55,18 @@ BENCH_PARAM_matrix_size=100000 ./npb_cg         # override via env
 
 ## Output
 
-**stdout** — JSON-lines:
+**stdout** — JSON-lines. Per timed CG solve, one record per kernel carrying
+that kernel's accumulated GPU event time (`time_ms`) and host wall-clock time
+(`host_time_ms`) within the solve; the summary's `total_time_ms` is the sum of
+all recorded GPU event times. Derived metrics (SpMV bandwidth, avg iteration
+time) are computed downstream:
 ```json
-{"type":"kernel","name":"spmv_kernel","time_ms":1.234,"params":{"matrix_size":50000,...}}
-{"type":"kernel","name":"dot_product_kernel","time_ms":1.234,"params":{...}}
-{"type":"kernel","name":"axpy_kernel","time_ms":1.234,"params":{...}}
-{"type":"summary","total_time_ms":6.170,"metrics":[{"name":"avg_iter_ms","value":1.234},{"name":"spmv_bw_gb_s","value":45.67}]}
+{"type":"kernel","name":"spmv_kernel","iter":0,"time_ms":1.234000,"host_time_ms":1.301000,"params":{"matrix_size":50000,...}}
+{"type":"kernel","name":"dot_product_kernel","iter":0,"time_ms":1.234000,"host_time_ms":1.310000,"params":{...}}
+{"type":"kernel","name":"axpy_kernel","iter":0,"time_ms":1.234000,"host_time_ms":1.298000,"params":{...}}
+{"type":"kernel","name":"scale_kernel","iter":0,"time_ms":0.412000,"host_time_ms":0.450000,"params":{...}}
+...
+{"type":"summary","total_time_ms":29.081000}
 ```
 
 **stderr** — human-readable timing and verification

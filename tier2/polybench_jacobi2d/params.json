@@ -2,7 +2,7 @@
   "benchmark": "polybench_jacobi2d",
   "tier": 2,
   "suite": "polybench",
-  "description": "2D Jacobi 5-point stencil with double buffering. Updates interior NxN grid for TSTEPS iterations. Measures memory bandwidth in GB/s.",
+  "description": "2D Jacobi 5-point stencil with double buffering. Updates interior NxN grid for TSTEPS iterations. Emits per-pass kernel times; memory bandwidth (GB/s) is derived downstream.",
   "scaling_param": {
     "name": "n",
     "description": "Grid dimension (NxN grid)",

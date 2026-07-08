@@ -44,36 +44,48 @@ make PLATFORM=metal
 ## Run
 
 ```bash
-./rodinia_gaussian                         # defaults: N=512, 3 iterations
+./rodinia_gaussian                         # defaults: N=512
 ./rodinia_gaussian --size 256
-./rodinia_gaussian --size 1024 --iterations 5
+BENCH_PARAM_num_iters=5 ./rodinia_gaussian --size 1024
 ```
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BENCH_PARAM_size` | 512 | Matrix dimension N |
+| `BENCH_PARAM_block_size` | 256 | Threads per block (echoed in records) |
+| `BENCH_PARAM_verify` | true | Verification mode (`true`, `false`, `skip`) |
+| `BENCH_PARAM_num_warmup` | 3 | Warmup elimination passes (not recorded) |
+| `BENCH_PARAM_num_iters` | 7 | Timed elimination passes, each recorded |
 
 ## Output
 
-**stdout** — CSV result row:
-```
-gaussian,<N>,<time_ms>,<GFLOPS>
-```
-Example:
-```
-gaussian,512,45.1234,1.97
+**stdout** — JSON lines: per timed pass, one `kernel` record per kernel
+(`fan1`, `fan2`) with that kernel's accumulated GPU event time (`time_ms`)
+and host time (`host_time_ms`) across all `N-1` pivot steps, then a summary
+whose `total_time_ms` is the sum of all recorded GPU event times:
+```json
+{"type":"kernel","name":"fan1","iter":0,"time_ms":10.123,"host_time_ms":12.456,"params":{"size":512,"block_size":256,"verify":"true"}}
+{"type":"kernel","name":"fan2","iter":0,"time_ms":35.000,"host_time_ms":38.100,"params":{"size":512,"block_size":256,"verify":"true"}}
+{"type":"summary","total_time_ms":315.861}
 ```
 
 **stderr** — human-readable details:
 ```
 Device: Apple M4 Pro
-Matrix size: 512×512  |  Iterations: 3
+Matrix size: 512×512
 
+pass 0: fan1 gpu = 10.123 ms, fan2 gpu = 35.000 ms
+...
+Total GPU time: 315.861 ms over 7 passes
 Verification: rel_err = 1.23e-06 — PASS
-
-Performance: 1.97 GFLOPS  (avg 45.1234 ms, min 44.9000 ms, max 45.5000 ms, stddev 0.3012 ms)
 ```
 
 ## Metrics
 
-- **Time**: wall-clock time for GPU forward elimination (fan1 + fan2 kernels across all `N-1` pivot steps), averaged over iterations
-- **GFLOPS**: `(2/3 × N³) / time_s / 1e9`
+- **Time**: GPU event time for forward elimination (fan1 + fan2 kernels across all `N-1` pivot steps), recorded per pass
+- **GFLOPS**: `(2/3 × N³) / time_s / 1e9` — derived downstream from `time_ms` and params
 - **Verification**: relative residual `‖Ax − b‖ / ‖b‖ < 1e-4`
 
 ## Platform Notes

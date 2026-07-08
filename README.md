@@ -113,7 +113,6 @@ gpu_benchmarks/
 │   ├── altis_particlefilter/
 │   ├── altis_raytracing/
 │   ├── lonestar_bh/
-│   ├── lonestar_dmr/
 │   ├── lonestar_sssp/
 │   ├── graph_cc/
 │   ├── graph_pr/
@@ -269,7 +268,6 @@ gpu_benchmarks/
 | Altis | `altis_gups` | Giga Updates Per Second (random memory access) |
 | Lonestar GPU | `lonestar_sssp` | Single-Source Shortest Path (Bellman-Ford) |
 | Lonestar GPU | `lonestar_bh` | Barnes-Hut N-body (2D quadtree approximation) |
-| Lonestar GPU | `lonestar_dmr` | Delaunay Mesh Refinement |
 | Graph Analytics | `graph_pr` | PageRank (pull-based iterative) |
 | Graph Analytics | `graph_tc` | Triangle Counting (sorted adjacency intersection) |
 | Graph Analytics | `graph_cc` | Connected Components (label propagation) |

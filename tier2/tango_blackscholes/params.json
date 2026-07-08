@@ -2,7 +2,7 @@
   "benchmark": "tango_blackscholes",
   "tier": 2,
   "suite": "tango",
-  "description": "Black-Scholes European option pricing with polynomial approximation of cumulative normal distribution. Measures throughput in Moptions/sec.",
+  "description": "Black-Scholes European option pricing with polynomial approximation of cumulative normal distribution. Throughput (options/sec) is derived downstream from the emitted per-iteration times.",
   "scaling_param": {
     "name": "size",
     "description": "Number of options to price",

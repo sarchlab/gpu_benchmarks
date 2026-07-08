@@ -2,7 +2,7 @@
   "benchmark": "shoc_scan",
   "tier": 2,
   "suite": "shoc",
-  "description": "Work-efficient exclusive prefix scan (Blelloch) with multi-block support via recursive block-sum propagation. Measures throughput in GB/s.",
+  "description": "Work-efficient exclusive prefix scan (Blelloch) with multi-block support via recursive block-sum propagation. Emits per-iteration kernel times; GB/s is derived downstream.",
   "scaling_param": {
     "name": "array_size",
     "description": "Number of float elements to scan",

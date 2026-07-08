@@ -15,30 +15,25 @@
 //
 //   --size N         Matrix dimension N (N×N)  (default: 512)
 //
-// Output (stdout): CSV — gaussian,<N>,<time_ms>,<GFLOPS>
+// Environment variables (override argv):
+//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_verify
+//   BENCH_PARAM_num_warmup   (warmup elimination passes, default 3)
+//   BENCH_PARAM_num_iters    (timed elimination passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// kernel (fan1, fan2) carrying that kernel's accumulated GPU event time
+// (time_ms) and host time (host_time_ms) across all N-1 pivot steps within
+// the pass, then a summary whose total_time_ms is the SUM of all recorded
+// GPU event times. GFLOPS is derived downstream from time_ms and params.
 // Output (stderr): device info, timing details, verification result
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <cfloat>
-#include <vector>
 
-// ---------------------------------------------------------------------------
-// Inlined bench_common_hip.h utilities
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
@@ -51,30 +46,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     }
     return defaultVal;
 }
-
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
 
 // ---------------------------------------------------------------------------
 // Kernel 1: fan1 — compute multipliers for pivot column t
@@ -156,8 +127,20 @@ int main(int argc, char** argv)
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size_param = atoi(env_val);
     env_val = getenv("BENCH_PARAM_verify");
-    if (env_val) verify = env_val;
-    int num_warmup = 5;
+    if (env_val) {
+        // Validate against the known enum set so the emitted params string is
+        // always a canonical literal, never raw env text.
+        if      (strcmp(env_val, "true")  == 0) verify = "true";
+        else if (strcmp(env_val, "false") == 0) verify = "false";
+        else if (strcmp(env_val, "skip")  == 0) verify = "skip";
+        else {
+            fprintf(stderr, "Invalid BENCH_PARAM_verify (expected true, false "
+                            "or skip)\n");
+            return 1;
+        }
+    }
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     size_t bytes_a = (size_t)N * N * sizeof(float);
     size_t bytes_b = (size_t)N * sizeof(float);
@@ -205,56 +188,66 @@ int main(int argc, char** argv)
     const int BLOCK1D = 256;
     const int BLOCK2D = 16;
 
-    // Warmup
-    for (int w = 0; w < num_warmup; ++w) {
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"",
+             N, block_size_param, verify);
+
+    // Per-kernel accumulators: each elimination pass launches fan1 and fan2
+    // once per pivot step; the accumulated GPU/host time of all N-1 steps
+    // within one pass becomes that pass's record for the kernel.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_fan1, acc_fan2;
+
+    // One full forward-elimination pass. The elimination destroys A/b in
+    // place, so the pristine inputs are re-uploaded at the start of every
+    // pass (untimed) — each pass performs identical work.
+    auto run_pass = [&]() {
+        bench_lap_reset(&acc_fan1);
+        bench_lap_reset(&acc_fan2);
+
         HIP_CHECK(hipMemcpy(d_a, h_a, bytes_a, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_b, h_b, bytes_b, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemset(d_m, 0, bytes_a));
 
-        for (int t = 0; t < N - 1; ++t) {
-            int remaining = N - t - 1;
-            // fan1
-            int grid1 = (remaining + BLOCK1D - 1) / BLOCK1D;
-            fan1<<<grid1, BLOCK1D>>>(d_m, d_a, N, t);
-            // fan2
-            dim3 block2(BLOCK2D, BLOCK2D);
-            dim3 grid2((remaining + BLOCK2D - 1) / BLOCK2D,
-                       (remaining + BLOCK2D - 1) / BLOCK2D);
-            fan2<<<grid2, block2>>>(d_m, d_a, d_b, N, t);
-        }
-        HIP_CHECK(hipDeviceSynchronize());
-    }
-
-    // Timed iterations — fan1 and fan2 timed separately into their own accumulators
-    double t_fan1 = 0.0;
-    double t_fan2 = 0.0;
-    BenchmarkTimer timer;
-
-    for (int iter = 0; iter < 1; ++iter) {
-        // Reset device data from original (outside timing)
-        HIP_CHECK(hipMemcpy(d_a, h_a, bytes_a, hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(d_b, h_b, bytes_b, hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemset(d_m, 0, bytes_a));
-
-        // Time the forward elimination kernel loop, per kernel
         for (int t = 0; t < N - 1; ++t) {
             int remaining = N - t - 1;
             // fan1: compute multipliers
             int grid1 = (remaining + BLOCK1D - 1) / BLOCK1D;
-            timer.record_start();
-            fan1<<<grid1, BLOCK1D>>>(d_m, d_a, N, t);
-            timer.record_stop();
-            t_fan1 += (double)timer.elapsed_ms();
+            bench_lap_add(&acc_fan1, bench_time_op(&timer, [&]() {
+                fan1<<<grid1, BLOCK1D>>>(d_m, d_a, N, t);
+            }));
             // fan2: update submatrix
             dim3 block2(BLOCK2D, BLOCK2D);
             dim3 grid2((remaining + BLOCK2D - 1) / BLOCK2D,
                        (remaining + BLOCK2D - 1) / BLOCK2D);
-            timer.record_start();
-            fan2<<<grid2, block2>>>(d_m, d_a, d_b, N, t);
-            timer.record_stop();
-            t_fan2 += (double)timer.elapsed_ms();
+            bench_lap_add(&acc_fan2, bench_time_op(&timer, [&]() {
+                fan2<<<grid2, block2>>>(d_m, d_a, d_b, N, t);
+            }));
         }
+    };
+
+    // Warmup passes (records not emitted)
+    for (int w = 0; w < num_warmup; ++w) {
+        run_pass();
     }
+
+    // Timed passes — one record per kernel per pass
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_pass();
+        bench_emit_iter("fan1", i, &acc_fan1, params);
+        bench_emit_iter("fan2", i, &acc_fan2, params);
+        total_gpu_ms += acc_fan1.gpu_ms + acc_fan2.gpu_ms;
+        fprintf(stderr, "pass %d: fan1 gpu = %.3f ms, fan2 gpu = %.3f ms\n",
+                i, acc_fan1.gpu_ms, acc_fan2.gpu_ms);
+    }
+
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // Copy final result from device
     HIP_CHECK(hipMemcpy(h_a, d_a, bytes_a, hipMemcpyDeviceToHost));
@@ -277,31 +270,6 @@ int main(int argc, char** argv)
     bool pass = (rel_err < 1e-4);
     fprintf(stderr, "Verification: rel_err = %.2e — %s\n\n",
             rel_err, pass ? "PASS" : "FAIL");
-
-    // Compute statistics — total is the sum of the per-kernel accumulators
-    double total_ms = t_fan1 + t_fan2;
-    double avg_ms = total_ms;
-
-    // GFLOPS: 2/3 * N^3 floating-point ops for forward elimination
-    double flops  = (2.0 / 3.0) * (double)N * (double)N * (double)N;
-    double gflops = flops / (avg_ms * 1e-3) / 1e9;
-
-    fprintf(stderr, "Performance: %.2f GFLOPS  (total %.4f ms: fan1=%.4f fan2=%.4f)\n",
-            gflops, total_ms, t_fan1, t_fan2);
-
-    // JSON-lines kernel events
-    printf("{\"type\":\"kernel\",\"name\":\"fan1\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
-           t_fan1, N, block_size_param, verify);
-
-    printf("{\"type\":\"kernel\",\"name\":\"fan2\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
-           t_fan2, N, block_size_param, verify);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
-           total_ms, gflops);
 
     // Cleanup
     HIP_CHECK(hipFree(d_a));

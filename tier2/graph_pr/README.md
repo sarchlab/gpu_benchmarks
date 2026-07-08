@@ -21,8 +21,15 @@ where `d = 0.85` is the damping factor.
 |-------------------|---------|--------------------------------|
 | `--vertices`       | 131072  | Number of graph vertices       |
 | `--degree`         | 16      | Average edges per vertex       |
-| `--iterations`     | 5       | Number of timed iterations     |
-| `--pr-iterations`  | 20      | PageRank iterations per run    |
+| `--pr-iterations`  | 20      | PageRank iterations per pass   |
+
+Environment variables (`BENCH_PARAM_vertices`, `BENCH_PARAM_degree`,
+`BENCH_PARAM_pr_iterations`) override the command-line flags. In addition:
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `BENCH_PARAM_num_warmup` | 3 | Warmup PageRank passes (untimed) |
+| `BENCH_PARAM_num_iters`  | 7 | Timed PageRank passes, each recorded |
 
 ## Build & Run
 
@@ -42,18 +49,24 @@ make PLATFORM=rocm
 
 ## Output Format
 
-**CSV to stdout:**
+**JSON lines to stdout** — one `kernel` record per timed pass carrying the
+accumulated GPU event time (`time_ms`) and host wall-clock time
+(`host_time_ms`) of all PageRank iterations in that pass, then a `summary`
+whose `total_time_ms` is the sum of all recorded GPU event times:
 ```
-graph_pr,<N_vertices>,<time_ms>,<GTEPS>
+{"type":"kernel","name":"pagerank_kernel","iter":0,"time_ms":45.123400,"host_time_ms":46.010000,"params":{"vertices":131072,"degree":16,"pr_iterations":20}}
+...
+{"type":"summary","total_time_ms":315.863800}
 ```
 
 **Human-readable to stderr:**
 ```
 Device: Apple M1
-PageRank (pull-based)  |  Vertices: 131072  |  Edges: 2097152  |  PR iterations: 20  |  Damping: 0.85  |  Iterations: 5 warmup + 5 timed
+PageRank (pull-based)  |  Vertices: 131072  |  Edges: 2097152  |  PR iterations: 20  |  Damping: 0.85  |  Passes: 3 warmup + 7 timed
 
-Average time: 45.1234 ms
-Throughput:   0.9300 GTEPS
+pass 0: pagerank_kernel gpu = 45.123 ms, host = 46.010 ms
+...
+Total GPU time: 315.864 ms over 7 passes
 PASS
 ```
 
@@ -61,7 +74,8 @@ PASS
 
 **GTEPS** (Giga Traversed Edges Per Second) = `N_edges × PR_iterations / time_seconds / 1e9`
 
-Measures the effective edge traversal throughput across all PageRank iterations.
+Derived downstream from the emitted `time_ms` and params; the benchmark itself
+reports raw times only.
 
 ## Verification
 

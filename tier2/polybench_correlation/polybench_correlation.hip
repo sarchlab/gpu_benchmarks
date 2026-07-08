@@ -6,30 +6,24 @@
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
-// Output (stdout): JSON-lines
+// Environment variables (override argv):
+//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// kernel (mean_kernel, stddev_kernel, normalize_kernel, correlation_kernel)
+// carrying that kernel's GPU event time and host time within the pass, then
+// a summary whose total_time_ms is the SUM of all recorded GPU event times.
+// Derived metrics are computed downstream from time_ms and params.
 // Output (stderr): device info, timing details
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
-#include <cfloat>
-#include <vector>
 
-// ---------------------------------------------------------------------------
-// Inlined error check macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing helpers
@@ -45,30 +39,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     }
     return defaultVal;
 }
-
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
 
 // ---------------------------------------------------------------------------
 // Kernel 1: Compute column means
@@ -178,8 +148,18 @@ int main(int argc, char** argv) {
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
-    if (env_val) precision = env_val;
-    int num_warmup = 5;
+    if (env_val) {
+        // Validate against the supported set; params must carry canonical
+        // literals, never raw env text.
+        if (strcmp(env_val, "float") != 0) {
+            fprintf(stderr, "Unsupported BENCH_PARAM_precision '%s' (supported: float)\n",
+                    env_val);
+            return EXIT_FAILURE;
+        }
+        precision = "float";
+    }
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int M = N;
 
@@ -209,8 +189,6 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMalloc(&d_stddev, vec_bytes));
     HIP_CHECK(hipMalloc(&d_corr,   corr_bytes));
 
-    BenchmarkTimer timer;
-
     int threads1d  = block_size;
     int blocks_n   = (N + threads1d - 1) / threads1d;
     int blocks_mn  = (M * N + threads1d - 1) / threads1d;
@@ -218,77 +196,63 @@ int main(int argc, char** argv) {
     dim3 corr_block(TILE_SIZE, TILE_SIZE);
     dim3 corr_grid((N + TILE_SIZE - 1) / TILE_SIZE, (N + TILE_SIZE - 1) / TILE_SIZE);
 
-    // Warmup
-    for (int w = 0; w < num_warmup; ++w) {
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
+             N, block_size, precision);
+
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_mean, acc_stddev, acc_norm, acc_corr;
+
+    // One full correlation pass. normalize_kernel mutates d_data in place, so
+    // the pristine input is re-uploaded at the start of every pass (untimed),
+    // exactly as the pre-conversion code did.
+    auto run_pass = [&]() {
+        bench_lap_reset(&acc_mean);
+        bench_lap_reset(&acc_stddev);
+        bench_lap_reset(&acc_norm);
+        bench_lap_reset(&acc_corr);
+
         HIP_CHECK(hipMemcpy(d_data, h_data, data_bytes, hipMemcpyHostToDevice));
-        mean_kernel<<<dim3(blocks_n), dim3(threads1d)>>>(d_data, d_mean, M, N);
-        stddev_kernel<<<dim3(blocks_n), dim3(threads1d)>>>(d_data, d_mean, d_stddev, M, N);
-        normalize_kernel<<<dim3(blocks_mn), dim3(threads1d)>>>(d_data, d_mean, d_stddev, M, N);
-        correlation_kernel<<<corr_grid, corr_block>>>(d_data, d_corr, M, N);
-    }
-    HIP_CHECK(hipDeviceSynchronize());
 
-    // Timed iterations
-    std::vector<double> t_mean(1), t_stddev(1), t_norm(1), t_corr(1);
-
-    for (int it = 0; it < 1; ++it) {
-        HIP_CHECK(hipMemcpy(d_data, h_data, data_bytes, hipMemcpyHostToDevice));
-
-        timer.record_start();
-        mean_kernel<<<dim3(blocks_n), dim3(threads1d)>>>(d_data, d_mean, M, N);
-        timer.record_stop();
-        t_mean[it] = (double)timer.elapsed_ms();
-
-        timer.record_start();
-        stddev_kernel<<<dim3(blocks_n), dim3(threads1d)>>>(d_data, d_mean, d_stddev, M, N);
-        timer.record_stop();
-        t_stddev[it] = (double)timer.elapsed_ms();
-
-        timer.record_start();
-        normalize_kernel<<<dim3(blocks_mn), dim3(threads1d)>>>(d_data, d_mean, d_stddev, M, N);
-        timer.record_stop();
-        t_norm[it] = (double)timer.elapsed_ms();
-
-        timer.record_start();
-        correlation_kernel<<<corr_grid, corr_block>>>(d_data, d_corr, M, N);
-        timer.record_stop();
-        t_corr[it] = (double)timer.elapsed_ms();
-    }
-
-    auto avg = [](const std::vector<double>& v) {
-        double s = 0; for (auto x : v) s += x; return s / v.size();
+        bench_lap_add(&acc_mean, bench_time_op(&timer, [&]() {
+            mean_kernel<<<dim3(blocks_n), dim3(threads1d)>>>(d_data, d_mean, M, N);
+        }));
+        bench_lap_add(&acc_stddev, bench_time_op(&timer, [&]() {
+            stddev_kernel<<<dim3(blocks_n), dim3(threads1d)>>>(d_data, d_mean, d_stddev, M, N);
+        }));
+        bench_lap_add(&acc_norm, bench_time_op(&timer, [&]() {
+            normalize_kernel<<<dim3(blocks_mn), dim3(threads1d)>>>(d_data, d_mean, d_stddev, M, N);
+        }));
+        bench_lap_add(&acc_corr, bench_time_op(&timer, [&]() {
+            correlation_kernel<<<corr_grid, corr_block>>>(d_data, d_corr, M, N);
+        }));
     };
 
-    double avg_mean   = avg(t_mean);
-    double avg_stddev = avg(t_stddev);
-    double avg_norm   = avg(t_norm);
-    double avg_corr   = avg(t_corr);
-    double total_ms   = avg_mean + avg_stddev + avg_norm + avg_corr;
+    for (int w = 0; w < num_warmup; ++w) {
+        run_pass();
+    }
 
-    fprintf(stderr, "Kernel timings (avg ms): mean=%.4f  stddev=%.4f  normalize=%.4f  correlation=%.4f\n",
-            avg_mean, avg_stddev, avg_norm, avg_corr);
-    fprintf(stderr, "Total: %.4f ms\n", total_ms);
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_pass();
+        bench_emit_iter("mean_kernel",        i, &acc_mean,   params);
+        bench_emit_iter("stddev_kernel",      i, &acc_stddev, params);
+        bench_emit_iter("normalize_kernel",   i, &acc_norm,   params);
+        bench_emit_iter("correlation_kernel", i, &acc_corr,   params);
+        total_gpu_ms += acc_mean.gpu_ms + acc_stddev.gpu_ms +
+                        acc_norm.gpu_ms + acc_corr.gpu_ms;
+        fprintf(stderr, "pass %d: mean=%.4f  stddev=%.4f  normalize=%.4f  "
+                "correlation=%.4f (gpu ms)\n",
+                i, acc_mean.gpu_ms, acc_stddev.gpu_ms,
+                acc_norm.gpu_ms, acc_corr.gpu_ms);
+    }
 
-    // JSON-lines output
-    printf("{\"type\":\"kernel\",\"name\":\"mean_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"precision\":\"%s\"}}\n",
-           avg_mean, N, block_size, precision);
-    printf("{\"type\":\"kernel\",\"name\":\"stddev_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"precision\":\"%s\"}}\n",
-           avg_stddev, N, block_size, precision);
-    printf("{\"type\":\"kernel\",\"name\":\"normalize_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"precision\":\"%s\"}}\n",
-           avg_norm, N, block_size, precision);
-    printf("{\"type\":\"kernel\",\"name\":\"correlation_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"precision\":\"%s\"}}\n",
-           avg_corr, N, block_size, precision);
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[]}\n",
-           total_ms);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // Cleanup
     HIP_CHECK(hipFree(d_data));

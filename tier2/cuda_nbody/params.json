@@ -2,7 +2,7 @@
   "benchmark": "cuda_nbody",
   "tier": 2,
   "suite": "cuda_sdk",
-  "description": "All-pairs N-body gravitational simulation with tile-based shared memory optimization. Each thread computes force on one body from all others. Measures GFLOPS.",
+  "description": "All-pairs N-body gravitational simulation with tile-based shared memory optimization. Each thread computes force on one body from all others. Emits per-iteration kernel times; GFLOPS is derived downstream.",
   "scaling_param": {
     "name": "bodies",
     "description": "Number of bodies in the simulation",

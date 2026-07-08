@@ -17,7 +17,7 @@ hz[i][j] -= 0.7*(ex[i][j+1] - ex[i][j] +
                  ey[i+1][j]  - ey[i][j])  for i < NX-1, j < NY-1
 ```
 
-The benchmark runs `TMAX` time steps per timed iteration and reports effective bandwidth using `7 * NX * NY * sizeof(float)` bytes per step.
+The benchmark runs `TMAX` time steps per timed pass and records each kernel's accumulated GPU time per pass. Effective bandwidth (`7 * NX * NY * sizeof(float)` bytes per step) is derived downstream.
 
 ## Files
 
@@ -59,11 +59,11 @@ make clean
 ## Run
 
 ```bash
-# Default: 512×512 grid, 50 time steps, 3 iterations
+# Default: 512×512 grid, 50 time steps
 ./polybench_fdtd2d
 
-# Custom grid size, time steps, iterations
-./polybench_fdtd2d --size 1024 --tmax 100 --iterations 5
+# Custom grid size, time steps
+./polybench_fdtd2d --size 1024 --tmax 100
 ```
 
 ### Arguments
@@ -71,28 +71,42 @@ make clean
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--size N` | 512 | Grid dimension (N×N) |
-| `--tmax T` | 50 | FDTD time steps per benchmark iteration |
-| `--iterations I` | 3 | Number of timed benchmark iterations |
+| `--tmax T` | 50 | FDTD time steps per benchmark pass |
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BENCH_PARAM_size` | 512 | Grid dimension (N×N) |
+| `BENCH_PARAM_tmax` | 50 | FDTD time steps per benchmark pass |
+| `BENCH_PARAM_block_size` | 256 | Threads per block (recorded in params) |
+| `BENCH_PARAM_num_warmup` | 3 | Warmup passes (untimed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded |
 
 ## Output
 
-**stdout** (CSV):
+**stdout** — JSON lines: per timed pass, one `{"type":"kernel",...}` record per kernel (`fdtd_update_ex`, `fdtd_update_ey`, `fdtd_update_hz`) with that kernel's accumulated GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`) over the pass's TMAX steps, then a summary whose `total_time_ms` is the sum of all recorded GPU event times:
 ```
-kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-polybench_fdtd2d,512x512,3,45.2310,44.8120,45.9100,0.5821
+{"type":"kernel","name":"fdtd_update_ex","iter":0,"time_ms":14.2310,"host_time_ms":15.0121,"params":{"size":512,"tmax":50,"block_size":256}}
+...
+{"type":"summary","total_time_ms":316.6170}
 ```
+
+The field arrays are re-uploaded (untimed) at the start of every pass, so each pass performs identical work.
 
 **stderr**:
 ```
 Device: NVIDIA GeForce RTX 3090 (id=0)
-Grid: 512×512  |  TMAX: 50  |  Iterations: 3
+Grid: 512×512  |  TMAX: 50  |  Passes: 3 warmup + 7 timed
 
-Effective bandwidth: 312.45 GB/s  (avg 45.2310 ms, 50 steps/iter)
+pass 0: ex=14.231 ey=14.812 hz=16.190 ms
+...
+Total GPU time: 316.617 ms over 7 passes (50 steps/pass)
 ```
 
 ## Performance Notes
 
 - Each time step performs three stencil passes over NX×NY float arrays
 - Memory-bound benchmark; performance scales with GPU memory bandwidth
-- Effective bandwidth formula: `7 * NX * NY * 4 bytes * TMAX / time_seconds`
+- Effective bandwidth formula (derived downstream from `time_ms` and params): `7 * NX * NY * 4 bytes * TMAX / time_seconds`
   - The factor 7 accounts for reads and writes across all three kernels

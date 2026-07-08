@@ -3,7 +3,8 @@
 ## Description
 
 Applies a 9-point star stencil iteratively on a 2D floating-point grid.
-Measures effective memory bandwidth in GB/s.
+Emits raw per-pass kernel times; effective memory bandwidth (GB/s) is
+derived downstream.
 Derived from the SHOC (Scalable Heterogeneous Computing) benchmark suite.
 
 ## Algorithm
@@ -20,7 +21,7 @@ out[i][j] = 0.5   * in[i][j]
 - **Interior only**: rows/columns 1 .. N-2; boundary cells remain 0
 - **Thread blocks**: 16×16
 - **Ping-pong buffers**: `in_buf` and `out_buf` swapped each iteration
-- **Trials**: 3 timed trials, average reported
+- **Passes**: `BENCH_PARAM_num_warmup` warmup passes (default 3), then `BENCH_PARAM_num_iters` timed passes (default 7), each recorded individually
 
 ## Files
 
@@ -49,11 +50,11 @@ make clean
 ## Run
 
 ```bash
-# Default: 2048×2048 grid, 5 iterations, 3 trials
+# Default: 2048×2048 grid, 5 stencil steps per pass
 ./shoc_stencil2d
 
 # Custom parameters
-./shoc_stencil2d --n 4096 --iterations 10 --trials 5
+BENCH_PARAM_num_iters=5 ./shoc_stencil2d --n 4096 --iterations 10
 ```
 
 ### Options
@@ -61,30 +62,34 @@ make clean
 | Option           | Default | Description                         |
 |------------------|---------|-------------------------------------|
 | `--n N`          | 2048    | Grid dimension (N×N floats)         |
-| `--iterations I` | 5       | Stencil steps per timed trial       |
-| `--trials T`     | 3       | Number of timed trials              |
+| `--iterations I` | 5       | Stencil steps per timed pass        |
+| `--trials T`     | 3       | Legacy trial-count param (echoed in records) |
+
+Environment variables (`BENCH_PARAM_*`) override the flags. In addition,
+`BENCH_PARAM_num_warmup` (default 3) sets the warmup passes and
+`BENCH_PARAM_num_iters` (default 7) the timed passes.
 
 ## Output Format
 
-**stderr**: device info, per-trial timing, correctness check result
+**stderr**: device info, per-pass timing, correctness check result
 
-**stdout** (CSV):
-```
-stencil2d,<N>,<ITERATIONS>,<time_ms>,<GBs>
+**stdout** (JSON lines): one `kernel` record per timed pass with the
+accumulated GPU event time (`time_ms`) and host time (`host_time_ms`) of all
+stencil steps in that pass, then a summary whose `total_time_ms` is the sum
+of all recorded GPU event times:
+```json
+{"type":"kernel","name":"stencil2d_kernel","iter":0,"time_ms":12.345,"host_time_ms":13.100,"params":{"n":2048,"iterations":5,"trials":3,"block_size":16}}
+{"type":"summary","total_time_ms":86.42}
 ```
 
-Example:
-```
-stencil2d,2048,5,12.3456,270.45
-```
+## Performance Metric (derived downstream)
 
-## Performance Metric
-
-Effective memory bandwidth (GB/s) approximates each stencil step as
+Effective memory bandwidth (GB/s), computed downstream from `time_ms` and
+params — not reported by the binary. It approximates each stencil step as
 reading and writing the full N×N grid:
 
 ```
-GB/s = ITERATIONS × 2 × N × N × sizeof(float) / (avg_time_s × 1e9)
+GB/s = ITERATIONS × 2 × N × N × sizeof(float) / (time_s × 1e9)
 ```
 
 ## Correctness Verification

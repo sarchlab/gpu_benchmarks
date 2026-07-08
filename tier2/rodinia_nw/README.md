@@ -12,7 +12,8 @@ and threadgroup/shared-memory tiling, based on the Rodinia NW benchmark.
 - Two GPU kernel passes process the block-dependency graph's upper-left and
   lower-right triangles respectively; within each block a shared-memory
   anti-diagonal sweep fills a `block_size × block_size` tile.
-- Reports **GCUPS** (giga cell-updates per second) and effective **GB/s**.
+- Emits per-iteration kernel times; **GCUPS** (giga cell-updates per second)
+  and effective **GB/s** are derived downstream.
 
 ## Files
 
@@ -39,20 +40,31 @@ make PLATFORM=metal
 ## Run
 
 ```bash
-./rodinia_nw                              # defaults: N=2048, block=16, penalty=2, iters=3
+./rodinia_nw                              # defaults: N=2048, block=16, penalty=2
 ./rodinia_nw --sequence_length 1024
-./rodinia_nw --sequence_length 4096 --block_size 32 --penalty 10 --iterations 5
+./rodinia_nw --sequence_length 4096 --block_size 32 --penalty 10
 ```
+
+Environment variables (override argv):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BENCH_PARAM_sequence_length` | 2048 | Sequence length N |
+| `BENCH_PARAM_block_size` | 16 | Threads per block / tile edge |
+| `BENCH_PARAM_penalty` | 2 | Gap penalty |
+| `BENCH_PARAM_num_warmup` | 3 | Untimed warmup passes |
+| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded individually |
 
 ## Output
 
-```
-kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-rodinia_nw,2048,3,42.3210,41.9870,42.6540,0.3380
-rodinia_nw,2048,42.3210        ← GCUPS metrics CSV line
-```
+**stdout** — JSON lines: per timed pass, one `{"type":"kernel",...}` record per
+kernel (`nw_kernel1`, `nw_kernel2`) with that pass's accumulated GPU event time
+(`time_ms`, summed over the wavefront diagonals) and host wall-clock time
+(`host_time_ms`), followed by a `{"type":"summary","total_time_ms":...}` line
+whose value is the sum of all recorded GPU event times. Derived metrics
+(GCUPS, GB/s) are computed downstream from `time_ms` and the params.
 
-Standard error shows human-readable GCUPS and GB/s.
+Standard error shows per-pass timing lines.
 
 ## Platforms
 

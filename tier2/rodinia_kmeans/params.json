@@ -2,26 +2,22 @@
   "benchmark": "rodinia_kmeans",
   "tier": 2,
   "suite": "rodinia",
-  "description": "K-means clustering: assigns N D-dimensional points to K clusters, iteratively updating centers until convergence. Measures throughput in Gpoints/s.",
+  "description": "Rodinia K-means clustering. Faithful port: the original invert_mapping (row-major to feature-major inversion for coalesced loads) and kmeansPoint (nearest-center assignment) kernels; the inverted feature-major layout is preserved. tex1Dfetch on the inverted features is replaced by __ldg (portability substitution). Cluster centers live in constant memory; centroid sums are done on the CPU each iteration. Centroids re-init per pass so every pass runs identical work.",
   "scaling_param": {
     "name": "points",
     "description": "Number of data points to cluster",
     "type": "int",
     "values": [
       1024,
-      1536,
       2048,
-      3072,
       4096,
-      6144,
       8192,
-      12288,
       16384,
-      24576,
       32768,
       49152,
       65536,
       98304,
+      100000,
       131072,
       196608,
       262144,
@@ -29,49 +25,50 @@
       524288,
       786432,
       1048576,
-      1572864,
       2097152,
-      3145728,
-      4194304,
-      6291456,
-      8388608
+      4194304
     ]
   },
   "non_scaling_params": [
     {
-      "name": "dims",
-      "description": "Number of dimensions per data point",
+      "name": "features",
+      "description": "Number of features per data point (constant-memory limit: clusters*features <= 1088)",
       "type": "int",
-      "default": 16,
+      "default": 34,
       "values": [
-        2,
-        16,
-        32
+        34
       ]
     },
     {
       "name": "clusters",
       "description": "Number of clusters (K)",
       "type": "int",
-      "default": 8,
+      "default": 5,
       "values": [
-        4,
-        8,
-        64
+        5
       ]
     },
     {
       "name": "max_iter",
-      "description": "Maximum number of K-means iterations",
+      "description": "K-means assignment iterations per timed pass",
       "type": "int",
-      "default": 1,
+      "default": 10,
       "values": [
-        1
+        10
+      ]
+    },
+    {
+      "name": "threads_per_block",
+      "description": "Threads per block; fixed at THREADS_PER_DIM^2=256 in the original geometry",
+      "type": "int",
+      "default": 256,
+      "values": [
+        256
       ]
     }
   ],
   "kernels": [
-    "kmeans_assign_kernel",
-    "kmeans_update_kernel"
+    "invert_mapping",
+    "kmeansPoint"
   ]
 }

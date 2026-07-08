@@ -4,10 +4,20 @@
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer.
 //
-// Output (stdout): JSON-lines
+// Environment variables:
+//   BENCH_PARAM_matrix_size, BENCH_PARAM_block_size,
+//   BENCH_PARAM_max_cg_iterations, BENCH_PARAM_nonzeros_per_row
+//   BENCH_PARAM_num_warmup   (warmup CG solves, default 3)
+//   BENCH_PARAM_num_iters    (timed CG solves, each recorded, default 7)
+//
+// Output (stdout): per timed CG solve, one {"type":"kernel",...} JSON line per
+// kernel (spmv_kernel, dot_product_kernel, axpy_kernel, scale_kernel) carrying
+// that kernel's accumulated GPU event time and host time within the solve,
+// then a summary whose total_time_ms is the SUM of all recorded GPU event
+// times. Bandwidth metrics are derived downstream from time_ms and params.
 // Output (stderr): human-readable
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -15,19 +25,7 @@
 #include <cmath>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                          \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                  \
-        if (_e != hipSuccess) {                                                 \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                         \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                 \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Kernel: Sparse Matrix-Vector Multiply (CSR format)
@@ -145,7 +143,6 @@ int main(int argc, char** argv) {
     int block_size     = 256;
     int max_cg_iters   = 25;
     int nonzeros_per_row = 7;
-    int iterations     = 5;
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_matrix_size");
@@ -156,16 +153,12 @@ int main(int argc, char** argv) {
     if (env_val) max_cg_iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_nonzeros_per_row");
     if (env_val) nonzeros_per_row = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], "--size") == 0) N = atoi(argv[i+1]);
-        if (strcmp(argv[i], "--iterations") == 0) iterations = atoi(argv[i+1]);
     }
-
-    int iters = iterations;
 
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
@@ -173,8 +166,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "NPB CG  |  Matrix: %d x %d  |  NNZ/row: %d  |  "
-            "CG iters: %d  |  Timed runs: 5 warmup + %d timed\n\n",
-            N, N, nonzeros_per_row, max_cg_iters, iters);
+            "CG iters: %d  |  Solves: %d warmup + %d timed\n\n",
+            N, N, nonzeros_per_row, max_cg_iters, num_warmup, num_iters);
 
     // Generate synthetic sparse matrix in CSR format
     int nnz_per_row = nonzeros_per_row;
@@ -240,94 +233,69 @@ int main(int argc, char** argv) {
 
     int smem = block_size * sizeof(float);
 
-    // Per-kernel timing events (used only when accumulators are supplied)
-    hipEvent_t kStart, kStop;
-    HIP_CHECK(hipEventCreate(&kStart));
-    HIP_CHECK(hipEventCreate(&kStop));
+    char params[192];
+    snprintf(params, sizeof(params),
+             "\"matrix_size\":%d,\"block_size\":%d,"
+             "\"max_cg_iterations\":%d,\"nonzeros_per_row\":%d",
+             N, block_size, max_cg_iters, nonzeros_per_row);
 
-    // run_cg accumulates per-kernel GPU time into the supplied accumulators.
-    // Passing nullptr (warmup / verification) runs the kernels untimed.
-    auto run_cg = [&](double* spmv_acc, double* dot_acc, double* axpy_acc) {
+    // Per-kernel accumulators: one CG solve launches each kernel many times;
+    // the accumulated GPU/host time within one solve becomes that solve's
+    // record for the kernel.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_spmv, acc_dot, acc_axpy, acc_scale;
+
+    // One full CG solve. x, b, r, p are re-initialized at the start of every
+    // solve (untimed), so each solve runs exactly max_cg_iters identical
+    // iterations regardless of state left by earlier solves.
+    auto run_cg = [&]() {
+        bench_lap_reset(&acc_spmv);
+        bench_lap_reset(&acc_dot);
+        bench_lap_reset(&acc_axpy);
+        bench_lap_reset(&acc_scale);
+
         HIP_CHECK(hipMemcpy(d_x, h_x.data(), vec_bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_b, h_b.data(), vec_bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_r, d_b, vec_bytes, hipMemcpyDeviceToDevice));
         HIP_CHECK(hipMemcpy(d_p, d_r, vec_bytes, hipMemcpyDeviceToDevice));
 
-        if (dot_acc) {
-            HIP_CHECK(hipEventRecord(kStart, 0));
+        bench_lap_add(&acc_dot, bench_time_op(&timer, [&]() {
             dot_product_kernel<<<numBlocks, block_size, smem>>>(d_r, d_r, d_partial, N);
-            HIP_CHECK(hipEventRecord(kStop, 0));
-            HIP_CHECK(hipEventSynchronize(kStop));
-            float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
-            *dot_acc += (double)_ms;
-        } else {
-            dot_product_kernel<<<numBlocks, block_size, smem>>>(d_r, d_r, d_partial, N);
-        }
+        }));
         float rr = finish_dot(d_partial, numBlocks);
 
         for (int iter = 0; iter < max_cg_iters; ++iter) {
-            if (spmv_acc) {
-                HIP_CHECK(hipEventRecord(kStart, 0));
+            bench_lap_add(&acc_spmv, bench_time_op(&timer, [&]() {
                 spmv_kernel<<<gridSize, block_size>>>(d_row_ptr, d_col_idx, d_values, d_p, d_Ap, N);
-                HIP_CHECK(hipEventRecord(kStop, 0));
-                HIP_CHECK(hipEventSynchronize(kStop));
-                float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
-                *spmv_acc += (double)_ms;
-            } else {
-                spmv_kernel<<<gridSize, block_size>>>(d_row_ptr, d_col_idx, d_values, d_p, d_Ap, N);
-            }
+            }));
 
-            if (dot_acc) {
-                HIP_CHECK(hipEventRecord(kStart, 0));
+            bench_lap_add(&acc_dot, bench_time_op(&timer, [&]() {
                 dot_product_kernel<<<numBlocks, block_size, smem>>>(d_p, d_Ap, d_partial, N);
-                HIP_CHECK(hipEventRecord(kStop, 0));
-                HIP_CHECK(hipEventSynchronize(kStop));
-                float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
-                *dot_acc += (double)_ms;
-            } else {
-                dot_product_kernel<<<numBlocks, block_size, smem>>>(d_p, d_Ap, d_partial, N);
-            }
+            }));
             float pAp = finish_dot(d_partial, numBlocks);
             float alpha = rr / fmaxf(pAp, 1e-20f);
 
-            if (axpy_acc) {
-                HIP_CHECK(hipEventRecord(kStart, 0));
+            bench_lap_add(&acc_axpy, bench_time_op(&timer, [&]() {
                 axpy_kernel<<<gridSize, block_size>>>(alpha, d_p, d_x, N);
+            }));
+            bench_lap_add(&acc_axpy, bench_time_op(&timer, [&]() {
                 axpy_kernel<<<gridSize, block_size>>>(-alpha, d_Ap, d_r, N);
-                HIP_CHECK(hipEventRecord(kStop, 0));
-                HIP_CHECK(hipEventSynchronize(kStop));
-                float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
-                *axpy_acc += (double)_ms;
-            } else {
-                axpy_kernel<<<gridSize, block_size>>>(alpha, d_p, d_x, N);
-                axpy_kernel<<<gridSize, block_size>>>(-alpha, d_Ap, d_r, N);
-            }
+            }));
 
-            if (dot_acc) {
-                HIP_CHECK(hipEventRecord(kStart, 0));
+            bench_lap_add(&acc_dot, bench_time_op(&timer, [&]() {
                 dot_product_kernel<<<numBlocks, block_size, smem>>>(d_r, d_r, d_partial, N);
-                HIP_CHECK(hipEventRecord(kStop, 0));
-                HIP_CHECK(hipEventSynchronize(kStop));
-                float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
-                *dot_acc += (double)_ms;
-            } else {
-                dot_product_kernel<<<numBlocks, block_size, smem>>>(d_r, d_r, d_partial, N);
-            }
+            }));
             float rr_new = finish_dot(d_partial, numBlocks);
 
             float beta = rr_new / fmaxf(rr, 1e-20f);
-            scale_kernel<<<gridSize, block_size>>>(beta, d_p, d_p, N);
+            bench_lap_add(&acc_scale, bench_time_op(&timer, [&]() {
+                scale_kernel<<<gridSize, block_size>>>(beta, d_p, d_p, N);
+            }));
 
-            if (axpy_acc) {
-                HIP_CHECK(hipEventRecord(kStart, 0));
+            bench_lap_add(&acc_axpy, bench_time_op(&timer, [&]() {
                 axpy_kernel<<<gridSize, block_size>>>(1.0f, d_r, d_p, N);
-                HIP_CHECK(hipEventRecord(kStop, 0));
-                HIP_CHECK(hipEventSynchronize(kStop));
-                float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
-                *axpy_acc += (double)_ms;
-            } else {
-                axpy_kernel<<<gridSize, block_size>>>(1.0f, d_r, d_p, N);
-            }
+            }));
 
             rr = rr_new;
         }
@@ -335,51 +303,32 @@ int main(int argc, char** argv) {
 
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
-        run_cg(nullptr, nullptr, nullptr);
-        HIP_CHECK(hipDeviceSynchronize());
+        run_cg();
     }
 
-    // Timed iterations — per-kernel accumulators summed across CG iterations
-    double spmv_ms = 0.0, dot_ms = 0.0, axpy_ms = 0.0;
-    for (int i = 0; i < iters; ++i) {
-        run_cg(&spmv_ms, &dot_ms, &axpy_ms);
+    // Timed solves — one record per kernel per solve
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_cg();
+        bench_emit_iter("spmv_kernel",        i, &acc_spmv,  params);
+        bench_emit_iter("dot_product_kernel", i, &acc_dot,   params);
+        bench_emit_iter("axpy_kernel",        i, &acc_axpy,  params);
+        bench_emit_iter("scale_kernel",       i, &acc_scale, params);
+        total_gpu_ms += acc_spmv.gpu_ms + acc_dot.gpu_ms +
+                        acc_axpy.gpu_ms + acc_scale.gpu_ms;
+        fprintf(stderr, "solve %d: spmv gpu = %.3f ms, dot gpu = %.3f ms, "
+                "axpy gpu = %.3f ms, scale gpu = %.3f ms\n",
+                i, acc_spmv.gpu_ms, acc_dot.gpu_ms,
+                acc_axpy.gpu_ms, acc_scale.gpu_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(kStart));
-    HIP_CHECK(hipEventDestroy(kStop));
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d solves\n",
+            total_gpu_ms, num_iters);
 
-    double total_ms = spmv_ms + dot_ms + axpy_ms;
-    double avg_ms = total_ms / iters;
-
-    long long spmv_bytes = ((long long)(N+1)*4 + total_nnz*4 + total_nnz*4 + (long long)N*4 + (long long)N*4);
-    double spmv_bw_gb = (double)spmv_bytes * max_cg_iters / (avg_ms * 1e-3) / 1e9;
-
-    printf("{\"type\":\"kernel\",\"name\":\"spmv_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"matrix_size\":%d,\"block_size\":%d,"
-           "\"max_cg_iterations\":%d,\"nonzeros_per_row\":%d,\"iterations\":%d}}\n",
-           spmv_ms, N, block_size, max_cg_iters, nonzeros_per_row, iters);
-
-    printf("{\"type\":\"kernel\",\"name\":\"dot_product_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"matrix_size\":%d,\"block_size\":%d,"
-           "\"max_cg_iterations\":%d,\"nonzeros_per_row\":%d,\"iterations\":%d}}\n",
-           dot_ms, N, block_size, max_cg_iters, nonzeros_per_row, iters);
-
-    printf("{\"type\":\"kernel\",\"name\":\"axpy_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"matrix_size\":%d,\"block_size\":%d,"
-           "\"max_cg_iterations\":%d,\"nonzeros_per_row\":%d,\"iterations\":%d}}\n",
-           axpy_ms, N, block_size, max_cg_iters, nonzeros_per_row, iters);
-
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"avg_iter_ms\",\"value\":%.4f},"
-           "{\"name\":\"spmv_bw_gb_s\",\"value\":%.2f}]}\n",
-           total_ms, avg_ms, spmv_bw_gb);
-
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
-    fprintf(stderr, "SpMV bandwidth: %.2f GB/s\n", spmv_bw_gb);
-
-    // Verification
+    // Verification (run_cg reuses the timer, so destroy it afterwards)
     {
-        run_cg(nullptr, nullptr, nullptr);
+        run_cg();
         HIP_CHECK(hipDeviceSynchronize());
 
         spmv_kernel<<<gridSize, block_size>>>(d_row_ptr, d_col_idx, d_values, d_x, d_Ap, N);
@@ -400,6 +349,8 @@ int main(int argc, char** argv) {
         else
             fprintf(stderr, "FAIL: relative residual too large\n");
     }
+
+    bench_timer_destroy(&timer);
 
     HIP_CHECK(hipFree(d_row_ptr));
     HIP_CHECK(hipFree(d_col_idx));

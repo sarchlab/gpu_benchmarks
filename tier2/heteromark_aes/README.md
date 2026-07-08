@@ -1,6 +1,6 @@
 # tier2/heteromark_aes — AES-256 ECB Encryption (HeteroMark)
 
-Benchmarks AES-256 encryption in ECB mode on the GPU. Each thread encrypts one 16-byte block through 14 rounds. Measures throughput in GB/s.
+Benchmarks AES-256 encryption in ECB mode on the GPU. Each thread encrypts one 16-byte block through 14 rounds. Emits raw per-iteration kernel times; throughput (GB/s) is derived downstream.
 
 Derived from the [HeteroMark benchmark suite](https://github.com/NUCAR-DEV/Hetero-Mark) AES workload.
 
@@ -14,7 +14,7 @@ Derived from the [HeteroMark benchmark suite](https://github.com/NUCAR-DEV/Heter
   4. **AddRoundKey** — XOR state with round key
 - 256-bit key → 15 round keys (240 bytes) via key expansion
 - Each GPU thread processes one independent block (embarrassingly parallel)
-- GB/s = N × 16 / time\_sec / 10⁹
+- GB/s = N × 16 / time\_sec / 10⁹ (derived downstream from the emitted times and params)
 
 ## Files
 
@@ -37,27 +37,39 @@ make PLATFORM=metal
 ## Run
 
 ```bash
-./heteromark_aes                              # defaults: N=1048576, 5 iterations
+./heteromark_aes                              # defaults: N=1048576
 ./heteromark_aes --size 65536                 # fewer blocks
-./heteromark_aes --size 1048576 --iterations 10
+BENCH_PARAM_size=65536 ./heteromark_aes       # env vars override argv
 ```
+
+Environment variables: `BENCH_PARAM_size`, `BENCH_PARAM_block_size`,
+`BENCH_PARAM_key_length`, plus `BENCH_PARAM_num_warmup` (warmup passes,
+default 3) and `BENCH_PARAM_num_iters` (timed passes, each recorded,
+default 7).
 
 ## Output
 
-**stdout** — CSV timing row:
+**stdout** — JSON lines, one kernel record per timed pass with the GPU event
+time (`time_ms`) and host wall-clock time (`host_time_ms`), then a summary
+whose `total_time_ms` is the sum of all recorded GPU event times (the
+per-pass plaintext re-upload is untimed):
 ```
-heteromark_aes,1048576,8.5432,1.9600
+{"type":"kernel","name":"aes256_encrypt_kernel","iter":0,"time_ms":8.543200,"host_time_ms":8.601000,"params":{"size":1048576,"block_size":256,"key_length":"256"}}
+...
+{"type":"summary","total_time_ms":59.802400}
 ```
 
-Format: `heteromark_aes,<N_blocks>,<time_ms>,<GBs>`
+Derived metrics such as GB/s are computed downstream from `time_ms` and the
+params.
 
 **stderr** — human-readable results:
 ```
 Device: AMD Radeon RX 7900 XTX (id=0)
-AES-256 ECB  |  Blocks: 1048576  |  Data: 16.00 MB  |  Iterations: 5 warmup + 5 timed
+AES-256 ECB  |  Blocks: 1048576  |  Data: 16.00 MB  |  Iterations: 3 warmup + 7 timed
 
-Average time: 8.5432 ms
-Throughput:   1.9600 GB/s
+aes256_encrypt_kernel iter 0: gpu = 8.543 ms, host = 8.601 ms
+...
+Total GPU time: 59.802 ms over 7 iterations
 PASS
 ```
 

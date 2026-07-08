@@ -1,89 +1,91 @@
-# shoc_sort — SHOC Sort Benchmark
+# shoc_sort — SHOC Sort Benchmark (faithful radix-sort port)
 
-GPU bitonic sort benchmark derived from the SHOC benchmark suite.
+Faithful port of the SHOC level1 **Sort** benchmark. The device kernels are the
+**original SHOC/CUDPP 4-bit radix sort**, taken verbatim from
+`shoc/src/cuda/level1/sort/sort_kernel.cu`, and driven with the original
+pipeline from `Sort.cu` (`radixSortStep` + `scanArrayRecursive`). Only the host
+driver is restructured for the per-iteration timing harness and JSON output.
 
 ## Algorithm
 
-Bitonic sort: a comparison-based parallel sorting network with O(n log² n)
-compare-and-swap operations, fully parallelizable on the GPU. Each GPU
-kernel pass performs one compare-and-swap step for all n elements
-simultaneously.
+A full sort of 32-bit unsigned keys is performed as **8 passes of 4 radix
+bits** (`SORT_BITS = 32`). Each radix pass runs four kernels:
+
+1. `radixSortBlocks` — block-local 4-bit sort in shared memory (CTA = 128, each
+   thread handles a `uint4`).
+2. `findRadixOffsets` — per-block radix counts and starting offsets (CTA = 256).
+3. `scan` + `vectorAddUniform4` — recursive block-sum prefix scan of the radix
+   counters (CTA = 256).
+4. `reorderData` — global scatter of keys/values into sorted order (CTA = 256).
+
+One recorded pass = one full sort (all 8 radix passes). Each kernel's GPU event
+time is accumulated across all of its launches within the pass and emitted once.
 
 ## Default Parameters
 
-| Parameter   | Default     | Description                         |
-|-------------|-------------|-------------------------------------|
-| `--size N`  | 4194304     | Number of elements (must be 2^k)    |
-| `--iterations I` | 5      | Number of timed iterations          |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--size N` | 4194304 | Number of key/value pairs (multiple of 1024) |
+| `--precision P` | uint | Key data-type label (uint/int/float; keys always sorted as 32-bit unsigned) |
+
+Fixed (compile-time) CTA sizes are `SORT_BLOCK_SIZE = 128` and
+`SCAN_BLOCK_SIZE = 256`, echoed into the params as `sort_block_size` /
+`scan_block_size`.
+
+Environment variables (`BENCH_PARAM_size`, `BENCH_PARAM_precision`) override the
+CLI flags, plus:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BENCH_PARAM_num_warmup` | 3 | Untimed warmup passes |
+| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded individually |
 
 ## Output
 
-- **stdout** (CSV): `shoc_sort,<N>,<Melements/s>`
-- **stderr**: device info, per-iteration timing, correctness check
+- **stdout** (JSON lines): per timed pass, one `{"type":"kernel",...}` record
+  for each of `radixSortBlocks`, `findRadixOffsets`, `scan`,
+  `vectorAddUniform4`, `reorderData`, carrying that kernel's accumulated GPU
+  event time (`time_ms`) and host wall-clock time (`host_time_ms`), followed by
+  a `{"type":"summary","total_time_ms":...}` line whose value is the sum of all
+  recorded GPU event times. Sort rate is derived downstream.
+- **stderr**: device info, per-pass per-kernel timing, correctness check.
+
+## Data reset
+
+The radix sort is **destructive** and returns its result in `dKeys`/`dVals`
+(each `radixSortStep` ping-pongs keys→tempKeys→keys). The pristine keys and
+values are therefore re-uploaded (untimed) at the start of every pass so each
+pass performs an identical sort of random data.
 
 ## Build
 
-### Auto-detect Platform
 ```bash
-make
-```
-
-### NVIDIA CUDA
-```bash
-make PLATFORM=cuda
-# Requires: nvcc (CUDA toolkit)
-```
-
-### AMD ROCm/HIP
-```bash
-make PLATFORM=rocm
-# Requires: hipcc (ROCm installation at /opt/rocm)
-```
-
-### Apple Metal
-```bash
+make               # auto-detect platform
+make PLATFORM=cuda # nvcc
+make PLATFORM=rocm # hipcc
 make PLATFORM=metal
-# Requires: Xcode command-line tools, macOS 10.14+
 ```
 
 ## Run
 
 ```bash
 ./shoc_sort
-./shoc_sort --size 8388608 --iterations 10
-```
-
-### Example Output
-
-```
-Device: NVIDIA A100-SXM4-80GB (id=0)
-Array size: 4194304 elements (16.0 MB) | Iterations: 5
-
-  Iter 1: 45.2312 ms
-  Iter 2: 44.9841 ms
-  Iter 3: 45.1023 ms
-  Iter 4: 45.0512 ms
-  Iter 5: 45.2104 ms
-Throughput: 92.98 Melements/s  (avg 45.1158 ms, ...)
-Correctness: PASS
-
-shoc_sort,4194304,92.98
+BENCH_PARAM_num_iters=10 ./shoc_sort --size 8388608
 ```
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `shoc_sort.hip` | HIP source — bitonic sort kernel + host code (CUDA & ROCm) |
-| `shoc_sort.metal` | Metal compute shader — bitonic sort kernel |
+| `shoc_sort.hip` | HIP/CUDA source — verbatim SHOC radix-sort kernels + timing driver |
+| `shoc_sort.metal` | Metal compute shader (legacy bitonic implementation) |
 | `shoc_sort_metal.mm` | Objective-C++ Metal host code (Apple) |
 | `Makefile` | Platform-aware build system |
 | `README.md` | This file |
 
 ## Notes
 
-- **Self-contained**: all utilities are inlined; no shared headers required.
-- The Metal implementation dispatches one command buffer per (j, k) pass.
-  For very large arrays this creates many small dispatches; this is the
-  straightforward Metal bitonic sort approach.
-- N must be a power of 2. Non-power-of-2 values are rounded up automatically.
+- N must be a multiple of 1024 (`4 * SCAN_BLOCK_SIZE`) so every kernel's grid
+  geometry divides evenly; other values are rounded down with a warning.
+- Input keys are synthetic random `uint32` (SHOC uses `i % 1024`); radix-sort
+  work is data-independent, so timing is unaffected.

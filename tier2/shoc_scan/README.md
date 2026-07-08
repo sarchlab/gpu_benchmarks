@@ -2,8 +2,9 @@
 
 ## Overview
 
-The **Scan** benchmark measures the effective GPU memory bandwidth for an
-**exclusive prefix sum** (scan) operation:
+The **Scan** benchmark times an **exclusive prefix sum** (scan) operation and
+emits per-iteration kernel times; effective GPU memory bandwidth is derived
+downstream:
 
 ```
 output[i] = input[0] + input[1] + … + input[i-1]   (output[0] = 0)
@@ -58,39 +59,55 @@ make PLATFORM=cuda
 ## Running
 
 ```bash
-./shoc_scan [--array_size N] [--block_size B] [--iterations I]
+./shoc_scan [--array_size N] [--block_size B] [--precision P]
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--array_size N` | `1048576` | Number of `float` elements (1 M ≈ 4 MiB) |
 | `--block_size B` | `256` | Threads per block — elements per block = 2× (HIP/CUDA only) |
-| `--iterations I` | `20` | Number of timed kernel launches |
+| `--precision P` | `float` | Precision label (half, float, double) |
+
+Environment variables `BENCH_PARAM_array_size`, `BENCH_PARAM_block_size`, and
+`BENCH_PARAM_precision` override the flags. `BENCH_PARAM_num_warmup` (default
+3) sets the untimed warmup passes and `BENCH_PARAM_num_iters` (default 7) the
+timed passes, each recorded.
 
 > Note: `--block_size` is ignored on Metal (thread-group size is set automatically).
 
 ## Output
 
-**stdout** — CSV row with timing statistics:
+**stdout** — JSON lines: per timed pass, one `kernel` record per kernel
+(`scan_block_kernel`, `add_block_sums_kernel`) with that kernel's accumulated
+GPU event time across all recursion levels in the pass, then a `summary`
+whose `total_time_ms` is the sum of all recorded GPU event times:
+```json
+{"type":"kernel","name":"scan_block_kernel","iter":0,"time_ms":0.185000,"host_time_ms":0.210000,"params":{"array_size":1048576,"block_size":256,"precision":"float"}}
+{"type":"kernel","name":"add_block_sums_kernel","iter":0,"time_ms":0.030000,"host_time_ms":0.045000,"params":{"array_size":1048576,"block_size":256,"precision":"float"}}
+...
+{"type":"summary","total_time_ms":1.505000}
 ```
-kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-scan,1048576,20,0.2150,0.2108,0.2301,0.0038
-```
+
+Derived metrics (e.g. GB/s) are computed downstream from `time_ms` and params.
 
 **stderr** — human-readable summary:
 ```
 Device: Apple M4 Pro
 Array size: 1048576 floats (4.0 MiB, padded to 1048576)
-Threadgroup size: 256  |  Iterations: 20
+Block size: 256
 
-Effective bandwidth: 38.96 GB/s  (avg 0.2150 ms)
+pass 0: scan gpu = 0.185 ms, add gpu = 0.030 ms
+...
+Total GPU time: 1.505 ms over 7 passes
 PASS
 ```
 
 ## Bandwidth Formula
 
+Derived downstream from the emitted per-iteration times:
+
 ```
-Bandwidth (GB/s) = 2 × N × sizeof(float) / avg_time_seconds / 1e9
+Bandwidth (GB/s) = 2 × N × sizeof(float) / time_seconds / 1e9   (derived downstream)
 ```
 
 The factor of 2 accounts for one read (input) and one write (output).

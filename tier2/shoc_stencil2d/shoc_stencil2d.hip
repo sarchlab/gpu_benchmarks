@@ -13,8 +13,6 @@
 // Uses ping-pong buffers: in_buf and out_buf are swapped each step.
 //
 // Default: N=2048, ITERATIONS=5
-// Measures effective memory bandwidth in GB/s.
-// Runs 3 timed trials, reports average.
 //
 // Compiles with hipcc (AMD ROCm) or nvcc -x cu (CUDA).
 //
@@ -22,33 +20,30 @@
 //   ./shoc_stencil2d [--n N] [--iterations I] [--trials T]
 //
 //   --n N            Grid dimension (N×N)           (default: 2048)
-//   --iterations I   Stencil steps per trial         (default: 5)
-//   --trials T       Number of timed trials          (default: 3)
+//   --iterations I   Stencil steps per pass          (default: 5)
+//   --trials T       Legacy trial-count param (echoed in records)
 //
-// Output (stdout): CSV — stencil2d,<N>,<ITERATIONS>,<time_ms>,<GBs>
+// Environment variables (override argv):
+//   BENCH_PARAM_n, BENCH_PARAM_iterations, BENCH_PARAM_trials,
+//   BENCH_PARAM_block_size
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
+// stencil2d_kernel carrying the accumulated GPU event time (time_ms) and
+// host time (host_time_ms) of all stencil steps within the pass, then a
+// summary whose total_time_ms is the SUM of all recorded GPU event times.
+// Bandwidth (GB/s) is derived downstream from time_ms and params.
 // Output (stderr): device info, timing details, correctness check
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <cfloat>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-// Utilities
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                          \
-    do {                                                                        \
-        hipError_t _e = (cmd);                                                  \
-        if (_e != hipSuccess) {                                                 \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                         \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                 \
-            exit(1);                                                            \
-        }                                                                       \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 static int parseIntParam(int argc, char** argv, const char* name, int defVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -60,28 +55,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defVal) {
     }
     return defVal;
 }
-
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t s = 0) { HIP_CHECK(hipEventRecord(start, s)); }
-    void record_stop (hipStream_t s = 0) {
-        HIP_CHECK(hipEventRecord(stop, s));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
 
 // ---------------------------------------------------------------------------
 // Stencil kernel — 9-point star stencil, 16×16 thread blocks
@@ -220,7 +193,8 @@ int main(int argc, char** argv)
     if (env_val) trials = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     // Print device info
     int device_id = 0;
@@ -228,8 +202,9 @@ int main(int argc, char** argv)
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Grid: %d×%d  |  Iterations/trial: %d  |  Trials: %d\n\n",
-            N, N, iters, trials);
+    fprintf(stderr, "Grid: %d×%d  |  Stencil steps/pass: %d  |  "
+            "Passes: %d warmup + %d timed\n\n",
+            N, N, iters, num_warmup, num_iters);
 
     // Correctness check on 64×64 grid
     bool ok = correctness_check();
@@ -257,66 +232,52 @@ int main(int argc, char** argv)
     dim3 grid((N - 2 + block_size - 1) / block_size,
               (N - 2 + block_size - 1) / block_size);
 
-    BenchmarkTimer timer;
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"n\":%d,\"iterations\":%d,\"trials\":%d,\"block_size\":%d",
+             N, iters, trials, block_size);
 
-    // Warmup
-    for (int w = 0; w < num_warmup; ++w) {
-        float *in_ptr = d_buf0, *out_ptr = d_buf1;
-        for (int it = 0; it < iters; ++it) {
-            stencil2d_kernel<<<grid, block>>>(in_ptr, out_ptr, N);
-            float* tmp = in_ptr; in_ptr = out_ptr; out_ptr = tmp;
-        }
-        HIP_CHECK(hipDeviceSynchronize());
-    }
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc;
 
-    // Timed trials
-    std::vector<double> trial_times((size_t)trials);
-    for (int t = 0; t < trials; ++t) {
-        // Reset to original data each trial for reproducibility
+    // One full stencil pass: `iters` ping-pong steps, each launch bracketed.
+    // The buffers are reset to the pristine input at the start of every pass
+    // (untimed) so each pass applies the stencil to the same data.
+    auto run_pass = [&]() {
+        bench_lap_reset(&acc);
+
         HIP_CHECK(hipMemcpy(d_buf0, h_data.data(), bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemset(d_buf1, 0, bytes));
 
         float *in_ptr = d_buf0, *out_ptr = d_buf1;
-
-        timer.record_start();
         for (int it = 0; it < iters; ++it) {
-            stencil2d_kernel<<<grid, block>>>(in_ptr, out_ptr, N);
+            bench_lap_add(&acc, bench_time_op(&timer, [&]() {
+                stencil2d_kernel<<<grid, block>>>(in_ptr, out_ptr, N);
+            }));
             float* tmp = in_ptr; in_ptr = out_ptr; out_ptr = tmp;
         }
-        timer.record_stop();
-        trial_times[t] = (double)timer.elapsed_ms();
+    };
+
+    // Warmup passes (records not emitted)
+    for (int w = 0; w < num_warmup; ++w) {
+        run_pass();
     }
 
-    // Statistics
-    double sum_ms = 0.0, mn_ms = DBL_MAX, mx_ms = 0.0;
-    for (int t = 0; t < trials; ++t) {
-        sum_ms += trial_times[t];
-        if (trial_times[t] < mn_ms) mn_ms = trial_times[t];
-        if (trial_times[t] > mx_ms) mx_ms = trial_times[t];
+    // Timed passes — one record per pass with the accumulated kernel time
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_pass();
+        bench_emit_iter("stencil2d_kernel", i, &acc, params);
+        total_gpu_ms += acc.gpu_ms;
+        fprintf(stderr, "pass %d: gpu = %.3f ms, host = %.3f ms (%d stencil steps)\n",
+                i, acc.gpu_ms, acc.host_ms, iters);
     }
-    double avg_ms = sum_ms / trials;
-    double variance = 0.0;
-    for (int t = 0; t < trials; ++t) {
-        double d = trial_times[t] - avg_ms;
-        variance += d * d;
-    }
-    double stddev = (trials > 1) ? sqrt(variance / (trials - 1)) : 0.0;
 
-    // GB/s: each iteration reads N*N floats and writes (N-2)*(N-2) floats
-    // approximate as 2 * N * N * sizeof(float) per iteration
-    double gb   = (double)iters * 2.0 * (double)N * (double)N * sizeof(float) / 1e9;
-    double gbps = gb / (avg_ms * 1e-3);
-
-    fprintf(stderr, "Bandwidth: %.2f GB/s  (avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
-            gbps, avg_ms, mn_ms, mx_ms, stddev);
-
-    // JSON-lines output
-    printf("{\"type\":\"kernel\",\"name\":\"stencil2d_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"n\":%d,\"iterations\":%d,\"trials\":%d,\"block_size\":%d}}\n",
-           avg_ms, N, iters, trials, block_size);
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
-           avg_ms, gbps);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // Cleanup
     HIP_CHECK(hipFree(d_buf0));

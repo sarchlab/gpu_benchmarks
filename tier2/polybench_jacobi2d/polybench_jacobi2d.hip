@@ -7,7 +7,6 @@
 // Only interior points (i=1..N-2, j=1..N-2) are updated; boundaries remain 0.
 //
 // Default: N=1024, TSTEPS=50
-// Measures memory bandwidth in GB/s (read N×N + write N×N each step).
 //
 // Compiles with hipcc (AMD ROCm) or nvcc -x cu (CUDA).
 //
@@ -16,32 +15,33 @@
 //
 //   --n N        Grid size N×N           (default: 1024)
 //   --tsteps T   Number of time steps    (default: 50)
-//   --trials K   Number of timed trials  (default: 3)
+//   --trials K   Legacy trial count (echoed in params; the measured pass
+//                count is BENCH_PARAM_num_iters)
 //
-// Output (stdout): CSV — jacobi2d,<N>,<TSTEPS>,<time_ms>,<GBs>
-// Output (stderr): device info, timing details
+// Environment variables (override argv):
+//   BENCH_PARAM_n, BENCH_PARAM_tsteps, BENCH_PARAM_trials, BENCH_PARAM_block_size
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass (one pass = TSTEPS kernel launches), one
+// {"type":"kernel",...} JSON line carrying the pass's accumulated GPU event
+// time (time_ms) and host wall-clock time (host_time_ms), then a summary
+// whose total_time_ms is the SUM of all recorded GPU event times.
+// Bandwidth (GB/s) is derived downstream from time_ms and params.
+// Output (stderr): device info, correctness check, per-pass timing
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <cfloat>
 #include <vector>
 
 // ---------------------------------------------------------------------------
 // Inlined utilities
 // ---------------------------------------------------------------------------
 
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -53,30 +53,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     }
     return defaultVal;
 }
-
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
 
 // ---------------------------------------------------------------------------
 // Kernel: one step of 2D Jacobi stencil
@@ -128,7 +104,8 @@ int main(int argc, char** argv) {
     if (env_val) trials = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size_param = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     size_t bytes = (size_t)N * N * sizeof(float);
 
@@ -138,12 +115,11 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Grid: %d×%d  |  TSTEPS: %d  |  Trials: %d\n\n",
-            N, N, TSTEPS, trials);
+    fprintf(stderr, "Grid: %d×%d  |  TSTEPS: %d  |  %d warmup + %d timed passes\n\n",
+            N, N, TSTEPS, num_warmup, num_iters);
 
     // Host allocations
     std::vector<float> h_A((size_t)N * N, 0.0f);
-    std::vector<float> h_B((size_t)N * N, 0.0f);
 
     // Initialize with random floats (interior only; boundaries stay 0)
     srand(42);
@@ -164,41 +140,54 @@ int main(int argc, char** argv) {
     dim3 grid((N-2 + BLOCK_DIM - 1) / BLOCK_DIM,
               (N-2 + BLOCK_DIM - 1) / BLOCK_DIM);
 
-    // Warmup (not measured)
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"n\":%d,\"tsteps\":%d,\"trials\":%d,\"block_size\":%d",
+             N, TSTEPS, trials, block_size_param);
+
+    // Per-pass accumulator: one pass = TSTEPS jacobi2d_kernel launches,
+    // each launch individually bracketed.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_jacobi;
+
+    // One full Jacobi pass. The two grids ping-pong across the TSTEPS
+    // internal steps; the initial state is restored at the start of every
+    // pass (untimed) — the same reset the original code performed. The step
+    // count is fixed (no convergence test), and the stencil timing is
+    // value-independent, so each pass measures identical work.
+    auto run_jacobi_pass = [&]() {
+        bench_lap_reset(&acc_jacobi);
+
+        HIP_CHECK(hipMemcpy(d_A, h_A.data(), bytes, hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemset(d_B, 0, bytes));
+
+        float *src = d_A, *dst = d_B;
+        for (int t = 0; t < TSTEPS; ++t) {
+            bench_lap_add(&acc_jacobi, bench_time_op(&timer, [&]() {
+                jacobi2d_kernel<<<grid, block>>>(src, dst, N);
+            }));
+            float* tmp = src; src = dst; dst = tmp;
+        }
+    };
+
     for (int w = 0; w < num_warmup; ++w) {
-        float *src = d_A, *dst = d_B;
-        for (int t = 0; t < TSTEPS; ++t) {
-            jacobi2d_kernel<<<grid, block>>>(src, dst, N);
-            float* tmp = src; src = dst; dst = tmp;
-        }
-        HIP_CHECK(hipDeviceSynchronize());
-        // Reset to initial state
-        HIP_CHECK(hipMemcpy(d_A, h_A.data(), bytes, hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemset(d_B, 0, bytes));
+        run_jacobi_pass();
     }
 
-    // Timed trials
-    BenchmarkTimer timer;
-    std::vector<double> times((size_t)trials);
-    for (int tr = 0; tr < trials; ++tr) {
-        // Reset for each trial
-        HIP_CHECK(hipMemcpy(d_A, h_A.data(), bytes, hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemset(d_B, 0, bytes));
-
-        float *src = d_A, *dst = d_B;
-        timer.record_start();
-        for (int t = 0; t < TSTEPS; ++t) {
-            jacobi2d_kernel<<<grid, block>>>(src, dst, N);
-            float* tmp = src; src = dst; dst = tmp;
-        }
-        timer.record_stop();
-        times[tr] = static_cast<double>(timer.elapsed_ms());
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_jacobi_pass();
+        bench_emit_iter("jacobi2d_kernel", i, &acc_jacobi, params);
+        total_gpu_ms += acc_jacobi.gpu_ms;
+        fprintf(stderr, "pass %d: gpu = %.3f ms (%d steps)\n",
+                i, acc_jacobi.gpu_ms, TSTEPS);
     }
 
-    // Copy final result back (src points to the latest output after swaps)
-    // After TSTEPS swaps: if TSTEPS is even, src=d_A holds result; if odd, src=d_B
-    float *final_src = (TSTEPS % 2 == 0) ? d_A : d_B;
-    HIP_CHECK(hipMemcpy(h_B.data(), final_src, bytes, hipMemcpyDeviceToHost));
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // Correctness check: run CPU for TSTEPS on small 64×64 grid
     {
@@ -265,37 +254,6 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipFree(cd_A));
         HIP_CHECK(hipFree(cd_B));
     }
-
-    // Statistics
-    double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < trials; ++i) {
-        sum_ms += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg_ms = sum_ms / trials;
-
-    double variance = 0.0;
-    for (int i = 0; i < trials; ++i) {
-        double d = times[i] - avg_ms;
-        variance += d * d;
-    }
-    double stddev = (trials > 1) ? sqrt(variance / (trials - 1)) : 0.0;
-
-    // GB/s: read N×N + write N×N per step, TSTEPS steps
-    double gb   = (double)TSTEPS * 2.0 * (double)N * (double)N * sizeof(float) / 1e9;
-    double gbps = gb / (avg_ms * 1e-3);
-
-    fprintf(stderr, "Bandwidth: %.2f GB/s  (avg %.4f ms, min %.4f ms, max %.4f ms, stddev %.4f ms)\n",
-            gbps, avg_ms, mn, mx, stddev);
-
-    // JSON-lines output
-    printf("{\"type\":\"kernel\",\"name\":\"jacobi2d_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"n\":%d,\"tsteps\":%d,\"trials\":%d,\"block_size\":%d}}\n",
-           avg_ms, N, TSTEPS, trials, block_size_param);
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
-           avg_ms, gbps);
 
     // Cleanup
     HIP_CHECK(hipFree(d_A));

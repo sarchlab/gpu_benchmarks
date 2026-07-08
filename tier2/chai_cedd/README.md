@@ -1,6 +1,6 @@
 # tier2/chai_cedd — Canny Edge Detection (Chai)
 
-Benchmarks Canny Edge Detection (CEDD) on the GPU using a 5-stage pipeline. Processes a synthetic grayscale image and measures throughput in megapixels per second.
+Benchmarks Canny Edge Detection (CEDD) on the GPU using a 5-stage pipeline. Processes a synthetic grayscale image and reports per-kernel, per-pass GPU times; throughput (Mpixels/sec) is derived downstream.
 
 Derived from the [Chai benchmark suite](https://github.com/chai-benchmarks/chai) CEDD workload.
 
@@ -13,7 +13,7 @@ Derived from the [Chai benchmark suite](https://github.com/chai-benchmarks/chai)
   3. **Magnitude + Direction** — compute gradient magnitude and quantize direction to 0°/45°/90°/135°
   4. **Non-Maximum Suppression** — thin edges by suppressing non-local-maxima along gradient direction
   5. **Hysteresis Thresholding** — double-threshold edge classification (low=50, high=100)
-- Mpixels/sec = W × H / time\_sec / 10⁶
+- Mpixels/sec = W × H / time\_sec / 10⁶ (derived downstream from the recorded times)
 
 ## Files
 
@@ -41,22 +41,36 @@ make PLATFORM=metal
 ./chai_cedd W=4096 H=4096         # larger image
 ```
 
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BENCH_PARAM_width` | 2048 | Image width |
+| `BENCH_PARAM_height` | 2048 | Image height |
+| `BENCH_PARAM_threshold_low` | 50 | Low hysteresis threshold |
+| `BENCH_PARAM_threshold_high` | 150 | High hysteresis threshold |
+| `BENCH_PARAM_num_warmup` | 3 | Warmup pipeline passes (untimed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed pipeline passes, each recorded |
+
 ## Output
 
-**stdout** — CSV timing row:
+**stdout** — JSON lines: per timed pass, one `{"type":"kernel",...}` record per pipeline kernel with `time_ms` (GPU event time) and `host_time_ms` (host wall-clock), then a summary whose `total_time_ms` is the sum of all recorded GPU event times:
 ```
-chai_cedd,2048x2048,5.1234,819.2000
+{"type":"kernel","name":"gaussian_blur_kernel","iter":0,"time_ms":1.0241,"host_time_ms":1.0555,"params":{"width":2048,...}}
+...
+{"type":"summary","total_time_ms":35.9123}
 ```
 
-Format: `chai_cedd,<WxH>,<time_ms>,<Mpixels_per_sec>`
+Derived metrics (Mpixels/sec) are computed downstream from `time_ms` and the params.
 
 **stderr** — human-readable results:
 ```
 Device: AMD Radeon RX 7900 XTX (id=0)
-Canny Edge Detection  |  Image: 2048x2048  |  Iterations: 5 warmup + 5 timed
+Canny Edge Detection  |  Image: 2048x2048  |  Passes: 3 warmup + 7 timed
 
-Average time: 5.1234 ms
-Throughput:   819.2000 Mpixels/sec
+pass 0: gauss=1.024 sobel=0.512 magdir=0.480 nms=0.470 hyst=0.610 ms
+...
+Total GPU time: 35.912 ms over 7 passes
 PASS (0.3% pixel mismatch in 122x122 interior, 45/14884)
 ```
 

@@ -2,7 +2,7 @@
   "benchmark": "shoc_spmv",
   "tier": 2,
   "suite": "shoc",
-  "description": "CSR sparse matrix-vector multiply y = A*x. Each thread handles one row. Measures throughput in GB/s and GFLOPS.",
+  "description": "CSR sparse matrix-vector multiply y = A*x. Each thread handles one row. Emits per-iteration kernel times; throughput in GB/s and GFLOPS is derived downstream.",
   "scaling_param": {
     "name": "num_rows",
     "description": "Number of matrix rows (and columns) in the synthetic sparse matrix",

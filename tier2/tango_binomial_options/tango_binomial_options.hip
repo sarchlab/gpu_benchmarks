@@ -12,30 +12,26 @@
 //   --options N      Number of options (default: 512)
 //   --steps S        Steps per option (default: 1024)
 //
-// Output (stdout): CSV row — tango_binomial_options,<N>x<steps>,<time_ms>,<opts/sec>
+// Environment variables (override argv):
+//   BENCH_PARAM_options, BENCH_PARAM_steps,
+//   BENCH_PARAM_precision (float|double|half)
+//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
+//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
+//
+// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
+// carrying the GPU event time and host wall-clock time, then a summary whose
+// total_time_ms is the SUM of all iterations' GPU event times.
+// Options/sec is derived downstream from time_ms and params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <cfloat>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -190,8 +186,15 @@ int main(int argc, char** argv) {
     if (env_val) numSteps = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
-    int num_warmup = 5;
-
+    /* Validate string params against their known sets, so the values echoed
+     * into the JSON records are always canonical literals. */
+    if (strcmp(precision, "float") != 0 && strcmp(precision, "double") != 0 &&
+        strcmp(precision, "half") != 0) {
+        fprintf(stderr, "Invalid precision '%s' (use float, double, half)\n", precision);
+        return EXIT_FAILURE;
+    }
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     // Shared memory must hold (numSteps+1) floats; clamp to reasonable limit
     if (numSteps > 4096) {
@@ -208,8 +211,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Options: %d  |  Steps: %d  |  Iterations: 5 warmup + %d timed\n\n",
-            numOptions, numSteps);
+    fprintf(stderr, "Options: %d  |  Steps: %d  |  Iterations: %d warmup + %d timed\n\n",
+            numOptions, numSteps, num_warmup, num_iters);
 
     // Host allocation + initialization
     OptionData* h_options = (OptionData*)malloc(optBytes);
@@ -237,62 +240,23 @@ int main(int argc, char** argv) {
     int gridSize  = numOptions;
     size_t sharedBytes = (size_t)(numSteps + 1) * sizeof(float);
 
-    // -------------------------------------------------------------------
-    // Warmup
-    // -------------------------------------------------------------------
-    for (int w = 0; w < num_warmup; ++w) {
-        binomial_kernel<<<dim3(gridSize), dim3(blockSize), sharedBytes, 0>>>(
-            d_options, d_prices, numSteps);
-        HIP_CHECK(hipDeviceSynchronize());
-    }
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"options\":%d,\"steps\":%d,\"precision\":\"%s\"",
+             numOptions, numSteps, precision);
 
-    // -------------------------------------------------------------------
-    // Timed iterations
-    // -------------------------------------------------------------------
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
+    // Warmup + timed iterations, each recorded individually. The kernel
+    // reads only the immutable option data and fully overwrites d_prices on
+    // each launch, so no state reset is needed between iterations.
+    double total_gpu_ms =
+        bench_run_loop("binomial_kernel", num_warmup, num_iters, params, [&]() {
+            binomial_kernel<<<dim3(gridSize), dim3(blockSize), sharedBytes, 0>>>(
+                d_options, d_prices, numSteps);
+        });
 
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        binomial_kernel<<<dim3(gridSize), dim3(blockSize), sharedBytes, 0>>>(
-            d_options, d_prices, numSteps);
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
-    }
-
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    // Compute average time
-    double sum = 0.0;
-    for (int i = 0; i < 1; ++i) sum += times[i];
-    double avg_ms = sum / 1;
-
-    // options/sec = numOptions / time_s
-    double opts_per_sec = (double)numOptions / (avg_ms * 1e-3);
-
-    double total_ms = sum;
-
-    // JSON-lines kernel event
-    printf("{\"type\":\"kernel\",\"name\":\"binomial_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"options\":%d,\"steps\":%d,"
-           "\"precision\":\"%s\"}}\n",
-           avg_ms, numOptions, numSteps, precision);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"options_per_sec\",\"value\":%.2f}]}\n",
-           total_ms, opts_per_sec);
-
-    // Human-readable output to stderr
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
-    fprintf(stderr, "Performance:  %.4f options/sec\n", opts_per_sec);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
+            total_gpu_ms, num_iters);
 
     // -------------------------------------------------------------------
     // Verification

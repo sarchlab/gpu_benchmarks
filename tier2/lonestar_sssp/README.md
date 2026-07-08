@@ -18,7 +18,14 @@ This is inspired by the Lonestar GPU benchmark suite's SSSP implementation.
 |-------------|---------|--------------------------------|
 | `--vertices` | 65536   | Number of graph vertices       |
 | `--degree`   | 16      | Average edges per vertex       |
-| `--iterations`| 5      | Number of timed iterations     |
+| `--iterations`| 5      | Legacy iteration-count param (echoed in records) |
+
+Environment variables (`BENCH_PARAM_*`) override the flags. In addition:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BENCH_PARAM_num_warmup` | 3 | Warmup SSSP passes (not recorded) |
+| `BENCH_PARAM_num_iters`  | 7 | Timed SSSP passes, each recorded  |
 
 ## Build & Run
 
@@ -38,29 +45,32 @@ make PLATFORM=rocm
 
 ## Output Format
 
-**CSV to stdout:**
-```
-lonestar_sssp,<N_vertices>,<time_ms>,<Medges_per_sec>
+**JSON lines to stdout:** one `kernel` record per timed pass with the
+accumulated GPU event time (`time_ms`) and host time (`host_time_ms`) of all
+Bellman-Ford iterations in that pass, then a summary whose `total_time_ms`
+is the sum of all recorded GPU event times:
+```json
+{"type":"kernel","name":"bellman_ford_kernel","iter":0,"time_ms":12.345,"host_time_ms":13.101,"params":{"vertices":65536,"degree":16,"iterations":5,"block_size":256}}
+{"type":"summary","total_time_ms":86.42}
 ```
 
 **Human-readable to stderr:**
 ```
 Device: Apple M1
-SSSP (Bellman-Ford)  |  Vertices: 65536  |  Edges: 1048576  |  Iterations: 5 warmup + 5 timed
+SSSP (Bellman-Ford)  |  Vertices: 65536  |  Edges: 1048576  |  Passes: 3 warmup + 7 timed
 
 Bellman-Ford converged in 8 iterations
-Average time: 12.3456 ms
-BF iterations (avg): 8.0
-Throughput:   682.1234 Medges/sec
+pass 0: gpu = 12.345 ms, host = 13.101 ms (8 BF iterations)
+...
+Total GPU time: 86.420 ms over 7 passes
 PASS
 ```
 
-## Metric
+## Metric (derived downstream)
 
 **Medges/sec** = `N_edges × BF_iterations / time_seconds / 1e6`
 
-Measures the effective edge processing throughput including all Bellman-Ford
-iterations required for convergence.
+Computed downstream from `time_ms` and params — not reported by the binary.
 
 ## Verification
 

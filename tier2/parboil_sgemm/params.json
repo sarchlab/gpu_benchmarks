@@ -2,7 +2,7 @@
   "benchmark": "parboil_sgemm",
   "tier": 2,
   "suite": "parboil",
-  "description": "Tiled single-precision GEMM: C = alpha*A*B + beta*C for NxN matrices. Measures compute throughput in GFLOPS.",
+  "description": "Tiled single-precision GEMM: C = alpha*A*B + beta*C for NxN matrices. Emits per-iteration kernel times; GFLOPS is derived downstream.",
   "scaling_param": {
     "name": "size",
     "description": "Square matrix dimension N (NxN matrices)",

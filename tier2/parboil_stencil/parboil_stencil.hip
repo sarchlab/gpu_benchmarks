@@ -13,58 +13,28 @@
 // Compiles with hipcc (AMD ROCm) or nvcc (CUDA).
 //
 // Usage:
-//   ./parboil_stencil [--grid_dim N] [--num_timesteps T] [--iterations I]
+//   ./parboil_stencil [--grid_dim N] [--num_timesteps T]
 //
 //   --grid_dim N        Grid dimension (N×N×N)           (default: 64)
-//   --num_timesteps T   Stencil time-steps per launch    (default: 10)
-//   --iterations I      Timed benchmark iterations       (default: 5)
+//   --num_timesteps T   Stencil time-steps per pass      (default: 10)
 //
-// Output (stdout): CSV row — kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-// Output (stderr): GFLOPS and GB/s
+// Environment variables (override argv):
+//   BENCH_PARAM_grid_dim, BENCH_PARAM_num_timesteps, BENCH_PARAM_block_size
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line
+// carrying the stencil kernel's accumulated GPU event time and host
+// wall-clock time over the pass's num_timesteps launches, then a summary
+// whose total_time_ms is the SUM of all recorded GPU event times.
+// GFLOPS / GB/s are derived downstream from time_ms and params.
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
-#include <cfloat>
-#include <vector>
 
-// ---------------------------------------------------------------------------
-// Inlined bench_common_hip.h utilities
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
-
-struct BenchResult {
-    const char* kernel_name;
-    const char* problem_size;
-    int         iterations;
-    double      avg_ms;
-    double      min_ms;
-    double      max_ms;
-    double      stddev_ms;
-};
-
-static int parseIterations(int argc, char** argv) {
-    int iters = 5;
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--iterations") == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v >= 1) iters = v;
-            break;
-        }
-    }
-    return iters;
-}
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -75,80 +45,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
         }
     }
     return defaultVal;
-}
-
-
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
-
-static int g_num_warmup = 5;
-
-template <typename Func>
-static BenchResult runBenchmark(const char* kernel_name,
-                                const char* problem_size,
-                                int         iterations,
-                                Func        func) {
-    BenchmarkTimer timer;
-
-    // Warmup
-    for (int w = 0; w < g_num_warmup; ++w) {
-        func();
-    }
-    HIP_CHECK(hipDeviceSynchronize());
-
-    std::vector<double> times(iterations);
-    for (int i = 0; i < iterations; ++i) {
-        timer.record_start();
-        func();
-        timer.record_stop();
-        times[i] = static_cast<double>(timer.elapsed_ms());
-    }
-
-    double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < iterations; ++i) {
-        sum += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg = sum / iterations;
-
-    double variance = 0.0;
-    for (int i = 0; i < iterations; ++i) {
-        double d = times[i] - avg;
-        variance += d * d;
-    }
-    double stddev = (iterations > 1) ? sqrt(variance / (iterations - 1)) : 0.0;
-
-    BenchResult r;
-    r.kernel_name  = kernel_name;
-    r.problem_size = problem_size;
-    r.iterations   = iterations;
-    r.avg_ms       = avg;
-    r.min_ms       = mn;
-    r.max_ms       = mx;
-    r.stddev_ms    = stddev;
-    return r;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,13 +84,11 @@ int main(int argc, char** argv) {
     // Default values from params.json
     int grid_dim      = 64;
     int num_timesteps = 10;
-    int iters         = 5;
     int block_size    = 256;
 
     // Command-line args as fallback
     grid_dim      = parseIntParam(argc, argv, "--grid_dim",      grid_dim);
     num_timesteps = parseIntParam(argc, argv, "--num_timesteps", num_timesteps);
-    iters         = parseIterations(argc, argv);
     block_size    = parseIntParam(argc, argv, "--block_size",    block_size);
 
     // Env vars override
@@ -203,11 +97,10 @@ int main(int argc, char** argv) {
     if (env_val) grid_dim = atoi(env_val);
     env_val = getenv("BENCH_PARAM_num_timesteps");
     if (env_val) num_timesteps = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int nx = grid_dim;
     int ny = grid_dim;
@@ -223,8 +116,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Grid: %d×%d×%d  |  Timesteps/launch: %d  |  Iterations: %d\n\n",
-            nx, ny, nz, num_timesteps, iters);
+    fprintf(stderr, "Grid: %d×%d×%d  |  Timesteps/pass: %d  |  Passes: %d warmup + %d timed\n\n",
+            nx, ny, nz, num_timesteps, num_warmup, num_iters);
 
     // Host allocation and initialization
     float* h_data = (float*)malloc(total * sizeof(float));
@@ -244,42 +137,53 @@ int main(int argc, char** argv) {
     dim3 block(16, 16, 1);
     dim3 grid((nx + 15) / 16, (ny + 15) / 16, nz);
 
-    char problemSize[64];
-    snprintf(problemSize, sizeof(problemSize), "%dx%dx%d", nx, ny, nz);
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"grid_dim\":%d,\"num_timesteps\":%d,\"iterations\":%d,\"block_size\":%d",
+             grid_dim, num_timesteps, num_iters, block_size);
 
-    g_num_warmup = num_warmup;
-    BenchResult r = runBenchmark(
-        "stencil3d", problemSize, iters, [&]() {
-            float* src = d_A;
-            float* dst = d_B;
-            for (int t = 0; t < num_timesteps; ++t) {
+    // Per-pass accumulator: each pass launches the stencil num_timesteps
+    // times (ping-pong); the accumulated GPU/host time becomes that pass's
+    // record.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_stencil;
+
+    // One stencil pass. The ping-pong buffers evolve in place across passes,
+    // but the Jacobi update (c0 + 6*c1 = 1, an averaging) keeps values
+    // bounded and the pass always performs a fixed num_timesteps launches
+    // with no data-dependent control flow, so timing is value-independent
+    // and no per-pass grid reset is needed.
+    auto run_stencil_pass = [&]() {
+        bench_lap_reset(&acc_stencil);
+        float* src = d_A;
+        float* dst = d_B;
+        for (int t = 0; t < num_timesteps; ++t) {
+            bench_lap_add(&acc_stencil, bench_time_op(&timer, [&]() {
                 stencil3d<<<grid, block>>>(src, dst, nx, ny, nz, c0, c1);
-                // Ping-pong
-                float* tmp = src; src = dst; dst = tmp;
-            }
-            HIP_CHECK(hipDeviceSynchronize());
-        });
+            }));
+            // Ping-pong
+            float* tmp = src; src = dst; dst = tmp;
+        }
+    };
 
-    // Performance metrics
-    long long interior_cells = (long long)(nx - 2) * (ny - 2) * (nz - 2);
-    double gflops = 8.0 * (double)interior_cells * num_timesteps
-                    / (r.avg_ms * 1e-3) / 1e9;
-    double gb_s = 8.0 * sizeof(float) * (double)interior_cells * num_timesteps
-                  / (r.avg_ms * 1e-3) / 1e9;
+    for (int w = 0; w < num_warmup; ++w) {
+        run_stencil_pass();
+    }
 
-    // JSON-lines output
-    printf("{\"type\":\"kernel\",\"name\":\"stencil3d\",\"time_ms\":%.6f,"
-           "\"params\":{\"grid_dim\":%d,\"num_timesteps\":%d,\"iterations\":%d,"
-           "\"block_size\":%d}}\n",
-           r.avg_ms, grid_dim, num_timesteps, iters, block_size);
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_stencil_pass();
+        bench_emit_iter("stencil3d", i, &acc_stencil, params);
+        total_gpu_ms += acc_stencil.gpu_ms;
+        fprintf(stderr, "pass %d: stencil3d gpu = %.3f ms, host = %.3f ms\n",
+                i, acc_stencil.gpu_ms, acc_stencil.host_ms);
+    }
 
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f},"
-           "{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
-           r.avg_ms * iters, gflops, gb_s);
-
-    fprintf(stderr, "GFLOPS: %.2f  |  GB/s: %.2f  (avg %.4f ms, %d timesteps/iter)\n",
-            gflops, gb_s, r.avg_ms, num_timesteps);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes (%d timesteps/pass)\n",
+            total_gpu_ms, num_iters, num_timesteps);
 
     HIP_CHECK(hipFree(d_A));
     HIP_CHECK(hipFree(d_B));

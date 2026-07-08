@@ -2,10 +2,10 @@
   "benchmark": "rodinia_lavamd",
   "tier": 2,
   "suite": "rodinia",
-  "description": "Short-range molecular dynamics with cell-list decomposition. Computes Lennard-Jones type particle interactions within neighboring cells (26 neighbors + self = 27 cells per box) on an NxNxN grid of boxes.",
+  "description": "Rodinia LavaMD short-range molecular dynamics. Faithful port: the original kernel_gpu_cuda force kernel, which stages the home box and each neighbor box's particles into shared memory before the all-pairs interaction and uses the modified-Lennard-Jones/Gaussian potential (vij=exp(-a2*r2), fs=2*a2*vij). Space is a boxes1d^3 grid of boxes with 100 particles each; one block per home box.",
   "scaling_param": {
-    "name": "num_boxes",
-    "description": "Number of boxes per dimension (total boxes = N^3)",
+    "name": "boxes1d",
+    "description": "Boxes per dimension (total boxes = boxes1d^3, particles = boxes1d^3 * 100)",
     "type": "int",
     "values": [
       2,
@@ -24,38 +24,30 @@
       15,
       16,
       18,
-      20,
-      22,
-      24,
-      26,
-      28,
-      30
+      20
     ]
   },
   "non_scaling_params": [
     {
-      "name": "block_size",
-      "description": "Threads per block (should be >= particles_per_box)",
+      "name": "particles_per_box",
+      "description": "Particles in each box; fixed compile-time NUMBER_PAR_PER_BOX=100 in the original kernel",
+      "type": "int",
+      "default": 100,
+      "values": [
+        100
+      ]
+    },
+    {
+      "name": "number_threads",
+      "description": "Threads per block; fixed compile-time NUMBER_THREADS=128 in the original",
       "type": "int",
       "default": 128,
       "values": [
         128
       ]
-    },
-    {
-      "name": "particles_per_box",
-      "description": "Number of particles in each box",
-      "type": "int",
-      "default": 100,
-      "values": [
-        50,
-        100,
-        150,
-        200
-      ]
     }
   ],
   "kernels": [
-    "lavamd_kernel"
+    "kernel_gpu_cuda"
   ]
 }

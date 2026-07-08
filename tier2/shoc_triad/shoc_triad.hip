@@ -6,33 +6,24 @@
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
 // Parameters are read from BENCH_PARAM_* environment variables,
-// with command-line --flags as fallback.
+// with command-line --flags as fallback:
+//   BENCH_PARAM_array_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
+//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
 //
-// Output (stdout): JSON-lines protocol
+// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
+// carrying the GPU event time and host wall-clock time, then a summary whose
+// total_time_ms is the SUM of all iterations' GPU event times. Effective
+// bandwidth is derived downstream from time_ms and params.
 // Output (stderr): Human-readable diagnostics
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <cfloat>
-#include <vector>
 
-// ---------------------------------------------------------------------------
-// Inlined bench_common_hip.h utilities
-// ---------------------------------------------------------------------------
-
-// Error-checking macro
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // Parse --<name> N from argv (returns defaultVal if not found)
 static int parseIntParam(int argc, char** argv, const char* name,
@@ -56,31 +47,6 @@ static const char* parseStrParam(int argc, char** argv, const char* name,
     }
     return defaultVal;
 }
-
-// HIP-event-based timer
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
 
 // ---------------------------------------------------------------------------
 // Triad kernel: a[i] = b[i] + scalar * c[i]
@@ -129,7 +95,18 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
+
+    // Validate precision against the supported set; params must carry
+    // canonical literals, never raw env/argv text.
+    if (strcmp(precision, "float") == 0) {
+        precision = "float";
+    } else {
+        fprintf(stderr, "Unsupported precision '%s' (supported: float)\n",
+                precision);
+        return EXIT_FAILURE;
+    }
 
     int N = array_size;
     size_t bytes  = (size_t)N * sizeof(float);
@@ -168,49 +145,22 @@ int main(int argc, char** argv) {
 
     int grid = (N + block_size - 1) / block_size;
 
-    // Warmup
-    for (int w = 0; w < num_warmup; ++w) {
-        triad_kernel<<<dim3(grid), dim3(block_size)>>>(d_a, d_b, d_c, scalar, N);
-        HIP_CHECK(hipDeviceSynchronize());
-    }
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"array_size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
+             array_size, block_size, precision);
 
-    // Timed iterations
-    BenchmarkTimer timer;
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        timer.record_start();
-        triad_kernel<<<dim3(grid), dim3(block_size)>>>(d_a, d_b, d_c, scalar, N);
-        timer.record_stop();
-        times[i] = static_cast<double>(timer.elapsed_ms());
-    }
+    // Warmup + timed iterations, each recorded individually. The kernel only
+    // reads b and c and overwrites a from scratch, so repeated launches
+    // perform identical work — no state reset needed.
+    double total_gpu_ms =
+        bench_run_loop("triad_kernel", num_warmup, num_iters, params, [&]() {
+            triad_kernel<<<dim3(grid), dim3(block_size)>>>(d_a, d_b, d_c, scalar, N);
+        });
 
-    // Statistics
-    double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        sum += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg_ms = sum / 1;
-
-    // Effective bandwidth: 2 reads (b, c) + 1 write (a) = 3 * N * sizeof(float)
-    double bandwidth_gb = 3.0 * (double)N * sizeof(float)
-                          / (avg_ms * 1e-3) / 1e9;
-    double total_ms = sum;
-
-    // JSON-lines kernel event
-    printf("{\"type\":\"kernel\",\"name\":\"triad_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"array_size\":%d,\"block_size\":%d,"
-           "\"precision\":\"%s\"}}\n",
-           avg_ms, array_size, block_size, precision);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
-           total_ms, bandwidth_gb);
-
-    fprintf(stderr, "Effective bandwidth: %.2f GB/s  (avg %.4f ms)\n",
-            bandwidth_gb, avg_ms);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
+            total_gpu_ms, num_iters);
 
     // Verify correctness
     HIP_CHECK(hipMemcpy(h_a, d_a, bytes, hipMemcpyDeviceToHost));

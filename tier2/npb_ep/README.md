@@ -1,24 +1,36 @@
 # tier2/npb_ep — Embarrassingly Parallel (NAS EP)
 
-Benchmarks the generation of **N pairs of Gaussian random deviates** using the Box-Muller transform with a per-thread linear congruential RNG. Counts results into 10 annular bins. Purely compute-bound workload with minimal memory traffic.
+Faithful port of the [NAS Parallel Benchmarks](https://www.nas.nasa.gov/software/npb.html) **EP** kernel, taken from [NPB-GPU (GMAP)](https://github.com/GMAP/NPB-GPU). The device kernel (`gpu_kernel`) and its random-number generators (`randlc_device`, `vranlc_device`) are the **original upstream source**; only the host driver is restructured for the per-iteration timing harness and JSON output.
 
-Derived from the [NAS Parallel Benchmarks](https://www.nas.nasa.gov/software/npb.html) EP kernel.
+EP generates 2^(M+1) pseudorandom numbers, forms Gaussian deviate pairs, and tallies them into 10 concentric square annuli. It is purely compute-bound with negligible memory traffic — the canonical "embarrassingly parallel" workload.
 
-## Algorithm
+## Algorithm (original NAS EP)
 
-- **N** pairs of Gaussian random deviates (default: N=16,777,216 = 2²⁴)
-- Per-thread linear congruential RNG (a = 5¹³ = 1,220,703,125, mod 2³²)
-- Box-Muller transform: uniform (u₁, u₂) → Gaussian (x₁, x₂)
-  - r = √(−2 ln u₁), θ = 2π u₂
-  - x₁ = r cos θ, x₂ = r sin θ
-- Bin index = floor(√(x₁² + x₂²)), capped at 9 (10 bins total)
-- Atomic increment of bin counters
+- Generate 2^(M+1) uniform numbers with the NAS 46-bit linear congruential generator `randlc`/`vranlc` (R23/R46 split, `A = 5^13 = 1,220,703,125`, seed `S = 271828183`).
+- Each of the 2^(M-16) threads derives its own starting seed via the `randlc` skip-ahead loop, then draws `NK = 2^16` numbers in batches of `RECOMPUTATION = 128`.
+- **Marsaglia polar (acceptance-rejection)** method: for a pair `(x1, x2)` in [-1,1]², accept iff `t1 = x1²+x2² <= 1`, then `t = sqrt(-2 ln t1 / t1)`, `t3 = x1·t`, `t4 = x2·t`.
+- Annulus bin `l = max(|t3|, |t4|)` (integer truncation); increment `q[l]` and accumulate `Sx += t3`, `Sy += t4`.
+- Each block reduces its threads' partials via `atomicAdd` into per-block slots; the host sums the per-block partials after the timed loop.
+
+This replaces the previous (incorrect) ANSI-C LCG + Box-Muller reimplementation with the real NAS algorithm.
+
+## Class / problem size
+
+The class exponent **M** sets the size. Default **M=28 (Class A)** — 2^29 numbers over 2^12 threads, which runs in well under a second on a modern GPU while giving a substantial per-pass kernel time.
+
+| M  | Class | Numbers (2^(M+1)) |
+|----|-------|-------------------|
+| 24 | S     | 2^25              |
+| 25 | W     | 2^26              |
+| 28 | A     | 2^29 (default)    |
+| 30 | B     | 2^31              |
+| 32 | C     | 2^33              |
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `npb_ep.hip` | HIP source — EP kernel with LCG + Box-Muller + binning |
+| `npb_ep.hip` | HIP/CUDA source — original NPB-GPU EP kernel + timing harness |
 | `npb_ep.metal` | Metal compute shader — EP kernel |
 | `npb_ep_metal.mm` | ObjC++ Metal host code |
 | `Makefile` | Auto-detecting build (Darwin→metal, ROCm→rocm, else→cuda) |
@@ -29,47 +41,44 @@ Derived from the [NAS Parallel Benchmarks](https://www.nas.nasa.gov/software/npb
 make               # auto-detect platform
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 ```
 
 ## Run
 
 ```bash
-./npb_ep                              # defaults: N=16777216, 5 iterations
-./npb_ep --size 1048576               # smaller workload
-./npb_ep --size 16777216 --iterations 10
+./npb_ep                 # defaults: M=28 (Class A)
+./npb_ep --m 24          # Class S
 ```
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BENCH_PARAM_m` | 28 | Class exponent M (24 S, 25 W, 28 A, 30 B, 32 C) |
+| `BENCH_PARAM_block_size` | 256 | Threads per block |
+| `BENCH_PARAM_num_warmup` | 3 | Warmup passes (untimed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded |
+
+## Timing model
+
+EP is embarrassingly parallel: **one recorded pass = one `gpu_kernel` launch** (the per-block partial reduction is inside the kernel). Each timed pass emits one `gpu_kernel` record. The RNG seeds are derived from fixed constants inside the kernel, so every launch performs identical work — no input reset is needed. The per-block output accumulators are written via `atomicAdd`, so they are zeroed (untimed, **outside** the timed bracket) before each launch to keep the final NAS verification meaningful.
 
 ## Output
 
-**stdout** — CSV timing row:
+**stdout** — JSON lines: one `{"type":"kernel",...}` record per timed pass with `time_ms` (GPU event time of the single `gpu_kernel` launch) and `host_time_ms`, then a summary whose `total_time_ms` is the sum of all passes' GPU event times:
 ```
-npb_ep,16777216,8.2345,2.0380
+{"type":"kernel","name":"gpu_kernel","iter":0,"time_ms":...,"host_time_ms":...,"params":{"class":"A","m":28,"block_size":256}}
+...
+{"type":"summary","total_time_ms":...}
 ```
 
-Format: `npb_ep,<N>,<time_ms>,<Gpairs_per_sec>`
-
-**stderr** — human-readable results:
-```
-Device: AMD Radeon RX 7900 XTX (id=0)
-EP pairs: 16777216 (2^24)  |  Iterations: 5 warmup + 5 timed
-
-Average time: 8.2345 ms
-Performance:  2.0380 Gpairs/sec
-
-Bin counts (GPU vs CPU, N=1048576):
-  Bin 0: GPU=697254  CPU=697254
-  Bin 1: GPU=315462  CPU=315462
-  ...
-PASS
-```
+**stderr** — human-readable NAS EP results (Gaussian pair count, Sx/Sy sums, the 10 bin counts) and verification.
 
 ## Verification
 
-- Runs CPU reference EP with same RNG and compares bin counts exactly
-- For large N, verification uses a capped subset (N ≤ 1,048,576) for tractable CPU time
+After the timed loop the host sums the per-block partials into `q[10]`, `Sx`, `Sy` and compares `Sx`/`Sy` against the NAS reference sums for the class (relative error ≤ 1e-8), exactly as in upstream NPB-GPU.
 
 ## Platform Notes
 
-- **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `npb_ep.hip`; one kernel launch, atomicAdd for bin counting
-- **Metal**: compiled with `clang++` from `npb_ep_metal.mm`; the Metal shader (`npb_ep.metal`) is loaded and compiled at runtime from the same directory as the binary
+- **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `npb_ep.hip` via `common/hip_cuda_compat.h`. Uses double precision (NAS spec); double `atomicAdd` requires sm_60+ (any modern NVIDIA GPU) or any GCN/CDNA GPU.
+- **Metal**: the Metal path (`npb_ep_metal.mm` / `npb_ep.metal`) is a separate implementation and was not updated to the faithful NAS algorithm in this change.

@@ -1,6 +1,6 @@
 # tier2/heteromark_pagerank — PageRank (HeteroMark)
 
-Benchmarks iterative PageRank (power method) on a **synthetic Erdős–Rényi graph** stored in CSR format. Measures throughput in edges processed per second.
+Benchmarks iterative PageRank (power method) on a **synthetic Erdős–Rényi graph** stored in CSR format. Emits per-iteration kernel times; throughput in edges per second is derived downstream.
 
 Derived from the [HeteroMark benchmark suite](https://github.com/NUCAR-DEV/Hetero-Mark) PageRank workload.
 
@@ -11,7 +11,18 @@ Derived from the [HeteroMark benchmark suite](https://github.com/NUCAR-DEV/Heter
 - Iterative power method (20 iterations by default):
   - `PR[v] = (1-d)/N + d * sum(PR[u]/degree[u])` for all in-neighbors u of v
   - Damping factor d = 0.85
-- Metric: `edges/sec = N_edges × PR_iterations / time_sec`
+- Metric: `edges/sec = N_edges × PR_iterations / time_sec` (derived downstream from the emitted times)
+- Each timed pass resets the rank vector to 1/N (untimed) before running all PageRank iterations, so every pass does identical work
+
+## Parameters
+
+| Env var | Description | Default |
+|---------|-------------|---------|
+| `BENCH_PARAM_vertices` | Number of vertices | 65536 |
+| `BENCH_PARAM_pr_iterations` | PageRank iterations per pass | 20 |
+| `BENCH_PARAM_damping_factor` | Damping factor d | 0.85 |
+| `BENCH_PARAM_num_warmup` | Warmup passes (untimed) | 3 |
+| `BENCH_PARAM_num_iters` | Timed passes, each recorded | 7 |
 
 ## Files
 
@@ -34,28 +45,33 @@ make PLATFORM=metal
 ## Run
 
 ```bash
-./heteromark_pagerank                                  # defaults: N=65536, 20 PR iters, 5 timed iters
+./heteromark_pagerank                                  # defaults: N=65536, 20 PR iters
 ./heteromark_pagerank --vertices 32768                 # smaller graph
-./heteromark_pagerank --vertices 65536 --iterations 10 --pr-iterations 30
+./heteromark_pagerank --vertices 65536 --pr-iterations 30
 ```
 
 ## Output
 
-**stdout** — CSV timing row:
-```
-heteromark_pagerank,65536,45.6789,4.5678e+08
+**stdout** — JSON lines, one `kernel` record per timed pass (the accumulated
+GPU event time of all PageRank iterations within the pass) followed by a
+`summary` whose `total_time_ms` is the sum of all recorded GPU event times:
+```json
+{"type":"kernel","name":"pagerank_kernel","iter":0,"time_ms":45.678900,"host_time_ms":46.100000,"params":{"vertices":65536,"pr_iterations":20,"damping_factor":0.850000}}
+...
+{"type":"summary","total_time_ms":319.752300}
 ```
 
-Format: `heteromark_pagerank,<N_vertices>,<time_ms>,<edges_per_sec>`
+Derived metrics (e.g. edges/sec) are computed downstream from `time_ms` and params.
 
 **stderr** — human-readable results:
 ```
 Device: AMD Radeon RX 7900 XTX (id=0)
-Vertices: 65536  |  PR iterations: 20  |  Timed iterations: 5 warmup + 5 timed
+Vertices: 65536  |  PR iterations: 20  |  Warmup: 3
 
 Graph: 65536 vertices, 1048576 edges (avg in-degree: 16.0)
-Average time: 45.6789 ms
-Throughput:   4.5678e+08 edges/sec
+pass 0: pagerank_kernel gpu = 45.679 ms, host = 46.100 ms
+...
+Total GPU time: 319.752 ms over 7 passes
 PASS
 ```
 

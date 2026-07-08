@@ -1,16 +1,29 @@
 # tier2/shoc_devicememory — Device Memory Bandwidth (SHOC)
 
-Benchmarks GPU global memory bandwidth for three access patterns: read-only, write-only, and read-write. Reports GB/s for each pattern.
+Benchmarks GPU global memory bandwidth for three access patterns: read-only, write-only, and read-write. Emits per-iteration kernel times; GB/s for each pattern is derived downstream.
 
 Derived from the [SHOC benchmark suite](https://github.com/vetter/shoc) DeviceMemory workload.
 
 ## Kernels
 
-| Kernel | Access Pattern | Bandwidth Formula |
+| Kernel | Access Pattern | Bandwidth Formula (derived downstream) |
 |--------|---------------|-------------------|
-| `DeviceMemory_Read` | Read-only (all threads read; one write/thread) | bytes / time |
-| `DeviceMemory_Write` | Write-only (strided writes) | bytes / time |
-| `DeviceMemory_ReadWrite` | Read + scale + write (in-place) | 2 × bytes / time |
+| `readOnly_kernel` | Read-only (all threads read; one write/thread) | bytes / time |
+| `writeOnly_kernel` | Write-only (strided writes) | bytes / time |
+| `readWrite_kernel` | Read + scale + write (in-place) | 2 × bytes / time |
+
+`BENCH_PARAM_transfer_mode` selects which kernels run: `read`, `write`, or
+`readwrite` (all three; default).
+
+## Parameters
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `BENCH_PARAM_array_size_mb` | 64 | Array size in MB |
+| `BENCH_PARAM_block_size` | 256 | Threads per block |
+| `BENCH_PARAM_transfer_mode` | readwrite | Access pattern(s): read, write, readwrite |
+| `BENCH_PARAM_num_warmup` | 3 | Warmup launches per kernel (untimed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed launches per kernel, each recorded |
 
 ## Files
 
@@ -33,29 +46,37 @@ make PLATFORM=metal
 ## Run
 
 ```bash
-./shoc_devicememory                        # defaults: 64 MB, 20 iterations
+./shoc_devicememory                        # defaults: 64 MB, readwrite
 ./shoc_devicememory --array_size_mb 256
-./shoc_devicememory --array_size_mb 128 --iterations 30
+./shoc_devicememory --transfer_mode read
 ```
 
 ## Output
 
-**stdout** — 3 CSV timing rows:
+**stdout** — JSON lines: for each enabled kernel, one `kernel` record per
+timed iteration carrying the GPU event time (`time_ms`) and host wall-clock
+time (`host_time_ms`), then a `summary` whose `total_time_ms` is the sum of
+all recorded GPU event times:
 ```
-kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-DeviceMemory_Read,64MB,20,2.3456,2.3000,2.4000,0.0123
-DeviceMemory_Write,64MB,20,1.9876,1.9500,2.0200,0.0098
-DeviceMemory_ReadWrite,64MB,20,4.1234,4.0800,4.2000,0.0156
+{"type":"kernel","name":"readOnly_kernel","iter":0,"time_ms":2.345600,"host_time_ms":2.400000,"params":{"array_size_mb":64,"block_size":256,"transfer_mode":"readwrite"}}
+...
+{"type":"kernel","name":"writeOnly_kernel","iter":0,"time_ms":1.987600,"host_time_ms":2.020000,"params":{...}}
+...
+{"type":"kernel","name":"readWrite_kernel","iter":0,"time_ms":4.123400,"host_time_ms":4.180000,"params":{...}}
+...
+{"type":"summary","total_time_ms":59.196200}
 ```
 
-**stderr** — human-readable bandwidth:
+Bandwidth in GB/s is derived downstream from `time_ms` and params.
+
+**stderr** — human-readable per-iteration times:
 ```
 Device: Apple M4 Pro
-Array size: 64 MB (16777216 floats)  |  Iterations: 20
+Array size: 64 MB (16777216 floats)  |  Block size: 256
 
-Read-only bandwidth:  115.23 GB/s  (64 MB)
-Write-only bandwidth: 136.45 GB/s  (64 MB)
-Read-write bandwidth: 103.87 GB/s  (64 MB)
+readOnly_kernel iter 0: gpu = 2.346 ms, host = 2.400 ms
+...
+Total GPU time: 59.196 ms (7 iterations per kernel)
 ```
 
 ## Platform Notes

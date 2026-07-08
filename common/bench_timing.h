@@ -104,6 +104,10 @@ static inline void bench_lap_begin(bench_timer_t *t, hipStream_t stream)
 
 static inline bench_lap_t bench_lap_end(bench_timer_t *t, hipStream_t stream)
 {
+    /* Catch a failed launch inside the bracket (e.g. an invalid launch config)
+     * before it is recorded as a bogus time. hipGetLastError clears and returns
+     * the error the async launch left pending. */
+    BENCH_TIMING_CHECK(hipGetLastError());
     BENCH_TIMING_CHECK(hipEventRecord(t->ev_stop, stream));
     BENCH_TIMING_CHECK(hipEventSynchronize(t->ev_stop));
     bench_lap_t lap;
@@ -173,6 +177,33 @@ static inline double bench_run_loop(const char *name, int num_warmup,
 
     bench_timer_destroy(&timer);
     return total_gpu_ms;
+}
+
+/**
+ * Multi-kernel workloads (tier2): run the whole workload num_iters times;
+ * within each pass, bracket every kernel launch with bench_time_op and
+ * accumulate into that kernel's per-pass bench_lap_t via bench_lap_add,
+ * then emit one record per kernel per pass with bench_emit_iter. The
+ * summary stays the sum of every emitted record's gpu time.
+ */
+template <typename LaunchFn>
+static inline bench_lap_t bench_time_op(bench_timer_t *t, LaunchFn op)
+{
+    bench_lap_begin(t, 0);
+    op();
+    return bench_lap_end(t, 0);
+}
+
+static inline void bench_lap_reset(bench_lap_t *acc)
+{
+    acc->gpu_ms  = 0.0;
+    acc->host_ms = 0.0;
+}
+
+static inline void bench_lap_add(bench_lap_t *acc, bench_lap_t lap)
+{
+    acc->gpu_ms  += lap.gpu_ms;
+    acc->host_ms += lap.host_ms;
 }
 
 /** bench_run_memcpy — shared runner for memcpy-based benchmarks

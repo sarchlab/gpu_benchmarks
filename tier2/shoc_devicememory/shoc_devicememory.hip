@@ -1,35 +1,27 @@
 // shoc_devicememory.hip — SHOC DeviceMemory benchmark (HIP, self-contained)
 //
 // Device global memory bandwidth benchmark: read-only, write-only, and
-// read-write patterns.  Measures GB/s for each access pattern.
+// read-write patterns.
 //
 // Parameters are read from BENCH_PARAM_* environment variables,
-// with command-line --flags as fallback.
+// with command-line --flags as fallback:
+//   BENCH_PARAM_array_size_mb, BENCH_PARAM_block_size,
+//   BENCH_PARAM_transfer_mode (read | write | readwrite)
+//   BENCH_PARAM_num_warmup   (warmup launches per kernel, default 3)
+//   BENCH_PARAM_num_iters    (timed launches per kernel, each recorded, default 7)
 //
-// Output (stdout): JSON-lines protocol
+// Output (stdout): per enabled kernel, one {"type":"kernel",...} JSON line per
+// timed iteration carrying the GPU event time and host wall-clock time, then a
+// summary whose total_time_ms is the SUM of all recorded GPU event times.
+// GB/s figures are derived downstream from time_ms and params.
 // Output (stderr): Human-readable diagnostics
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
-#include <cfloat>
-#include <vector>
 
-// ---------------------------------------------------------------------------
-// Inlined bench_common_hip.h utilities
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -51,30 +43,6 @@ static const char* parseStrParam(int argc, char** argv, const char* name,
     }
     return defaultVal;
 }
-
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
 
 // ---------------------------------------------------------------------------
 // Kernels
@@ -116,44 +84,6 @@ __global__ void readWrite_kernel(float* __restrict__ data,
 }
 
 // ---------------------------------------------------------------------------
-// Helper: run benchmark for one kernel
-// ---------------------------------------------------------------------------
-struct KernelResult {
-    double avg_ms;
-    double total_ms;
-};
-
-static int g_num_warmup = 5;
-
-template <typename Func>
-static KernelResult benchKernel(int iters, Func func) {
-    BenchmarkTimer timer;
-
-    // Warmup
-    for (int w = 0; w < g_num_warmup; ++w) {
-        func();
-    }
-    HIP_CHECK(hipDeviceSynchronize());
-
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        timer.record_start();
-        func();
-        timer.record_stop();
-        times[i] = static_cast<double>(timer.elapsed_ms());
-    }
-
-    double sum = 0.0;
-    for (int i = 0; i < 1; ++i) sum += times[i];
-    double avg = sum / 1;
-
-    KernelResult r;
-    r.avg_ms = avg;
-    r.total_ms = sum;
-    return r;
-}
-
-// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 int main(int argc, char** argv) {
@@ -177,7 +107,22 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_transfer_mode");
     if (env_val) transfer_mode = env_val;
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
+
+    // Validate transfer_mode against its known set and canonicalize it so the
+    // params JSON never echoes raw env/argv text.
+    if (strcmp(transfer_mode, "read") == 0) {
+        transfer_mode = "read";
+    } else if (strcmp(transfer_mode, "write") == 0) {
+        transfer_mode = "write";
+    } else if (strcmp(transfer_mode, "readwrite") == 0) {
+        transfer_mode = "readwrite";
+    } else {
+        fprintf(stderr, "Unsupported transfer_mode '%s' (supported: read, write, readwrite)\n",
+                transfer_mode);
+        return EXIT_FAILURE;
+    }
 
     size_t N     = (size_t)array_size_mb * 1024 * 1024 / sizeof(float);
     size_t bytes = N * sizeof(float);
@@ -206,77 +151,59 @@ int main(int argc, char** argv) {
     int num_blocks = (int)((N + block_size - 1) / block_size);
     if (num_blocks > 65535) num_blocks = 65535;
 
-    g_num_warmup = num_warmup;
-    double total_all_ms = 0.0;
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"array_size_mb\":%d,\"block_size\":%d,\"transfer_mode\":\"%s\"",
+             array_size_mb, block_size, transfer_mode);
+
+    double total_gpu_ms = 0.0;
 
     // Determine which kernels to run based on transfer_mode
     bool run_read  = (strcmp(transfer_mode, "read") == 0 || strcmp(transfer_mode, "readwrite") == 0);
     bool run_write = (strcmp(transfer_mode, "write") == 0 || strcmp(transfer_mode, "readwrite") == 0);
     bool run_rw    = (strcmp(transfer_mode, "readwrite") == 0);
 
-    double read_bw = 0.0, write_bw = 0.0, rw_bw = 0.0;
-
     // --- Read-only bandwidth ---
-    if (run_read || strcmp(transfer_mode, "readwrite") == 0) {
-        KernelResult kr = benchKernel(1, [&]() {
+    if (run_read) {
+        // readOnly_kernel only reads d_input and overwrites d_output;
+        // repeated launches perform identical work.
+        total_gpu_ms += bench_run_loop("readOnly_kernel", num_warmup, num_iters,
+                                       params, [&]() {
             readOnly_kernel<<<dim3(num_blocks), dim3(block_size)>>>(d_input, d_output, (int)N);
         });
-        read_bw = (double)bytes / (kr.avg_ms * 1e-3) / 1e9;
-        total_all_ms += kr.total_ms;
-
-        printf("{\"type\":\"kernel\",\"name\":\"readOnly_kernel\",\"time_ms\":%.6f,"
-               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d,"
-               "\"transfer_mode\":\"%s\"}}\n",
-               kr.avg_ms, array_size_mb, block_size, transfer_mode);
-
-        fprintf(stderr, "Read-only bandwidth:  %.2f GB/s  (%d MB)\n", read_bw, array_size_mb);
     }
 
     // --- Write-only bandwidth ---
-    if (run_write || strcmp(transfer_mode, "readwrite") == 0) {
-        KernelResult kr = benchKernel(1, [&]() {
+    if (run_write) {
+        // writeOnly_kernel overwrites d_output from scratch every launch.
+        total_gpu_ms += bench_run_loop("writeOnly_kernel", num_warmup, num_iters,
+                                       params, [&]() {
             writeOnly_kernel<<<dim3(num_blocks), dim3(block_size)>>>(d_output, (int)N);
         });
-        write_bw = (double)bytes / (kr.avg_ms * 1e-3) / 1e9;
-        total_all_ms += kr.total_ms;
-
-        printf("{\"type\":\"kernel\",\"name\":\"writeOnly_kernel\",\"time_ms\":%.6f,"
-               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d,"
-               "\"transfer_mode\":\"%s\"}}\n",
-               kr.avg_ms, array_size_mb, block_size, transfer_mode);
-
-        fprintf(stderr, "Write-only bandwidth: %.2f GB/s  (%d MB)\n", write_bw, array_size_mb);
     }
 
     // --- Read-write bandwidth ---
-    if (run_rw || strcmp(transfer_mode, "readwrite") == 0) {
-        // Re-initialize d_input
+    if (run_rw) {
+        // Re-initialize d_input (readOnly warmups do not touch it, but keep
+        // the pristine values for a well-defined starting point)
         {
             float* h_rw = (float*)malloc(bytes);
             for (size_t i = 0; i < N; ++i) h_rw[i] = (float)(i % 1000) * 0.001f;
             HIP_CHECK(hipMemcpy(d_input, h_rw, bytes, hipMemcpyHostToDevice));
             free(h_rw);
         }
-        KernelResult kr = benchKernel(1, [&]() {
+        // readWrite_kernel scales data in place by 1.0001; the float multiply
+        // is value-independent (no control flow or memory-access pattern
+        // depends on the data), so no per-iteration reset is needed.
+        total_gpu_ms += bench_run_loop("readWrite_kernel", num_warmup, num_iters,
+                                       params, [&]() {
             readWrite_kernel<<<dim3(num_blocks), dim3(block_size)>>>(d_input, (int)N);
         });
-        rw_bw = 2.0 * (double)bytes / (kr.avg_ms * 1e-3) / 1e9;
-        total_all_ms += kr.total_ms;
-
-        printf("{\"type\":\"kernel\",\"name\":\"readWrite_kernel\",\"time_ms\":%.6f,"
-               "\"params\":{\"array_size_mb\":%d,\"block_size\":%d,"
-               "\"transfer_mode\":\"%s\"}}\n",
-               kr.avg_ms, array_size_mb, block_size, transfer_mode);
-
-        fprintf(stderr, "Read-write bandwidth: %.2f GB/s  (%d MB)\n", rw_bw, array_size_mb);
     }
 
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"read_bw_gbps\",\"value\":%.2f},"
-           "{\"name\":\"write_bw_gbps\",\"value\":%.2f},"
-           "{\"name\":\"readwrite_bw_gbps\",\"value\":%.2f}]}\n",
-           total_all_ms, read_bw, write_bw, rw_bw);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms (%d iterations per kernel)\n",
+            total_gpu_ms, num_iters);
 
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_output));

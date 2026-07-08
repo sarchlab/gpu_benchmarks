@@ -8,7 +8,7 @@ F = C * D
 G = E * F
 ```
 
-All matrices are square N×N single-precision floats (default N=256). Reports combined throughput in GFLOPS.
+All matrices are square N×N single-precision floats (default N=256). Emits per-iteration kernel times; GFLOPS is derived downstream.
 
 Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) 3mm workload.
 
@@ -17,7 +17,7 @@ Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/project
 - Three sequential GPU kernel launches per iteration
 - Each kernel: one thread per output element, simple dot-product inner loop (no tiling)
 - Default size: N=256 (all matrices 256×256)
-- GFLOPS = (2·N³ + 2·N³ + 2·N³) / time\_sec / 1e9 = 6·N³ / time\_sec / 1e9
+- GFLOPS = (2·N³ + 2·N³ + 2·N³) / time\_sec / 1e9 = 6·N³ / time\_sec / 1e9 (derived downstream from the emitted times and params)
 
 ## Files
 
@@ -40,24 +40,37 @@ make PLATFORM=metal
 ## Run
 
 ```bash
-./polybench_3mm                       # defaults: 256×256, 5 iterations
+./polybench_3mm                       # defaults: 256×256
 ./polybench_3mm --size 512
-./polybench_3mm --size 256 --iterations 10
+BENCH_PARAM_num_iters=10 ./polybench_3mm
 ```
+
+Environment variables (override argv):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BENCH_PARAM_size` | 256 | Matrix dimension N |
+| `BENCH_PARAM_block_size` | 256 | Threads per block (echoed in params) |
+| `BENCH_PARAM_precision` | float | Floating-point precision (half/float/double) |
+| `BENCH_PARAM_num_warmup` | 3 | Untimed warmup passes |
+| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded individually |
 
 ## Output
 
-**stdout** — CSV row with GFLOPS:
-```
-polybench_3mm,256,125.34
-```
+**stdout** — JSON lines: per timed pass, one `{"type":"kernel",...}` record per
+kernel (`mm3_kernel1`, `mm3_kernel2`, `mm3_kernel3`) with that kernel's GPU
+event time (`time_ms`) and host wall-clock time (`host_time_ms`), followed by
+a `{"type":"summary","total_time_ms":...}` line whose value is the sum of all
+recorded GPU event times. Derived metrics (GFLOPS) are computed downstream.
 
 **stderr** — human-readable results:
 ```
 Device: AMD Radeon RX 7900 XTX (id=0)
-Matrix size: 256×256 (all)  |  Iterations: 5
+Matrix size: 256×256 (all)
 
-Performance: 125.34 GFLOPS  (avg 2.1234 ms, min 2.1100 ms, max 2.1500 ms, stddev 0.0150 ms)
+pass 0: k1 gpu = 0.712 ms, k2 gpu = 0.708 ms, k3 gpu = 0.705 ms
+...
+Total GPU time: 14.876 ms over 7 passes
 ```
 
 ## Platform Notes

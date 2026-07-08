@@ -13,15 +13,24 @@
 // Usage:
 //   ./rodinia_lud [--size N]
 //
-// Output (stdout): CSV — lud,<N>,<time_ms>,<GFLOPS>
-// Output (stderr): device info, per-iteration timing, verification result
+// Environment variables (override argv):
+//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_verify
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// kernel (lud_diagonal, lud_perimeter, lud_internal) carrying that kernel's
+// accumulated GPU event time across all block steps in the pass plus the
+// host wall-clock time, then a summary whose total_time_ms is the SUM of
+// all recorded GPU event times. GFLOPS is derived downstream from time_ms
+// and params.
+// Output (stderr): device info, per-pass timing, verification result
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <vector>
 
 // ---------------------------------------------------------------------------
 // Constants and error checking
@@ -29,15 +38,7 @@
 
 #define BSIZE 16
 
-#define HIP_CHECK(cmd)                                                        \
-    do {                                                                      \
-        hipError_t _e = (cmd);                                                \
-        if (_e != hipSuccess) {                                               \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                       \
-                    hipGetErrorString(_e), __FILE__, __LINE__);               \
-            exit(1);                                                          \
-        }                                                                     \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Kernels
@@ -208,7 +209,16 @@ int main(int argc, char **argv)
     if (env_val) block_size_param = atoi(env_val);
     env_val = getenv("BENCH_PARAM_verify");
     if (env_val) verify_mode = env_val;
-    int num_warmup = 5;
+    // Validate string params against their known sets so the values echoed
+    // into the JSON records are always canonical literals.
+    if (strcmp(verify_mode, "true") != 0 && strcmp(verify_mode, "false") != 0 &&
+        strcmp(verify_mode, "skip") != 0) {
+        fprintf(stderr, "Invalid verify '%s' (use true, false, skip)\n",
+                verify_mode);
+        return EXIT_FAILURE;
+    }
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
     if (N % BSIZE != 0) {
         fprintf(stderr, "Error: N=%d must be divisible by BSIZE=%d\n", N, BSIZE);
         return 1;
@@ -238,108 +248,76 @@ int main(int argc, char **argv)
     float *d_a;
     HIP_CHECK(hipMalloc(&d_a, bytes));
 
-    // Events for timing
-    hipEvent_t ev_start, ev_stop;
-    HIP_CHECK(hipEventCreate(&ev_start));
-    HIP_CHECK(hipEventCreate(&ev_stop));
-
     dim3 block(BSIZE, BSIZE);
 
-    // Per-kernel timing accumulators (filled only when `timed` is true).
-    double t_diagonal = 0.0, t_perimeter = 0.0, t_internal = 0.0;
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"",
+             N, block_size_param, verify_mode);
 
-    auto run_lud = [&](bool timed) {
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_diagonal, acc_perimeter, acc_internal;
+
+    // One full LUD pass. The factorization is IN PLACE, so the matrix MUST be
+    // re-uploaded from the pristine host copy at the start of every pass
+    // (untimed) — otherwise later passes would factor an already-factored
+    // matrix. Only the kernel launches are inside the timed brackets.
+    auto run_lud_pass = [&]() {
+        bench_lap_reset(&acc_diagonal);
+        bench_lap_reset(&acc_perimeter);
+        bench_lap_reset(&acc_internal);
+
+        HIP_CHECK(hipMemcpy(d_a, h_a, bytes, hipMemcpyHostToDevice));
+
         for (int k = 0; k < num_blocks; k++) {
-            if (timed) {
-                HIP_CHECK(hipEventRecord(ev_start));
+            bench_lap_add(&acc_diagonal, bench_time_op(&timer, [&]() {
                 lud_diagonal<<<dim3(1), block>>>(d_a, N, k);
-                HIP_CHECK(hipEventRecord(ev_stop));
-                HIP_CHECK(hipEventSynchronize(ev_stop));
-                float ms = 0.0f;
-                HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));
-                t_diagonal += (double)ms;
-            } else {
-                lud_diagonal<<<dim3(1), block>>>(d_a, N, k);
-            }
-            int peri  = 2 * (num_blocks - k - 1);
+            }));
+            int peri   = 2 * (num_blocks - k - 1);
             int intern =     num_blocks - k - 1;
             if (peri > 0) {
-                if (timed) {
-                    HIP_CHECK(hipEventRecord(ev_start));
+                bench_lap_add(&acc_perimeter, bench_time_op(&timer, [&]() {
                     lud_perimeter<<<dim3(peri), block>>>(d_a, N, k);
-                    HIP_CHECK(hipEventRecord(ev_stop));
-                    HIP_CHECK(hipEventSynchronize(ev_stop));
-                    float ms = 0.0f;
-                    HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));
-                    t_perimeter += (double)ms;
-
-                    HIP_CHECK(hipEventRecord(ev_start));
+                }));
+                bench_lap_add(&acc_internal, bench_time_op(&timer, [&]() {
                     lud_internal<<<dim3(intern,intern), block>>>(d_a, N, k);
-                    HIP_CHECK(hipEventRecord(ev_stop));
-                    HIP_CHECK(hipEventSynchronize(ev_stop));
-                    ms = 0.0f;
-                    HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));
-                    t_internal += (double)ms;
-                } else {
-                    lud_perimeter<<<dim3(peri), block>>>(d_a, N, k);
-                    lud_internal<<<dim3(intern,intern), block>>>(d_a, N, k);
-                }
+                }));
             }
         }
     };
 
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
-        HIP_CHECK(hipMemcpy(d_a, h_a, bytes, hipMemcpyHostToDevice));
-        run_lud(false);
-        HIP_CHECK(hipDeviceSynchronize());
+        run_lud_pass();
     }
-    // Correctness verification (one extra run)
-    HIP_CHECK(hipMemcpy(d_a, h_a, bytes, hipMemcpyHostToDevice));
-    run_lud(false);
-    HIP_CHECK(hipDeviceSynchronize());
+    // Correctness verification (one extra pass)
+    run_lud_pass();
     HIP_CHECK(hipMemcpy(h_lu, d_a, bytes, hipMemcpyDeviceToHost));
 
     verify(h_lu, h_a_orig, N);
 
-    // Timed iterations — each kernel timed separately via its own event pair.
-    for (int it = 0; it < 1; it++) {
-        HIP_CHECK(hipMemcpy(d_a, h_a, bytes, hipMemcpyHostToDevice));
-        run_lud(true);
+    // Timed passes — one record per kernel per pass.
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; i++) {
+        run_lud_pass();
+        bench_emit_iter("lud_diagonal",  i, &acc_diagonal,  params);
+        bench_emit_iter("lud_perimeter", i, &acc_perimeter, params);
+        bench_emit_iter("lud_internal",  i, &acc_internal,  params);
+        total_gpu_ms += acc_diagonal.gpu_ms + acc_perimeter.gpu_ms
+                      + acc_internal.gpu_ms;
+        fprintf(stderr, "pass %d: diagonal gpu = %.3f ms, perimeter gpu = %.3f ms, "
+                        "internal gpu = %.3f ms\n",
+                i, acc_diagonal.gpu_ms, acc_perimeter.gpu_ms, acc_internal.gpu_ms);
     }
 
-    // Statistics
-    double sum_ms = t_diagonal + t_perimeter + t_internal;
-    double avg_ms = sum_ms / 1;
-    double gflops = (2.0 / 3.0) * (double)N * (double)N * (double)N
-                    / (avg_ms * 1e-3) / 1e9;
-
-    fprintf(stderr, "\nAverage: %.4f ms  GFLOPS: %.2f"
-                    "  (diagonal=%.4f perimeter=%.4f internal=%.4f)\n",
-            avg_ms, gflops, t_diagonal, t_perimeter, t_internal);
-
-    // JSON-lines kernel events
-    printf("{\"type\":\"kernel\",\"name\":\"lud_diagonal\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
-           t_diagonal, N, block_size_param, verify_mode);
-
-    printf("{\"type\":\"kernel\",\"name\":\"lud_perimeter\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
-           t_perimeter, N, block_size_param, verify_mode);
-
-    printf("{\"type\":\"kernel\",\"name\":\"lud_internal\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"}}\n",
-           t_internal, N, block_size_param, verify_mode);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
-           sum_ms, gflops);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // Cleanup
     HIP_CHECK(hipFree(d_a));
-    HIP_CHECK(hipEventDestroy(ev_start));
-    HIP_CHECK(hipEventDestroy(ev_stop));
     free(h_a);
     free(h_a_orig);
     free(h_lu);

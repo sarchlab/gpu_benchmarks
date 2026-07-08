@@ -13,41 +13,36 @@
 //                       one thread per column j > k
 //
 // Default: M = N = 512
-// Performance metric: GB/s = 3*M*N*sizeof(float) / time_s / 1e9
 //
 // Compiles with hipcc (AMD ROCm) or nvcc -x cu (CUDA).
 //
 // Usage:
 //   ./polybench_gramschmidt [--m M] [--n N] [--passes P]
 //
-//   --m M       Number of rows    (default: 512)
-//   --n N       Number of columns (default: 512)
-//   --passes P  Timed passes      (default: 3)
+//   --m M       Number of rows                          (default: 512)
+//   --n N       Number of columns                       (default: 512)
+//   --passes P  QR factorizations per recorded iteration (default: 3)
 //
-// Output (stdout): CSV — gramschmidt,<M>,<N>,<time_ms>,<GBs>
+// Environment variables (override argv):
+//   BENCH_PARAM_m, BENCH_PARAM_n, BENCH_PARAM_passes, BENCH_PARAM_block_size
+//   BENCH_PARAM_num_warmup   (warmup iterations, default 3)
+//   BENCH_PARAM_num_iters    (timed iterations, each recorded, default 7)
+//
+// Output (stdout): per timed iteration, one {"type":"kernel",...} JSON line
+// per kernel (gram_norm, gram_norm_finish, gram_normalize, gram_project)
+// carrying that kernel's accumulated GPU event time (time_ms) and host
+// wall-clock time (host_time_ms) over all `passes` factorizations of that
+// iteration, then a summary whose total_time_ms is the SUM of all recorded
+// GPU event times. GB/s is derived downstream from time_ms and params.
 // Output (stderr): device info, timing details, orthogonality check
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <cfloat>
-#include <vector>
 
-// ---------------------------------------------------------------------------
-// Inlined utilities
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -59,30 +54,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     }
     return defaultVal;
 }
-
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
 
 // ---------------------------------------------------------------------------
 // Kernel: accumulate ||A[:,k]||^2 via atomic add
@@ -191,6 +162,8 @@ int main(int argc, char** argv)
     if (env_val) passes = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size_param = atoi(env_val);
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     size_t bytes_A = (size_t)M * N * sizeof(float);
     size_t bytes_Q = (size_t)M * N * sizeof(float);
@@ -229,73 +202,85 @@ int main(int argc, char** argv)
     const int block_size = 256;
     const int grid_M = (M + block_size - 1) / block_size;
 
-    BenchmarkTimer timer;
-    int num_warmup = 5;
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"m\":%d,\"n\":%d,\"passes\":%d,\"block_size\":%d",
+             M, N, passes, block_size_param);
 
-    // Per-kernel time accumulators (summed across k-loop and all passes)
-    double t_norm = 0.0, t_norm_finish = 0.0, t_normalize = 0.0, t_project = 0.0;
+    // Per-kernel accumulators: one recorded iteration = `passes` full QR
+    // factorizations; each kernel's GPU/host time is accumulated over all
+    // k-columns and all passes within the iteration.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_norm, acc_norm_finish, acc_normalize, acc_project;
 
-    // Warmup — run the full per-pass kernel sequence, untimed
+    // One recorded iteration. Gram-Schmidt orthogonalizes A in place, so A
+    // is restored from the pristine host copy (and Q/R zeroed) before every
+    // factorization — otherwise later factorizations would run on an
+    // already-orthogonalized matrix. Resets stay outside timed brackets.
+    auto run_iter = [&]() {
+        bench_lap_reset(&acc_norm);
+        bench_lap_reset(&acc_norm_finish);
+        bench_lap_reset(&acc_normalize);
+        bench_lap_reset(&acc_project);
+
+        for (int pass = 0; pass < passes; ++pass) {
+            // Restore A from original, zero Q and R (outside timing)
+            HIP_CHECK(hipMemcpy(d_A, h_A_orig, bytes_A, hipMemcpyHostToDevice));
+            HIP_CHECK(hipMemset(d_Q, 0, bytes_Q));
+            HIP_CHECK(hipMemset(d_R, 0, bytes_R));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            for (int k = 0; k < N; ++k) {
+                // Step 1: zero nrm_buf (untimed), then accumulate ||A[:,k]||^2
+                HIP_CHECK(hipMemsetAsync(d_nrm_buf, 0, sizeof(float), 0));
+                bench_lap_add(&acc_norm, bench_time_op(&timer, [&]() {
+                    gram_norm<<<grid_M, block_size>>>(d_A, d_nrm_buf, M, N, k);
+                }));
+
+                // Step 2: finalize norm → R[k,k]
+                bench_lap_add(&acc_norm_finish, bench_time_op(&timer, [&]() {
+                    gram_norm_finish<<<1, 1>>>(d_nrm_buf, d_R, N, k);
+                }));
+
+                // Step 3: normalize column k
+                bench_lap_add(&acc_normalize, bench_time_op(&timer, [&]() {
+                    gram_normalize<<<grid_M, block_size>>>(d_A, d_Q, d_nrm_buf, M, N, k);
+                }));
+
+                // Step 4: project remaining columns (if any)
+                if (k + 1 < N) {
+                    int remaining   = N - k - 1;
+                    int grid_proj   = (remaining + block_size - 1) / block_size;
+                    bench_lap_add(&acc_project, bench_time_op(&timer, [&]() {
+                        gram_project<<<grid_proj, block_size>>>(d_A, d_Q, d_R, M, N, k);
+                    }));
+                }
+            }
+        }
+    };
+
     for (int w = 0; w < num_warmup; ++w) {
-        HIP_CHECK(hipMemcpy(d_A, h_A_orig, bytes_A, hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemset(d_Q, 0, bytes_Q));
-        HIP_CHECK(hipMemset(d_R, 0, bytes_R));
-        HIP_CHECK(hipDeviceSynchronize());
-
-        for (int k = 0; k < N; ++k) {
-            HIP_CHECK(hipMemsetAsync(d_nrm_buf, 0, sizeof(float), 0));
-            gram_norm<<<grid_M, block_size>>>(d_A, d_nrm_buf, M, N, k);
-            gram_norm_finish<<<1, 1>>>(d_nrm_buf, d_R, N, k);
-            gram_normalize<<<grid_M, block_size>>>(d_A, d_Q, d_nrm_buf, M, N, k);
-            if (k + 1 < N) {
-                int remaining   = N - k - 1;
-                int grid_proj   = (remaining + block_size - 1) / block_size;
-                gram_project<<<grid_proj, block_size>>>(d_A, d_Q, d_R, M, N, k);
-            }
-        }
-        HIP_CHECK(hipDeviceSynchronize());
+        run_iter();
     }
 
-    for (int pass = 0; pass < passes; ++pass) {
-        // Restore A from original, zero Q and R (outside timing)
-        HIP_CHECK(hipMemcpy(d_A, h_A_orig, bytes_A, hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemset(d_Q, 0, bytes_Q));
-        HIP_CHECK(hipMemset(d_R, 0, bytes_R));
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // ----- Timed region — time each kernel separately -----
-        for (int k = 0; k < N; ++k) {
-            // Step 1: zero nrm_buf, then accumulate ||A[:,k]||^2
-            HIP_CHECK(hipMemsetAsync(d_nrm_buf, 0, sizeof(float), 0));
-            timer.record_start();
-            gram_norm<<<grid_M, block_size>>>(d_A, d_nrm_buf, M, N, k);
-            timer.record_stop();
-            t_norm += static_cast<double>(timer.elapsed_ms());
-
-            // Step 2: finalize norm → R[k,k]
-            timer.record_start();
-            gram_norm_finish<<<1, 1>>>(d_nrm_buf, d_R, N, k);
-            timer.record_stop();
-            t_norm_finish += static_cast<double>(timer.elapsed_ms());
-
-            // Step 3: normalize column k
-            timer.record_start();
-            gram_normalize<<<grid_M, block_size>>>(d_A, d_Q, d_nrm_buf, M, N, k);
-            timer.record_stop();
-            t_normalize += static_cast<double>(timer.elapsed_ms());
-
-            // Step 4: project remaining columns (if any)
-            if (k + 1 < N) {
-                int remaining   = N - k - 1;
-                int grid_proj   = (remaining + block_size - 1) / block_size;
-                timer.record_start();
-                gram_project<<<grid_proj, block_size>>>(d_A, d_Q, d_R, M, N, k);
-                timer.record_stop();
-                t_project += static_cast<double>(timer.elapsed_ms());
-            }
-        }
-        // ----- End timed region -----
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_iter();
+        bench_emit_iter("gram_norm",        i, &acc_norm,        params);
+        bench_emit_iter("gram_norm_finish", i, &acc_norm_finish, params);
+        bench_emit_iter("gram_normalize",   i, &acc_normalize,   params);
+        bench_emit_iter("gram_project",     i, &acc_project,     params);
+        total_gpu_ms += acc_norm.gpu_ms + acc_norm_finish.gpu_ms +
+                        acc_normalize.gpu_ms + acc_project.gpu_ms;
+        fprintf(stderr,
+                "iter %d: norm gpu = %.3f ms, finish gpu = %.3f ms, "
+                "normalize gpu = %.3f ms, project gpu = %.3f ms\n",
+                i, acc_norm.gpu_ms, acc_norm_finish.gpu_ms,
+                acc_normalize.gpu_ms, acc_project.gpu_ms);
     }
+
+    bench_timer_destroy(&timer);
 
     // Copy Q back for orthogonality check
     HIP_CHECK(hipMemcpy(h_Q, d_Q, bytes_Q, hipMemcpyDeviceToHost));
@@ -305,33 +290,9 @@ int main(int argc, char** argv)
     fprintf(stderr, "Orthogonality check (first %d columns): %s\n\n",
             (N < 8 ? N : 8), orth_ok ? "PASS" : "FAIL");
 
-    // Statistics — total per-kernel times (summed across all passes)
-    double total_ms = t_norm + t_norm_finish + t_normalize + t_project;
-
-    // GB/s: 3 * M*N*sizeof(float) per pass (read A, read Q, write A for project)
-    double gb   = 3.0 * (double)M * (double)N * sizeof(float) / 1e9 * (double)passes;
-    double gbps = gb / (total_ms * 1e-3);
-
-    fprintf(stderr,
-            "Bandwidth: %.2f GB/s  (total %.4f ms: norm=%.4f finish=%.4f normalize=%.4f project=%.4f)\n",
-            gbps, total_ms, t_norm, t_norm_finish, t_normalize, t_project);
-
-    // JSON-lines output
-    printf("{\"type\":\"kernel\",\"name\":\"gram_norm\",\"time_ms\":%.6f,"
-           "\"params\":{\"m\":%d,\"n\":%d,\"passes\":%d,\"block_size\":%d}}\n",
-           t_norm, M, N, passes, block_size_param);
-    printf("{\"type\":\"kernel\",\"name\":\"gram_norm_finish\",\"time_ms\":%.6f,"
-           "\"params\":{\"m\":%d,\"n\":%d,\"passes\":%d,\"block_size\":%d}}\n",
-           t_norm_finish, M, N, passes, block_size_param);
-    printf("{\"type\":\"kernel\",\"name\":\"gram_normalize\",\"time_ms\":%.6f,"
-           "\"params\":{\"m\":%d,\"n\":%d,\"passes\":%d,\"block_size\":%d}}\n",
-           t_normalize, M, N, passes, block_size_param);
-    printf("{\"type\":\"kernel\",\"name\":\"gram_project\",\"time_ms\":%.6f,"
-           "\"params\":{\"m\":%d,\"n\":%d,\"passes\":%d,\"block_size\":%d}}\n",
-           t_project, M, N, passes, block_size_param);
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
-           total_ms, gbps);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
+            total_gpu_ms, num_iters);
 
     // Cleanup
     HIP_CHECK(hipFree(d_A));

@@ -1,6 +1,6 @@
 # tier2/shoc_gemm — Dense Matrix Multiply (SHOC GEMM)
 
-Benchmarks dense matrix multiplication: **C = α·A·B + β·C** for square N×N single-precision matrices. Measures peak compute throughput in GFLOPS.
+Benchmarks dense matrix multiplication: **C = α·A·B + β·C** for square N×N single-precision matrices. Emits raw per-iteration kernel times; compute throughput (GFLOPS) is derived downstream.
 
 Derived from the [SHOC benchmark suite](https://github.com/vetter/shoc) GEMM workload.
 
@@ -8,7 +8,7 @@ Derived from the [SHOC benchmark suite](https://github.com/vetter/shoc) GEMM wor
 
 - Square N×N single-precision matrix multiply
 - Tiled/shared-memory kernel: 16×16 thread tiles load sub-matrices into threadgroup memory to improve cache reuse
-- GFLOPS = 2·N³ / time\_sec / 1e9
+- GFLOPS = 2·N³ / time\_sec / 1e9 (derived downstream from the emitted times and params)
 
 ## Files
 
@@ -31,25 +31,38 @@ make PLATFORM=metal
 ## Run
 
 ```bash
-./shoc_gemm                     # defaults: 512×512, 20 iterations
+./shoc_gemm                     # defaults: 512×512
 ./shoc_gemm --size 1024
-./shoc_gemm --size 256 --iterations 50
+BENCH_PARAM_size=1024 ./shoc_gemm   # env vars override argv
 ```
+
+Environment variables: `BENCH_PARAM_size`, `BENCH_PARAM_block_size`,
+`BENCH_PARAM_precision`, plus `BENCH_PARAM_num_warmup` (warmup launches,
+default 3) and `BENCH_PARAM_num_iters` (timed launches, each recorded,
+default 7).
 
 ## Output
 
-**stdout** — CSV timing row:
+**stdout** — JSON lines, one kernel record per timed iteration with the GPU
+event time (`time_ms`) and host wall-clock time (`host_time_ms`), then a
+summary whose `total_time_ms` is the sum of all iterations' GPU event times:
 ```
-kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-gemm,512,20,12.3456,12.1000,12.9000,0.1234
+{"type":"kernel","name":"gemm_kernel","iter":0,"time_ms":12.345600,"host_time_ms":12.410000,"params":{"size":512,"block_size":16,"precision":"float"}}
+...
+{"type":"summary","total_time_ms":86.419200}
 ```
+
+Derived metrics such as GFLOPS are computed downstream from `time_ms` and
+the params.
 
 **stderr** — human-readable results:
 ```
 Device: AMD Radeon RX 7900 XTX (id=0)
-Matrix size: 512×512  |  Iterations: 20
+Matrix size: 512×512
 
-Performance: 8765.43 GFLOPS  (avg 12.3456 ms)
+gemm_kernel iter 0: gpu = 12.346 ms, host = 12.410 ms
+...
+Total GPU time: 86.419 ms over 7 iterations
 PASS
 ```
 

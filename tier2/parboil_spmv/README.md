@@ -1,95 +1,63 @@
-# tier2/parboil_spmv — Sparse Matrix-Vector Multiplication (Parboil SpMV)
+# tier2/parboil_spmv — Sparse Matrix-Vector Multiplication (Parboil SpMV, JDS)
 
-CSR (Compressed Sparse Row) Sparse Matrix-Vector Multiplication: **y = A × x**
+Faithful port of the Parboil **SpMV** benchmark: the device kernel `spmv_jds`
+is the original (`parboil/benchmarks/spmv/src/cuda/jds_kernels.cu`), and the host
+driver builds the original **JDS (Jagged Diagonal Storage)** layout with a port
+of Parboil's `coo_to_jds` converter (`common_src/convert-dataset/convert_dataset.c`).
+Only the host driver is restructured for the per-iteration timing harness.
 
-Each GPU thread computes one output row, performing a dot product of the corresponding sparse row of A with the dense input vector x. Measures effective GFLOPS for irregular memory-access patterns common in scientific computing.
+## Algorithm (JDS — the faithful part)
 
-Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parboil.aspx) SpMV workload.
+- Rows are sorted by **descending non-zero count** (jagged / Fubini transpose)
+  and stored **column-major** so thread `ix` walks its row's columns at stride-1
+  offsets `jds_ptr[k] + ix`.
+- Per-32-row-warp-group column counts (`sh_zcnt_int`) and per-column base offsets
+  (`jds_ptr_int`) live in **constant memory** (each capped at 5000 entries →
+  `num_rows ≤ 160000`, JDS column depth `< 5000`).
+- One thread computes one row over the JDS permutation `d_perm`; the result is
+  scattered back to the real row. Launch geometry is the original
+  `compute_active_thread` (`gpu_info.cc`).
 
-## Algorithm
+## Texture → `__ldg` substitution (spec rule 2)
 
-Matrix A is stored in CSR format:
-- `row_ptr[i]` and `row_ptr[i+1]` give the range of non-zeros for row `i`
-- `col_idx[j]` is the column of the j-th non-zero element
-- `values[j]` is the value of the j-th non-zero element
+The canonical Parboil SpMV fetches the dense vector `x` through a 1-D texture
+(`tex1Dfetch`). The compat layer does not map CUDA texture references, so the
+three `x_vec` reads use `__ldg(&x_vec[i])` (read-only data cache) — the closest
+portable equivalent. The **JDS data layout is preserved verbatim.** Jagged
+padding entries carry column index `0` (instead of the converter's `-1`) with
+value `0`, so the read-only gather never dereferences a negative index; the
+value is `0` so the product is unchanged.
 
-**Kernel** (`spmv_csr`): For each row, iterate over its non-zeros and accumulate:
+## Parameters
 
-```
-y[row] = sum(values[j] * x[col_idx[j]])  for j in [row_ptr[row], row_ptr[row+1])
-```
+| Env var / flag | Description | Default |
+|----------------|-------------|---------|
+| `BENCH_PARAM_num_rows` / `--num_rows` | Matrix rows (≤ ~160000) | 50000 |
+| `BENCH_PARAM_avg_nnz_per_row` / `--avg_nnz_per_row` | Avg non-zeros per row (depth < 5000) | 80 |
+| `BENCH_PARAM_block_size` / `--block_size` | Override block size (0 = original `compute_active_thread`) | 0 |
+| `--seed` | RNG seed for matrix generation | 42 |
+| `BENCH_PARAM_num_warmup` | Warmup launches (untimed) | 3 |
+| `BENCH_PARAM_num_iters` | Timed launches, each recorded | 7 |
 
-The matrix is generated randomly (no file I/O required):
-- `num_rows` rows, each with a random number of non-zeros uniformly distributed around `avg_nnz_per_row`
-- Column indices are spread across `[0, num_rows)` and sorted per row
+Matrix and vector are generated synthetically (no `.mtx` file); sized to a
+Parboil-scale matrix (Dubcova3/mixtank are tens of thousands of rows).
 
-## Files
-
-| File | Description |
-|------|-------------|
-| `parboil_spmv.hip`       | HIP source — SpMV kernel + self-contained host code |
-| `parboil_spmv.metal`     | Metal compute shader — `spmv_csr_kernel` |
-| `parboil_spmv_metal.mm`  | ObjC++ Metal host code |
-| `Makefile`               | Auto-detecting build (Darwin→metal, ROCm→rocm, else→cuda) |
-
-## Build
+## Build / Run
 
 ```bash
-make               # auto-detect platform
-make PLATFORM=cuda
-make PLATFORM=rocm
-make PLATFORM=metal
-```
-
-## Run
-
-```bash
-./parboil_spmv                                          # defaults: 65536 rows, 10 nnz/row, 10 iters
-./parboil_spmv --num_rows 131072
-./parboil_spmv --num_rows 65536 --avg_nnz_per_row 20 --iterations 20
+make               # auto-detect platform (cuda / rocm / metal)
+./parboil_spmv
+./parboil_spmv --num_rows 100000 --avg_nnz_per_row 40
 ```
 
 ## Output
 
-**stdout** — CSV timing row:
-```
-kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-parboil_spmv,65536,10,0.8234,0.8100,0.8600,0.0150
-```
+**stdout** — one `kernel` record per timed iteration for `spmv_jds` (one launch
+per pass), then a `summary` whose `total_time_ms` is the sum of all iterations'
+GPU event times. **stderr** — device info, per-iteration timing, PASS/FAIL (all
+rows vs. a CPU reference built from the generated COO). GFLOPS (`2 × nnz / t`) is
+derived downstream from `time_ms` and params.
 
-**stderr** — human-readable results:
-```
-Device: Apple M4 Pro
-Rows: 65536  |  NNZ: 655360  |  Iterations: 10
-
-parboil_spmv,65536,1.5900
-GFLOPS: 1.5900  (avg 0.8234 ms)
-PASS
-```
-
-The `stderr` line `parboil_spmv,<num_rows>,<GFLOPS>` is the canonical CSV metric.
-
-## Parameters
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--num_rows N` | 65536 | Number of matrix rows (= number of columns) |
-| `--avg_nnz_per_row K` | 10 | Average non-zeros per row |
-| `--block_size B` | 256 | GPU thread-block size (CUDA/ROCm only) |
-| `--iterations I` | 10 | Number of timed kernel launches |
-| `--seed S` | 42 | RNG seed for matrix generation |
-
-## Performance Metric
-
-```
-GFLOPS = 2 × total_nnz / avg_time_seconds / 1e9
-```
-
-Factor of 2 accounts for one multiply and one add per non-zero element.
-
-## Platform Notes
-
-- **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `parboil_spmv.hip`
-- **Metal**: compiled with `clang++` from `parboil_spmv_metal.mm`; the Metal shader `parboil_spmv.metal` is loaded at runtime from the same directory as the binary
-- Input data is generated synthetically — no external input files required
-- Verification checks 100 sampled rows against CPU reference output
+> **Metal note:** `parboil_spmv.metal` / `parboil_spmv_metal.mm` still contain the
+> earlier CSR implementation and were not updated by this faithful port
+> (HIP/CUDA only).

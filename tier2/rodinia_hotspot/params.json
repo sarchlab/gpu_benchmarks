@@ -2,7 +2,7 @@
   "benchmark": "rodinia_hotspot",
   "tier": 2,
   "suite": "rodinia",
-  "description": "Iterative 2D stencil thermal simulation for chip temperature estimation. Updates each cell based on four neighbors, local power density, and thermal resistances.",
+  "description": "Rodinia Hotspot: transient thermal simulation via the original pyramidal shared-memory stencil (calculate_temp), advancing pyramid_height time steps per launch with ghost-zone halos. Records the accumulated per-pass GPU time of a full total_iterations simulation.",
   "scaling_param": {
     "name": "grid_size",
     "description": "Grid dimension (NxN temperature grid)",
@@ -32,27 +32,27 @@
   },
   "non_scaling_params": [
     {
-      "name": "block_size",
-      "description": "Thread-block dimension (BxB threads)",
+      "name": "total_iterations",
+      "description": "Total thermal time steps simulated per pass",
       "type": "int",
-      "default": 16,
+      "default": 360,
       "values": [
-        16
+        360
       ]
     },
     {
-      "name": "num_iterations",
-      "description": "Stencil time-steps per timed launch",
+      "name": "pyramid_height",
+      "description": "Time steps advanced per pyramidal launch (must be < BLOCK_SIZE/2 = 8)",
       "type": "int",
-      "default": 10,
+      "default": 2,
       "values": [
         1,
-        10,
-        50
+        2,
+        4
       ]
     }
   ],
   "kernels": [
-    "hotspot_kernel"
+    "calculate_temp"
   ]
 }

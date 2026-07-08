@@ -52,38 +52,51 @@ make clean
 ## Run
 
 ```bash
-# Default: M=N=4096, 5 iterations
+# Default: M=N=4096
 ./polybench_bicg
 
-# Custom size and iterations
-./polybench_bicg --m 8192 --n 8192 --iterations 10
+# Custom size and iteration counts
+BENCH_PARAM_num_iters=10 ./polybench_bicg --m 8192 --n 8192
 ```
+
+### Environment variables
+
+`BENCH_PARAM_m`, `BENCH_PARAM_n`, `BENCH_PARAM_block_size` override the flags.
+In addition:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BENCH_PARAM_num_warmup` | 3 | Warmup passes (not recorded) |
+| `BENCH_PARAM_num_iters`  | 7 | Timed passes, each recorded  |
 
 ## Output
 
 **stderr** — device info, correctness check, timing details:
 ```
 Device: Apple M2 Pro
-Matrix size: 4096×4096  |  Iterations: 5
+Matrix size: 4096×4096
 
 Correctness check (first 8 s, 8 q elements): PASS
 
-Bandwidth: 412.50 GB/s  (avg 0.3201 ms, min 0.3145 ms, max 0.3312 ms, stddev 0.0068 ms)
+pass 0: bicg_kernel1 gpu = 0.161 ms, bicg_kernel2 gpu = 0.159 ms
+...
+Total GPU time: 2.241 ms over 7 passes
 ```
 
-**stdout** — CSV result:
-```
-bicg,<N>,<time_ms>,<GBs>
+**stdout** — JSON lines: per timed pass, one `kernel` record per kernel with
+its GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`),
+then a summary whose `total_time_ms` is the sum of all recorded GPU event
+times:
+```json
+{"type":"kernel","name":"bicg_kernel1","iter":0,"time_ms":0.161,"host_time_ms":0.180,"params":{"m":4096,"n":4096,"block_size":256}}
+{"type":"kernel","name":"bicg_kernel2","iter":0,"time_ms":0.159,"host_time_ms":0.175,"params":{"m":4096,"n":4096,"block_size":256}}
+{"type":"summary","total_time_ms":2.241}
 ```
 
-Example:
-```
-bicg,4096,0.3201,412.50
-```
+## Performance Metric (derived downstream)
 
-## Performance Metric
-
-Memory bandwidth (GB/s) is computed as:
+Memory bandwidth (GB/s), computed downstream from `time_ms` and params — not
+reported by the binary:
 
 ```
 GB/s = (2 × M × N × 4 bytes) / time_s / 1e9

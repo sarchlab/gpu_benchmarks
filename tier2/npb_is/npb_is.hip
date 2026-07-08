@@ -12,15 +12,24 @@
 //
 //   --size N         Number of keys (default: 8388608 = 2^23)
 //
-// Output (stdout): CSV row — npb_is,<N>,<time_ms>,<Mkeys_per_sec>
+// Environment variables (override argv):
+//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_verify
+//   BENCH_PARAM_num_warmup   (warmup sort passes, default 3)
+//   BENCH_PARAM_num_iters    (timed sort passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// kernel (histogram_kernel, prefix_sum_kernel, scatter_kernel) carrying that
+// kernel's GPU event time (time_ms) and host wall-clock time (host_time_ms)
+// within the pass, then a summary whose total_time_ms is the SUM of all
+// recorded GPU event times. Keys/sec is derived downstream from time_ms and
+// params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <vector>
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -33,15 +42,7 @@
 // Error-checking macro
 // ---------------------------------------------------------------------------
 
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -186,8 +187,15 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_verify");
     if (env_val) verify = env_val;
-    int num_warmup = 5;
-
+    // Validate string params against their known sets so the values echoed
+    // into the JSON records are always canonical literals.
+    if (strcmp(verify, "true") != 0 && strcmp(verify, "false") != 0 &&
+        strcmp(verify, "skip") != 0) {
+        fprintf(stderr, "Invalid verify '%s' (use true, false, skip)\n", verify);
+        return 1;
+    }
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     // Print device info
     int device_id = 0;
@@ -195,8 +203,9 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "IS keys: %d (2^%.0f)  |  Buckets: %d warmup + %d timed\n\n",
-            N, log2((double)N), NUM_BUCKETS, num_warmup);
+    fprintf(stderr, "IS keys: %d (2^%.0f)  |  Buckets: %d  |  "
+            "Iterations: %d warmup + %d timed\n\n",
+            N, log2((double)N), NUM_BUCKETS, num_warmup, num_iters);
 
     size_t keysBytes = (size_t)N * sizeof(int);
     size_t histBytes = NUM_BUCKETS * sizeof(unsigned int);
@@ -224,110 +233,70 @@ int main(int argc, char** argv) {
     int blockSize = block_size;
     int gridKeys  = (N + blockSize - 1) / blockSize;
 
-    // Per-kernel timing events (used only when accumulators are supplied)
-    hipEvent_t kStart, kStop;
-    HIP_CHECK(hipEventCreate(&kStart));
-    HIP_CHECK(hipEventCreate(&kStop));
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"",
+             N, block_size, verify);
 
-    // Lambda: run full IS (histogram + prefix sum + scatter)
-    // When accumulators are supplied, each phase launch is timed separately;
-    // passing nullptr (warmup) runs untimed.
-    auto run_is = [&](double* hist_acc, double* prefix_acc, double* scatter_acc) {
-        // Clear histogram
+    // Per-kernel accumulators: one full IS pass launches each kernel once;
+    // each pass's per-kernel GPU/host time becomes that pass's record.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_hist, acc_prefix, acc_scatter;
+
+    // One full IS pass (histogram + prefix sum + scatter). The input keys
+    // are never mutated (the sort scatters into d_sorted), the histogram is
+    // zeroed and the offsets recopied every pass, so each pass performs
+    // identical work. Resets and the d2d copy stay outside timed brackets.
+    auto run_is_pass = [&]() {
+        bench_lap_reset(&acc_hist);
+        bench_lap_reset(&acc_prefix);
+        bench_lap_reset(&acc_scatter);
+
+        // Clear histogram (untimed)
         HIP_CHECK(hipMemset(d_hist, 0, histBytes));
 
         // Phase 1: histogram
-        if (hist_acc) {
-            HIP_CHECK(hipEventRecord(kStart, 0));
+        bench_lap_add(&acc_hist, bench_time_op(&timer, [&]() {
             histogram_kernel<<<dim3(gridKeys), dim3(blockSize)>>>(d_keys, N, d_hist);
-            HIP_CHECK(hipEventRecord(kStop, 0));
-            HIP_CHECK(hipEventSynchronize(kStop));
-            float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
-            *hist_acc += (double)_ms;
-        } else {
-            histogram_kernel<<<dim3(gridKeys), dim3(blockSize)>>>(d_keys, N, d_hist);
-        }
+        }));
 
         // Phase 2: prefix sum (exclusive scan on histogram)
         // Single-block scan, NUM_BUCKETS threads
-        if (prefix_acc) {
-            HIP_CHECK(hipEventRecord(kStart, 0));
+        bench_lap_add(&acc_prefix, bench_time_op(&timer, [&]() {
             prefix_sum_kernel<<<dim3(1), dim3(NUM_BUCKETS), NUM_BUCKETS * sizeof(unsigned int), 0>>>(
                 d_hist, NUM_BUCKETS);
-            HIP_CHECK(hipEventRecord(kStop, 0));
-            HIP_CHECK(hipEventSynchronize(kStop));
-            float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
-            *prefix_acc += (double)_ms;
-        } else {
-            prefix_sum_kernel<<<dim3(1), dim3(NUM_BUCKETS), NUM_BUCKETS * sizeof(unsigned int), 0>>>(
-                d_hist, NUM_BUCKETS);
-        }
+        }));
 
-        // Copy prefix sums to offsets (scatter will modify offsets)
+        // Copy prefix sums to offsets (scatter will modify offsets; untimed)
         HIP_CHECK(hipMemcpy(d_offsets, d_hist, histBytes, hipMemcpyDeviceToDevice));
 
         // Phase 3: scatter
-        if (scatter_acc) {
-            HIP_CHECK(hipEventRecord(kStart, 0));
+        bench_lap_add(&acc_scatter, bench_time_op(&timer, [&]() {
             scatter_kernel<<<dim3(gridKeys), dim3(blockSize)>>>(d_keys, N, d_offsets, d_sorted);
-            HIP_CHECK(hipEventRecord(kStop, 0));
-            HIP_CHECK(hipEventSynchronize(kStop));
-            float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
-            *scatter_acc += (double)_ms;
-        } else {
-            scatter_kernel<<<dim3(gridKeys), dim3(blockSize)>>>(d_keys, N, d_offsets, d_sorted);
-        }
+        }));
     };
 
-    // -------------------------------------------------------------------
-    // Warmup
-    // -------------------------------------------------------------------
     for (int w = 0; w < num_warmup; ++w) {
-        run_is(nullptr, nullptr, nullptr);
-        HIP_CHECK(hipDeviceSynchronize());
+        run_is_pass();
     }
 
-    // -------------------------------------------------------------------
-    // Timed iterations — each phase timed into its own accumulator
-    // -------------------------------------------------------------------
-    double hist_ms = 0.0, prefix_ms = 0.0, scatter_ms = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        run_is(&hist_ms, &prefix_ms, &scatter_ms);
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_is_pass();
+        bench_emit_iter("histogram_kernel",  i, &acc_hist,    params);
+        bench_emit_iter("prefix_sum_kernel", i, &acc_prefix,  params);
+        bench_emit_iter("scatter_kernel",    i, &acc_scatter, params);
+        total_gpu_ms += acc_hist.gpu_ms + acc_prefix.gpu_ms + acc_scatter.gpu_ms;
+        fprintf(stderr, "pass %d: histogram gpu = %.3f ms, prefix_sum gpu = %.3f ms, "
+                "scatter gpu = %.3f ms\n",
+                i, acc_hist.gpu_ms, acc_prefix.gpu_ms, acc_scatter.gpu_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(kStart));
-    HIP_CHECK(hipEventDestroy(kStop));
-
-    double total_ms = hist_ms + prefix_ms + scatter_ms;
-    double avg_ms = total_ms;
-
-    // M keys/sec = N / time_s / 1e6
-    double mkeys_sec = (double)N / (avg_ms * 1e-3) / 1e6;
-
-    // JSON-lines kernel events (one per kernel)
-    printf("{\"type\":\"kernel\",\"name\":\"histogram_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"verify\":\"%s\"}}\n",
-           hist_ms, N, block_size, verify);
-
-    printf("{\"type\":\"kernel\",\"name\":\"prefix_sum_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"verify\":\"%s\"}}\n",
-           prefix_ms, N, block_size, verify);
-
-    printf("{\"type\":\"kernel\",\"name\":\"scatter_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"verify\":\"%s\"}}\n",
-           scatter_ms, N, block_size, verify);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"mkeys_per_sec\",\"value\":%.2f}]}\n",
-           total_ms, mkeys_sec);
-
-    // Human-readable output to stderr
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
-    fprintf(stderr, "Performance:  %.4f Mkeys/sec\n", mkeys_sec);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // -------------------------------------------------------------------
     // Verification: check sorted output is bucket-ordered

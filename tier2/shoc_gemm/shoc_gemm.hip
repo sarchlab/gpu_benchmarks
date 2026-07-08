@@ -1,35 +1,27 @@
 // shoc_gemm.hip — SHOC GEMM benchmark (HIP, self-contained)
 //
 // Dense matrix multiply: C = alpha*A*B + beta*C for NxN square matrices of floats.
-// Measures peak compute throughput in GFLOPS.
 //
 // Parameters are read from BENCH_PARAM_* environment variables,
-// with command-line --flags as fallback.
+// with command-line --flags as fallback:
+//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
+//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
 //
-// Output (stdout): JSON-lines protocol
+// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
+// carrying the GPU event time (time_ms) and host wall-clock time
+// (host_time_ms), then a summary whose total_time_ms is the SUM of all
+// iterations' GPU event times. GFLOPS (2*N^3 / time) is derived downstream
+// from time_ms and params.
 // Output (stderr): Human-readable diagnostics
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <cfloat>
-#include <vector>
 
-// ---------------------------------------------------------------------------
-// Inlined bench_common_hip.h utilities
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -51,30 +43,6 @@ static const char* parseStrParam(int argc, char** argv, const char* name,
     }
     return defaultVal;
 }
-
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
 
 // ---------------------------------------------------------------------------
 // GEMM kernel
@@ -156,7 +124,15 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
-    int num_warmup = 5;
+    // Validate string params against their known sets so the values echoed
+    // into the JSON records are always canonical literals.
+    if (strcmp(precision, "float") != 0 && strcmp(precision, "double") != 0 &&
+        strcmp(precision, "half") != 0) {
+        fprintf(stderr, "Invalid precision '%s' (use float, double, half)\n", precision);
+        return 1;
+    }
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int M = size, N = size, K = size;
     float alpha = 1.0f, beta = 0.0f;
@@ -201,48 +177,22 @@ int main(int argc, char** argv) {
     dim3 block(TILE_SIZE, TILE_SIZE);
     dim3 grid((N + TILE_SIZE - 1) / TILE_SIZE, (M + TILE_SIZE - 1) / TILE_SIZE);
 
-    // Warmup
-    for (int w = 0; w < num_warmup; ++w) {
-        gemm_kernel<<<grid, block>>>(d_A, d_B, d_C, M, N, K, alpha, beta);
-        HIP_CHECK(hipDeviceSynchronize());
-    }
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
+             size, block_size, precision);
 
-    // Timed iterations
-    BenchmarkTimer timer;
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        timer.record_start();
-        gemm_kernel<<<grid, block>>>(d_A, d_B, d_C, M, N, K, alpha, beta);
-        timer.record_stop();
-        times[i] = static_cast<double>(timer.elapsed_ms());
-    }
+    // Warmup + timed iterations, each recorded individually. With beta = 0
+    // the kernel fully overwrites C each launch (the beta*C term is zero),
+    // so repeated launches perform identical work — no reset needed.
+    double total_gpu_ms =
+        bench_run_loop("gemm_kernel", num_warmup, num_iters, params, [&]() {
+            gemm_kernel<<<grid, block>>>(d_A, d_B, d_C, M, N, K, alpha, beta);
+        });
 
-    // Statistics
-    double sum_t = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        sum_t += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg_ms = sum_t / 1;
-    double total_ms = sum_t;
-
-    // GFLOPS: 2 * M * N * K
-    double gflops = 2.0 * (double)M * (double)N * (double)K
-                    / (avg_ms * 1e-3) / 1e9;
-
-    // JSON-lines kernel event
-    printf("{\"type\":\"kernel\",\"name\":\"gemm_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"precision\":\"%s\"}}\n",
-           avg_ms, size, block_size, precision);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
-           total_ms, gflops);
-
-    fprintf(stderr, "Performance: %.2f GFLOPS  (avg %.4f ms)\n", gflops, avg_ms);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
+            total_gpu_ms, num_iters);
 
     // Verify correctness (only for small sizes)
     if (size <= 512) {

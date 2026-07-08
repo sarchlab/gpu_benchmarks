@@ -2,7 +2,7 @@
   "benchmark": "parboil_stencil",
   "tier": 2,
   "suite": "parboil",
-  "description": "7-point 3D Jacobi stencil over NxNxN grid with ping-pong buffers. Measures throughput in GFLOPS and GB/s.",
+  "description": "7-point 3D Jacobi stencil over NxNxN grid with ping-pong buffers. Emits per-pass GPU times; GFLOPS and GB/s are derived downstream.",
   "scaling_param": {
     "name": "grid_dim",
     "description": "Grid dimension N (NxNxN 3D grid)",

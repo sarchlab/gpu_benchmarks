@@ -35,29 +35,41 @@ make PLATFORM=metal
 ## Run
 
 ```bash
-./polybench_correlation                                  # defaults: 1024×1024, 5 iters
+./polybench_correlation                                  # defaults: 1024×1024
 BENCH_PARAM_size=2048 ./polybench_correlation            # 2048×2048
 BENCH_PARAM_block_size=128 ./polybench_correlation       # custom block size
 ```
 
+Additional environment variables:
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `BENCH_PARAM_num_warmup` | 3 | Warmup passes (untimed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded |
+
 ## Output
 
-**stdout** — JSON-lines (one line per kernel + summary):
+**stdout** — JSON-lines. Per timed pass, one record per kernel carrying the
+GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`), then a
+summary whose `total_time_ms` is the sum of all recorded GPU event times
+(no metrics array; derived metrics are computed downstream):
 ```json
-{"type":"kernel","name":"mean_kernel","time_ms":0.123456,"params":{"size":1024,"iterations":5,"block_size":256}}
-{"type":"kernel","name":"stddev_kernel","time_ms":0.234567,"params":{"size":1024,"iterations":5,"block_size":256}}
-{"type":"kernel","name":"normalize_kernel","time_ms":0.345678,"params":{"size":1024,"iterations":5,"block_size":256}}
-{"type":"kernel","name":"correlation_kernel","time_ms":1.456789,"params":{"size":1024,"iterations":5,"block_size":256}}
-{"type":"summary","total_time_ms":2.160490,"metrics":[]}
+{"type":"kernel","name":"mean_kernel","iter":0,"time_ms":0.123456,"host_time_ms":0.140000,"params":{"size":1024,"block_size":256,"precision":"float"}}
+{"type":"kernel","name":"stddev_kernel","iter":0,"time_ms":0.234567,"host_time_ms":0.250000,"params":{"size":1024,"block_size":256,"precision":"float"}}
+{"type":"kernel","name":"normalize_kernel","iter":0,"time_ms":0.345678,"host_time_ms":0.360000,"params":{"size":1024,"block_size":256,"precision":"float"}}
+{"type":"kernel","name":"correlation_kernel","iter":0,"time_ms":1.456789,"host_time_ms":1.480000,"params":{"size":1024,"block_size":256,"precision":"float"}}
+...
+{"type":"summary","total_time_ms":15.123430}
 ```
 
 **stderr** — human-readable:
 ```
 Device: NVIDIA GeForce RTX 4090 (id=0)
-Data matrix: 1024x1024  |  Iterations: 5
+Data matrix: 1024x1024
 
-Kernel timings (avg ms): mean=0.1235  stddev=0.2346  normalize=0.3457  correlation=1.4568
-Total: 2.1605 ms
+pass 0: mean=0.1235  stddev=0.2346  normalize=0.3457  correlation=1.4568 (gpu ms)
+...
+Total GPU time: 15.123 ms over 7 passes
 ```
 
 ## Platform Notes

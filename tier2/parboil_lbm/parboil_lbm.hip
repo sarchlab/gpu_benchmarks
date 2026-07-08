@@ -7,29 +7,27 @@
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
-// Output (stdout): JSON-lines
+// Environment variables:
+//   BENCH_PARAM_grid_dim, BENCH_PARAM_block_size, BENCH_PARAM_num_timesteps,
+//   BENCH_PARAM_tau
+//   BENCH_PARAM_num_warmup   (warmup simulation passes, default 3)
+//   BENCH_PARAM_num_iters    (timed simulation passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
+// lbm_collide_stream_kernel carrying the GPU event time and host time
+// accumulated over the pass's num_timesteps kernel launches, then a summary
+// whose total_time_ms is the SUM of all recorded GPU event times. MLUPS
+// (N^3 * num_timesteps / time) is derived downstream from time_ms and params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // D3Q19 velocity set
@@ -177,7 +175,6 @@ int main(int argc, char** argv) {
     int block_size   = 128;
     int num_timesteps = 100;
     float tau        = 0.7f;
-    int iterations   = 5;
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_grid_dim");
@@ -188,11 +185,10 @@ int main(int argc, char** argv) {
     if (env_val) num_timesteps = atoi(env_val);
     env_val = getenv("BENCH_PARAM_tau");
     if (env_val) tau = (float)atof(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
-    int num_warmup = 5;
+    /* BENCH_PARAM_iterations is superseded by BENCH_PARAM_num_iters. */
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
-    int iters = iterations;
     float omega = 1.0f / tau;
     int Nx = grid_dim, Ny = grid_dim, Nz = grid_dim;
     int N = Nx * Ny * Nz;
@@ -203,8 +199,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "LBM D3Q19  |  Grid: %dx%dx%d = %d  |  Timesteps: %d  |  "
-            "Tau: %.2f  |  Iterations: 5 warmup + %d timed\n\n",
-            Nx, Ny, Nz, N, num_timesteps, tau, iters);
+            "Tau: %.2f  |  Iterations: %d warmup + %d timed\n\n",
+            Nx, Ny, Nz, N, num_timesteps, tau, num_warmup, num_iters);
 
     // Initialize equilibrium distributions
     size_t f_bytes = (size_t)Q * N * sizeof(float);
@@ -224,68 +220,58 @@ int main(int argc, char** argv) {
 
     int gridSize = (N + block_size - 1) / block_size;
 
-    auto run_lbm = [&]() {
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"grid_dim\":%d,\"block_size\":%d,\"num_timesteps\":%d,"
+             "\"tau\":%.2f",
+             grid_dim, block_size, num_timesteps, tau);
+
+    // Per-pass accumulator: each simulation pass launches the collide-stream
+    // kernel num_timesteps times; the accumulated GPU/host time of all
+    // timesteps within one pass becomes that pass's record.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_lbm;
+
+    // One full simulation pass. The simulation evolves the distribution
+    // arrays in place (ping-pong), so the equilibrium initial state is
+    // re-uploaded at the start of every pass (untimed) to keep each pass's
+    // work identical. Only the kernel launches sit inside timed brackets;
+    // the host-side buffer swap stays outside.
+    auto run_lbm_pass = [&]() {
+        bench_lap_reset(&acc_lbm);
+
+        HIP_CHECK(hipMemcpy(d_f_src, h_f.data(), f_bytes, hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemset(d_f_dst, 0, f_bytes));
+
         for (int t = 0; t < num_timesteps; ++t) {
-            lbm_collide_stream_kernel<<<dim3(gridSize), dim3(block_size)>>>(
-                d_f_src, d_f_dst, Nx, Ny, Nz, omega);
+            bench_lap_add(&acc_lbm, bench_time_op(&timer, [&]() {
+                lbm_collide_stream_kernel<<<dim3(gridSize), dim3(block_size)>>>(
+                    d_f_src, d_f_dst, Nx, Ny, Nz, omega);
+            }));
             float* tmp = d_f_src;
             d_f_src = d_f_dst;
             d_f_dst = tmp;
         }
     };
 
-    auto upload_initial = [&]() {
-        HIP_CHECK(hipMemcpy(d_f_src, h_f.data(), f_bytes, hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemset(d_f_dst, 0, f_bytes));
-    };
-
-    // Warmup
     for (int w = 0; w < num_warmup; ++w) {
-        upload_initial();
-        run_lbm();
-        HIP_CHECK(hipDeviceSynchronize());
+        run_lbm_pass();
     }
 
-    // Timed iterations
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
-        upload_initial();
-
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        run_lbm();
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_lbm_pass();
+        bench_emit_iter("lbm_collide_stream_kernel", i, &acc_lbm, params);
+        total_gpu_ms += acc_lbm.gpu_ms;
+        fprintf(stderr, "pass %d: gpu = %.3f ms, host = %.3f ms\n",
+                i, acc_lbm.gpu_ms, acc_lbm.host_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
-    double total_ms = sum;
-
-    double mlups = (double)N * num_timesteps / (avg_ms * 1e-3) / 1e6;
-
-    printf("{\"type\":\"kernel\",\"name\":\"lbm_collide_stream_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"grid_dim\":%d,\"iterations\":%d,\"block_size\":%d,"
-           "\"num_timesteps\":%d,\"tau\":%.2f}}\n",
-           avg_ms, grid_dim, iters, block_size, num_timesteps, tau);
-
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"mlups\",\"value\":%.2f}]}\n",
-           total_ms, mlups);
-
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
-    fprintf(stderr, "Throughput:   %.2f MLUPS\n", mlups);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // Verification
     {

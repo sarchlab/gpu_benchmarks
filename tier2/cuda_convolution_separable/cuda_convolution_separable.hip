@@ -1,7 +1,6 @@
 // cuda_convolution_separable.hip — Separable 2D convolution benchmark (HIP)
 //
 // Two-pass separable 2D convolution: row pass + column pass.
-// Measures throughput in GB/s = 2 * W * H * sizeof(float) / time_s / 1e9.
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
@@ -12,30 +11,31 @@
 //   --height H        Image height (default: 4096)
 //   --radius R        Kernel radius (default: 8, filter width = 2*R+1)
 //
-// Output (stdout): CSV row — cuda_convolution_separable,<WxH>,<time_ms>,<GBs>
+// Environment variables (override argv):
+//   BENCH_PARAM_width, BENCH_PARAM_height, BENCH_PARAM_radius
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// kernel (convolution_row_kernel, convolution_col_kernel) carrying that
+// kernel's GPU event time (time_ms) and host wall-clock time (host_time_ms)
+// within the pass, then a summary whose total_time_ms is the SUM of all
+// recorded GPU event times. Throughput (GB/s) is derived downstream from
+// time_ms and params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <cfloat>
 #include <vector>
 
 // ---------------------------------------------------------------------------
 // Error-checking macro
 // ---------------------------------------------------------------------------
 
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -134,7 +134,9 @@ __global__ void convolution_row_kernel(
 // ---------------------------------------------------------------------------
 
 #define COL_TILE_W 16
-#define COL_TILE_H 128
+// COL_TILE_W * COL_TILE_H is the column-kernel block size and must stay
+// within the 1024 threads/block hardware limit: 16 * 64 = 1024.
+#define COL_TILE_H 64
 
 __global__ void convolution_col_kernel(
     const float* __restrict__ input,
@@ -197,8 +199,6 @@ __global__ void convolution_col_kernel(
 static void conv_separable_cpu(const float* input, float* output,
                                int width, int height,
                                const float* kernel_weights, int radius) {
-    int klen = 2 * radius + 1;
-
     // Temporary buffer for row pass
     std::vector<float> temp((size_t)width * height, 0.0f);
 
@@ -254,8 +254,8 @@ int main(int argc, char** argv) {
     if (env_val) height = atoi(env_val);
     env_val = getenv("BENCH_PARAM_radius");
     if (env_val) radius = atoi(env_val);
-    int num_warmup = 5;
-
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     if (radius > MAX_KERNEL_RADIUS) {
         fprintf(stderr, "Error: radius=%d exceeds max=%d\n", radius, MAX_KERNEL_RADIUS);
@@ -272,8 +272,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Image: %dx%d  |  Kernel radius: %d (%d-tap)  |  "
-                    "Iterations: 5 warmup + %d timed\n\n",
-            width, height, radius, klen);
+                    "Iterations: %d warmup + %d timed\n\n",
+            width, height, radius, klen, num_warmup, num_iters);
 
     // Generate Gaussian-like kernel weights
     std::vector<float> h_kernel((size_t)klen);
@@ -288,7 +288,7 @@ int main(int argc, char** argv) {
         for (int i = 0; i < klen; ++i) h_kernel[i] /= sum;
     }
 
-    // Copy kernel to constant memory
+    // Copy kernel to constant memory (setup — outside all timed brackets)
     HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(c_kernel), h_kernel.data(),
                                  klen * sizeof(float)));
 
@@ -319,85 +319,54 @@ int main(int argc, char** argv) {
                  (height + COL_TILE_H - 1) / COL_TILE_H);
     size_t colSmem = COL_TILE_W * (COL_TILE_H + 2 * radius) * sizeof(float);
 
-    // Per-kernel timing events (used only when accumulators are supplied)
-    hipEvent_t kStart, kStop;
-    HIP_CHECK(hipEventCreate(&kStart));
-    HIP_CHECK(hipEventCreate(&kStop));
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"width\":%d,\"height\":%d,\"radius\":%d",
+             width, height, radius);
 
-    // Lambda: run full separable convolution
-    // When accumulators are supplied, each pass is timed separately;
-    // passing nullptr (warmup) runs untimed.
-    auto run_conv = [&](double* row_acc, double* col_acc) {
-        if (row_acc) {
-            HIP_CHECK(hipEventRecord(kStart, 0));
+    // Per-kernel accumulators: each pass runs the row kernel then the
+    // column kernel once, each launch individually bracketed.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_row, acc_col;
+
+    // One full separable-convolution pass. The row kernel reads the
+    // never-mutated d_input and overwrites d_temp; the column kernel reads
+    // d_temp and overwrites d_output. No pass mutates its own inputs, so
+    // every pass performs identical work — no state reset is needed.
+    auto run_conv_pass = [&]() {
+        bench_lap_reset(&acc_row);
+        bench_lap_reset(&acc_col);
+
+        bench_lap_add(&acc_row, bench_time_op(&timer, [&]() {
             convolution_row_kernel<<<rowGrid, rowBlock, rowSmem, 0>>>(
                 d_input, d_temp, width, height, radius);
-            HIP_CHECK(hipEventRecord(kStop, 0));
-            HIP_CHECK(hipEventSynchronize(kStop));
-            float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
-            *row_acc += (double)_ms;
-        } else {
-            convolution_row_kernel<<<rowGrid, rowBlock, rowSmem, 0>>>(
-                d_input, d_temp, width, height, radius);
-        }
+        }));
 
-        if (col_acc) {
-            HIP_CHECK(hipEventRecord(kStart, 0));
+        bench_lap_add(&acc_col, bench_time_op(&timer, [&]() {
             convolution_col_kernel<<<colGrid, colBlock, colSmem, 0>>>(
                 d_temp, d_output, width, height, radius);
-            HIP_CHECK(hipEventRecord(kStop, 0));
-            HIP_CHECK(hipEventSynchronize(kStop));
-            float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
-            *col_acc += (double)_ms;
-        } else {
-            convolution_col_kernel<<<colGrid, colBlock, colSmem, 0>>>(
-                d_temp, d_output, width, height, radius);
-        }
+        }));
     };
 
-    // -------------------------------------------------------------------
-    // Warmup
-    // -------------------------------------------------------------------
     for (int w = 0; w < num_warmup; ++w) {
-        run_conv(nullptr, nullptr);
-        HIP_CHECK(hipDeviceSynchronize());
+        run_conv_pass();
     }
 
-    // -------------------------------------------------------------------
-    // Timed iterations — each pass timed into its own accumulator
-    // -------------------------------------------------------------------
-    double row_ms = 0.0, col_ms = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        run_conv(&row_ms, &col_ms);
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_conv_pass();
+        bench_emit_iter("convolution_row_kernel", i, &acc_row, params);
+        bench_emit_iter("convolution_col_kernel", i, &acc_col, params);
+        total_gpu_ms += acc_row.gpu_ms + acc_col.gpu_ms;
+        fprintf(stderr, "pass %d: row gpu = %.3f ms, col gpu = %.3f ms\n",
+                i, acc_row.gpu_ms, acc_col.gpu_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(kStart));
-    HIP_CHECK(hipEventDestroy(kStop));
-
-    double total_ms = row_ms + col_ms;
-    double avg_ms = total_ms;
-
-    // GB/s = 2 * W * H * sizeof(float) / time_s / 1e9
-    double data_bytes = 2.0 * (double)width * (double)height * sizeof(float);
-    double gbs = data_bytes / (avg_ms * 1e-3) / 1e9;
-
-    // JSON-lines kernel events (one per kernel)
-    printf("{\"type\":\"kernel\",\"name\":\"convolution_row_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"width\":%d,\"height\":%d,\"radius\":%d}}\n",
-           row_ms, width, height, radius);
-
-    printf("{\"type\":\"kernel\",\"name\":\"convolution_col_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"width\":%d,\"height\":%d,\"radius\":%d}}\n",
-           col_ms, width, height, radius);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"throughput_gbps\",\"value\":%.2f}]}\n",
-           total_ms, gbs);
-
-    // Human-readable output to stderr
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
-    fprintf(stderr, "Throughput:   %.4f GB/s\n", gbs);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // -------------------------------------------------------------------
     // Verification (for smaller images)

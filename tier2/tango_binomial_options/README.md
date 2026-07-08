@@ -1,6 +1,6 @@
 # tier2/tango_binomial_options — Binomial Option Pricing (CRR Model)
 
-Benchmarks the Cox-Ross-Rubinstein (CRR) binomial tree model for **American put option** pricing with early exercise. Measures throughput in **options/sec**.
+Benchmarks the Cox-Ross-Rubinstein (CRR) binomial tree model for **American put option** pricing with early exercise. Reports per-iteration GPU times; throughput (options/sec) is derived downstream.
 
 Derived from the [Tango benchmark suite](https://github.com/AkshayUsha/Tango) binomial options workload.
 
@@ -13,7 +13,7 @@ Derived from the [Tango benchmark suite](https://github.com/AkshayUsha/Tango) bi
 - Uses shared/threadgroup memory for the option value array at each level
 - CRR parameters: u = e^(σ√Δt), d = 1/u, p = (e^(rΔt) − d) / (u − d)
 - Input parameters randomized: S∈[5,200], K∈[1,300], T∈[0.25,10], σ∈[0.1,1.0], r=0.02
-- Metric: options/sec = N / time\_sec
+- Metric: options/sec = N / time\_sec (derived downstream from the recorded times)
 
 ## Files
 
@@ -38,25 +38,37 @@ make PLATFORM=metal
 ```bash
 ./tango_binomial_options                                  # defaults: 512 options, 1024 steps
 ./tango_binomial_options --options 256 --steps 512        # fewer options and steps
-./tango_binomial_options --options 512 --steps 1024 --iterations 10
 ```
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BENCH_PARAM_options` | 512 | Number of options |
+| `BENCH_PARAM_steps` | 1024 | Binomial tree steps per option |
+| `BENCH_PARAM_precision` | float | Precision label (float, double, half; recorded in params) |
+| `BENCH_PARAM_num_warmup` | 3 | Warmup launches (untimed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed launches, each recorded |
 
 ## Output
 
-**stdout** — CSV timing row:
+**stdout** — JSON lines: one `{"type":"kernel",...}` record per timed iteration with `time_ms` (GPU event time) and `host_time_ms` (host wall-clock), then a summary whose `total_time_ms` is the sum of all iterations' GPU event times:
 ```
-tango_binomial_options,512x1024,45.6789,11205.0000
+{"type":"kernel","name":"binomial_kernel","iter":0,"time_ms":45.6789,"host_time_ms":45.9012,"params":{"options":512,"steps":1024,"precision":"float"}}
+...
+{"type":"summary","total_time_ms":319.7523}
 ```
 
-Format: `tango_binomial_options,<N_options>x<steps>,<time_ms>,<options_per_sec>`
+Derived metrics (options/sec) are computed downstream from `time_ms` and the params.
 
 **stderr** — human-readable results:
 ```
 Device: AMD Radeon RX 7900 XTX (id=0)
-Options: 512  |  Steps: 1024  |  Iterations: 5 warmup + 5 timed
+Options: 512  |  Steps: 1024  |  Iterations: 3 warmup + 7 timed
 
-Average time: 45.6789 ms
-Performance:  11205.0000 options/sec
+binomial_kernel iter 0: gpu = 45.679 ms, host = 45.901 ms
+...
+Total GPU time: 319.752 ms over 7 iterations
 PASS
 ```
 

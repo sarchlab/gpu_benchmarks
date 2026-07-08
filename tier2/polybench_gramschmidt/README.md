@@ -82,37 +82,51 @@ make clean
 ```bash
 ./polybench_gramschmidt                    # default: M=512, N=512, 3 passes
 ./polybench_gramschmidt --m 1024 --n 512  # larger matrix
-./polybench_gramschmidt --passes 5        # more timed passes
+./polybench_gramschmidt --passes 5        # more factorizations per recorded iteration
 ```
+
+| Environment variable | Default | Description |
+|----------------------|---------|-------------|
+| `BENCH_PARAM_m` | 512 | Number of rows (overrides `--m`) |
+| `BENCH_PARAM_n` | 512 | Number of columns (overrides `--n`) |
+| `BENCH_PARAM_passes` | 3 | QR factorizations per recorded iteration (overrides `--passes`) |
+| `BENCH_PARAM_block_size` | 256 | Reported thread-block size |
+| `BENCH_PARAM_num_warmup` | 3 | Warmup iterations (untimed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed iterations, each recorded |
 
 ## Output Format
 
-**stderr** — device info, per-pass timing, orthogonality check result, summary
+**stderr** — device info, per-iteration timing, orthogonality check result,
+summary
 
-**stdout** — CSV result line:
-
-```
-gramschmidt,<M>,<N>,<time_ms>,<GBs>
-```
-
-Example:
-```
-gramschmidt,512,512,45.2318,1.08
-```
-
-## Performance Metric
+**stdout** — JSON lines: per timed iteration, one kernel record per kernel
+(`gram_norm`, `gram_norm_finish`, `gram_normalize`, `gram_project`) carrying
+that kernel's GPU event time (`time_ms`) and host wall-clock time
+(`host_time_ms`) accumulated over the iteration's `passes` factorizations,
+then a summary whose `total_time_ms` is the sum of all recorded GPU event
+times. The matrix A is restored (and Q/R zeroed) before every factorization,
+outside the timed brackets:
 
 ```
-GB/s = (3 × M × N × sizeof(float)) / (avg_time_s × 10⁹)
+{"type":"kernel","name":"gram_norm","iter":0,"time_ms":12.345600,"host_time_ms":13.010000,"params":{"m":512,"n":512,"passes":3,"block_size":256}}
+...
+{"type":"summary","total_time_ms":316.622600}
+```
+
+## Performance Metric (derived downstream)
+
+```
+GB/s = (3 × M × N × sizeof(float) × passes) / (time_s × 10⁹)
 ```
 
 The factor of 3 accounts for the dominant memory traffic in the projection
 step: one read of `Q[:,k]`, one read of `A[:,j]`, and one write to `A[:,j]`
-per column j > k, summed across all N column iterations.
+per column j > k, summed across all N column iterations. This metric is
+computed downstream from the emitted `time_ms` and params.
 
 ## Orthogonality Verification
 
-After the final timed pass, the benchmark computes `Qᵀ Q` on the CPU for the
+After the final timed iteration, the benchmark computes `Qᵀ Q` on the CPU for the
 first `min(8, N)` columns and checks:
 
 - **Diagonal** elements: `|dot(Q[:,i], Q[:,i]) − 1| < 0.01`

@@ -1,6 +1,6 @@
 # tier2/cuda_transpose — Shared-Memory Tiled Matrix Transpose
 
-Benchmarks matrix transpose using shared memory tiling for a square N×N single-precision matrix (default 4096×4096). Compares naive vs. optimized (bank-conflict-free) transpose kernels. Measures effective memory bandwidth in GB/s.
+Benchmarks matrix transpose using shared memory tiling for a square N×N single-precision matrix (default 4096×4096). Compares naive vs. optimized (bank-conflict-free) transpose kernels. Emits per-iteration kernel times; effective memory bandwidth in GB/s is derived downstream.
 
 Based on the classic [CUDA Matrix Transpose](https://developer.nvidia.com/blog/efficient-matrix-transpose-cuda-cc/) optimization pattern.
 
@@ -14,7 +14,17 @@ Two transpose variants are benchmarked:
 | **Optimized** | Uses shared memory (threadgroup memory on Metal) with `TILE_DIM+1` padding to avoid bank conflicts. Both reads and writes are coalesced. |
 
 - **TILE_DIM** = 32, **BLOCK_ROWS** = 8 — each threadblock handles a 32×32 tile, with 32×8 = 256 threads per block
-- **Effective bandwidth** = 2 × N × N × sizeof(float) / time\_sec / 1e9 (GB/s)
+- **Effective bandwidth** = 2 × N × N × sizeof(float) / time\_sec / 1e9 (GB/s) — derived downstream from the emitted times
+
+## Parameters
+
+| Env var | Description | Default |
+|---------|-------------|---------|
+| `BENCH_PARAM_size` | Matrix dimension N (N×N) | 4096 |
+| `BENCH_PARAM_block_size` | Threads per block (descriptor) | 256 |
+| `BENCH_PARAM_tile_dim` | Tile dimension (descriptor) | 32 |
+| `BENCH_PARAM_num_warmup` | Warmup launches per variant (untimed) | 3 |
+| `BENCH_PARAM_num_iters` | Timed launches per variant, each recorded | 7 |
 
 ## Files
 
@@ -43,23 +53,31 @@ make PLATFORM=metal
 
 ## Output
 
-**stdout** — CSV timing rows (one per variant):
+**stdout** — JSON lines: one `kernel` record per timed iteration of each
+variant (`transpose_naive`, `transpose_optimized`), then a `summary` whose
+`total_time_ms` is the sum of all iterations' GPU event times:
 ```
-cuda_transpose,naive_4096,1.2345,103.45
-cuda_transpose,optimized_4096,0.5678,224.89
+{"type":"kernel","name":"transpose_naive","iter":0,"time_ms":1.234500,"host_time_ms":1.301000,"params":{"size":4096,"block_size":256,"tile_dim":32}}
+...
+{"type":"kernel","name":"transpose_optimized","iter":0,"time_ms":0.567800,"host_time_ms":0.621000,"params":{"size":4096,"block_size":256,"tile_dim":32}}
+...
+{"type":"summary","total_time_ms":12.616100}
 ```
 
-Format: `cuda_transpose,<variant>_<N>,<time_ms>,<GB/s>`
+Derived metrics (GB/s per variant) are computed downstream from `time_ms` and params.
 
 **stderr** — human-readable results:
 ```
 Device: Apple M2 (id=0)
-Matrix size: 4096×4096  |  Warmup: 5  |  Timed: 5
+Matrix size: 4096×4096  |  Warmup: 3  |  Timed: 7
 
-Naive transpose:     avg 1.2345 ms  |  103.45 GB/s
+transpose_naive iter 0: gpu = 1.234 ms, host = 1.301 ms
+...
   Verification: PASS
-Optimized transpose: avg 0.5678 ms  |  224.89 GB/s
+transpose_optimized iter 0: gpu = 0.568 ms, host = 0.621 ms
+...
   Verification: PASS
+Total GPU time: 12.616 ms over 7 iterations per variant
 ```
 
 ## Platform Notes

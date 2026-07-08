@@ -1,25 +1,52 @@
 # rodinia_pathfinder — Minimum-Cost Path Through a 2D Grid
 
-Rodinia PathFinder benchmark: computes the minimum-cost path through a 2D grid
-from top to bottom using dynamic programming with double-buffered row sweeps on GPU.
+Faithful port of the Rodinia PathFinder benchmark: the device kernel
+(`dynproc_kernel`) and the host launch geometry are the **original** Rodinia 3.1
+CUDA source; only the outer driver loop is restructured for per-iteration timing.
 
 ## Algorithm
 
-- Grid of `ROWS × COLS` integer costs (randomly initialized to `[0, 10)`)
-- Initialize `src[col] = wall[0][col]` (first row)
-- For each row `t` from `1` to `ROWS-1`:
-  - Each GPU thread (one per column) computes:
-    ```
-    dst[col] = wall[t][col] + min(src[col-1], src[col], src[col+1])
-    ```
-  - Swap `src` ↔ `dst` (double buffering)
-- The minimum value in the final `src` array is the overall minimum path cost
+Dynamic-programming shortest descent through a `ROWS × COLS` integer cost grid.
+Starting from row 0, each subsequent row's accumulated minimum cost is derived
+from the three cells above it:
+
+```
+next[n] = wall[t][n] + min(cur[n-1], cur[n], cur[n+1])
+```
+
+The original kernel uses **pyramidal / ghost-zone temporal blocking** (identical
+in spirit to Rodinia Hotspot): a 1-D block of `BLOCK_SIZE = 256` threads loads
+one row into shared memory and advances `pyramid_height` rows locally before
+writing back, using a border (halo) of `pyramid_height` columns so neighbouring
+blocks stay consistent. A block computes a non-overlapping "small block" of
+`BLOCK_SIZE − 2·pyramid_height` columns per launch.
+
+One **recorded pass** is a full top-to-bottom traversal of all `ROWS`, driven by
+the original `calc_path` loop (`for t = 0; t < rows-1; t += pyramid_height`).
+Every pyramidal launch within the pass is timed and accumulated into a single
+`dynproc_kernel` record. With the defaults (`rows=100`, `pyramid_height=20`)
+there are `ceil((100-1)/20) = 5` launches per pass; the last advances
+`min(20, rows-t-1)` rows.
+
+## Default problem size
+
+| Parameter | Default | Notes |
+|-----------|---------|-------|
+| `--cols` / `BENCH_PARAM_cols` | 100000 | matches the original standard run |
+| `--rows` / `BENCH_PARAM_rows` | 100 | wide/short grid, as in the original run |
+| `--pyramid_height` / `BENCH_PARAM_pyramid_height` | 20 | as in the original run |
+| `BENCH_PARAM_num_warmup` | 3 | warmup passes (untimed) |
+| `BENCH_PARAM_num_iters` | 7 | timed passes, each recorded |
+
+`BLOCK_SIZE` is a fixed compile-time `256` in the original kernel; the emitted
+`block_size` descriptor reflects that fixed value. `pyramid_height` must be
+`< BLOCK_SIZE/2 = 128`.
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `rodinia_pathfinder.hip` | HIP/CUDA implementation (NVIDIA + AMD) |
+| `rodinia_pathfinder.hip` | HIP/CUDA implementation (faithful kernel + host driver) |
 | `rodinia_pathfinder.metal` | Metal compute shader (Apple) |
 | `rodinia_pathfinder_metal.mm` | ObjC++ Metal host (Apple) |
 | `Makefile` | Platform auto-detect build system |
@@ -28,56 +55,39 @@ from top to bottom using dynamic programming with double-buffered row sweeps on 
 ## Build
 
 ```bash
-# Auto-detect platform
-make
-
-# Explicit platform
+make                  # auto-detect platform
 make PLATFORM=cuda    # NVIDIA CUDA
 make PLATFORM=rocm    # AMD ROCm/HIP
 make PLATFORM=metal   # Apple Metal
-
-# Clean
 make clean
 ```
-
-**Requirements:**
-- CUDA: NVIDIA CUDA toolkit + `nvcc`
-- ROCm: AMD ROCm 5.x+ + `hipcc`
-- Metal: macOS 12+ + Xcode command-line tools
 
 ## Run
 
 ```bash
-./rodinia_pathfinder [--rows R] [--cols C] [--iterations I]
+./rodinia_pathfinder [--cols C] [--rows R] [--pyramid_height P]
 ```
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--rows R` | 100000 | Number of grid rows |
-| `--cols C` | 100 | Number of grid columns |
-| `--iterations I` | 3 | Number of timed benchmark iterations |
 
 ## Output
 
+**stdout** — JSON lines: one `kernel` record per timed pass (the GPU event time
+is the sum of all pyramidal launches in that pass), then a `summary` whose
+`total_time_ms` is the sum of all recorded GPU event times:
+
 ```
-benchmark,rows,cols,time_ms,GBs
-pathfinder,100000,100,45.2318,0.0267
+{"type":"kernel","name":"dynproc_kernel","iter":0,"time_ms":...,"host_time_ms":...,"params":{"cols":100000,"rows":100,"pyramid_height":20,"block_size":256}}
+...
+{"type":"summary","total_time_ms":...}
 ```
 
-Informational output (stderr):
-- GPU device name
-- Grid dimensions
-- Verification result (against small CPU reference)
-- Minimum cost in the final row
+**stderr** — device name, pyramid geometry, per-pass timing, and verification
+against a CPU dynamic-programming reference over the full grid.
 
-## Performance Notes
+## Data reset
 
-- Memory access pattern: each row sweep reads `COLS` ints (src) + `COLS` ints (wall),
-  writes `COLS` ints (dst) → `3 × ROWS × COLS × 4` bytes per iteration
-- The kernel is bandwidth-bound with minimal compute per element
-- Metal implementation batches `1000` row dispatches per command buffer to reduce
-  host-side overhead
-- For very large grids (e.g., 1M rows), reduce `--rows` or increase batch size in code
+`gpuWall` (the cost grid) is immutable and uploaded once. Each pass re-seeds the
+row-0 cost vector `gpuResult[0]` (untimed) so every recorded pass traverses the
+identical grid.
 
 ## References
 

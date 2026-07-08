@@ -17,7 +17,19 @@ T_new[i][j] = T[i][j] + step_div_cap * (
 ```
 Boundary cells use clamped (no-flux) boundary conditions.
 
-Multiple time-steps are run per benchmark iteration using ping-pong buffers.
+Multiple time-steps are run per timed pass using ping-pong buffers; the
+initial temperature grid is re-uploaded (untimed) at the start of every pass
+so all passes simulate the same trajectory.
+
+## Parameters
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `BENCH_PARAM_grid_size` | 512 | Grid dimension (N×N) |
+| `BENCH_PARAM_block_size` | 16 | Thread-block dimension (B×B) |
+| `BENCH_PARAM_num_iterations` | 10 | Stencil time-steps per pass |
+| `BENCH_PARAM_num_warmup` | 3 | Warmup passes (untimed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded |
 
 ## Files
 
@@ -40,25 +52,32 @@ make PLATFORM=metal
 ## Run
 
 ```bash
-./rodinia_hotspot                                         # defaults: 512×512, 10 steps/iter, 20 iters
+./rodinia_hotspot                                         # defaults: 512×512, 10 steps/pass
 ./rodinia_hotspot --grid_size 1024
-./rodinia_hotspot --grid_size 256 --num_iterations 20 --iterations 50
+./rodinia_hotspot --grid_size 256 --num_iterations 20
 ```
 
 ## Output
 
-**stdout** — CSV timing row:
+**stdout** — JSON lines, one `kernel` record per timed pass carrying the
+accumulated GPU event time (`time_ms`) of all stencil steps in that pass plus
+host wall-clock time (`host_time_ms`), then a `summary` whose `total_time_ms`
+is the sum of all recorded GPU event times. Effective bandwidth
+(3 × cells × 4 bytes × steps / time) is derived downstream:
 ```
-kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-hotspot,512,20,8.7654,8.6000,9.1000,0.1234
+{"type":"kernel","name":"hotspot_kernel","iter":0,"time_ms":8.765400,"host_time_ms":8.990000,"params":{"grid_size":512,"block_size":16,"num_iterations":10}}
+...
+{"type":"summary","total_time_ms":61.357800}
 ```
 
 **stderr** — human-readable results:
 ```
 Device: Apple M4 Pro
-Grid: 512×512  |  Steps/launch: 10  |  Iterations: 20
+Grid: 512×512  |  Block: 16×16  |  Steps/launch: 10
 
-Effective bandwidth: 245.67 GB/s  (avg 8.7654 ms, 10 steps/iter)
+pass 0: hotspot_kernel gpu = 8.765 ms, host = 8.990 ms
+...
+Total GPU time: 61.358 ms over 7 passes (10 steps/pass)
 ```
 
 ## Platform Notes

@@ -9,32 +9,30 @@
 //   ./cuda_nbody [--bodies N] [--iterations I] [--timesteps T]
 //
 //   --bodies N       Number of bodies (default: 16384)
-//   --iterations I   Timed iterations (default: 5)
+//   --iterations I   Legacy iteration-count param, echoed into records only
 //   --timesteps T    Simulation timesteps per run (default: 10)
 //
-// Output (stdout): CSV row — cuda_nbody,<N>,<time_ms>,<GFLOPS>
+// Environment variables (override argv):
+//   BENCH_PARAM_bodies, BENCH_PARAM_timesteps, BENCH_PARAM_iterations,
+//   BENCH_PARAM_block_size
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
+// nbody_kernel carrying the accumulated GPU event time of all timesteps in
+// the pass plus the host wall-clock time, then a summary whose total_time_ms
+// is the SUM of all recorded GPU event times. GFLOPS is derived downstream
+// from time_ms and params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -195,7 +193,10 @@ int main(int argc, char** argv) {
     if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    int num_warmup = 5;
+    // `iters` is a legacy params.json key echoed into the records; the
+    // measured pass count is controlled by BENCH_PARAM_num_iters below.
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     // Print device info
     int device_id = 0;
@@ -203,8 +204,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Bodies: %d  |  Timesteps: %d  |  Iterations: 5 warmup + %d timed\n\n",
-            N, timesteps, iters);
+    fprintf(stderr, "Bodies: %d  |  Timesteps: %d  |  Iterations: %d warmup + %d timed\n\n",
+            N, timesteps, num_warmup, num_iters);
 
     size_t bytes = (size_t)N * sizeof(float4);
 
@@ -231,68 +232,49 @@ int main(int argc, char** argv) {
     int blockSize = TILE_SIZE;
     int gridSize  = (N + blockSize - 1) / blockSize;
 
-    // Lambda: run full simulation (timesteps steps)
-    auto run_nbody = [&]() {
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"bodies\":%d,\"timesteps\":%d,\"iterations\":%d,\"block_size\":%d",
+             N, timesteps, iters, block_size);
+
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_nbody;
+
+    // One full simulation pass. The kernel integrates positions/velocities in
+    // place, so particle state is reset from the pristine host copies at the
+    // start of every pass (untimed) — each pass simulates the same trajectory.
+    // Only the kernel launches are inside the timed brackets.
+    auto run_nbody_pass = [&]() {
+        bench_lap_reset(&acc_nbody);
+
         HIP_CHECK(hipMemcpy(d_pos, h_pos_orig.data(), bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_vel, h_vel_orig.data(), bytes, hipMemcpyHostToDevice));
 
         for (int t = 0; t < timesteps; ++t) {
-            nbody_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_pos, d_vel, N);
+            bench_lap_add(&acc_nbody, bench_time_op(&timer, [&]() {
+                nbody_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_pos, d_vel, N);
+            }));
         }
     };
 
-    // -------------------------------------------------------------------
-    // Warmup
-    // -------------------------------------------------------------------
     for (int w = 0; w < num_warmup; ++w) {
-        run_nbody();
-        HIP_CHECK(hipDeviceSynchronize());
+        run_nbody_pass();
     }
 
-    // -------------------------------------------------------------------
-    // Timed iterations
-    // -------------------------------------------------------------------
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    std::vector<double> times((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        run_nbody();
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_nbody_pass();
+        bench_emit_iter("nbody_kernel", i, &acc_nbody, params);
+        total_gpu_ms += acc_nbody.gpu_ms;
+        fprintf(stderr, "pass %d: nbody_kernel gpu = %.3f ms, host = %.3f ms\n",
+                i, acc_nbody.gpu_ms, acc_nbody.host_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    // Compute average time
-    double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
-
-    // GFLOPS = 20 * N * N * timesteps / time_s / 1e9
-    double gflops = 20.0 * (double)N * (double)N * (double)timesteps
-                    / (avg_ms * 1e-3) / 1e9;
-
-    // JSON-lines output
-    printf("{\"type\":\"kernel\",\"name\":\"nbody_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"bodies\":%d,\"timesteps\":%d,\"iterations\":%d,"
-           "\"block_size\":%d}}\n",
-           avg_ms, N, timesteps, iters, block_size);
-
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
-           sum, gflops);
-
-    // Human-readable output to stderr
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
-    fprintf(stderr, "Performance:  %.4f GFLOPS\n", gflops);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // -------------------------------------------------------------------
     // Verification: run 1 timestep on CPU with small subset, compare

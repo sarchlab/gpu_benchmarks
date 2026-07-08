@@ -2,7 +2,7 @@
   "benchmark": "shoc_reduction",
   "tier": 2,
   "suite": "shoc",
-  "description": "Parallel sum reduction of a float array using tree-based shared-memory reduction. Measures effective memory bandwidth in GB/s.",
+  "description": "Parallel sum reduction of a float array using tree-based shared-memory reduction. Emits per-pass kernel times; effective memory bandwidth (GB/s) is derived downstream.",
   "scaling_param": {
     "name": "size",
     "description": "Number of float elements to reduce",

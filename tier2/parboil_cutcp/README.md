@@ -1,68 +1,65 @@
-# tier2/parboil_cutcp — Coulombic Potential with Cutoff (Parboil)
+# tier2/parboil_cutcp — Coulombic Potential with Cutoff (Parboil, cutoff binning)
 
-Benchmarks direct summation of electrostatic charge interactions on a 3D grid with a distance cutoff. Each GPU thread computes the potential at one grid point by iterating over all atoms within the cutoff radius, computing q/r contributions. Measures throughput in Ginteractions/sec.
+Faithful port of the Parboil **CUTCP** benchmark: the device kernel
+`cuda_cutoff_potential_lattice6overlap` and the host bin-construction driver are
+the original (`parboil/benchmarks/cutcp/src/cuda/cutoff6overlap.cu`). Only the
+host driver is restructured for the per-iteration timing harness and JSON output.
 
-Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parboil/parboil.aspx) CUTCP workload.
+## Algorithm (cutoff binning — the faithful part)
 
-## Algorithm
+- Atoms are geometrically hashed into a **4 Å lattice of bins**, `BIN_DEPTH=8`
+  atoms per bin (atoms beyond depth overflow — see below).
+- The potential lattice is decomposed into `8×8×8`-point **regions**. Each thread
+  block (`blockDim = 8×2×8`, 128 threads, 4 lattice points/thread) computes one
+  region, walking only the **neighboring bins within the cutoff** via a
+  `__constant__` `NbrList` offset stencil, staging bins through shared memory
+  (`AtomBinCache`) for coalesced reuse.
+- The kernel is launched **once per x-y plane of regions (per z-slab)**; every
+  launch within a pass is accumulated into one kernel record.
+- Result regions are transposed back into the lattice on the host (untimed).
 
-- **num_atoms** charged atoms (default: 10,000) randomly placed in the domain
-- Fixed 64×64×64 grid (262,144 grid points) with configurable spacing
-- For each grid point, iterate over all atoms and accumulate Coulomb potential (q/r) for atoms within cutoff distance
-- Cutoff radius limits the interaction range (default: 12.0 Å)
-- Ginteractions/sec = (num_atoms × grid_points) / time_sec / 10⁹
+## What changed vs. upstream
 
-## Files
+- Host driver wrapped in the timing harness; timers/`pb_*`/verbose output removed.
+- Bin **overflow** atoms (bins with > `BIN_DEPTH` atoms) are dropped instead of
+  being spilled to a CPU pass. They are also excluded from the CPU reference, so
+  the GPU result still verifies. Default density (~7 atoms/bin) keeps overflow small.
+- Synthetic atoms are generated in-process (no `.pdb`/dataset file).
 
-| File | Description |
-|------|-------------|
-| `parboil_cutcp.hip` | HIP source — portable ROCm/CUDA implementation |
-| `parboil_cutcp.metal` | Metal compute shader — potential kernel |
-| `parboil_cutcp_metal.mm` | ObjC++ Metal host code |
-| `Makefile` | Auto-detecting build (Darwin→metal, ROCm→rocm, else→cuda) |
-| `params.json` | Parameter specification |
+## Parameters
 
-## Build
+| Env var | Description | Default |
+|---------|-------------|---------|
+| `BENCH_PARAM_num_atoms` | Number of charged atoms | 40000 |
+| `BENCH_PARAM_lattice_dim` | Lattice side nx=ny=nz (multiple of 8) | 144 |
+| `BENCH_PARAM_grid_spacing` | Lattice spacing h (Å); 0.5 keeps BIN_LENGTH/(8h)=1 | 0.5 |
+| `BENCH_PARAM_cutoff_radius` | Interaction cutoff (Å) | 12.0 |
+| `BENCH_PARAM_num_warmup` | Warmup passes (untimed) | 3 |
+| `BENCH_PARAM_num_iters` | Timed passes, each recorded | 7 |
+
+`grid_spacing` is fixed at 0.5 by the neighbor-list branch condition
+(`BIN_LENGTH/(8h)` must be integral). `block_size` is not tunable — the region
+scheme fixes it at `8×2×8` (compile-time).
+
+## Build / Run
 
 ```bash
-make               # auto-detect platform
-make PLATFORM=cuda
-make PLATFORM=rocm
-make PLATFORM=metal
-```
-
-## Run
-
-```bash
-./parboil_cutcp                                    # defaults
-BENCH_PARAM_num_atoms=50000 ./parboil_cutcp        # more atoms
-BENCH_PARAM_cutoff_radius=6.0 ./parboil_cutcp      # smaller cutoff
+make                 # auto-detect platform (cuda / rocm / metal)
+./parboil_cutcp
+BENCH_PARAM_num_atoms=100000 ./parboil_cutcp
 ```
 
 ## Output
 
-**stdout** — JSON-lines:
-```json
-{"type":"kernel","name":"cutcp_kernel","time_ms":12.3456,"params":{"num_atoms":10000,"block_size":128,"grid_spacing":0.50,"cutoff_radius":12.0}}
-{"type":"summary","total_time_ms":61.7280,"metrics":[{"name":"ginteractions_per_sec","value":0.2123}]}
-```
+**stdout** — one `kernel` record per timed pass for
+`cuda_cutoff_potential_lattice6overlap` (accumulated GPU time of all z-slab
+launches), then a `summary` whose `total_time_ms` is the sum of all recorded GPU
+event times. **stderr** — device info, per-pass timing, PASS/FAIL (64 sampled
+lattice points vs. a CPU reference over the binned atoms, rel. tol. 0.1%).
 
-**stderr** — human-readable:
-```
-Device: Apple M1 Max
-CUTCP  |  Atoms: 10000  |  Grid: 64^3 = 262144  |  Cutoff: 12.0  |  Spacing: 0.50  |  Iterations: 5 warmup + 5 timed
+Derived metrics (e.g. Ginteractions/sec) are computed downstream from `time_ms`
+and params.
 
-Average time: 12.3456 ms
-Throughput:   0.2123 Ginteractions/sec
-PASS
-```
-
-## Verification
-
-- 64 randomly-selected grid points are compared against CPU reference computation
-- Reports PASS/FAIL with mismatch details (relative tolerance 0.1%)
-
-## Platform Notes
-
-- **CUDA/ROCm**: Uses float4 SoA for atom data for coalesced memory access
-- **Metal**: Loads `parboil_cutcp.metal` shader at runtime from the same directory as the binary
+> **Metal note:** `parboil_cutcp.metal` / `parboil_cutcp_metal.mm` still contain
+> the earlier brute-force implementation and were not updated by this faithful
+> port (HIP/CUDA only).

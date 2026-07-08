@@ -1,105 +1,101 @@
 # rodinia_kmeans — Rodinia K-Means Clustering Benchmark
 
-GPU implementation of the K-Means clustering algorithm, derived from the
-[Rodinia benchmark suite](https://rodinia.cs.virginia.edu/).
+GPU K-means clustering. This is a **faithful port** of Rodinia kmeans: the
+device kernels `invert_mapping` and `kmeansPoint` are the original upstream
+kernels (`rodinia/cuda/kmeans/kmeans_cuda_kernel.cu`). The defining faithful
+characteristic is the **inverted (feature-major) feature layout** for coalesced
+loads — `invert_mapping` transforms the row-major `[point][feature]` array into a
+column-major `[feature][point]` array, and `kmeansPoint` indexes it as
+`point_id + j*npoints`. That layout is preserved exactly.
 
-K-Means partitions **N** D-dimensional data points into **K** clusters by
-iteratively assigning each point to the nearest cluster center and
-recomputing the centers.
+Derived from the [Rodinia benchmark suite](https://rodinia.cs.virginia.edu/).
+
+## Portability substitution (texture → `__ldg`)
+
+The original `kmeansPoint` reads the inverted features through a bound 1D texture
+(`tex1Dfetch(t_features, addr)`). The HIP/CUDA compatibility layer does not map
+CUDA texture references, so the fetch is replaced by `__ldg(&features[addr])`
+(the read-only data cache — the closest portable equivalent). **The data layout,
+which is the faithful part, is unchanged**; only the fetch mechanism differs.
+Cluster centers stay in `__constant__` memory (`c_clusters`), exactly as
+upstream, and centroid sums are done on the CPU each iteration (the upstream
+default `CPU_CENTER_REDUCE`/`CPU_DELTA_REDUCE`; the GPU-reduction paths are
+compiled out upstream and are omitted here).
 
 ## Algorithm
 
-1. **Initialize** N random points in [0,1)^D; use the first K as initial centers.
-2. **Assign** — GPU kernel assigns each point to its nearest cluster center
-   (one thread per point; computes squared Euclidean distance to all K centers).
-3. **Update** — GPU kernel accumulates per-cluster point sums using atomics;
-   host divides to get new centers.
-4. **Repeat** until fewer than 0.01% of assignments change or `max_iter` is reached.
-5. **Verify** — run one extra assign pass and check final delta < 1%.
+1. Generate `N` random points, each with `D` features (row-major); first `K`
+   points seed the initial centers.
+2. `invert_mapping` (once) builds the feature-major array for coalesced access.
+3. Per iteration: upload centers to constant memory; `kmeansPoint` assigns each
+   point to its nearest center (one thread per point, squared Euclidean distance
+   to all `K` centers); copy membership back and recompute centers as per-cluster
+   means on the CPU.
+4. Repeat for `max_iter` iterations.
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `rodinia_kmeans.hip` | HIP/CUDA implementation (two GPU kernels + host loop) |
-| `rodinia_kmeans.metal` | Metal compute shaders (assign + update kernels) |
-| `rodinia_kmeans_metal.mm` | Objective-C++ Metal host code |
+| `rodinia_kmeans.hip` | HIP/CUDA source — original `invert_mapping`/`kmeansPoint` kernels + timing driver |
+| `rodinia_kmeans.metal` | Metal compute shaders (separate reimplementation, not the upstream kernels) |
+| `rodinia_kmeans_metal.mm` | ObjC++ Metal host code |
 | `Makefile` | Platform auto-detect build system |
-| `README.md` | This file |
+| `params.json` | Parameter specification |
 
 ## Build
 
 ```bash
-# Auto-detect platform (Darwin → metal, /opt/rocm → rocm, else → cuda)
-make
-
-# Explicit platform
+make               # auto-detect (Darwin→metal, /opt/rocm→rocm, else→cuda)
 make PLATFORM=cuda
 make PLATFORM=rocm
 make PLATFORM=metal
-
-# Clean
 make clean
 ```
 
 ## Run
 
 ```bash
-# Default: N=16384 points, D=16 dims, K=8 clusters, max_iter=10
-./rodinia_kmeans
-
-# Custom parameters
-./rodinia_kmeans --points 65536 --dims 32 --clusters 16 --max_iter 20
+./rodinia_kmeans                                              # default: 100000 points, 34 features, 5 clusters, max_iter 10
+./rodinia_kmeans --points 262144 --clusters 5 --max_iter 20
+BENCH_PARAM_points=65536 ./rodinia_kmeans
 ```
 
 | Environment variable | Default | Description |
 |----------------------|---------|-------------|
-| `BENCH_PARAM_points` | 16384 | Number of data points (overrides `--points`) |
-| `BENCH_PARAM_dims` | 16 | Dimensions per point (overrides `--dims`) |
-| `BENCH_PARAM_clusters` | 8 | Number of clusters (overrides `--clusters`) |
-| `BENCH_PARAM_max_iter` | 10 | Max k-means iterations per pass (overrides `--max_iter`) |
+| `BENCH_PARAM_points` | 100000 | Number of data points |
+| `BENCH_PARAM_features` | 34 | Features per point (constant-memory limit: `clusters*features ≤ 1088`) |
+| `BENCH_PARAM_clusters` | 5 | Number of clusters (K) |
+| `BENCH_PARAM_max_iter` | 10 | K-means iterations per pass |
 | `BENCH_PARAM_num_warmup` | 3 | Warmup clustering passes (untimed) |
 | `BENCH_PARAM_num_iters` | 7 | Timed clustering passes, each recorded |
 
 ## Output
 
-Per-iteration convergence info is printed to **stderr**:
+**stdout** — JSON lines: per timed pass, one `kernel` record per kernel
+(`invert_mapping`, `kmeansPoint`) with that kernel's accumulated GPU event time
+(`time_ms`) and host time (`host_time_ms`), then a summary whose `total_time_ms`
+is the sum of all recorded GPU event times. Cluster centers are re-initialized to
+the pristine initial centers at the start of every pass (untimed), so each pass
+converges over identical work:
 
-```
-  iter  1: changed=12345   delta=0.752930
-  iter  2: changed=1234    delta=0.075317
-  ...
-Final stability check: changed=0  delta=0.000000  PASS
-```
-
-Timing records are printed to **stdout** as JSON lines: per timed clustering
-pass, one kernel record per kernel (`kmeans_assign_kernel`,
-`kmeans_update_kernel`) carrying that kernel's GPU event time (`time_ms`)
-and host wall-clock time (`host_time_ms`) accumulated over the pass's
-k-means iterations, then a summary whose `total_time_ms` is the sum of all
-recorded GPU event times. Centroids and membership are reset to their
-initial state before every pass (untimed), so each pass converges over
-identical work:
-
-```
-{"type":"kernel","name":"kmeans_assign_kernel","iter":0,"time_ms":8.123400,"host_time_ms":8.500000,"params":{"points":16384,"dims":16,"clusters":8,"max_iter":10}}
-{"type":"kernel","name":"kmeans_update_kernel","iter":0,"time_ms":4.222200,"host_time_ms":4.610000,"params":{...}}
-...
-{"type":"summary","total_time_ms":86.419200}
+```json
+{"type":"kernel","name":"invert_mapping","iter":0,"time_ms":0.412,"host_time_ms":0.480,"params":{"points":100000,"features":34,"clusters":5,"max_iter":10,"threads_per_block":256}}
+{"type":"kernel","name":"kmeansPoint","iter":0,"time_ms":8.123,"host_time_ms":9.500,"params":{...}}
+{"type":"summary","total_time_ms":86.419}
 ```
 
-Derived metrics such as points/sec are computed downstream from `time_ms`
-and the params.
+`invert_mapping` reads immutable features and produces the same result every
+pass; it is re-run once per pass only so that it emits a timing record.
+
+**stderr** — human-readable per-pass timing.
 
 ## Platform Notes
 
-- **CUDA/ROCm**: Uses `hipEvent_t` for timing; atomicAdd for center updates.
-- **Metal**: Uses `atomic_fetch_add_explicit` with `memory_order_relaxed` on
-  device-side `atomic_float` / `atomic_int`. Shader source is loaded at
-  runtime from the same directory as the binary.
-- The Metal `.metal` file must be present alongside the binary at runtime.
+- **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `rodinia_kmeans.hip` (the faithful upstream kernels; texture fetch → `__ldg`).
+- **Metal**: a separate reimplementation in `rodinia_kmeans_metal.mm`; it is not the upstream kernel.
+- Input data is generated synthetically — no external input files required.
 
 ## Reference
 
-Rodinia: A Benchmark Suite for Heterogeneous Computing.
-S. Che et al., IEEE IISWC 2009.
+Rodinia: A Benchmark Suite for Heterogeneous Computing. S. Che et al., IEEE IISWC 2009.

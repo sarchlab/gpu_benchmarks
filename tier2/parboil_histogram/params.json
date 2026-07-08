@@ -2,64 +2,55 @@
   "benchmark": "parboil_histogram",
   "tier": 2,
   "suite": "parboil",
-  "description": "256-bin histogram of N random uint32 values using atomic operations. Each element mapped to a bin via lower 8 bits. Emits per-iteration kernel times; GB/s is derived downstream.",
+  "description": "Large 2D saturating histogram (histo_width x histo_height, 8-bit bins) built by the original Parboil 4-kernel privatized pipeline: prescan (estimate active range) -> intermediates (bin decomposition) -> main (per-block privatized sub-histograms in shared memory with saturating 8-bit atomics) -> final (saturating merge). Faithful port of the Parboil cuda kernels; one pass runs all four kernels, each emitted as its own per-iteration record.",
   "scaling_param": {
-    "name": "n",
-    "description": "Number of input uint32 elements",
+    "name": "img_height",
+    "description": "Input image height (rows); elements = img_width * img_height. Should be a multiple of 16 (UNROLL).",
     "type": "int",
     "values": [
       1024,
-      1536,
       2048,
       3072,
       4096,
       6144,
       8192,
       12288,
-      16384,
-      24576,
-      32768,
-      49152,
-      65536,
-      98304,
-      131072,
-      196608,
-      262144,
-      393216,
-      524288,
-      786432,
-      1048576,
-      1572864,
-      2097152,
-      3145728,
-      4194304,
-      6291456,
-      8388608
+      16384
     ]
   },
   "non_scaling_params": [
     {
-      "name": "num_bins",
-      "description": "Number of histogram bins",
-      "type": "int",
-      "default": 256,
-      "values": [
-        64,
-        256,
-        1024
-      ]
-    },
-    {
-      "name": "block_size",
-      "description": "Number of threads per block",
+      "name": "img_width",
+      "description": "Input image width (columns); kept equal to histo_width",
       "type": "int",
       "default": 256,
       "values": [
         256
       ]
+    },
+    {
+      "name": "histo_width",
+      "description": "Histogram width (bins along x)",
+      "type": "int",
+      "default": 256,
+      "values": [
+        256
+      ]
+    },
+    {
+      "name": "histo_height",
+      "description": "Histogram height (bins along y); histo_width*histo_height bins",
+      "type": "int",
+      "default": 8192,
+      "values": [
+        8192
+      ]
     }
   ],
   "kernels": [
-    "histogram_kernel"
+    "histo_prescan_kernel",
+    "histo_intermediates_kernel",
+    "histo_main_kernel",
+    "histo_final_kernel"
   ]
 }

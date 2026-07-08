@@ -2,59 +2,55 @@
   "benchmark": "rodinia_pathfinder",
   "tier": 2,
   "suite": "rodinia",
-  "description": "Minimum-cost path through a 2D grid from top row to bottom row. Each row processed by one kernel launch with double buffering.",
+  "description": "Rodinia PathFinder: dynamic-programming minimum-cost path down a 2D cost grid. Faithful port of the original dynproc_kernel using pyramidal shared-memory temporal blocking (pyramid_height rows advanced per launch with a ghost-zone border). One recorded pass is a full top-to-bottom traversal of all rows; all pyramidal launches accumulate into one dynproc_kernel record.",
   "scaling_param": {
     "name": "cols",
-    "description": "Number of grid columns (width of the grid)",
+    "description": "Number of grid columns (width). The original standard run uses 100000.",
     "type": "int",
     "values": [
-      100,
-      150,
-      200,
-      300,
-      500,
-      750,
       1000,
-      1500,
       2000,
-      3000,
       5000,
-      7500,
       10000,
-      15000,
       20000,
-      30000,
       50000,
-      75000,
       100000,
-      150000,
       200000,
-      300000,
       500000,
-      750000,
       1000000,
-      1500000,
       2000000,
-      3000000,
       5000000
     ]
   },
   "non_scaling_params": [
     {
       "name": "rows",
-      "description": "Number of grid rows (height of the grid, controls number of kernel launches)",
+      "description": "Number of grid rows (height / number of DP time steps). Controls launches/pass = ceil((rows-1)/pyramid_height).",
       "type": "int",
-      "default": 100000,
+      "default": 100,
       "values": [
         100,
+        500,
         1000,
-        10000,
-        100000
+        10000
+      ]
+    },
+    {
+      "name": "pyramid_height",
+      "description": "Rows advanced per kernel launch (temporal blocking factor). Must satisfy pyramid_height < BLOCK_SIZE/2 = 128.",
+      "type": "int",
+      "default": 20,
+      "values": [
+        1,
+        2,
+        4,
+        20,
+        40
       ]
     },
     {
       "name": "block_size",
-      "description": "Number of threads per block",
+      "description": "Threads per block (fixed compile-time BLOCK_SIZE in the original kernel).",
       "type": "int",
       "default": 256,
       "values": [

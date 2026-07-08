@@ -1,26 +1,43 @@
 // npb_ep.hip — NAS Parallel Benchmarks Embarrassingly Parallel (EP)
 //
-// Generates N pairs of Gaussian random deviates using Box-Muller transform
-// with a per-thread linear congruential RNG, then counts results into 10
-// annular bins.  Purely compute-bound workload.
+// Faithful port of NPB-GPU (GMAP) EP: the device kernel (gpu_kernel) and its
+// random-number generators (randlc_device / vranlc_device) are the ORIGINAL
+// upstream source. EP generates 2^(M+1) pseudorandom numbers via the NAS 46-bit
+// linear congruential generator (randlc, R23/R46 split), forms Gaussian deviate
+// pairs by the Marsaglia polar (acceptance-rejection) method, tallies them into
+// 10 concentric square annuli, and accumulates the Sx/Sy sums. Purely
+// compute-bound. Only the host driver is restructured for per-iteration timing.
+//
+// Upstream kernel/RNG taken verbatim (modulo the two notes below) from:
+//   NPB-GPU/hip/EP/ep.cpp   (gpu_kernel, randlc_device, vranlc_device)
+//   NPB-GPU/hip/common/npb.hpp (host randlc, R23/R46/T23/T46)
+// Two minimal faithful deviations:
+//   1. The compile-time NN macro (grid guard) is passed to the kernel as `nn`
+//      so the class M can be a runtime parameter instead of requiring a
+//      recompile (the original fixes M in npbparams.hpp).
+//   2. Nothing else — math, rejection test, binning and reduction are verbatim.
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
+// Uses double precision (NAS spec). Double atomicAdd needs sm_60+ / any GCN.
+//
+// Class is set by M: M=24 -> S, 25 -> W, 28 -> A, 30 -> B, 32 -> C.
+// Default M=28 (Class A): NN = 2^12 threads, each doing NK = 2^16 numbers,
+// i.e. 2^28 pairs / 2^29 numbers per launch — runs in well under a second on a
+// modern GPU yet gives a substantial (>~ms) per-pass kernel time.
 //
 // Usage:
-//   ./npb_ep [--size N]
-//
-//   --size N         Number of Gaussian pairs (default: 16777216 = 2^24)
+//   ./npb_ep [--m M]
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_seed
-//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
-//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
+//   BENCH_PARAM_m           (class exponent M, default 28 = Class A)
+//   BENCH_PARAM_block_size  (threads per block, default 256)
+//   BENCH_PARAM_num_warmup  (warmup passes, default 3)
+//   BENCH_PARAM_num_iters   (timed passes, each recorded, default 7)
 //
-// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
-// carrying the GPU event time and host wall-clock time, then a summary whose
-// total_time_ms is the SUM of all iterations' GPU event times.
-// Gpairs/sec is derived downstream from time_ms and params.
-// Output (stderr): human-readable results
+// Output (stdout): one {"type":"kernel",...} JSON line per timed pass carrying
+// the GPU event time and host wall-clock time of the single gpu_kernel launch,
+// then a summary whose total_time_ms is the SUM of all passes' GPU event times.
+// Output (stderr): human-readable EP results + NAS verification.
 
 #include "../../common/bench_timing.h"
 #include <cstdio>
@@ -28,19 +45,179 @@
 #include <cstring>
 #include <cmath>
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-// Number of annular bins
-#define NUM_BINS 10
-
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
+
+// ---------------------------------------------------------------------------
+// NAS EP constants — verbatim from NPB-GPU EP/ep.cpp and common/npb.hpp
+// ---------------------------------------------------------------------------
+#define MK            (16)
+#define NK            (1 << MK)            // numbers per batch group = 2^16 (fixed)
+#define NQ            (10)                 // number of annular bins
+#define EPSILON       (1.0e-8)
+#define A             (1220703125.0)
+#define S             (271828183.0)
+#define RECOMPUTATION (128)
+
+// R23 = 2^-23, T23 = 2^23, R46 = 2^-46, T46 = 2^46 (literal products; the
+// upstream defines these via pow — we use the equivalent product form so the
+// values are compile-time constants usable in both host and device code).
+#define R23 (0.5*0.5*0.5*0.5*0.5*0.5*0.5*0.5*0.5*0.5*0.5*0.5*0.5*0.5*0.5*0.5*0.5*0.5*0.5*0.5*0.5*0.5*0.5)
+#define R46 (R23*R23)
+#define T23 (2.0*2.0*2.0*2.0*2.0*2.0*2.0*2.0*2.0*2.0*2.0*2.0*2.0*2.0*2.0*2.0*2.0*2.0*2.0*2.0*2.0*2.0*2.0)
+#define T46 (T23*T23)
+
+// ---------------------------------------------------------------------------
+// RNG — verbatim from NPB-GPU EP/ep.cpp (__device__ versions)
+// ---------------------------------------------------------------------------
+__device__ double randlc_device(double* x,
+        double a){
+    double t1,t2,t3,t4,a1,a2,x1,x2,z;
+    t1 = R23 * a;
+    a1 = (int)t1;
+    a2 = a - T23 * a1;
+    t1 = R23 * (*x);
+    x1 = (int)t1;
+    x2 = (*x) - T23 * x1;
+    t1 = a1 * x2 + a2 * x1;
+    t2 = (int)(R23 * t1);
+    z = t1 - T23 * t2;
+    t3 = T23 * z + a2 * x2;
+    t4 = (int)(R46 * t3);
+    (*x) = t3 - T46 * t4;
+    return (R46 * (*x));
+}
+
+__device__ void vranlc_device(int n,
+        double* x_seed,
+        double a,
+        double* y){
+    int i;
+    double x,t1,t2,t3,t4,a1,a2,x1,x2,z;
+    t1 = R23 * a;
+    a1 = (int)t1;
+    a2 = a - T23 * a1;
+    x = *x_seed;
+    for(i=0; i<n; i++){
+        t1 = R23 * x;
+        x1 = (int)t1;
+        x2 = x - T23 * x1;
+        t1 = a1 * x2 + a2 * x1;
+        t2 = (int)(R23 * t1);
+        z = t1 - T23 * t2;
+        t3 = T23 * z + a2 * x2;
+        t4 = (int)(R46 * t3);
+        x = t3 - T46 * t4;
+        y[i] = R46 * x;
+    }
+    *x_seed = x;
+}
+
+// Host randlc — verbatim from NPB-GPU common/npb.hpp (used to derive `an`)
+static double randlc(double* x, double a){
+    double t1,t2,t3,t4,a1,a2,x1,x2,z;
+    t1 = R23 * a;
+    a1 = (int)t1;
+    a2 = a - T23 * a1;
+    t1 = R23 * (*x);
+    x1 = (int)t1;
+    x2 = (*x) - T23 * x1;
+    t1 = a1 * x2 + a2 * x1;
+    t2 = (int)(R23 * t1);
+    z = t1 - T23 * t2;
+    t3 = T23 * z + a2 * x2;
+    t4 = (int)(R46 * t3);
+    (*x) = t3 - T46 * t4;
+    return (R46 * (*x));
+}
+
+// ---------------------------------------------------------------------------
+// EP kernel — verbatim from NPB-GPU EP/ep.cpp gpu_kernel.
+// Only faithful change: the compile-time NN grid guard is a runtime arg `nn`
+// so class M is selectable without recompiling.
+// ---------------------------------------------------------------------------
+__global__ void gpu_kernel(double* q_global,
+        double* sx_global,
+        double* sy_global,
+        double an,
+        int nn){
+    double x_local[2*RECOMPUTATION];
+    double q_local[NQ];
+    double sx_local, sy_local;
+    double t1, t2, t3, t4, x1, x2, seed;
+    int i, ii, ik, kk, l;
+
+    q_local[0]=0.0;
+    q_local[1]=0.0;
+    q_local[2]=0.0;
+    q_local[3]=0.0;
+    q_local[4]=0.0;
+    q_local[5]=0.0;
+    q_local[6]=0.0;
+    q_local[7]=0.0;
+    q_local[8]=0.0;
+    q_local[9]=0.0;
+    sx_local=0.0;
+    sy_local=0.0;
+
+    kk=blockIdx.x*blockDim.x+threadIdx.x;
+
+    if(kk>=nn){return;}
+
+    t1=S;
+    t2=an;
+
+    /* find starting seed t1 for this kk */
+    for(i=1; i<=100; i++){
+        ik=kk/2;
+        if((2*ik)!=kk){t3=randlc_device(&t1, t2);}
+        if(ik==0){break;}
+        t3=randlc_device(&t2, t2);
+        kk=ik;
+    }
+
+    seed=t1;
+    for(ii=0; ii<NK; ii=ii+RECOMPUTATION){
+        /* compute uniform pseudorandom numbers */
+        vranlc_device(2*RECOMPUTATION, &seed, A, x_local);
+
+        /*
+         * compute gaussian deviates by acceptance-rejection method and
+         * tally counts in concentric square annuli. this loop is not
+         * vectorizable.
+         */
+        for(i=0; i<RECOMPUTATION; i++){
+            x1=2.0*x_local[2*i]-1.0;
+            x2=2.0*x_local[2*i+1]-1.0;
+            t1=x1*x1+x2*x2;
+            if(t1<=1.0){
+                t2=sqrt(-2.0*log(t1)/t1);
+                t3=(x1*t2);
+                t4=(x2*t2);
+                l=max(fabs(t3), fabs(t4));
+                q_local[l]+=1.0;
+                sx_local+=t3;
+                sy_local+=t4;
+            }
+        }
+    }
+
+    atomicAdd(q_global+blockIdx.x*NQ+0, q_local[0]);
+    atomicAdd(q_global+blockIdx.x*NQ+1, q_local[1]);
+    atomicAdd(q_global+blockIdx.x*NQ+2, q_local[2]);
+    atomicAdd(q_global+blockIdx.x*NQ+3, q_local[3]);
+    atomicAdd(q_global+blockIdx.x*NQ+4, q_local[4]);
+    atomicAdd(q_global+blockIdx.x*NQ+5, q_local[5]);
+    atomicAdd(q_global+blockIdx.x*NQ+6, q_local[6]);
+    atomicAdd(q_global+blockIdx.x*NQ+7, q_local[7]);
+    atomicAdd(q_global+blockIdx.x*NQ+8, q_local[8]);
+    atomicAdd(q_global+blockIdx.x*NQ+9, q_local[9]);
+    atomicAdd(sx_global+blockIdx.x, sx_local);
+    atomicAdd(sy_global+blockIdx.x, sy_local);
+}
 
 // ---------------------------------------------------------------------------
 // Argument parsing
 // ---------------------------------------------------------------------------
-
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], name) == 0) {
@@ -52,213 +229,174 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     return defaultVal;
 }
 
-// ---------------------------------------------------------------------------
-// LCG RNG — integer-based, works identically on CPU/GPU/Metal
-//   seed = seed * 1103515245 + 12345  (ANSI C LCG, mod 2^32 by overflow)
-// ---------------------------------------------------------------------------
-
-__device__ __host__ static inline unsigned int lcg_next(unsigned int seed) {
-    return seed * 1103515245u + 12345u;
-}
-
-// ---------------------------------------------------------------------------
-// Kernel: EP — generate Gaussian pairs and bin them
-//   Each thread generates one pair of uniform random numbers, applies
-//   Box-Muller transform, and atomically increments the appropriate bin.
-//   bins[NUM_BINS] is stored in global memory.
-// ---------------------------------------------------------------------------
-
-__global__ void ep_kernel(int N, unsigned long long* bins) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= N) return;
-
-    // Per-thread seed derived from thread index
-    unsigned int seed = (unsigned int)(idx + 1);
-    // Advance RNG a few steps for decorrelation
-    seed = lcg_next(seed);
-    seed = lcg_next(seed);
-
-    // Generate two uniform random numbers in (0, 1)
-    seed = lcg_next(seed);
-    float u1 = (float)seed / 4294967296.0f;
-    seed = lcg_next(seed);
-    float u2 = (float)seed / 4294967296.0f;
-
-    // Avoid log(0)
-    if (u1 < 1e-10f) u1 = 1e-10f;
-
-    // Box-Muller transform
-    float r = sqrtf(-2.0f * logf(u1));
-    float theta = 2.0f * (float)M_PI * u2;
-    float x1 = r * cosf(theta);
-    float x2 = r * sinf(theta);
-
-    // Compute distance squared
-    float t = x1 * x1 + x2 * x2;
-
-    // Bin index: floor(sqrt(t)), capped at NUM_BINS-1
-    int bin = (int)sqrtf(t);
-    if (bin >= NUM_BINS) bin = NUM_BINS - 1;
-    if (bin < 0) bin = 0;
-
-    atomicAdd(&bins[bin], 1ULL);
-}
-
-// ---------------------------------------------------------------------------
-// CPU reference for verification
-// ---------------------------------------------------------------------------
-
-static void ep_cpu(int N, unsigned long long* bins) {
-    for (int i = 0; i < NUM_BINS; ++i) bins[i] = 0;
-
-    for (int idx = 0; idx < N; ++idx) {
-        unsigned int seed = (unsigned int)(idx + 1);
-        seed = lcg_next(seed);
-        seed = lcg_next(seed);
-
-        seed = lcg_next(seed);
-        float u1 = (float)seed / 4294967296.0f;
-        seed = lcg_next(seed);
-        float u2 = (float)seed / 4294967296.0f;
-
-        if (u1 < 1e-10f) u1 = 1e-10f;
-
-        float r = sqrtf(-2.0f * logf(u1));
-        float theta = 2.0f * (float)M_PI * u2;
-        float x1 = r * cosf(theta);
-        float x2 = r * sinf(theta);
-
-        float t = x1 * x1 + x2 * x2;
-
-        int bin = (int)sqrtf(t);
-        if (bin >= NUM_BINS) bin = NUM_BINS - 1;
-        if (bin < 0) bin = 0;
-
-        bins[bin] += 1;
+static const char* class_of(int m) {
+    switch (m) {
+        case 24: return "S";
+        case 25: return "W";
+        case 28: return "A";
+        case 30: return "B";
+        case 32: return "C";
+        case 36: return "D";
+        case 40: return "E";
+        default: return "?";
     }
 }
 
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
-
 int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
-    // Defaults from params.json
-    int N          = 16777216;  // 2^24
+    // Default M=28 => Class A.
+    int m          = parseIntParam(argc, argv, "--m", 28);
     int block_size = 256;
-    int seed_param = 271828183;
 
-    // Command-line fallback
-    N          = parseIntParam(argc, argv, "--size", N);
-
-    // Environment variable overrides
     const char* env_val;
-    env_val = getenv("BENCH_PARAM_size");
-    if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_seed");
-    if (env_val) seed_param = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_m");          if (env_val) m = atoi(env_val);
+    env_val = getenv("BENCH_PARAM_block_size"); if (env_val) block_size = atoi(env_val);
     const int num_warmup = bench_num_warmup();
     const int num_iters  = bench_num_iters();
 
-    // Print device info
+    if (m <= MK) {
+        fprintf(stderr, "M must be > %d (M-MK = number-of-groups exponent must be >= 1)\n", MK);
+        return EXIT_FAILURE;
+    }
+
+    // Grid geometry (original setup_gpu): NN = 2^(M-MK) total threads.
+    long long nn = 1LL << (m - MK);
+    int threads_per_block = block_size;
+    int blocks_per_grid   = (int)((nn + threads_per_block - 1) / threads_per_block);
+
+    // an = A^(2^MK): MK+1 randlc iterations from A (original main setup).
+    double t1 = A;
+    for (int i = 0; i < MK + 1; ++i) {
+        randlc(&t1, t1);
+    }
+    double an = t1;
+
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "EP pairs: %d (2^%.0f)  |  Iterations: %d warmup + %d timed\n\n",
-            N, log2((double)N), num_warmup, num_iters);
+    fprintf(stderr, "NAS EP Class %s  |  M=%d  |  N = 2^%d numbers  |  NN = %lld threads\n",
+            class_of(m), m, m + 1, nn);
+    fprintf(stderr, "Grid: %d blocks x %d threads  |  %d warmup + %d timed passes\n\n",
+            blocks_per_grid, threads_per_block, num_warmup, num_iters);
 
-    // Device allocation for bins
-    unsigned long long* d_bins;
-    HIP_CHECK(hipMalloc(&d_bins, NUM_BINS * sizeof(unsigned long long)));
-
-    // Kernel launch config
-    int blockSize = block_size;
-    int gridSize  = (N + blockSize - 1) / blockSize;
+    // Device accumulators (per-block partial sums).
+    size_t size_q  = (size_t)blocks_per_grid * NQ * sizeof(double);
+    size_t size_sx = (size_t)blocks_per_grid * sizeof(double);
+    size_t size_sy = (size_t)blocks_per_grid * sizeof(double);
+    double* q_device;
+    double* sx_device;
+    double* sy_device;
+    HIP_CHECK(hipMalloc(&q_device,  size_q));
+    HIP_CHECK(hipMalloc(&sx_device, size_sx));
+    HIP_CHECK(hipMalloc(&sy_device, size_sy));
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d,\"seed\":%d",
-             N, block_size, seed_param);
+             "\"class\":\"%s\",\"m\":%d,\"block_size\":%d",
+             class_of(m), m, block_size);
 
-    // One EP pass. The kernel derives every thread's RNG seed from its
-    // thread index, so each launch performs identical work; the bins are
-    // atomically ACCUMULATED, so they are reset (untimed) before each launch
-    // to keep the verification below meaningful.
+    // One recorded pass = one gpu_kernel launch (EP is embarrassingly parallel;
+    // the per-block partial reduction is inside the kernel). The RNG seeds are
+    // derived from fixed constants inside the kernel, so every launch performs
+    // identical work — no input reset needed. The output accumulators, however,
+    // are written via atomicAdd, so they are zeroed (untimed, OUTSIDE the timed
+    // bracket) before each launch to keep the final NAS verification meaningful.
     bench_timer_t timer;
     bench_timer_create(&timer);
 
+    auto run_launch = [&](bench_lap_t* lap_out) {
+        HIP_CHECK(hipMemset(q_device,  0, size_q));
+        HIP_CHECK(hipMemset(sx_device, 0, size_sx));
+        HIP_CHECK(hipMemset(sy_device, 0, size_sy));
+        *lap_out = bench_time_op(&timer, [&]() {
+            gpu_kernel<<<dim3(blocks_per_grid), dim3(threads_per_block)>>>(
+                q_device, sx_device, sy_device, an, (int)nn);
+        });
+        HIP_CHECK(hipGetLastError());
+    };
+
+    bench_lap_t lap;
     for (int w = 0; w < num_warmup; ++w) {
-        HIP_CHECK(hipMemset(d_bins, 0, NUM_BINS * sizeof(unsigned long long)));
-        ep_kernel<<<dim3(gridSize), dim3(blockSize)>>>(N, d_bins);
-        HIP_CHECK(hipDeviceSynchronize());
+        run_launch(&lap);
     }
 
     double total_gpu_ms = 0.0;
     for (int i = 0; i < num_iters; ++i) {
-        // Reset bins outside the timed bracket
-        HIP_CHECK(hipMemset(d_bins, 0, NUM_BINS * sizeof(unsigned long long)));
-        HIP_CHECK(hipDeviceSynchronize());
-
-        bench_lap_t lap = bench_time_op(&timer, [&]() {
-            ep_kernel<<<dim3(gridSize), dim3(blockSize)>>>(N, d_bins);
-        });
-
-        bench_emit_iter("ep_kernel", i, &lap, params);
+        run_launch(&lap);
+        bench_emit_iter("gpu_kernel", i, &lap, params);
         total_gpu_ms += lap.gpu_ms;
-        fprintf(stderr, "ep_kernel iter %d: gpu = %.3f ms, host = %.3f ms\n",
+        fprintf(stderr, "gpu_kernel pass %d: gpu = %.3f ms, host = %.3f ms\n",
                 i, lap.gpu_ms, lap.host_ms);
     }
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n", total_gpu_ms, num_iters);
 
     // -------------------------------------------------------------------
-    // Verification: compare GPU bins against CPU reference
+    // Host-side final reduction + NAS verification (untimed).
+    // The device buffers hold the LAST launch's per-block partials.
     // -------------------------------------------------------------------
-    unsigned long long h_bins[NUM_BINS];
-    HIP_CHECK(hipMemcpy(h_bins, d_bins, NUM_BINS * sizeof(unsigned long long),
-                        hipMemcpyDeviceToHost));
+    double* q_host  = (double*)malloc(size_q);
+    double* sx_host = (double*)malloc(size_sx);
+    double* sy_host = (double*)malloc(size_sy);
+    HIP_CHECK(hipMemcpy(q_host,  q_device,  size_q,  hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(sx_host, sx_device, size_sx, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(sy_host, sy_device, size_sy, hipMemcpyDeviceToHost));
 
-    // Use a small N for verification to keep CPU time reasonable
-    int verifyN = (N <= 1048576) ? N : 1048576;
+    double q[NQ];
+    for (int i = 0; i < NQ; ++i) q[i] = 0.0;
+    double sx = 0.0, sy = 0.0;
+    for (int block = 0; block < blocks_per_grid; ++block) {
+        for (int i = 0; i < NQ; ++i) q[i] += q_host[block*NQ + i];
+        sx += sx_host[block];
+        sy += sy_host[block];
+    }
+    double gc = 0.0;
+    for (int i = 0; i < NQ; ++i) gc += q[i];
 
-    // Re-run GPU with verifyN if different
-    unsigned long long h_verify_gpu[NUM_BINS];
-    if (verifyN != N) {
-        int vGridSize = (verifyN + blockSize - 1) / blockSize;
-        HIP_CHECK(hipMemset(d_bins, 0, NUM_BINS * sizeof(unsigned long long)));
-        ep_kernel<<<dim3(vGridSize), dim3(blockSize)>>>(verifyN, d_bins);
-        HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipMemcpy(h_verify_gpu, d_bins, NUM_BINS * sizeof(unsigned long long),
-                            hipMemcpyDeviceToHost));
-    } else {
-        for (int i = 0; i < NUM_BINS; ++i) h_verify_gpu[i] = h_bins[i];
+    // NAS reference sums per class (from NPB-GPU EP/ep.cpp).
+    double sx_verify = 0.0, sy_verify = 0.0;
+    bool have_ref = true;
+    if      (m == 24) { sx_verify = -3.247834652034740e+3; sy_verify = -6.958407078382297e+3; }
+    else if (m == 25) { sx_verify = -2.863319731645753e+3; sy_verify = -6.320053679109499e+3; }
+    else if (m == 28) { sx_verify = -4.295875165629892e+3; sy_verify = -1.580732573678431e+4; }
+    else if (m == 30) { sx_verify =  4.033815542441498e+4; sy_verify = -2.660669192809235e+4; }
+    else if (m == 32) { sx_verify =  4.764367927995374e+4; sy_verify = -8.084072988043731e+4; }
+    else if (m == 36) { sx_verify =  1.982481200946593e+5; sy_verify = -1.020596636361769e+5; }
+    else if (m == 40) { sx_verify = -5.319717441530e+05;   sy_verify = -3.688834557731e+05;   }
+    else              { have_ref = false; }
+
+    bool verified = have_ref;
+    if (have_ref) {
+        double sx_err = fabs((sx - sx_verify) / sx_verify);
+        double sy_err = fabs((sy - sy_verify) / sy_verify);
+        verified = (sx_err <= EPSILON) && (sy_err <= EPSILON);
     }
 
-    unsigned long long cpu_bins[NUM_BINS];
-    ep_cpu(verifyN, cpu_bins);
+    fprintf(stderr, "\nNAS EP Results (Class %s, M=%d):\n", class_of(m), m);
+    fprintf(stderr, "  N = 2^%d\n", m + 1);
+    fprintf(stderr, "  No. Gaussian Pairs = %15.0f\n", gc);
+    fprintf(stderr, "  Sums = %25.15e %25.15e\n", sx, sy);
+    fprintf(stderr, "  Counts:\n");
+    for (int i = 0; i < NQ; ++i) fprintf(stderr, "    %3d %15.0f\n", i, q[i]);
+    if (!have_ref)      fprintf(stderr, "  No reference sums for M=%d (verification skipped)\n", m);
+    else if (verified)  fprintf(stderr, "  Verification: PASS\n");
+    else                fprintf(stderr, "  Verification: FAIL (sx=%.15e vs %.15e, sy=%.15e vs %.15e)\n",
+                                 sx, sx_verify, sy, sy_verify);
 
-    fprintf(stderr, "\nBin counts (GPU vs CPU, N=%d):\n", verifyN);
-    int errors = 0;
-    for (int i = 0; i < NUM_BINS; ++i) {
-        fprintf(stderr, "  Bin %d: GPU=%llu  CPU=%llu\n", i, h_verify_gpu[i], cpu_bins[i]);
-        if (h_verify_gpu[i] != cpu_bins[i]) errors++;
-    }
-
-    if (errors > 0)
-        fprintf(stderr, "FAIL: %d bin mismatches\n", errors);
-    else
-        fprintf(stderr, "PASS\n");
-
-    HIP_CHECK(hipFree(d_bins));
+    free(q_host);
+    free(sx_host);
+    free(sy_host);
+    HIP_CHECK(hipFree(q_device));
+    HIP_CHECK(hipFree(sx_device));
+    HIP_CHECK(hipFree(sy_device));
 
     return 0;
 }

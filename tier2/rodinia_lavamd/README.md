@@ -1,34 +1,41 @@
 # tier2/rodinia_lavamd — Short-Range Molecular Dynamics (Rodinia LavaMD)
 
-Short-range molecular dynamics simulation using cell-list decomposition. Computes Lennard-Jones type particle interactions within neighboring cells (26 neighbors + self = 27 cells per box) on an N×N×N grid of boxes, each containing a fixed number of particles.
+Short-range molecular dynamics with cell-list decomposition. This is a
+**faithful port** of Rodinia LavaMD: the device kernel `kernel_gpu_cuda` is the
+original upstream kernel (`rodinia/cuda/lavaMD/kernel/kernel_gpu_cuda.cu`),
+copied verbatim, including its staging of the home box and each neighbor box's
+particles into shared memory before the all-pairs interaction. Only the host
+driver is restructured for the per-iteration timing harness and JSON output.
 
-Derived from the [Rodinia benchmark suite](https://rodinia.cs.virginia.edu/) LavaMD workload.
+Derived from the [Rodinia benchmark suite](https://rodinia.cs.virginia.edu/).
 
 ## Algorithm
 
-For each box `(bx, by, bz)` in an `N×N×N` grid:
+Space is a `boxes1d³` grid of boxes; each box holds `NUMBER_PAR_PER_BOX = 100`
+particles. One thread block processes one home box:
+
 ```
-for each particle i in box:
-    for each of 27 neighboring boxes (including self):
-        for each particle j in neighbor box:
-            r = distance(pos_i, pos_j)
-            if r > 0:
-                // Lennard-Jones potential: V(r) = 4*eps*((sigma/r)^12 - (sigma/r)^6)
-                r2inv = 1.0 / (r*r)
-                r6inv = r2inv * r2inv * r2inv
-                force = r2inv * r6inv * (LJ_A * r6inv - LJ_B)
-                energy += r6inv * (LJ_A * r6inv - LJ_B)
-                f_i += force * (pos_i - pos_j) / r
+a2 = 2 * alpha^2
+load home-box particles rA into shared memory (rA_shared)
+for each of the (up to 26) neighbor boxes + self:
+    load neighbor particles rB and charges qB into shared memory
+    for each home particle i:
+        for each neighbor particle j:
+            r2  = rA.v + rB.v - dot(rA, rB)
+            vij = exp(-a2 * r2)          // modified-LJ / Gaussian potential
+            fs  = 2 * a2 * vij
+            fA[i] += qB[j] * (vij, fs*dx, fs*dy, fs*dz)
 ```
 
-Each thread block processes one box, and threads within the block compute forces for particles in that box.
+Note this is the original modified-Lennard-Jones / Gaussian potential
+(`vij = exp(-a2*r2)`), **not** a standard `1/r^12 − 1/r^6` Lennard-Jones form.
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `rodinia_lavamd.hip` | HIP source — LJ kernel + self-contained utilities |
-| `rodinia_lavamd.metal` | Metal compute shader — LJ kernel |
+| `rodinia_lavamd.hip` | HIP/CUDA source — original `kernel_gpu_cuda` + timing driver |
+| `rodinia_lavamd.metal` | Metal compute shader (separate reimplementation, not the upstream kernel) |
 | `rodinia_lavamd_metal.mm` | ObjC++ Metal host code |
 | `Makefile` | Auto-detecting build (Darwin→metal, ROCm→rocm, else→cuda) |
 | `params.json` | Parameter specification |
@@ -45,42 +52,44 @@ make PLATFORM=metal
 ## Run
 
 ```bash
-./rodinia_lavamd                                              # defaults: 10³ boxes, 100 particles/box
-BENCH_PARAM_num_boxes=15 ./rodinia_lavamd
-BENCH_PARAM_num_boxes=8 BENCH_PARAM_particles_per_box=200 ./rodinia_lavamd
+./rodinia_lavamd                       # default: 10³ boxes, 100 particles/box
+./rodinia_lavamd --boxes1d 15
+BENCH_PARAM_boxes1d=8 ./rodinia_lavamd
 ```
 
-Environment variables override argv:
+### Environment variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `BENCH_PARAM_num_boxes` | Boxes per dimension (total = N³) | 10 |
-| `BENCH_PARAM_block_size` | Threads per block | 128 |
-| `BENCH_PARAM_particles_per_box` | Particles per box | 100 |
-| `BENCH_PARAM_num_warmup` | Warmup launches (untimed) | 3 |
-| `BENCH_PARAM_num_iters` | Timed launches, each recorded | 7 |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BENCH_PARAM_boxes1d` | 10 | Boxes per dimension (total boxes = `boxes1d³`) |
+| `BENCH_PARAM_num_warmup` | 3 | Warmup passes (untimed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded |
+
+`particles_per_box` (100) and `number_threads` (128) are fixed compile-time
+constants (`NUMBER_PAR_PER_BOX`, `NUMBER_THREADS`) in the original kernel and are
+emitted as params for downstream derivation only.
 
 ## Output
 
-**stdout** — JSON-lines: one `{"type":"kernel",...}` record per timed iteration carrying the GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`), then a summary whose `total_time_ms` is the sum of all iterations' GPU event times:
-```
-{"type":"kernel","name":"lavamd_kernel","iter":0,"time_ms":12.345,"host_time_ms":12.501,"params":{"num_boxes":10,...}}
+**stdout** — JSON lines: one `kernel` record per timed pass for
+`kernel_gpu_cuda` carrying the GPU event time (`time_ms`) and host wall-clock
+time (`host_time_ms`), then a summary whose `total_time_ms` is the sum of all
+passes' GPU event times:
+```json
+{"type":"kernel","name":"kernel_gpu_cuda","iter":0,"time_ms":12.345,"host_time_ms":12.501,"params":{"boxes1d":10,"particles_per_box":100,"number_threads":128}}
 {"type":"summary","total_time_ms":86.415}
 ```
 
-Derived metrics such as GFLOPS are computed downstream from `time_ms` and params.
+One pass = one `kernel_gpu_cuda` launch over all home boxes (the original
+launches the force kernel exactly once). Because the kernel *accumulates* into
+the force output, that output buffer is zeroed before every launch (untimed) so
+each pass performs identical work; the immutable position/charge/box inputs need
+no reset.
 
-**stderr** — human-readable results:
-```
-Device: Apple M4 Pro
-Boxes: 10×10×10 (1000 total)  |  Particles/box: 100  |  Iterations: 3 warmup + 7 timed
-lavamd_kernel iter 0: gpu = 12.345 ms, host = 12.501 ms
-...
-Total GPU time: 86.415 ms over 7 iterations
-```
+**stderr** — human-readable per-pass timing.
 
 ## Platform Notes
 
-- **CUDA/ROCm**: compiled with `nvcc`/`hipcc`
-- **Metal**: compiled with `clang++`; the Metal shader is loaded at runtime from the same directory as the binary
-- Input data is generated synthetically — no external input files required
+- **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `rodinia_lavamd.hip` (the faithful upstream kernel).
+- **Metal**: a separate reimplementation in `rodinia_lavamd_metal.mm`; it is not the upstream kernel.
+- Input data is generated synthetically — no external input files required.

@@ -2,18 +2,14 @@
   "benchmark": "parboil_spmv",
   "tier": 2,
   "suite": "parboil",
-  "description": "CSR sparse matrix-vector multiplication y = A*x. Each thread computes one output row. Emits per-iteration kernel times; GFLOPS is derived downstream.",
+  "description": "Sparse matrix-vector multiplication y = A*x in JDS (Jagged Diagonal Storage) layout. The matrix is sorted by row length and stored column-major (padded/transposed) so one thread walks its JDS row at stride-1 offsets; per-warp-group column counts and column base offsets live in constant memory. Faithful port of the Parboil cuda kernel spmv_jds (x fetched via __ldg in place of the original texture); emits per-iteration kernel times.",
   "scaling_param": {
     "name": "num_rows",
-    "description": "Number of matrix rows",
+    "description": "Number of matrix rows (JDS tables cap this near 160000)",
     "type": "int",
     "values": [
-      1024,
-      1536,
       2048,
-      3072,
       4096,
-      6144,
       8192,
       12288,
       16384,
@@ -23,43 +19,23 @@
       65536,
       98304,
       131072,
-      196608,
-      262144,
-      393216,
-      524288,
-      786432,
-      1048576,
-      1572864,
-      2097152,
-      3145728,
-      4194304,
-      6291456,
-      8388608
+      160000
     ]
   },
   "non_scaling_params": [
     {
       "name": "avg_nnz_per_row",
-      "description": "Average number of non-zero elements per row",
+      "description": "Average non-zeros per row (JDS column depth must stay < 5000)",
       "type": "int",
-      "default": 10,
+      "default": 80,
       "values": [
-        4,
-        10,
+        20,
+        40,
         80
-      ]
-    },
-    {
-      "name": "block_size",
-      "description": "GPU thread-block size",
-      "type": "int",
-      "default": 256,
-      "values": [
-        256
       ]
     }
   ],
   "kernels": [
-    "spmv_csr"
+    "spmv_jds"
   ]
 }

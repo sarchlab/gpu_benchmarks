@@ -2,10 +2,10 @@
   "benchmark": "rodinia_srad",
   "tier": 2,
   "suite": "rodinia",
-  "description": "Speckle-Reducing Anisotropic Diffusion (SRAD): iterative Perona-Malik anisotropic diffusion for image smoothing. Two-phase stencil per iteration.",
+  "description": "Speckle-Reducing Anisotropic Diffusion (Rodinia SRAD v2). Faithful port: the original srad_cuda_1 / srad_cuda_2 kernels with shared-memory neighborhood tiling (BLOCK_SIZE 16). Each SRAD iteration runs both kernels; q0sqr is recomputed each iteration on the CPU from an ROI image-statistics reduction.",
   "scaling_param": {
     "name": "image_size",
-    "description": "Image dimension (NxN pixel grid)",
+    "description": "Image dimension (NxN pixel grid, multiple of 16)",
     "type": "int",
     "values": [
       64,
@@ -33,27 +33,37 @@
   "non_scaling_params": [
     {
       "name": "num_iterations",
-      "description": "SRAD iterations per timed launch",
+      "description": "SRAD iterations per timed pass (each runs srad_cuda_1 + srad_cuda_2)",
       "type": "int",
-      "default": 50,
+      "default": 100,
       "values": [
         10,
         50,
+        100,
         200
       ]
     },
     {
       "name": "block_size",
-      "description": "Thread-block dimension (BxB threads)",
+      "description": "Thread-block dimension (BxB); fixed compile-time BLOCK_SIZE=16 in the original kernels",
       "type": "int",
       "default": 16,
       "values": [
         16
       ]
+    },
+    {
+      "name": "lambda",
+      "description": "Diffusion step size in (0,1)",
+      "type": "float",
+      "default": 0.5,
+      "values": [
+        0.5
+      ]
     }
   ],
   "kernels": [
-    "srad1",
-    "srad2"
+    "srad_cuda_1",
+    "srad_cuda_2"
   ]
 }

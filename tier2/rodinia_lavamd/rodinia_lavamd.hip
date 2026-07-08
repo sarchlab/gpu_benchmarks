@@ -1,39 +1,46 @@
 // rodinia_lavamd.hip — Rodinia LavaMD benchmark (HIP, self-contained)
 //
-// Short-range molecular dynamics with cell-list decomposition.
-// Computes Lennard-Jones type particle interactions within neighboring cells
-// (26 neighbors + self = 27 cells per box) on an NxNxN grid of boxes.
+// Faithful port of Rodinia LavaMD: the device kernel (kernel_gpu_cuda) is the
+// ORIGINAL upstream kernel, copied verbatim from
+// rodinia/cuda/lavaMD/kernel/kernel_gpu_cuda.cu — including its staging of the
+// home box and each neighbor box's particles into SHARED MEMORY
+// (rA_shared[100], rB_shared[100], qB_shared[100]) before the all-pairs
+// interaction, and the modified-Lennard-Jones / Gaussian potential
+// (vij = exp(-a2*r2), fs = 2*a2*vij). The particle/box data structures
+// (FOUR_VECTOR, box_str, par_str, dim_str, NUMBER_PAR_PER_BOX=100) and the
+// host geometry (one block per home box, NUMBER_THREADS threads) are the
+// original. Only the driver is restructured for the per-iteration timing
+// harness and JSON output.
+//
+// Space is a boxes1d^3 grid of boxes; each box holds NUMBER_PAR_PER_BOX
+// particles. For every home box the kernel walks its (up to 26) neighbor
+// boxes plus itself, computing pairwise force/energy contributions.
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
-// Environment variables (override argv):
-//   BENCH_PARAM_num_boxes, BENCH_PARAM_block_size, BENCH_PARAM_particles_per_box
-//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
-//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
+// Usage:
+//   ./rodinia_lavamd [--boxes1d B]
 //
-// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
-// carrying the GPU event time (time_ms) and host wall-clock time
-// (host_time_ms), then a summary whose total_time_ms is the SUM of all
-// iterations' GPU event times. GFLOPS is derived downstream from time_ms
-// and params.
+//   --boxes1d B   Boxes per dimension (total boxes = B^3)   (default: 10)
+//
+// Environment variables (override argv):
+//   BENCH_PARAM_boxes1d
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): one {"type":"kernel",...} JSON line per timed pass for
+// kernel_gpu_cuda carrying the GPU event time (time_ms) and host wall-clock
+// time (host_time_ms), then a summary whose total_time_ms is the SUM of all
+// passes' GPU event times.
 // Output (stderr): human-readable results
 
 #include "../../common/bench_timing.h"
-
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <vector>
-
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
+#include <cmath>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
-
-// ---------------------------------------------------------------------------
-// Argument parsing
-// ---------------------------------------------------------------------------
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -47,89 +54,183 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
 }
 
 // ---------------------------------------------------------------------------
-// LJ potential constants
+// DEFINES / STRUCTURES — verbatim from Rodinia lavaMD/main.h
 // ---------------------------------------------------------------------------
-#define LJ_A   2.0f
-#define LJ_B   1.0f
-#define BOX_SIZE 10.0f
+#define fp double
+
+#define NUMBER_PAR_PER_BOX 100          // keep low so more blocks share SM
+#define NUMBER_THREADS 128              // ~ NUMBER_PAR_PER_BOX for best perf
+
+#define DOT(A,B) ((A.x)*(B.x)+(A.y)*(B.y)+(A.z)*(B.z))  // STABLE
+
+typedef struct { fp x, y, z; } THREE_VECTOR;
+typedef struct { fp v, x, y, z; } FOUR_VECTOR;
+
+typedef struct nei_str {
+    int x, y, z;
+    int number;
+    long offset;
+} nei_str;
+
+typedef struct box_str {
+    int x, y, z;
+    int number;
+    long offset;
+    int nn;
+    nei_str nei[26];
+} box_str;
+
+typedef struct par_str {
+    fp alpha;
+} par_str;
+
+typedef struct dim_str {
+    int cur_arg;
+    int arch_arg;
+    int cores_arg;
+    int boxes1d_arg;
+    long number_boxes;
+    long box_mem;
+    long space_elem;
+    long space_mem;
+    long space_mem2;
+} dim_str;
 
 // ---------------------------------------------------------------------------
-// LavaMD kernel
+// KERNEL — verbatim from Rodinia lavaMD/kernel/kernel_gpu_cuda.cu
 // ---------------------------------------------------------------------------
-__global__ void lavamd_kernel(
-    const float* __restrict__ pos_x,
-    const float* __restrict__ pos_y,
-    const float* __restrict__ pos_z,
-    float* __restrict__ force_x,
-    float* __restrict__ force_y,
-    float* __restrict__ force_z,
-    float* __restrict__ energy_out,
-    const int*   __restrict__ neighbor_list,
-    const int*   __restrict__ neighbor_count,
-    int particles_per_box,
-    int total_boxes)
+__global__ void kernel_gpu_cuda(par_str d_par_gpu,
+								dim_str d_dim_gpu,
+								box_str* d_box_gpu,
+								FOUR_VECTOR* d_rv_gpu,
+								fp* d_qv_gpu,
+								FOUR_VECTOR* d_fv_gpu)
 {
-    int box_id = blockIdx.x;
-    if (box_id >= total_boxes) return;
 
-    int tid = threadIdx.x;
-    int base_i = box_id * particles_per_box;
+	int bx = blockIdx.x;
+	int tx = threadIdx.x;
+	int wtx = tx;
 
-    for (int p = tid; p < particles_per_box; p += blockDim.x) {
-        int i = base_i + p;
-        float px = pos_x[i];
-        float py = pos_y[i];
-        float pz = pos_z[i];
+	if(bx<d_dim_gpu.number_boxes){
 
-        float fx = 0.0f, fy = 0.0f, fz = 0.0f;
-        float pe = 0.0f;
+		// parameters
+		fp a2 = 2.0*d_par_gpu.alpha*d_par_gpu.alpha;
 
-        int n_neighbors = neighbor_count[box_id];
+		// home box
+		int first_i;
+		FOUR_VECTOR* rA;
+		FOUR_VECTOR* fA;
+		__shared__ FOUR_VECTOR rA_shared[100];
 
-        for (int n = 0; n < n_neighbors; ++n) {
-            int nbox = neighbor_list[box_id * 27 + n];
-            int base_j = nbox * particles_per_box;
+		// nei box
+		int pointer;
+		int k = 0;
+		int first_j;
+		FOUR_VECTOR* rB;
+		fp* qB;
+		int j = 0;
+		__shared__ FOUR_VECTOR rB_shared[100];
+		__shared__ double qB_shared[100];
 
-            for (int q = 0; q < particles_per_box; ++q) {
-                int j = base_j + q;
+		// common
+		fp r2;
+		fp u2;
+		fp vij;
+		fp fs;
+		fp fxij;
+		fp fyij;
+		fp fzij;
+		THREE_VECTOR d;
 
-                float dx = px - pos_x[j];
-                float dy = py - pos_y[j];
-                float dz = pz - pos_z[j];
+		// home box - box parameters
+		first_i = d_box_gpu[bx].offset;
 
-                float r2 = dx * dx + dy * dy + dz * dz;
+		// home box - distance, force, charge and type parameters
+		rA = &d_rv_gpu[first_i];
+		fA = &d_fv_gpu[first_i];
 
-                if (r2 > 1e-10f) {
-                    float r2inv = 1.0f / r2;
-                    float r6inv = r2inv * r2inv * r2inv;
+		// home box - shared memory
+		while(wtx<NUMBER_PAR_PER_BOX){
+			rA_shared[wtx] = rA[wtx];
+			wtx = wtx + NUMBER_THREADS;
+		}
+		wtx = tx;
 
-                    float force = r2inv * r6inv * (LJ_A * r6inv - LJ_B);
-                    pe += r6inv * (LJ_A * r6inv - LJ_B);
+		// synchronize threads  - not needed, but just to be safe
+		__syncthreads();
 
-                    fx += force * dx;
-                    fy += force * dy;
-                    fz += force * dz;
-                }
-            }
-        }
+		// loop over neiing boxes of home box
+		for (k=0; k<(1+d_box_gpu[bx].nn); k++){
 
-        force_x[i]    = fx;
-        force_y[i]    = fy;
-        force_z[i]    = fz;
-        energy_out[i] = pe;
-    }
-}
+			//----------------------------------------50
+			//	nei box - get pointer to the right box
+			//----------------------------------------50
 
-// ---------------------------------------------------------------------------
-// Simple PRNG
-// ---------------------------------------------------------------------------
-static inline unsigned int lcg_rand(unsigned int* state) {
-    *state = *state * 1664525u + 1013904223u;
-    return *state;
-}
+			if(k==0){
+				pointer = bx;													// set first box to be processed to home box
+			}
+			else{
+				pointer = d_box_gpu[bx].nei[k-1].number;							// remaining boxes are nei boxes
+			}
 
-static inline float rand_float(unsigned int* state, float lo, float hi) {
-    return lo + (float)(lcg_rand(state) & 0xFFFF) / 65535.0f * (hi - lo);
+			// nei box - box parameters
+			first_j = d_box_gpu[pointer].offset;
+
+			// nei box - distance, (force), charge and (type) parameters
+			rB = &d_rv_gpu[first_j];
+			qB = &d_qv_gpu[first_j];
+
+			// nei box - shared memory
+			while(wtx<NUMBER_PAR_PER_BOX){
+				rB_shared[wtx] = rB[wtx];
+				qB_shared[wtx] = qB[wtx];
+				wtx = wtx + NUMBER_THREADS;
+			}
+			wtx = tx;
+
+			// synchronize threads because in next section each thread accesses data brought in by different threads here
+			__syncthreads();
+
+			// loop for the number of particles in the home box
+			while(wtx<NUMBER_PAR_PER_BOX){
+
+				// loop for the number of particles in the current nei box
+				for (j=0; j<NUMBER_PAR_PER_BOX; j++){
+
+					r2 = (fp)rA_shared[wtx].v + (fp)rB_shared[j].v - DOT((fp)rA_shared[wtx],(fp)rB_shared[j]);
+					u2 = a2*r2;
+					vij= exp(-u2);
+					fs = 2*vij;
+
+					d.x = (fp)rA_shared[wtx].x  - (fp)rB_shared[j].x;
+					fxij=fs*d.x;
+					d.y = (fp)rA_shared[wtx].y  - (fp)rB_shared[j].y;
+					fyij=fs*d.y;
+					d.z = (fp)rA_shared[wtx].z  - (fp)rB_shared[j].z;
+					fzij=fs*d.z;
+
+					fA[wtx].v +=  (double)((fp)qB_shared[j]*vij);
+					fA[wtx].x +=  (double)((fp)qB_shared[j]*fxij);
+					fA[wtx].y +=  (double)((fp)qB_shared[j]*fyij);
+					fA[wtx].z +=  (double)((fp)qB_shared[j]*fzij);
+
+				}
+
+				// increment work thread index
+				wtx = wtx + NUMBER_THREADS;
+
+			}
+
+			// reset work index
+			wtx = tx;
+
+			// synchronize after finishing force contributions from current nei box not to cause conflicts when starting next box
+			__syncthreads();
+
+		}
+
+	}
+
 }
 
 // ---------------------------------------------------------------------------
@@ -138,134 +239,146 @@ static inline float rand_float(unsigned int* state, float lo, float hi) {
 int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
-    int num_boxes         = 10;
-    int block_size        = 128;
-    int particles_per_box = 100;
-
-    num_boxes         = parseIntParam(argc, argv, "--num_boxes", num_boxes);
-    block_size        = parseIntParam(argc, argv, "--block_size", block_size);
-    particles_per_box = parseIntParam(argc, argv, "--particles_per_box", particles_per_box);
-
-    const char* env_val;
-    env_val = getenv("BENCH_PARAM_num_boxes");
-    if (env_val) num_boxes = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_particles_per_box");
-    if (env_val) particles_per_box = atoi(env_val);
+    int boxes1d = parseIntParam(argc, argv, "--boxes1d", 10);
+    const char* env_val = getenv("BENCH_PARAM_boxes1d");
+    if (env_val) boxes1d = atoi(env_val);
     const int num_warmup = bench_num_warmup();
     const int num_iters  = bench_num_iters();
 
-    int nb = num_boxes;
-    int total_boxes     = nb * nb * nb;
-    long long total_particles = (long long)total_boxes * particles_per_box;
+    par_str par_cpu;
+    dim_str dim_cpu;
+    par_cpu.alpha = 0.5;                                   // original input
+    dim_cpu.boxes1d_arg = boxes1d;
+
+    // DIMENSIONS (verbatim from main.c)
+    dim_cpu.number_boxes = (long)dim_cpu.boxes1d_arg * dim_cpu.boxes1d_arg * dim_cpu.boxes1d_arg;
+    dim_cpu.space_elem   = dim_cpu.number_boxes * NUMBER_PAR_PER_BOX;
+    dim_cpu.space_mem    = dim_cpu.space_elem * sizeof(FOUR_VECTOR);
+    dim_cpu.space_mem2   = dim_cpu.space_elem * sizeof(fp);
+    dim_cpu.box_mem      = dim_cpu.number_boxes * sizeof(box_str);
 
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Boxes: %d×%d×%d (%d total)  |  Particles/box: %d  |  "
-            "Iterations: %d warmup + %d timed\n\n",
-            nb, nb, nb, total_boxes, particles_per_box, num_warmup, num_iters);
+    fprintf(stderr, "boxes1d = %d  |  boxes = %ld  |  particles/box = %d  |  particles = %ld\n",
+            boxes1d, dim_cpu.number_boxes, NUMBER_PAR_PER_BOX, dim_cpu.space_elem);
+    fprintf(stderr, "thread block size of kernel = %d\n\n", NUMBER_THREADS);
 
-    size_t pos_bytes    = (size_t)total_particles * sizeof(float);
-    size_t force_bytes  = (size_t)total_particles * sizeof(float);
-    size_t neigh_bytes  = (size_t)total_boxes * 27 * sizeof(int);
-    size_t ncount_bytes = (size_t)total_boxes * sizeof(int);
-
-    std::vector<float> h_pos_x(total_particles);
-    std::vector<float> h_pos_y(total_particles);
-    std::vector<float> h_pos_z(total_particles);
-    std::vector<int>   h_neighbor_list(total_boxes * 27, 0);
-    std::vector<int>   h_neighbor_count(total_boxes, 0);
-
-    unsigned int seed = 42;
-
-    for (int bz = 0; bz < nb; ++bz) {
-        for (int by = 0; by < nb; ++by) {
-            for (int bx = 0; bx < nb; ++bx) {
-                int box_id = bz * nb * nb + by * nb + bx;
-                int base = box_id * particles_per_box;
-
-                for (int p = 0; p < particles_per_box; ++p) {
-                    h_pos_x[base + p] = bx * BOX_SIZE + rand_float(&seed, 0.5f, BOX_SIZE - 0.5f);
-                    h_pos_y[base + p] = by * BOX_SIZE + rand_float(&seed, 0.5f, BOX_SIZE - 0.5f);
-                    h_pos_z[base + p] = bz * BOX_SIZE + rand_float(&seed, 0.5f, BOX_SIZE - 0.5f);
-                }
-
-                int count = 0;
-                for (int dz = -1; dz <= 1; ++dz) {
-                    for (int dy = -1; dy <= 1; ++dy) {
-                        for (int dx = -1; dx <= 1; ++dx) {
-                            int nnx = bx + dx;
-                            int nny = by + dy;
-                            int nnz = bz + dz;
-                            if (nnx >= 0 && nnx < nb && nny >= 0 && nny < nb && nnz >= 0 && nnz < nb) {
-                                int nid = nnz * nb * nb + nny * nb + nnx;
-                                h_neighbor_list[box_id * 27 + count] = nid;
-                                count++;
+    // SYSTEM MEMORY — box neighbor lists (verbatim construction from main.c)
+    box_str* box_cpu = (box_str*)malloc(dim_cpu.box_mem);
+    int nh = 0;
+    for (int i = 0; i < dim_cpu.boxes1d_arg; i++) {
+        for (int j = 0; j < dim_cpu.boxes1d_arg; j++) {
+            for (int k = 0; k < dim_cpu.boxes1d_arg; k++) {
+                box_cpu[nh].x = k;
+                box_cpu[nh].y = j;
+                box_cpu[nh].z = i;
+                box_cpu[nh].number = nh;
+                box_cpu[nh].offset = nh * NUMBER_PAR_PER_BOX;
+                box_cpu[nh].nn = 0;
+                for (int l = -1; l < 2; l++) {
+                    for (int m = -1; m < 2; m++) {
+                        for (int n = -1; n < 2; n++) {
+                            if ((((i+l)>=0 && (j+m)>=0 && (k+n)>=0) &&
+                                 ((i+l)<dim_cpu.boxes1d_arg && (j+m)<dim_cpu.boxes1d_arg && (k+n)<dim_cpu.boxes1d_arg)) &&
+                                !(l==0 && m==0 && n==0)) {
+                                box_cpu[nh].nei[box_cpu[nh].nn].x = (k+n);
+                                box_cpu[nh].nei[box_cpu[nh].nn].y = (j+m);
+                                box_cpu[nh].nei[box_cpu[nh].nn].z = (i+l);
+                                box_cpu[nh].nei[box_cpu[nh].nn].number =
+                                    (box_cpu[nh].nei[box_cpu[nh].nn].z * dim_cpu.boxes1d_arg * dim_cpu.boxes1d_arg) +
+                                    (box_cpu[nh].nei[box_cpu[nh].nn].y * dim_cpu.boxes1d_arg) +
+                                     box_cpu[nh].nei[box_cpu[nh].nn].x;
+                                box_cpu[nh].nei[box_cpu[nh].nn].offset =
+                                    box_cpu[nh].nei[box_cpu[nh].nn].number * NUMBER_PAR_PER_BOX;
+                                box_cpu[nh].nn = box_cpu[nh].nn + 1;
                             }
                         }
                     }
                 }
-                h_neighbor_count[box_id] = count;
+                nh = nh + 1;
             }
         }
     }
 
-    float *d_pos_x, *d_pos_y, *d_pos_z;
-    float *d_force_x, *d_force_y, *d_force_z, *d_energy;
-    int   *d_neighbor_list, *d_neighbor_count;
+    // PARAMETERS, DISTANCE, CHARGE, FORCE (as in main.c; fixed seed for repro)
+    srand(42);
+    FOUR_VECTOR* rv_cpu = (FOUR_VECTOR*)malloc(dim_cpu.space_mem);
+    for (long i = 0; i < dim_cpu.space_elem; i++) {
+        rv_cpu[i].v = (rand()%10 + 1) / 10.0;
+        rv_cpu[i].x = (rand()%10 + 1) / 10.0;
+        rv_cpu[i].y = (rand()%10 + 1) / 10.0;
+        rv_cpu[i].z = (rand()%10 + 1) / 10.0;
+    }
+    fp* qv_cpu = (fp*)malloc(dim_cpu.space_mem2);
+    for (long i = 0; i < dim_cpu.space_elem; i++) {
+        qv_cpu[i] = (rand()%10 + 1) / 10.0;
+    }
 
-    HIP_CHECK(hipMalloc(&d_pos_x,          pos_bytes));
-    HIP_CHECK(hipMalloc(&d_pos_y,          pos_bytes));
-    HIP_CHECK(hipMalloc(&d_pos_z,          pos_bytes));
-    HIP_CHECK(hipMalloc(&d_force_x,        force_bytes));
-    HIP_CHECK(hipMalloc(&d_force_y,        force_bytes));
-    HIP_CHECK(hipMalloc(&d_force_z,        force_bytes));
-    HIP_CHECK(hipMalloc(&d_energy,         force_bytes));
-    HIP_CHECK(hipMalloc(&d_neighbor_list,  neigh_bytes));
-    HIP_CHECK(hipMalloc(&d_neighbor_count, ncount_bytes));
+    // Device buffers
+    box_str* d_box_gpu;
+    FOUR_VECTOR* d_rv_gpu;
+    fp* d_qv_gpu;
+    FOUR_VECTOR* d_fv_gpu;
+    HIP_CHECK(hipMalloc((void**)&d_box_gpu, dim_cpu.box_mem));
+    HIP_CHECK(hipMalloc((void**)&d_rv_gpu,  dim_cpu.space_mem));
+    HIP_CHECK(hipMalloc((void**)&d_qv_gpu,  dim_cpu.space_mem2));
+    HIP_CHECK(hipMalloc((void**)&d_fv_gpu,  dim_cpu.space_mem));
+    HIP_CHECK(hipMemcpy(d_box_gpu, box_cpu, dim_cpu.box_mem,  hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_rv_gpu,  rv_cpu,  dim_cpu.space_mem, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_qv_gpu,  qv_cpu,  dim_cpu.space_mem2, hipMemcpyHostToDevice));
 
-    HIP_CHECK(hipMemcpy(d_pos_x, h_pos_x.data(), pos_bytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_pos_y, h_pos_y.data(), pos_bytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_pos_z, h_pos_z.data(), pos_bytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_neighbor_list,  h_neighbor_list.data(),  neigh_bytes,  hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_neighbor_count, h_neighbor_count.data(), ncount_bytes, hipMemcpyHostToDevice));
-
-    dim3 grid(total_boxes);
-    dim3 block(block_size);
+    dim3 blocks(dim_cpu.number_boxes, 1);
+    dim3 threads(NUMBER_THREADS, 1);
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"num_boxes\":%d,\"block_size\":%d,\"particles_per_box\":%d",
-             num_boxes, block_size, particles_per_box);
+             "\"boxes1d\":%d,\"particles_per_box\":%d,\"number_threads\":%d",
+             boxes1d, NUMBER_PAR_PER_BOX, NUMBER_THREADS);
 
-    // Warmup + timed iterations, each recorded individually. The kernel
-    // reads immutable position/neighbor arrays and fully OVERWRITES (does
-    // not accumulate into) the force/energy outputs every launch, so
-    // repeated launches perform identical work; the old per-iteration
-    // hipMemset of the outputs was unnecessary and is dropped.
-    double total_gpu_ms =
-        bench_run_loop("lavamd_kernel", num_warmup, num_iters, params, [&]() {
-            lavamd_kernel<<<grid, block>>>(
-                d_pos_x, d_pos_y, d_pos_z, d_force_x, d_force_y, d_force_z, d_energy, d_neighbor_list, d_neighbor_count, particles_per_box, total_boxes);
-        });
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc;
 
+    // One recorded pass = one kernel_gpu_cuda launch over all home boxes (the
+    // original launches the force kernel exactly once). The kernel ACCUMULATES
+    // into d_fv_gpu (fA[wtx].v += ...), so the force output is zeroed before
+    // every launch (untimed) to keep each pass identical; the immutable
+    // position/charge/box inputs need no reset.
+    auto run_pass = [&]() {
+        bench_lap_reset(&acc);
+        HIP_CHECK(hipMemset(d_fv_gpu, 0, dim_cpu.space_mem));
+        bench_lap_add(&acc, bench_time_op(&timer, [&]() {
+            kernel_gpu_cuda<<<blocks, threads>>>(par_cpu, dim_cpu, d_box_gpu,
+                                                 d_rv_gpu, d_qv_gpu, d_fv_gpu);
+        }));
+        HIP_CHECK(hipGetLastError());
+    };
+
+    for (int w = 0; w < num_warmup; ++w) run_pass();
+
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_pass();
+        bench_emit_iter("kernel_gpu_cuda", i, &acc, params);
+        total_gpu_ms += acc.gpu_ms;
+        fprintf(stderr, "pass %d: kernel_gpu_cuda gpu = %.3f ms, host = %.3f ms\n",
+                i, acc.gpu_ms, acc.host_ms);
+    }
+
+    bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n", total_gpu_ms, num_iters);
 
-    HIP_CHECK(hipFree(d_pos_x));
-    HIP_CHECK(hipFree(d_pos_y));
-    HIP_CHECK(hipFree(d_pos_z));
-    HIP_CHECK(hipFree(d_force_x));
-    HIP_CHECK(hipFree(d_force_y));
-    HIP_CHECK(hipFree(d_force_z));
-    HIP_CHECK(hipFree(d_energy));
-    HIP_CHECK(hipFree(d_neighbor_list));
-    HIP_CHECK(hipFree(d_neighbor_count));
+    HIP_CHECK(hipFree(d_box_gpu));
+    HIP_CHECK(hipFree(d_rv_gpu));
+    HIP_CHECK(hipFree(d_qv_gpu));
+    HIP_CHECK(hipFree(d_fv_gpu));
+    free(box_cpu);
+    free(rv_cpu);
+    free(qv_cpu);
 
     return 0;
 }

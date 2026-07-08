@@ -1,8 +1,16 @@
-// lonestar_dmr.hip — LoneStar Delaunay Mesh Refinement benchmark (HIP)
+// lonestar_dmr.hip — worklist-driven irregular mesh kernel (HIP)
 //
-// Worklist-based irregular mesh refinement. Generates a synthetic Delaunay
-// triangulation, identifies "bad" triangles (minimum angle below threshold),
-// and refines them by inserting circumcenters (simplified Ruppert's algorithm).
+// NOT A FAITHFUL PORT of the LoneStar GPU Delaunay Mesh Refinement benchmark.
+// The real DMR performs cavity re-triangulation (removing bad triangles,
+// inserting circumcenter points, and re-triangulating the cavity so the mesh
+// topology grows) driven by a worklist over a genuine Delaunay mesh — none of
+// which is reproduced here. This kernel instead identifies "bad" triangles
+// (minimum angle below a threshold) over a synthetic set of vertex triples and
+// nudges their vertices toward the circumcenter; mesh topology never changes.
+// It exercises a worklist + irregular-gather access pattern, but is a
+// DIFFERENT computation from DMR. Faithfully porting the Galois/LoneStar DMR
+// as a self-contained benchmark needs the mesh data structures and a real
+// Delaunay input, and is tracked as follow-up work.
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //

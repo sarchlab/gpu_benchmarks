@@ -2,64 +2,46 @@
   "benchmark": "npb_ep",
   "tier": 2,
   "suite": "npb",
-  "description": "NAS Parallel Benchmarks Embarrassingly Parallel: generates N pairs of Gaussian random deviates using Box-Muller transform with per-thread LCG RNG, counts results into 10 annular bins. Purely compute-bound.",
+  "description": "NAS Parallel Benchmarks Embarrassingly Parallel (EP): faithful port of the NPB-GPU EP kernel. Generates 2^(M+1) pseudorandom numbers with the NAS 46-bit linear congruential generator (randlc), forms Gaussian deviate pairs by the Marsaglia polar acceptance-rejection method, tallies them into 10 concentric square annuli, and accumulates the Sx/Sy sums. Purely compute-bound. The class exponent M sets the problem size (M=24 Class S, 28 Class A, 30 Class B, 32 Class C).",
   "scaling_param": {
-    "name": "size",
-    "description": "Number of Gaussian pairs to generate",
+    "name": "m",
+    "description": "Class exponent M: generates 2^(M+1) random numbers over 2^(M-16) threads (M=24 S, 25 W, 28 A, 30 B, 32 C)",
     "type": "int",
     "values": [
-      1024,
-      1536,
-      2048,
-      3072,
-      4096,
-      6144,
-      8192,
-      12288,
-      16384,
-      24576,
-      32768,
-      49152,
-      65536,
-      98304,
-      131072,
-      196608,
-      262144,
-      393216,
-      524288,
-      786432,
-      1048576,
-      1572864,
-      2097152,
-      3145728,
-      4194304,
-      6291456,
-      8388608
+      24,
+      25,
+      28,
+      30,
+      32
     ]
   },
   "non_scaling_params": [
+    {
+      "name": "class",
+      "description": "NAS problem class, derived from M (24->S, 25->W, 28->A, 30->B, 32->C)",
+      "type": "string",
+      "default": "A",
+      "values": [
+        "S",
+        "W",
+        "A",
+        "B",
+        "C"
+      ]
+    },
     {
       "name": "block_size",
       "description": "Number of threads per block",
       "type": "int",
       "default": 256,
       "values": [
-        256
-      ]
-    },
-    {
-      "name": "seed",
-      "description": "RNG seed for reproducibility",
-      "type": "int",
-      "default": 271828183,
-      "values": [
-        271828183,
-        314159265,
-        123456789
+        128,
+        256,
+        512
       ]
     }
   ],
   "kernels": [
-    "ep_kernel"
+    "gpu_kernel"
   ]
 }

@@ -2,7 +2,7 @@
   "benchmark": "lonestar_dmr",
   "tier": 2,
   "suite": "lonestar",
-  "description": "Delaunay Mesh Refinement (DMR): worklist-based irregular mesh refinement. Identifies bad triangles (minimum angle below threshold) and refines them by moving vertices toward circumcenters (simplified Ruppert's algorithm).",
+  "description": "NOT a faithful LoneStar DMR port: exercises a worklist + irregular-gather pattern over synthetic vertex triples (bad-triangle detection + vertex nudging toward circumcenters), but does NOT perform DMR's cavity re-triangulation and does not change mesh topology. Faithful DMR needs real mesh data structures / Delaunay input (follow-up work).",
   "scaling_param": {
     "name": "num_triangles",
     "description": "Number of triangles in the synthetic mesh",

@@ -2,54 +2,27 @@
   "benchmark": "shoc_sort",
   "tier": 2,
   "suite": "shoc",
-  "description": "Bitonic sort on a large array of random unsigned integers. O(n log^2 n) compare-and-swap network. Emits per-iteration kernel times; Melements/s is derived downstream.",
+  "description": "Faithful SHOC Sort: the original CUDPP 4-bit radix sort (radixSortBlocks, findRadixOffsets, scan, vectorAddUniform4, reorderData) sorting 32-bit unsigned keys in 8 radix passes. Emits per-pass, per-kernel GPU times; sort rate is derived downstream.",
   "scaling_param": {
     "name": "size",
-    "description": "Number of unsigned int elements to sort (must be power of 2)",
+    "description": "Number of key/value pairs to sort (must be a multiple of 1024)",
     "type": "int",
     "values": [
-      1024,
-      1536,
-      2048,
-      3072,
-      4096,
-      6144,
-      8192,
-      12288,
-      16384,
-      24576,
       32768,
-      49152,
       65536,
-      98304,
       131072,
-      196608,
       262144,
-      393216,
       524288,
-      786432,
       1048576,
-      1572864,
       2097152,
-      3145728,
       4194304,
-      6291456,
       8388608
     ]
   },
   "non_scaling_params": [
     {
-      "name": "block_size",
-      "description": "GPU thread-block size for bitonic sort steps",
-      "type": "int",
-      "default": 256,
-      "values": [
-        256
-      ]
-    },
-    {
       "name": "precision",
-      "description": "Data type of elements to sort",
+      "description": "Key data-type label (keys are always sorted as 32-bit unsigned)",
       "type": "enum",
       "default": "uint",
       "values": [
@@ -57,9 +30,31 @@
         "int",
         "float"
       ]
+    },
+    {
+      "name": "sort_block_size",
+      "description": "radixSortBlocks CTA size (compile-time fixed, SHOC SORT_BLOCK_SIZE)",
+      "type": "int",
+      "default": 128,
+      "values": [
+        128
+      ]
+    },
+    {
+      "name": "scan_block_size",
+      "description": "findRadixOffsets/scan/reorderData CTA size (compile-time fixed, SHOC SCAN_BLOCK_SIZE)",
+      "type": "int",
+      "default": 256,
+      "values": [
+        256
+      ]
     }
   ],
   "kernels": [
-    "bitonic_step"
+    "radixSortBlocks",
+    "findRadixOffsets",
+    "scan",
+    "vectorAddUniform4",
+    "reorderData"
   ]
 }

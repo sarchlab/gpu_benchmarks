@@ -7,30 +7,26 @@
 // Parameters are read from BENCH_PARAM_* environment variables,
 // with command-line --flags as fallback.
 //
-// Output (stdout): JSON-lines protocol
+// Environment variables:
+//   BENCH_PARAM_array_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// kernel (scan_block_kernel, add_block_sums_kernel) carrying that kernel's
+// accumulated GPU event time across all recursion levels in the pass plus
+// the host wall-clock time, then a summary whose total_time_ms is the SUM
+// of all recorded GPU event times. Bandwidth (GB/s) is derived downstream
+// from time_ms and params.
 // Output (stderr): Human-readable diagnostics
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <cfloat>
-#include <vector>
 
-// ---------------------------------------------------------------------------
-// Inlined bench_common_hip.h utilities
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 static int parseIntParam(int argc, char** argv, const char* name,
                          int defaultVal) {
@@ -53,31 +49,6 @@ static const char* parseStrParam(int argc, char** argv, const char* name,
     }
     return defaultVal;
 }
-
-// HIP-event-based timer
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
 
 // ---------------------------------------------------------------------------
 // Scan kernels
@@ -158,17 +129,16 @@ __global__ void add_block_sums_kernel(float* __restrict__ data,
 // Recursive multi-block scan
 // ---------------------------------------------------------------------------
 
-// When `timed` is true, each kernel launch (at every recursion level) is wrapped
-// in its own event pair and its elapsed time is accumulated into the matching
-// per-kernel accumulator (*t_scan for scan_block_kernel, *t_add for
-// add_block_sums_kernel). When `timed` is false the kernels run untimed (warmup
-// / verification).
+// Each kernel launch (at every recursion level) is wrapped in the shared
+// event-pair timer and its elapsed time is accumulated into the matching
+// per-kernel accumulator (*acc_scan for scan_block_kernel, *acc_add for
+// add_block_sums_kernel). Temporary allocations and frees stay outside the
+// timed brackets.
 static void scan_recursive(float* d_output, const float* d_input, int N,
                             int block_size,
-                            bool timed = false,
-                            BenchmarkTimer* timer = nullptr,
-                            double* t_scan = nullptr,
-                            double* t_add = nullptr) {
+                            bench_timer_t* timer,
+                            bench_lap_t* acc_scan,
+                            bench_lap_t* acc_add) {
     int elements_per_block = block_size * 2;
     int num_blocks         = (N + elements_per_block - 1) / elements_per_block;
     size_t shared_mem      = (size_t)elements_per_block * sizeof(float);
@@ -178,16 +148,10 @@ static void scan_recursive(float* d_output, const float* d_input, int N,
         HIP_CHECK(hipMalloc(&d_block_sums, (size_t)num_blocks * sizeof(float)));
     }
 
-    if (timed) {
-        timer->record_start();
+    bench_lap_add(acc_scan, bench_time_op(timer, [&]() {
         scan_block_kernel<<<dim3(num_blocks), dim3(block_size), shared_mem, 0>>>(
             d_output, d_input, d_block_sums, N);
-        timer->record_stop();
-        *t_scan += static_cast<double>(timer->elapsed_ms());
-    } else {
-        scan_block_kernel<<<dim3(num_blocks), dim3(block_size), shared_mem, 0>>>(
-            d_output, d_input, d_block_sums, N);
-    }
+    }));
 
     if (num_blocks > 1) {
         float* d_scanned_block_sums;
@@ -195,18 +159,12 @@ static void scan_recursive(float* d_output, const float* d_input, int N,
                              (size_t)num_blocks * sizeof(float)));
 
         scan_recursive(d_scanned_block_sums, d_block_sums, num_blocks,
-                       block_size, timed, timer, t_scan, t_add);
+                       block_size, timer, acc_scan, acc_add);
 
-        if (timed) {
-            timer->record_start();
+        bench_lap_add(acc_add, bench_time_op(timer, [&]() {
             add_block_sums_kernel<<<dim3(num_blocks), dim3(block_size)>>>(
                 d_output, d_scanned_block_sums, N);
-            timer->record_stop();
-            *t_add += static_cast<double>(timer->elapsed_ms());
-        } else {
-            add_block_sums_kernel<<<dim3(num_blocks), dim3(block_size)>>>(
-                d_output, d_scanned_block_sums, N);
-        }
+        }));
 
         HIP_CHECK(hipFree(d_scanned_block_sums));
         HIP_CHECK(hipFree(d_block_sums));
@@ -247,7 +205,16 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
-    int num_warmup = 5;
+    // Validate string params against their known sets so the values echoed
+    // into the JSON records are always canonical literals.
+    if (strcmp(precision, "half") != 0 && strcmp(precision, "float") != 0 &&
+        strcmp(precision, "double") != 0) {
+        fprintf(stderr, "Invalid precision '%s' (use half, float, double)\n",
+                precision);
+        return EXIT_FAILURE;
+    }
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int N     = array_size;
 
@@ -288,52 +255,52 @@ int main(int argc, char** argv) {
 
     HIP_CHECK(hipMemcpy(d_input, h_input, bytes, hipMemcpyHostToDevice));
 
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"array_size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
+             array_size, block_size, precision);
+
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_scan, acc_add;
+
+    // One full scan pass. The scan reads d_input (never modified) and
+    // rewrites d_output as a pure function of it; block-sum temporaries are
+    // allocated fresh inside the pass (outside the timed brackets). Repeated
+    // passes therefore do identical work — no per-pass data reset needed.
+    auto run_scan_pass = [&]() {
+        bench_lap_reset(&acc_scan);
+        bench_lap_reset(&acc_add);
+        scan_recursive(d_output, d_input, N_padded, block_size,
+                       &timer, &acc_scan, &acc_add);
+    };
+
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
-        scan_recursive(d_output, d_input, N_padded, block_size);
-        HIP_CHECK(hipDeviceSynchronize());
+        run_scan_pass();
     }
 
-    // Timed iterations — each kernel type accumulated separately across all
-    // recursion levels via its own event pair.
-    BenchmarkTimer timer;
-    double t_scan = 0.0, t_add = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        scan_recursive(d_output, d_input, N_padded, block_size,
-                       true, &timer, &t_scan, &t_add);
+    // Timed passes — each kernel type accumulated separately across all
+    // recursion levels, one record per kernel per pass.
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_scan_pass();
+        bench_emit_iter("scan_block_kernel",    i, &acc_scan, params);
+        bench_emit_iter("add_block_sums_kernel", i, &acc_add,  params);
+        total_gpu_ms += acc_scan.gpu_ms + acc_add.gpu_ms;
+        fprintf(stderr, "pass %d: scan gpu = %.3f ms, add gpu = %.3f ms\n",
+                i, acc_scan.gpu_ms, acc_add.gpu_ms);
     }
 
-    // Statistics
-    double total_ms = t_scan + t_add;
-    double avg_ms = total_ms;
-
-    // Effective bandwidth: 1 read + 1 write = 2 × N × sizeof(float)
-    double bandwidth_gb = 2.0 * (double)N * sizeof(float)
-                          / (avg_ms * 1e-3) / 1e9;
-
-    // JSON-lines: one event per kernel listed in params.json
-    printf("{\"type\":\"kernel\",\"name\":\"scan_block_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"array_size\":%d,\"block_size\":%d,"
-           "\"precision\":\"%s\"}}\n",
-           t_scan, array_size, block_size, precision);
-
-    printf("{\"type\":\"kernel\",\"name\":\"add_block_sums_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"array_size\":%d,\"block_size\":%d,"
-           "\"precision\":\"%s\"}}\n",
-           t_add, array_size, block_size, precision);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
-           total_ms, bandwidth_gb);
-
-    fprintf(stderr, "Effective bandwidth: %.2f GB/s  (scan=%.4f add=%.4f ms)\n",
-            bandwidth_gb, t_scan, t_add);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // ---------------------------------------------------------------------------
     // Verification
     // ---------------------------------------------------------------------------
-    scan_recursive(d_output, d_input, N_padded, block_size);
+    run_scan_pass();
+    bench_timer_destroy(&timer);
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipMemcpy(h_output, d_output, bytes_orig, hipMemcpyDeviceToHost));
 
@@ -367,6 +334,6 @@ int main(int argc, char** argv) {
     // Verification is reported above (stderr) but is non-fatal: an fp32 prefix
     // sum of millions of elements legitimately diverges from the sequential CPU
     // reference by more than the tolerance (summation-order rounding), so it must
-    // not discard the bandwidth measurement. Matches shoc_reduction's behavior.
+    // not discard the timing measurements. Matches shoc_reduction's behavior.
     return 0;
 }

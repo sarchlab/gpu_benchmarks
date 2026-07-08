@@ -2,7 +2,7 @@
   "benchmark": "polybench_2dconv",
   "tier": 2,
   "suite": "polybench",
-  "description": "2D convolution with a fixed 3x3 kernel applied to an NxN matrix. Each GPU thread computes one output element. Measures throughput in GFLOPS.",
+  "description": "2D convolution with a fixed 3x3 kernel applied to an NxN matrix. Each GPU thread computes one output element. Throughput (GFLOPS) is derived downstream from the emitted per-iteration times.",
   "scaling_param": {
     "name": "size",
     "description": "Matrix dimension N (NxN input matrix)",

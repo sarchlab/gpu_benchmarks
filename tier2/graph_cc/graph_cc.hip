@@ -7,30 +7,26 @@
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
-// Output (stdout): JSON-lines protocol
+// Environment variables:
+//   BENCH_PARAM_num_vertices, BENCH_PARAM_avg_degree,
+//   BENCH_PARAM_max_iterations, BENCH_PARAM_block_size, BENCH_PARAM_iterations
+//   BENCH_PARAM_num_warmup   (warmup CC passes, default 3)
+//   BENCH_PARAM_num_iters    (timed CC passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
+// cc_propagate_kernel carrying the accumulated GPU event time (time_ms) and
+// host time (host_time_ms) of all label-propagation iterations within the
+// pass, then a summary whose total_time_ms is the SUM of all recorded GPU
+// event times. MTEPS is derived downstream from time_ms and params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
-#include <cmath>
 #include <vector>
 #include <algorithm>
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Simple deterministic PRNG (xorshift32)
@@ -148,12 +144,19 @@ static void cc_cpu(int N, int max_iters,
 }
 
 // ---------------------------------------------------------------------------
-// GPU CC: run propagation until convergence or max_iters
+// GPU CC: one full pass — reset labels (untimed), then propagate until
+// convergence or max_iters. Every kernel launch is bracketed with hipEvents;
+// the accumulated GPU/host time of all iterations lands in *acc.
 // ---------------------------------------------------------------------------
 
 static int run_cc_gpu(int N, int max_iters, int block_size,
                       int* d_row_offsets, int* d_col_indices,
-                      int* d_labels, int* d_changed) {
+                      int* d_labels, int* d_changed,
+                      bench_timer_t* timer, bench_lap_t* acc) {
+    bench_lap_reset(acc);
+
+    // Reset per-pass state: labels back to vertex IDs so every pass performs
+    // the same convergence work regardless of what earlier passes left behind.
     std::vector<int> h_init(N);
     for (int i = 0; i < N; ++i) h_init[i] = i;
     HIP_CHECK(hipMemcpy(d_labels, h_init.data(), N * sizeof(int), hipMemcpyHostToDevice));
@@ -166,9 +169,10 @@ static int run_cc_gpu(int N, int max_iters, int block_size,
         h_changed = 0;
         HIP_CHECK(hipMemcpy(d_changed, &h_changed, sizeof(int), hipMemcpyHostToDevice));
 
-        cc_propagate_kernel<<<dim3(gridSize), dim3(block_size)>>>(
-            d_row_offsets, d_col_indices, d_labels, d_changed, N);
-        HIP_CHECK(hipDeviceSynchronize());
+        bench_lap_add(acc, bench_time_op(timer, [&]() {
+            cc_propagate_kernel<<<dim3(gridSize), dim3(block_size)>>>(
+                d_row_offsets, d_col_indices, d_labels, d_changed, N);
+        }));
 
         HIP_CHECK(hipMemcpy(&h_changed, d_changed, sizeof(int), hipMemcpyDeviceToHost));
         iters_done = iter + 1;
@@ -204,10 +208,10 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_iterations");
     if (env_val) iterations = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
-    int N     = num_vertices;
-    int iters = iterations;
+    int N = num_vertices;
 
     // Generate CSR graph
     std::vector<int> row_offsets, col_indices;
@@ -223,8 +227,8 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Connected Components (label propagation)  |  "
             "Vertices: %d  |  Edges: %d  |  Avg degree: %d  |  "
             "Max iterations: %d  |  "
-            "Benchmark iterations: 5 warmup + %d timed\n\n",
-            N, num_edges, avg_degree, max_iterations, iters);
+            "Benchmark passes: %d warmup + %d timed\n\n",
+            N, num_edges, avg_degree, max_iterations, num_warmup, num_iters);
 
     // Allocate device memory
     int *d_row_offsets, *d_col_indices, *d_labels, *d_changed;
@@ -236,70 +240,50 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(d_row_offsets, row_offsets.data(), (N + 1) * sizeof(int), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_col_indices, col_indices.data(), num_edges * sizeof(int), hipMemcpyHostToDevice));
 
+    char params[192];
+    snprintf(params, sizeof(params),
+             "\"num_vertices\":%d,\"avg_degree\":%d,\"max_iterations\":%d,"
+             "\"block_size\":%d,\"iterations\":%d",
+             num_vertices, avg_degree, max_iterations, block_size, iterations);
+
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc;
+
     // -------------------------------------------------------------------
-    // Warmup
+    // Warmup passes (records not emitted)
     // -------------------------------------------------------------------
     for (int w = 0; w < num_warmup; ++w) {
         run_cc_gpu(N, max_iterations, block_size,
-                   d_row_offsets, d_col_indices, d_labels, d_changed);
+                   d_row_offsets, d_col_indices, d_labels, d_changed,
+                   &timer, &acc);
     }
 
     // -------------------------------------------------------------------
-    // Timed iterations
+    // Timed passes — one record per pass with the accumulated kernel time
     // -------------------------------------------------------------------
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    std::vector<double> times((size_t)iters);
-    int total_cc_iters = 0;
-    for (int i = 0; i < iters; ++i) {
-        HIP_CHECK(hipEventRecord(evStart, 0));
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
         int cc_iters = run_cc_gpu(N, max_iterations, block_size,
-                                   d_row_offsets, d_col_indices, d_labels, d_changed);
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
-        total_cc_iters += cc_iters;
+                                  d_row_offsets, d_col_indices, d_labels, d_changed,
+                                  &timer, &acc);
+        bench_emit_iter("cc_propagate_kernel", i, &acc, params);
+        total_gpu_ms += acc.gpu_ms;
+        fprintf(stderr, "pass %d: gpu = %.3f ms, host = %.3f ms (%d CC iterations)\n",
+                i, acc.gpu_ms, acc.host_ms, cc_iters);
     }
 
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    double sum = 0.0;
-    for (int i = 0; i < iters; ++i) sum += times[i];
-    double avg_ms = sum / iters;
-    double avg_cc_iters = (double)total_cc_iters / iters;
-
-    double mteps = (double)num_edges * avg_cc_iters / (avg_ms * 1e-3) / 1e6;
-
-    double total_ms = sum;
-
-    // JSON-lines kernel event
-    printf("{\"type\":\"kernel\",\"name\":\"cc_propagate_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_vertices\":%d,\"avg_degree\":%d,"
-           "\"max_iterations\":%d,\"block_size\":%d,\"iterations\":%d}}\n",
-           avg_ms, num_vertices, avg_degree, max_iterations, block_size, iterations);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"mteps\",\"value\":%.2f},"
-           "{\"name\":\"avg_cc_iterations\",\"value\":%.1f}]}\n",
-           total_ms, mteps, avg_cc_iters);
-
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
-    fprintf(stderr, "Avg CC iterations: %.1f\n", avg_cc_iters);
-    fprintf(stderr, "Throughput:   %.2f MTEPS\n", mteps);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // -------------------------------------------------------------------
     // Verification
     // -------------------------------------------------------------------
     {
         run_cc_gpu(N, max_iterations, block_size,
-                   d_row_offsets, d_col_indices, d_labels, d_changed);
+                   d_row_offsets, d_col_indices, d_labels, d_changed,
+                   &timer, &acc);
 
         std::vector<int> h_gpu_labels(N);
         HIP_CHECK(hipMemcpy(h_gpu_labels.data(), d_labels, N * sizeof(int), hipMemcpyDeviceToHost));
@@ -327,6 +311,7 @@ int main(int argc, char** argv) {
             fprintf(stderr, "PASS\n");
     }
 
+    bench_timer_destroy(&timer);
     HIP_CHECK(hipFree(d_row_offsets));
     HIP_CHECK(hipFree(d_col_indices));
     HIP_CHECK(hipFree(d_labels));

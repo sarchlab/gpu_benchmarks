@@ -14,44 +14,27 @@
 //   ./rodinia_srad [--image_size N] [--num_iterations K] [--block_size B]
 //
 //   --image_size N      Image dimension (N×N)              (default: 512)
-//   --num_iterations K  SRAD iterations per timed launch   (default: 50)
+//   --num_iterations K  SRAD iterations per pass           (default: 50)
 //   --block_size B      Thread-block dimension (B×B)       (default: 16)
 //
-// Output (stdout): CSV row — kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-// Output (stderr): Effective bandwidth in GB/s
+// Environment variables (override argv):
+//   BENCH_PARAM_image_size, BENCH_PARAM_num_iterations, BENCH_PARAM_block_size
+//   BENCH_PARAM_num_warmup   (warmup SRAD passes, default 3)
+//   BENCH_PARAM_num_iters    (timed SRAD passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// kernel (srad1, srad2) carrying that kernel's accumulated GPU event time
+// (time_ms) and host time (host_time_ms) across the K SRAD iterations within
+// the pass, then a summary whose total_time_ms is the SUM of all recorded
+// GPU event times. Effective bandwidth is derived downstream from time_ms
+// and params.
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
-#include <cfloat>
-#include <vector>
 
-// ---------------------------------------------------------------------------
-// Inlined bench_common_hip.h utilities
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
-
-struct BenchResult {
-    const char* kernel_name;
-    const char* problem_size;
-    int         iterations;
-    double      avg_ms;
-    double      min_ms;
-    double      max_ms;
-    double      stddev_ms;
-};
-
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -62,79 +45,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
         }
     }
     return defaultVal;
-}
-
-
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
-
-template <typename Func>
-static BenchResult runBenchmark(const char* kernel_name,
-                                const char* problem_size,
-                                int         iterations,
-                                int         num_warmup,
-                                Func        func) {
-    BenchmarkTimer timer;
-
-    // Warmup
-    for (int w = 0; w < num_warmup; ++w) {
-        func();
-        HIP_CHECK(hipDeviceSynchronize());
-    }
-
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        timer.record_start();
-        func();
-        timer.record_stop();
-        times[i] = static_cast<double>(timer.elapsed_ms());
-    }
-
-    double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        sum += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg = sum / 1;
-
-    double variance = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        double d = times[i] - avg;
-        variance += d * d;
-    }
-    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
-
-    BenchResult r;
-    r.kernel_name  = kernel_name;
-    r.problem_size = problem_size;
-    r.iterations   = iterations;
-    r.avg_ms       = avg;
-    r.min_ms       = mn;
-    r.max_ms       = mx;
-    r.stddev_ms    = stddev;
-    return r;
 }
 
 // ---------------------------------------------------------------------------
@@ -263,7 +173,8 @@ int main(int argc, char** argv) {
     if (env_val) num_iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_dim = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_bench_iters = bench_num_iters();
 
     int rows = image_size;
     int cols = image_size;
@@ -303,74 +214,58 @@ int main(int argc, char** argv) {
     dim3 grid((cols + block_dim - 1) / block_dim,
               (rows + block_dim - 1) / block_dim);
 
-    char problemSize[64];
-    snprintf(problemSize, sizeof(problemSize), "%dx%d", rows, cols);
-    (void)problemSize;
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"image_size\":%d,\"num_iterations\":%d,\"block_size\":%d",
+             image_size, num_iters, block_dim);
 
-    // Per-kernel timing accumulators (summed across the k-loop).
-    double t_srad1 = 0.0, t_srad2 = 0.0;
+    // Per-kernel accumulators: each pass launches srad1 and srad2 once per
+    // SRAD iteration; the accumulated GPU/host time of all K iterations
+    // within one pass becomes that pass's record for the kernel.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_srad1, acc_srad2;
 
-    // Runs the full SRAD sequence once. When `timed`, srad1 and srad2 are each
-    // wrapped in their own event pair inside the k-loop so each kernel reports
-    // its own accumulated time.
-    BenchmarkTimer timer;
-    auto run_srad = [&](bool timed) {
-        // Reset image to original before each run
+    // One full SRAD pass. The diffusion updates the image J in place, so J is
+    // reset to the pristine input at the start of every pass (untimed) —
+    // each pass smooths the same image.
+    auto run_pass = [&]() {
+        bench_lap_reset(&acc_srad1);
+        bench_lap_reset(&acc_srad2);
+
         HIP_CHECK(hipMemcpy(d_J, h_J_orig, size * sizeof(float),
                             hipMemcpyHostToDevice));
 
         for (int k = 0; k < num_iters; ++k) {
-            if (timed) {
-                timer.record_start();
+            bench_lap_add(&acc_srad1, bench_time_op(&timer, [&]() {
                 srad1<<<grid, block>>>(d_J, d_dN, d_dS, d_dW, d_dE, d_c, rows, cols, q0sqr);
-                timer.record_stop();
-                t_srad1 += static_cast<double>(timer.elapsed_ms());
-
-                timer.record_start();
+            }));
+            bench_lap_add(&acc_srad2, bench_time_op(&timer, [&]() {
                 srad2<<<grid, block>>>(d_J, d_dN, d_dS, d_dW, d_dE, d_c, rows, cols, lambda);
-                timer.record_stop();
-                t_srad2 += static_cast<double>(timer.elapsed_ms());
-            } else {
-                srad1<<<grid, block>>>(d_J, d_dN, d_dS, d_dW, d_dE, d_c, rows, cols, q0sqr);
-                srad2<<<grid, block>>>(d_J, d_dN, d_dS, d_dW, d_dE, d_c, rows, cols, lambda);
-            }
+            }));
         }
-        HIP_CHECK(hipDeviceSynchronize());
     };
 
-    // Warmup — full kernel sequence, untimed
+    // Warmup passes (records not emitted)
     for (int w = 0; w < num_warmup; ++w) {
-        run_srad(false);
+        run_pass();
     }
 
-    // Timed run — each kernel measured separately
-    for (int i = 0; i < 1; ++i) {
-        run_srad(true);
+    // Timed passes — one record per kernel per pass
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_bench_iters; ++i) {
+        run_pass();
+        bench_emit_iter("srad1", i, &acc_srad1, params);
+        bench_emit_iter("srad2", i, &acc_srad2, params);
+        total_gpu_ms += acc_srad1.gpu_ms + acc_srad2.gpu_ms;
+        fprintf(stderr, "pass %d: srad1 gpu = %.3f ms, srad2 gpu = %.3f ms\n",
+                i, acc_srad1.gpu_ms, acc_srad2.gpu_ms);
     }
 
-    double total_ms = t_srad1 + t_srad2;
-
-    // Effective bandwidth
-    double bytes_per_iter = 13.0 * (double)size * sizeof(float);
-    double total_bytes    = bytes_per_iter * num_iters;
-    double bw_gb = total_bytes / (total_ms * 1e-3) / 1e9;
-
-    // JSON-lines kernel events
-    printf("{\"type\":\"kernel\",\"name\":\"srad1\",\"time_ms\":%.6f,"
-           "\"params\":{\"image_size\":%d,\"num_iterations\":%d,\"block_size\":%d}}\n",
-           t_srad1, image_size, num_iters, block_dim);
-
-    printf("{\"type\":\"kernel\",\"name\":\"srad2\",\"time_ms\":%.6f,"
-           "\"params\":{\"image_size\":%d,\"num_iterations\":%d,\"block_size\":%d}}\n",
-           t_srad2, image_size, num_iters, block_dim);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"effective_bandwidth_gbps\",\"value\":%.2f}]}\n",
-           total_ms, bw_gb);
-
-    fprintf(stderr, "Effective bandwidth: %.2f GB/s  (srad1=%.4f srad2=%.4f ms, %d SRAD iters/launch)\n",
-            bw_gb, t_srad1, t_srad2, num_iters);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes (%d SRAD iters/pass)\n",
+            total_gpu_ms, num_bench_iters, num_iters);
 
     HIP_CHECK(hipFree(d_J));
     HIP_CHECK(hipFree(d_dN));

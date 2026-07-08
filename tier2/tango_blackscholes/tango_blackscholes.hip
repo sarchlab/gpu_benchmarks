@@ -11,34 +11,29 @@
 //
 //   --size N         Number of options (default: 4194304 = 4M)
 //
-// Output (stdout): CSV row — tango_blackscholes,<N>,<time_ms>,<Moptions_per_sec>
+// Environment variables (override argv):
+//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
+//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
+//
+// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
+// carrying the GPU event time (time_ms) and host wall-clock time
+// (host_time_ms), then a summary whose total_time_ms is the SUM of all
+// iterations' GPU event times. Options/sec is derived downstream from
+// time_ms and params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <cfloat>
-#include <vector>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -195,7 +190,15 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
-    int num_warmup = 5;
+    // Validate string params against their known sets so the values echoed
+    // into the JSON records are always canonical literals.
+    if (strcmp(precision, "float") != 0 && strcmp(precision, "double") != 0 &&
+        strcmp(precision, "half") != 0) {
+        fprintf(stderr, "Invalid precision '%s' (use float, double, half)\n", precision);
+        return 1;
+    }
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int N     = size;
 
@@ -209,8 +212,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Options: %d  |  Iterations: 5 warmup + %d timed\n\n",
-            N);
+    fprintf(stderr, "Options: %d  |  Iterations: %d warmup + %d timed\n\n",
+            N, num_warmup, num_iters);
 
     // Host allocation + initialization
     float* h_S     = (float*)malloc(bytes);
@@ -246,62 +249,24 @@ int main(int argc, char** argv) {
     int blockSize = block_size;
     int gridSize  = (N + blockSize - 1) / blockSize;
 
-    // -------------------------------------------------------------------
-    // Warmup
-    // -------------------------------------------------------------------
-    for (int w = 0; w < num_warmup; ++w) {
-        blackscholes_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
-            d_S, d_K, d_T, d_sigma, r, d_call, d_put, N);
-        HIP_CHECK(hipDeviceSynchronize());
-    }
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
+             size, block_size, precision);
 
-    // -------------------------------------------------------------------
-    // Timed iterations
-    // -------------------------------------------------------------------
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
+    // Warmup + timed iterations, each recorded individually. Inputs (S, K,
+    // T, sigma) are read-only and outputs (call, put) are fully overwritten
+    // every launch, so repeated launches perform identical work — no reset
+    // needed.
+    double total_gpu_ms =
+        bench_run_loop("blackscholes_kernel", num_warmup, num_iters, params, [&]() {
+            blackscholes_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+                d_S, d_K, d_T, d_sigma, r, d_call, d_put, N);
+        });
 
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        blackscholes_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
-            d_S, d_K, d_T, d_sigma, r, d_call, d_put, N);
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
-    }
-
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    // Compute average time
-    double sum = 0.0;
-    for (int i = 0; i < 1; ++i) sum += times[i];
-    double avg_ms = sum / 1;
-
-    // M options/sec = N / time_s / 1e6
-    double mopts = (double)N / (avg_ms * 1e-3) / 1e6;
-
-    double total_ms = sum;
-
-    // JSON-lines kernel event
-    printf("{\"type\":\"kernel\",\"name\":\"blackscholes_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"precision\":\"%s\"}}\n",
-           avg_ms, size, block_size, precision);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"moptions_per_sec\",\"value\":%.2f}]}\n",
-           total_ms, mopts);
-
-    // Human-readable output to stderr
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
-    fprintf(stderr, "Performance:  %.4f M options/sec\n", mopts);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
+            total_gpu_ms, num_iters);
 
     // -------------------------------------------------------------------
     // Verification

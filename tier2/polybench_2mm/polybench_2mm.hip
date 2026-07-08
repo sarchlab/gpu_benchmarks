@@ -4,28 +4,29 @@
 // for NxN square matrices. Tiled shared-memory implementation.
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
+//
+// Environment variables (override argv):
+//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_alpha,
+//   BENCH_PARAM_beta, BENCH_PARAM_precision (one of: half, float, double)
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// kernel launch (mm_kernel_1, mm_kernel_2) carrying its GPU event time
+// (time_ms) and host wall-clock time (host_time_ms), then a summary whose
+// total_time_ms is the SUM of all recorded GPU event times. GFLOPS
+// (4*N^3 / time) is derived downstream from time_ms and params.
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
-#include <cfloat>
-#include <vector>
 
 // ---------------------------------------------------------------------------
 // Error-checking macro
 // ---------------------------------------------------------------------------
 
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -119,8 +120,19 @@ int main(int argc, char** argv) {
     env_val = getenv("BENCH_PARAM_beta");
     if (env_val) beta = (float)atof(env_val);
     env_val = getenv("BENCH_PARAM_precision");
-    if (env_val) precision = env_val;
-    int num_warmup = 5;
+    if (env_val) {
+        // Validate against the known set — emit canonical literals only.
+        if (strcmp(env_val, "half") == 0)        precision = "half";
+        else if (strcmp(env_val, "float") == 0)  precision = "float";
+        else if (strcmp(env_val, "double") == 0) precision = "double";
+        else {
+            fprintf(stderr, "Error: BENCH_PARAM_precision must be one of "
+                    "half, float, double (got \"%s\")\n", env_val);
+            return 1;
+        }
+    }
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     size_t bytes = (size_t)N * N * sizeof(float);
 
@@ -131,8 +143,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "2MM: D=alpha*A*B+beta*D, E=alpha*C*D+beta*E  |  N=%d  |  "
-            "alpha=%.1f  beta=%.1f warmup + %d timed\n\n",
-            N, alpha, beta, num_warmup);
+            "alpha=%.1f  beta=%.1f  |  %d warmup + %d timed\n\n",
+            N, alpha, beta, num_warmup, num_iters);
 
     // Host allocations
     float* h_A = (float*)malloc(bytes);
@@ -165,73 +177,56 @@ int main(int argc, char** argv) {
     dim3 block(TILE_SIZE, TILE_SIZE);
     dim3 grid((N + TILE_SIZE - 1) / TILE_SIZE, (N + TILE_SIZE - 1) / TILE_SIZE);
 
-    auto run_2mm = [&]() {
-        HIP_CHECK(hipMemcpy(d_D, h_D, bytes, hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(d_E, h_E, bytes, hipMemcpyHostToDevice));
-        mm_kernel<<<grid, block>>>(d_A, d_B, d_D, N, alpha, beta);
-        mm_kernel<<<grid, block>>>(d_C, d_D, d_E, N, alpha, beta);
-    };
+    char params[192];
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"block_size\":%d,\"alpha\":%.2f,\"beta\":%.2f,"
+             "\"precision\":\"%s\"",
+             N, block_size, alpha, beta, precision);
 
-    // Warmup
-    for (int w = 0; w < num_warmup; ++w) {
-        run_2mm();
-        HIP_CHECK(hipDeviceSynchronize());
-    }
+    // Per-kernel accumulators: one launch of each mm_kernel per pass.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_mm1, acc_mm2;
 
-    // Timed iterations — time each mm_kernel launch separately
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
+    // One full 2MM pass. D and E are rewritten in place (beta*Out term), so
+    // the pristine inputs are re-uploaded at the start of every pass
+    // (untimed) — the same reset the original code performed.
+    auto run_2mm_pass = [&]() {
+        bench_lap_reset(&acc_mm1);
+        bench_lap_reset(&acc_mm2);
 
-    double t_mm1 = 0.0, t_mm2 = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        // Restore D and E inputs (outside timing) before each timed pass
         HIP_CHECK(hipMemcpy(d_D, h_D, bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_E, h_E, bytes, hipMemcpyHostToDevice));
 
         // mm_kernel #1: D = alpha*A*B + beta*D
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        mm_kernel<<<grid, block>>>(d_A, d_B, d_D, N, alpha, beta);
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-        float ms1 = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms1, evStart, evStop));
-        t_mm1 += (double)ms1;
+        bench_lap_add(&acc_mm1, bench_time_op(&timer, [&]() {
+            mm_kernel<<<grid, block>>>(d_A, d_B, d_D, N, alpha, beta);
+        }));
 
         // mm_kernel #2: E = alpha*C*D + beta*E
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        mm_kernel<<<grid, block>>>(d_C, d_D, d_E, N, alpha, beta);
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-        float ms2 = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms2, evStart, evStop));
-        t_mm2 += (double)ms2;
+        bench_lap_add(&acc_mm2, bench_time_op(&timer, [&]() {
+            mm_kernel<<<grid, block>>>(d_C, d_D, d_E, N, alpha, beta);
+        }));
+    };
+
+    for (int w = 0; w < num_warmup; ++w) {
+        run_2mm_pass();
     }
 
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_2mm_pass();
+        bench_emit_iter("mm_kernel_1", i, &acc_mm1, params);
+        bench_emit_iter("mm_kernel_2", i, &acc_mm2, params);
+        total_gpu_ms += acc_mm1.gpu_ms + acc_mm2.gpu_ms;
+        fprintf(stderr, "pass %d: mm1 gpu = %.3f ms, mm2 gpu = %.3f ms\n",
+                i, acc_mm1.gpu_ms, acc_mm2.gpu_ms);
+    }
 
-    double avg_ms = t_mm1 + t_mm2;
-
-    double gflops = 4.0 * (double)N * (double)N * (double)N
-                    / (avg_ms * 1e-3) / 1e9;
-
-    fprintf(stderr, "Performance: %.2f GFLOPS  (total %.4f ms: mm1=%.4f mm2=%.4f)\n",
-            gflops, avg_ms, t_mm1, t_mm2);
-
-    printf("{\"type\":\"kernel\",\"name\":\"mm_kernel_1\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"alpha\":%.2f,\"beta\":%.2f,\"precision\":\"%s\"}}\n",
-           t_mm1, N, block_size, alpha, beta, precision);
-
-    printf("{\"type\":\"kernel\",\"name\":\"mm_kernel_2\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"alpha\":%.2f,\"beta\":%.2f,\"precision\":\"%s\"}}\n",
-           t_mm2, N, block_size, alpha, beta, precision);
-
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
-           avg_ms, gflops);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     HIP_CHECK(hipFree(d_A));
     HIP_CHECK(hipFree(d_B));

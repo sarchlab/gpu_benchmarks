@@ -2,7 +2,7 @@
   "benchmark": "shoc_gemm",
   "tier": 2,
   "suite": "shoc",
-  "description": "Dense matrix multiply C = alpha*A*B + beta*C for NxN square float matrices. Measures peak compute throughput in GFLOPS.",
+  "description": "Dense matrix multiply C = alpha*A*B + beta*C for NxN square float matrices. Peak compute throughput (GFLOPS) is derived downstream from the emitted per-iteration times.",
   "scaling_param": {
     "name": "size",
     "description": "Square matrix dimension N (NxN matrices)",

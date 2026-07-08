@@ -2,7 +2,7 @@
   "benchmark": "chai_cedd",
   "tier": 2,
   "suite": "chai",
-  "description": "Canny Edge Detection pipeline: Gaussian blur, Sobel gradient, magnitude+direction, non-maximum suppression, hysteresis thresholding. Measures throughput in Mpixels/s.",
+  "description": "Canny Edge Detection pipeline: Gaussian blur, Sobel gradient, magnitude+direction, non-maximum suppression, hysteresis thresholding. Emits per-pass, per-kernel GPU times; Mpixels/s is derived downstream.",
   "scaling_param": {
     "name": "width",
     "description": "Image width in pixels (W= parameter, also sets height for square image)",

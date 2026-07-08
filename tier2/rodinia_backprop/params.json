@@ -2,7 +2,7 @@
   "benchmark": "rodinia_backprop",
   "tier": 2,
   "suite": "rodinia",
-  "description": "Two-layer fully-connected neural network forward + backward pass. Architecture: INPUT_N -> HIDDEN_N -> OUTPUT_N. Measures throughput in GFLOPS.",
+  "description": "Two-layer fully-connected neural network forward + backward pass. Architecture: INPUT_N -> HIDDEN_N -> OUTPUT_N. Emits per-iteration kernel times; throughput in GFLOPS is derived downstream.",
   "scaling_param": {
     "name": "input",
     "description": "Input layer size (number of input neurons)",

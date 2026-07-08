@@ -11,29 +11,27 @@
 //   W=<width>    Image width  (default: 2048)
 //   H=<height>   Image height (default: 2048)
 //
-// Output (stdout): CSV row — chai_cedd,<WxH>,<time_ms>,<Mpixels_per_sec>
+// Environment variables (override argv):
+//   BENCH_PARAM_width, BENCH_PARAM_height,
+//   BENCH_PARAM_threshold_low, BENCH_PARAM_threshold_high
+//   BENCH_PARAM_num_warmup   (warmup pipeline passes, default 3)
+//   BENCH_PARAM_num_iters    (timed pipeline passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// pipeline kernel carrying that kernel's GPU event time and host wall-clock
+// time within the pass, then a summary whose total_time_ms is the SUM of all
+// recorded GPU event times. Throughput (Mpixels/sec) is derived downstream
+// from time_ms and params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing (key=value style)
@@ -388,7 +386,8 @@ int main(int argc, char** argv) {
     if (env_val) threshold_low = atoi(env_val);
     env_val = getenv("BENCH_PARAM_threshold_high");
     if (env_val) threshold_high = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int W = width;
     int H = height;
@@ -401,7 +400,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Canny Edge Detection  |  Image: %dx%d  |  "
-            "Iterations: %d warmup + 5 timed\n\n", W, H, num_warmup);
+            "Passes: %d warmup + %d timed\n\n", W, H, num_warmup, num_iters);
 
     // Generate synthetic grayscale image
     std::vector<float> h_input(npix);
@@ -431,129 +430,68 @@ int main(int argc, char** argv) {
 
     float low_t = (float)threshold_low, high_t = (float)threshold_high;
 
-    // Run the 5-stage CEDD pipeline. When timing events are supplied, each
-    // kernel launch is wrapped in its own event pair and its elapsed time is
-    // added to the matching accumulator, so every kernel reports its OWN
-    // separately measured GPU time.
-    auto run_cedd = [&](hipEvent_t* evStart, hipEvent_t* evStop,
-                        double* t_gauss, double* t_sobel, double* t_magdir,
-                        double* t_nms, double* t_hyst) {
-        if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-        gaussian_blur_kernel<<<gridDim, blockDim>>>(d_input, d_blurred, W, H);
-        if (evStart) {
-            HIP_CHECK(hipEventRecord(*evStop, 0));
-            HIP_CHECK(hipEventSynchronize(*evStop));
-            float ms = 0.0f;
-            HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
-            *t_gauss += (double)ms;
-        }
+    char params[192];
+    snprintf(params, sizeof(params),
+             "\"width\":%d,\"height\":%d,\"threshold_low\":%d,\"threshold_high\":%d",
+             width, height, threshold_low, threshold_high);
 
-        if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-        sobel_kernel<<<gridDim, blockDim>>>(d_blurred, d_gx, d_gy, W, H);
-        if (evStart) {
-            HIP_CHECK(hipEventRecord(*evStop, 0));
-            HIP_CHECK(hipEventSynchronize(*evStop));
-            float ms = 0.0f;
-            HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
-            *t_sobel += (double)ms;
-        }
+    // Per-kernel accumulators: each pass launches every pipeline kernel once;
+    // the measured GPU/host time of each launch becomes that pass's record
+    // for the kernel.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_gauss, acc_sobel, acc_magdir, acc_nms, acc_hyst;
 
-        if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-        magnitude_direction_kernel<<<gridDim, blockDim>>>(d_gx, d_gy, d_mag, d_dir, W, H);
-        if (evStart) {
-            HIP_CHECK(hipEventRecord(*evStop, 0));
-            HIP_CHECK(hipEventSynchronize(*evStop));
-            float ms = 0.0f;
-            HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
-            *t_magdir += (double)ms;
-        }
+    // One full 5-stage CEDD pass. The pipeline is feed-forward: d_input is
+    // never written and every intermediate buffer is fully overwritten each
+    // pass, so no state reset is needed between passes.
+    auto run_cedd_pass = [&]() {
+        bench_lap_reset(&acc_gauss);
+        bench_lap_reset(&acc_sobel);
+        bench_lap_reset(&acc_magdir);
+        bench_lap_reset(&acc_nms);
+        bench_lap_reset(&acc_hyst);
 
-        if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-        nms_kernel<<<gridDim, blockDim>>>(d_mag, d_dir, d_nms, W, H);
-        if (evStart) {
-            HIP_CHECK(hipEventRecord(*evStop, 0));
-            HIP_CHECK(hipEventSynchronize(*evStop));
-            float ms = 0.0f;
-            HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
-            *t_nms += (double)ms;
-        }
-
-        if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-        hysteresis_kernel<<<gridDim, blockDim>>>(d_nms, d_edges, W, H, low_t, high_t);
-        if (evStart) {
-            HIP_CHECK(hipEventRecord(*evStop, 0));
-            HIP_CHECK(hipEventSynchronize(*evStop));
-            float ms = 0.0f;
-            HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
-            *t_hyst += (double)ms;
-        }
+        bench_lap_add(&acc_gauss, bench_time_op(&timer, [&]() {
+            gaussian_blur_kernel<<<gridDim, blockDim>>>(d_input, d_blurred, W, H);
+        }));
+        bench_lap_add(&acc_sobel, bench_time_op(&timer, [&]() {
+            sobel_kernel<<<gridDim, blockDim>>>(d_blurred, d_gx, d_gy, W, H);
+        }));
+        bench_lap_add(&acc_magdir, bench_time_op(&timer, [&]() {
+            magnitude_direction_kernel<<<gridDim, blockDim>>>(d_gx, d_gy, d_mag, d_dir, W, H);
+        }));
+        bench_lap_add(&acc_nms, bench_time_op(&timer, [&]() {
+            nms_kernel<<<gridDim, blockDim>>>(d_mag, d_dir, d_nms, W, H);
+        }));
+        bench_lap_add(&acc_hyst, bench_time_op(&timer, [&]() {
+            hysteresis_kernel<<<gridDim, blockDim>>>(d_nms, d_edges, W, H, low_t, high_t);
+        }));
     };
 
-    // -------------------------------------------------------------------
-    // Warmup
-    // -------------------------------------------------------------------
     for (int w = 0; w < num_warmup; ++w) {
-        run_cedd(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);  // untimed
-        HIP_CHECK(hipDeviceSynchronize());
+        run_cedd_pass();
     }
 
-    // -------------------------------------------------------------------
-    // Timed iterations — each kernel measured separately with its own
-    // accumulator.
-    // -------------------------------------------------------------------
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    double t_gauss = 0.0, t_sobel = 0.0, t_magdir = 0.0, t_nms = 0.0, t_hyst = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        run_cedd(&evStart, &evStop, &t_gauss, &t_sobel, &t_magdir, &t_nms, &t_hyst);
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_cedd_pass();
+        bench_emit_iter("gaussian_blur_kernel",       i, &acc_gauss,  params);
+        bench_emit_iter("sobel_kernel",               i, &acc_sobel,  params);
+        bench_emit_iter("magnitude_direction_kernel", i, &acc_magdir, params);
+        bench_emit_iter("nms_kernel",                 i, &acc_nms,    params);
+        bench_emit_iter("hysteresis_kernel",          i, &acc_hyst,   params);
+        total_gpu_ms += acc_gauss.gpu_ms + acc_sobel.gpu_ms + acc_magdir.gpu_ms +
+                        acc_nms.gpu_ms + acc_hyst.gpu_ms;
+        fprintf(stderr, "pass %d: gauss=%.3f sobel=%.3f magdir=%.3f nms=%.3f hyst=%.3f ms\n",
+                i, acc_gauss.gpu_ms, acc_sobel.gpu_ms, acc_magdir.gpu_ms,
+                acc_nms.gpu_ms, acc_hyst.gpu_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    double total_ms = t_gauss + t_sobel + t_magdir + t_nms + t_hyst;
-    double avg_ms   = total_ms;
-
-    // Mpixels/sec = W * H / time_s / 1e6
-    double mpix_per_sec = (double)npix / (avg_ms * 1e-3) / 1e6;
-
-    // JSON-lines kernel events (5 kernels in the pipeline, each with its OWN time)
-    printf("{\"type\":\"kernel\",\"name\":\"gaussian_blur_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"width\":%d,\"height\":%d,\"threshold_low\":%d,"
-           "\"threshold_high\":%d}}\n",
-           t_gauss, width, height, threshold_low, threshold_high);
-
-    printf("{\"type\":\"kernel\",\"name\":\"sobel_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"width\":%d,\"height\":%d,\"threshold_low\":%d,"
-           "\"threshold_high\":%d}}\n",
-           t_sobel, width, height, threshold_low, threshold_high);
-
-    printf("{\"type\":\"kernel\",\"name\":\"magnitude_direction_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"width\":%d,\"height\":%d,\"threshold_low\":%d,"
-           "\"threshold_high\":%d}}\n",
-           t_magdir, width, height, threshold_low, threshold_high);
-
-    printf("{\"type\":\"kernel\",\"name\":\"nms_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"width\":%d,\"height\":%d,\"threshold_low\":%d,"
-           "\"threshold_high\":%d}}\n",
-           t_nms, width, height, threshold_low, threshold_high);
-
-    printf("{\"type\":\"kernel\",\"name\":\"hysteresis_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"width\":%d,\"height\":%d,\"threshold_low\":%d,"
-           "\"threshold_high\":%d}}\n",
-           t_hyst, width, height, threshold_low, threshold_high);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"mpixels_per_sec\",\"value\":%.2f}]}\n",
-           total_ms, mpix_per_sec);
-
-    // Human-readable output to stderr
-    fprintf(stderr, "Average time: %.4f ms  (gauss=%.4f sobel=%.4f magdir=%.4f nms=%.4f hyst=%.4f)\n",
-            avg_ms, t_gauss, t_sobel, t_magdir, t_nms, t_hyst);
-    fprintf(stderr, "Throughput:   %.4f Mpixels/sec\n", mpix_per_sec);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // -------------------------------------------------------------------
     // Verification: compare a small sub-region with CPU reference

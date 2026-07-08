@@ -4,10 +4,22 @@
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer.
 //
-// Output (stdout): JSON-lines
+// Environment variables:
+//   BENCH_PARAM_grid_size, BENCH_PARAM_block_size,
+//   BENCH_PARAM_num_vcycles, BENCH_PARAM_num_smooth_steps
+//   BENCH_PARAM_num_warmup   (warmup MG passes, default 3)
+//   BENCH_PARAM_num_iters    (timed MG passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass (one pass = num_vcycles V-cycles from a
+// zeroed solution), one {"type":"kernel",...} JSON line per kernel
+// (smooth_kernel, restrict_kernel, prolong_kernel) carrying that kernel's
+// accumulated GPU event time (time_ms) and host wall-clock time
+// (host_time_ms) within the pass, then a summary whose total_time_ms is the
+// SUM of all recorded GPU event times. Mcells/sec is derived downstream
+// from time_ms and params.
 // Output (stderr): human-readable
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -19,15 +31,7 @@
 // Error-checking macro
 // ---------------------------------------------------------------------------
 
-#define HIP_CHECK(cmd)                                                          \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                  \
-        if (_e != hipSuccess) {                                                 \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                         \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                 \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // 3D indexing helper
@@ -232,7 +236,8 @@ int main(int argc, char** argv) {
     if (env_val) num_vcycles = atoi(env_val);
     env_val = getenv("BENCH_PARAM_num_smooth_steps");
     if (env_val) num_smooth = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], "--size") == 0) N = atoi(argv[i+1]);
@@ -247,8 +252,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "NPB MG  |  Grid: %d x %d x %d  |  V-cycles: %d  |  "
-            "Smooth steps: %d  |  Timed runs: 5 warmup + %d timed\n\n",
-            N, N, N, num_vcycles, num_smooth);
+            "Smooth steps: %d  |  %d warmup + %d timed passes\n\n",
+            N, N, N, num_vcycles, num_smooth, num_warmup, num_iters);
 
     std::vector<int> levels;
     { int sz = N; while (sz >= 4) { levels.push_back(sz); sz /= 2; } }
@@ -289,27 +294,33 @@ int main(int argc, char** argv) {
     float smooth_weight = 1.0f;
     int smem = block_size * sizeof(float);
 
-    // Per-kernel timing events (used only when accumulators are supplied)
-    hipEvent_t kStart, kStop;
-    HIP_CHECK(hipEventCreate(&kStart));
-    HIP_CHECK(hipEventCreate(&kStop));
+    char params[192];
+    snprintf(params, sizeof(params),
+             "\"grid_size\":%d,\"block_size\":%d,"
+             "\"num_vcycles\":%d,\"num_smooth_steps\":%d",
+             N, block_size, num_vcycles, num_smooth);
 
-    // run_vcycle accumulates per-kernel GPU time for the emitted kernels
-    // (smooth / restrict / prolong). Passing nullptr runs untimed.
-    auto run_vcycle = [&](double* smooth_acc, double* restrict_acc, double* prolong_acc) {
+    // Per-kernel accumulators for the emitted kernels (smooth / restrict /
+    // prolong), reused across V-cycles within one MG pass.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_smooth, acc_restrict, acc_prolong;
+
+    // One V-cycle. When `timed` is true, every emitted kernel launch is
+    // individually bracketed and accumulated. residual_kernel is auxiliary
+    // work inside the pass; as in the original benchmark it is neither
+    // timed nor emitted, so it stays outside the timed brackets.
+    auto run_vcycle = [&](bool timed) {
         for (int lv = 0; lv < num_levels - 1; ++lv) {
             int sz = levels[lv];
             int total = sz * sz * sz;
             int grid = (total + block_size - 1) / block_size;
 
             for (int s = 0; s < num_smooth; ++s) {
-                if (smooth_acc) {
-                    HIP_CHECK(hipEventRecord(kStart, 0));
-                    smooth_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_temp[lv], sz, smooth_weight);
-                    HIP_CHECK(hipEventRecord(kStop, 0));
-                    HIP_CHECK(hipEventSynchronize(kStop));
-                    float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
-                    *smooth_acc += (double)_ms;
+                if (timed) {
+                    bench_lap_add(&acc_smooth, bench_time_op(&timer, [&]() {
+                        smooth_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_temp[lv], sz, smooth_weight);
+                    }));
                 } else {
                     smooth_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_temp[lv], sz, smooth_weight);
                 }
@@ -321,13 +332,10 @@ int main(int argc, char** argv) {
             int csz = levels[lv + 1];
             int ctotal = csz * csz * csz;
             int cgrid = (ctotal + block_size - 1) / block_size;
-            if (restrict_acc) {
-                HIP_CHECK(hipEventRecord(kStart, 0));
-                restrict_kernel<<<cgrid, block_size>>>(d_r[lv], d_rhs[lv + 1], sz, csz);
-                HIP_CHECK(hipEventRecord(kStop, 0));
-                HIP_CHECK(hipEventSynchronize(kStop));
-                float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
-                *restrict_acc += (double)_ms;
+            if (timed) {
+                bench_lap_add(&acc_restrict, bench_time_op(&timer, [&]() {
+                    restrict_kernel<<<cgrid, block_size>>>(d_r[lv], d_rhs[lv + 1], sz, csz);
+                }));
             } else {
                 restrict_kernel<<<cgrid, block_size>>>(d_r[lv], d_rhs[lv + 1], sz, csz);
             }
@@ -341,13 +349,10 @@ int main(int argc, char** argv) {
             int total = sz * sz * sz;
             int grid = (total + block_size - 1) / block_size;
             for (int s = 0; s < num_smooth * 2; ++s) {
-                if (smooth_acc) {
-                    HIP_CHECK(hipEventRecord(kStart, 0));
-                    smooth_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_temp[lv], sz, smooth_weight);
-                    HIP_CHECK(hipEventRecord(kStop, 0));
-                    HIP_CHECK(hipEventSynchronize(kStop));
-                    float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
-                    *smooth_acc += (double)_ms;
+                if (timed) {
+                    bench_lap_add(&acc_smooth, bench_time_op(&timer, [&]() {
+                        smooth_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_temp[lv], sz, smooth_weight);
+                    }));
                 } else {
                     smooth_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_temp[lv], sz, smooth_weight);
                 }
@@ -361,25 +366,19 @@ int main(int argc, char** argv) {
             int grid = (total + block_size - 1) / block_size;
             int csz = levels[lv + 1];
 
-            if (prolong_acc) {
-                HIP_CHECK(hipEventRecord(kStart, 0));
-                prolong_kernel<<<grid, block_size>>>(d_u[lv + 1], d_u[lv], sz, csz);
-                HIP_CHECK(hipEventRecord(kStop, 0));
-                HIP_CHECK(hipEventSynchronize(kStop));
-                float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
-                *prolong_acc += (double)_ms;
+            if (timed) {
+                bench_lap_add(&acc_prolong, bench_time_op(&timer, [&]() {
+                    prolong_kernel<<<grid, block_size>>>(d_u[lv + 1], d_u[lv], sz, csz);
+                }));
             } else {
                 prolong_kernel<<<grid, block_size>>>(d_u[lv + 1], d_u[lv], sz, csz);
             }
 
             for (int s = 0; s < num_smooth; ++s) {
-                if (smooth_acc) {
-                    HIP_CHECK(hipEventRecord(kStart, 0));
-                    smooth_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_temp[lv], sz, smooth_weight);
-                    HIP_CHECK(hipEventRecord(kStop, 0));
-                    HIP_CHECK(hipEventSynchronize(kStop));
-                    float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
-                    *smooth_acc += (double)_ms;
+                if (timed) {
+                    bench_lap_add(&acc_smooth, bench_time_op(&timer, [&]() {
+                        smooth_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_temp[lv], sz, smooth_weight);
+                    }));
                 } else {
                     smooth_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_temp[lv], sz, smooth_weight);
                 }
@@ -388,55 +387,46 @@ int main(int argc, char** argv) {
         }
     };
 
-    auto run_mg = [&](double* smooth_acc, double* restrict_acc, double* prolong_acc) {
+    // One full MG pass: the solution grids are zeroed at the start of every
+    // pass (untimed) — the same reset the original code performed — so each
+    // pass solves the identical fixed-count V-cycle workload regardless of
+    // what earlier passes left behind.
+    auto run_mg_pass = [&](bool timed) {
+        if (timed) {
+            bench_lap_reset(&acc_smooth);
+            bench_lap_reset(&acc_restrict);
+            bench_lap_reset(&acc_prolong);
+        }
         for (int lv = 0; lv < num_levels; ++lv)
             HIP_CHECK(hipMemset(d_u[lv], 0, level_bytes[lv]));
-        for (int v = 0; v < num_vcycles; ++v) run_vcycle(smooth_acc, restrict_acc, prolong_acc);
+        for (int v = 0; v < num_vcycles; ++v) run_vcycle(timed);
     };
 
-    for (int w = 0; w < num_warmup; ++w) { run_mg(nullptr, nullptr, nullptr); HIP_CHECK(hipDeviceSynchronize()); }
-
-    // Timed run — per-kernel accumulators summed across all V-cycle invocations
-    double smooth_ms = 0.0, restrict_ms = 0.0, prolong_ms = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        run_mg(&smooth_ms, &restrict_ms, &prolong_ms);
+    for (int w = 0; w < num_warmup; ++w) {
+        run_mg_pass(false);
+        HIP_CHECK(hipDeviceSynchronize());
     }
 
-    HIP_CHECK(hipEventDestroy(kStart));
-    HIP_CHECK(hipEventDestroy(kStop));
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_mg_pass(true);
+        bench_emit_iter("smooth_kernel",   i, &acc_smooth,   params);
+        bench_emit_iter("restrict_kernel", i, &acc_restrict, params);
+        bench_emit_iter("prolong_kernel",  i, &acc_prolong,  params);
+        total_gpu_ms += acc_smooth.gpu_ms + acc_restrict.gpu_ms + acc_prolong.gpu_ms;
+        fprintf(stderr, "pass %d: smooth gpu = %.3f ms, restrict gpu = %.3f ms, "
+                "prolong gpu = %.3f ms\n",
+                i, acc_smooth.gpu_ms, acc_restrict.gpu_ms, acc_prolong.gpu_ms);
+    }
 
-    double total_ms = smooth_ms + restrict_ms + prolong_ms;
-    double avg_ms = total_ms;
-
-    double mcells = (double)(N * N * N) / 1e6;
-    double mcells_per_sec = mcells / (avg_ms * 1e-3);
-
-    printf("{\"type\":\"kernel\",\"name\":\"smooth_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"grid_size\":%d,\"block_size\":%d,"
-           "\"num_vcycles\":%d,\"num_smooth_steps\":%d}}\n",
-           smooth_ms, N, block_size, num_vcycles, num_smooth);
-
-    printf("{\"type\":\"kernel\",\"name\":\"restrict_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"grid_size\":%d,\"block_size\":%d,"
-           "\"num_vcycles\":%d,\"num_smooth_steps\":%d}}\n",
-           restrict_ms, N, block_size, num_vcycles, num_smooth);
-
-    printf("{\"type\":\"kernel\",\"name\":\"prolong_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"grid_size\":%d,\"block_size\":%d,"
-           "\"num_vcycles\":%d,\"num_smooth_steps\":%d}}\n",
-           prolong_ms, N, block_size, num_vcycles, num_smooth);
-
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"avg_iter_ms\",\"value\":%.4f},"
-           "{\"name\":\"mcells_per_sec\",\"value\":%.2f}]}\n",
-           total_ms, avg_ms, mcells_per_sec);
-
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
-    fprintf(stderr, "Throughput:   %.2f Mcells/sec\n", mcells_per_sec);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // Verification
     {
-        run_mg(nullptr, nullptr, nullptr);
+        run_mg_pass(false);
         HIP_CHECK(hipDeviceSynchronize());
 
         int total = N * N * N;

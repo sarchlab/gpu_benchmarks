@@ -6,29 +6,25 @@
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
-// Output (stdout): JSON-lines protocol
+// Environment variables:
+//   BENCH_PARAM_table_size, BENCH_PARAM_block_size, BENCH_PARAM_num_updates,
+//   BENCH_PARAM_num_threads
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): one {"type":"kernel",...} JSON line per timed pass carrying
+// the GPU event time and host wall-clock time, then a summary whose
+// total_time_ms is the SUM of all passes' GPU event times. GUPS
+// (total_updates / time) is derived downstream from time_ms and params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // GUPS kernel: each thread performs num_updates random XOR updates on the table
@@ -100,7 +96,8 @@ int main(int argc, char** argv) {
     if (env_val) num_updates = atoi(env_val);
     env_val = getenv("BENCH_PARAM_num_threads");
     if (env_val) num_threads = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int gridSize   = (num_threads + block_size - 1) / block_size;
     int actual_threads = gridSize * block_size;
@@ -115,9 +112,10 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "GUPS benchmark  |  Table size: %d (%.2f MB)  |  "
             "Updates/thread: %d  |  Threads: %d  |  Total updates: %lld  |  "
-            "Iterations: 5 warmup + %d timed\n\n",
+            "Iterations: %d warmup + %d timed\n\n",
             table_size, (double)table_size * 8.0 / 1e6,
-            num_updates, actual_threads, total_updates);
+            num_updates, actual_threads, total_updates,
+            num_warmup, num_iters);
 
     // -----------------------------------------------------------------------
     // Allocate table on device
@@ -137,62 +135,45 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_table, h_table.data(), table_bytes, hipMemcpyHostToDevice));
     };
 
-    // -----------------------------------------------------------------------
-    // Warmup
-    // -----------------------------------------------------------------------
+    char params[192];
+    snprintf(params, sizeof(params),
+             "\"table_size\":%d,\"block_size\":%d,\"num_updates\":%d,"
+             "\"num_threads\":%d",
+             table_size, block_size, num_updates, num_threads);
+
+    // One measurement pass. The kernel XOR-accumulates into the table, so the
+    // pristine table is re-uploaded before every pass (untimed, as the old
+    // code did) to keep each pass's work identical. The timed bracket
+    // contains only the kernel launch.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t lap;
+
+    auto run_pass = [&]() {
+        reset_table();
+        lap = bench_time_op(&timer, [&]() {
+            gups_kernel<<<dim3(gridSize), dim3(block_size)>>>(
+                d_table, table_size, num_updates, seed_base);
+        });
+    };
+
     for (int w = 0; w < num_warmup; ++w) {
-        reset_table();
-        gups_kernel<<<dim3(gridSize), dim3(block_size)>>>(
-            d_table, table_size, num_updates, seed_base);
-        HIP_CHECK(hipDeviceSynchronize());
+        run_pass();
     }
 
-    // -----------------------------------------------------------------------
-    // Timed iterations
-    // -----------------------------------------------------------------------
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        reset_table();
-
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        gups_kernel<<<dim3(gridSize), dim3(block_size)>>>(
-            d_table, table_size, num_updates, seed_base);
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_pass();
+        bench_emit_iter("gups_kernel", i, &lap, params);
+        total_gpu_ms += lap.gpu_ms;
+        fprintf(stderr, "gups_kernel iter %d: gpu = %.3f ms, host = %.3f ms\n",
+                i, lap.gpu_ms, lap.host_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    // Compute average time
-    double sum = 0.0;
-    for (int i = 0; i < 1; ++i) sum += times[i];
-    double avg_ms = sum / 1;
-    double total_ms = sum;
-
-    double gups = (double)total_updates / (avg_ms * 1e-3) / 1e9;
-
-    // JSON-lines kernel event
-    printf("{\"type\":\"kernel\",\"name\":\"gups_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"table_size\":%d,\"block_size\":%d,\"num_updates\":%d,"
-           "\"num_threads\":%d}}\n",
-           avg_ms, table_size, block_size, num_updates, num_threads);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"gups\",\"value\":%.6f}]}\n",
-           total_ms, gups);
-
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
-    fprintf(stderr, "Throughput:   %.6f GUPS (Giga Updates Per Second)\n", gups);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
+            total_gpu_ms, num_iters);
 
     // -----------------------------------------------------------------------
     // Verification

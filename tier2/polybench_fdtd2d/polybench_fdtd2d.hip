@@ -17,43 +17,26 @@
 //   ./polybench_fdtd2d [--size N] [--tmax T]
 //
 //   --size N        Grid dimension (N×N)            (default: 512)
-//   --tmax T        Time steps per benchmark iter   (default: 50)
+//   --tmax T        Time steps per benchmark pass   (default: 50)
 //
-// Output (stdout): CSV — kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-// Output (stderr): Effective bandwidth in GB/s
+// Environment variables (override argv):
+//   BENCH_PARAM_size, BENCH_PARAM_tmax, BENCH_PARAM_block_size
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// kernel (fdtd_update_ex, fdtd_update_ey, fdtd_update_hz) carrying that
+// kernel's accumulated GPU event time and host wall-clock time over the
+// pass's TMAX time steps, then a summary whose total_time_ms is the SUM of
+// all recorded GPU event times. Effective bandwidth is derived downstream
+// from time_ms and params.
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
-#include <cfloat>
-#include <vector>
 
-// ---------------------------------------------------------------------------
-// Inlined bench_common_hip.h utilities
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
-
-struct BenchResult {
-    const char* kernel_name;
-    const char* problem_size;
-    int         iterations;
-    double      avg_ms;
-    double      min_ms;
-    double      max_ms;
-    double      stddev_ms;
-};
-
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -64,80 +47,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
         }
     }
     return defaultVal;
-}
-
-
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
-
-static int g_num_warmup = 5;
-
-template <typename Func>
-static BenchResult runBenchmark(const char* kernel_name,
-                                const char* problem_size,
-                                int         iterations,
-                                Func        func) {
-    BenchmarkTimer timer;
-
-    // Warmup
-    for (int w = 0; w < g_num_warmup; ++w) {
-        func();
-    }
-    HIP_CHECK(hipDeviceSynchronize());
-
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        timer.record_start();
-        func();
-        timer.record_stop();
-        times[i] = static_cast<double>(timer.elapsed_ms());
-    }
-
-    double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        sum += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg = sum / 1;
-
-    double variance = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        double d = times[i] - avg;
-        variance += d * d;
-    }
-    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
-
-    BenchResult r;
-    r.kernel_name  = kernel_name;
-    r.problem_size = problem_size;
-    r.iterations   = iterations;
-    r.avg_ms       = avg;
-    r.min_ms       = mn;
-    r.max_ms       = mx;
-    r.stddev_ms    = stddev;
-    return r;
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +122,8 @@ int main(int argc, char** argv) {
     if (env_val) TMAX = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int NX = N, NY = N;
     size_t grid_bytes = (size_t)NX * NY * sizeof(float);
@@ -224,8 +134,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Grid: %d×%d  |  TMAX: %d\n\n",
-            NX, NY, TMAX);
+    fprintf(stderr, "Grid: %d×%d  |  TMAX: %d  |  Passes: %d warmup + %d timed\n\n",
+            NX, NY, TMAX, num_warmup, num_iters);
 
     // Host allocations and initialization
     float* h_ex = (float*)malloc(grid_bytes);
@@ -247,76 +157,62 @@ int main(int argc, char** argv) {
     dim3 block(16, 16);
     dim3 grid2d((NY + block.x - 1) / block.x, (NX + block.y - 1) / block.y);
 
-    char problemSize[64];
-    snprintf(problemSize, sizeof(problemSize), "%dx%d", NX, NY);
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"tmax\":%d,\"block_size\":%d",
+             N, TMAX, block_size);
 
-    g_num_warmup = num_warmup;
-    (void)problemSize;
+    // Per-kernel accumulators: each pass runs TMAX time steps; the
+    // accumulated GPU/host time of a kernel's TMAX launches becomes that
+    // pass's record for the kernel.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_ex, acc_ey, acc_hz;
 
-    BenchmarkTimer timer;
+    // One full FDTD pass. The kernels update ex/ey/hz IN PLACE across the
+    // TMAX steps, so the pristine fields are re-uploaded (untimed) at the
+    // start of every pass to keep each pass's work identical.
+    auto run_fdtd_pass = [&]() {
+        bench_lap_reset(&acc_ex);
+        bench_lap_reset(&acc_ey);
+        bench_lap_reset(&acc_hz);
 
-    // Warmup — run the full kernel sequence, untimed
-    for (int w = 0; w < g_num_warmup; ++w) {
         HIP_CHECK(hipMemcpy(d_ex, h_ex, grid_bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_ey, h_ey, grid_bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_hz, h_hz, grid_bytes, hipMemcpyHostToDevice));
 
         for (int t = 0; t < TMAX; ++t) {
-            fdtd_update_ex<<<grid2d, block>>>(d_ex, d_hz, NX, NY);
-            fdtd_update_ey<<<grid2d, block>>>(d_ey, d_hz, NX, NY);
-            fdtd_update_hz<<<grid2d, block>>>(d_ex, d_ey, d_hz, NX, NY);
+            bench_lap_add(&acc_ex, bench_time_op(&timer, [&]() {
+                fdtd_update_ex<<<grid2d, block>>>(d_ex, d_hz, NX, NY);
+            }));
+            bench_lap_add(&acc_ey, bench_time_op(&timer, [&]() {
+                fdtd_update_ey<<<grid2d, block>>>(d_ey, d_hz, NX, NY);
+            }));
+            bench_lap_add(&acc_hz, bench_time_op(&timer, [&]() {
+                fdtd_update_hz<<<grid2d, block>>>(d_ex, d_ey, d_hz, NX, NY);
+            }));
         }
+    };
+
+    for (int w = 0; w < num_warmup; ++w) {
+        run_fdtd_pass();
     }
-    HIP_CHECK(hipDeviceSynchronize());
 
-    // Timed region — accumulate each kernel's GPU time across the TMAX steps
-    double t_ex = 0.0, t_ey = 0.0, t_hz = 0.0;
-
-    // Reset device arrays from host for reproducibility
-    HIP_CHECK(hipMemcpy(d_ex, h_ex, grid_bytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_ey, h_ey, grid_bytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_hz, h_hz, grid_bytes, hipMemcpyHostToDevice));
-
-    for (int t = 0; t < TMAX; ++t) {
-        timer.record_start();
-        fdtd_update_ex<<<grid2d, block>>>(d_ex, d_hz, NX, NY);
-        timer.record_stop();
-        t_ex += static_cast<double>(timer.elapsed_ms());
-
-        timer.record_start();
-        fdtd_update_ey<<<grid2d, block>>>(d_ey, d_hz, NX, NY);
-        timer.record_stop();
-        t_ey += static_cast<double>(timer.elapsed_ms());
-
-        timer.record_start();
-        fdtd_update_hz<<<grid2d, block>>>(d_ex, d_ey, d_hz, NX, NY);
-        timer.record_stop();
-        t_hz += static_cast<double>(timer.elapsed_ms());
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_fdtd_pass();
+        bench_emit_iter("fdtd_update_ex", i, &acc_ex, params);
+        bench_emit_iter("fdtd_update_ey", i, &acc_ey, params);
+        bench_emit_iter("fdtd_update_hz", i, &acc_hz, params);
+        total_gpu_ms += acc_ex.gpu_ms + acc_ey.gpu_ms + acc_hz.gpu_ms;
+        fprintf(stderr, "pass %d: ex=%.3f ey=%.3f hz=%.3f ms\n",
+                i, acc_ex.gpu_ms, acc_ey.gpu_ms, acc_hz.gpu_ms);
     }
-    HIP_CHECK(hipDeviceSynchronize());
 
-    double total_ms = t_ex + t_ey + t_hz;
-
-    // Effective bandwidth: 7*NX*NY*sizeof(float) bytes/step across ex/ey/hz updates
-    double bytes_per_step = 7.0 * (double)NX * NY * sizeof(float);
-    double total_bytes    = bytes_per_step * TMAX;
-    double bw_gb = total_bytes / (total_ms * 1e-3) / 1e9;
-    fprintf(stderr, "Effective bandwidth: %.2f GB/s  (total %.4f ms: ex=%.4f ey=%.4f hz=%.4f, %d steps/iter)\n",
-            bw_gb, total_ms, t_ex, t_ey, t_hz, TMAX);
-
-    // JSON-lines output
-    printf("{\"type\":\"kernel\",\"name\":\"fdtd_update_ex\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"tmax\":%d,\"block_size\":%d}}\n",
-           t_ex, N, TMAX, block_size);
-    printf("{\"type\":\"kernel\",\"name\":\"fdtd_update_ey\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"tmax\":%d,\"block_size\":%d}}\n",
-           t_ey, N, TMAX, block_size);
-    printf("{\"type\":\"kernel\",\"name\":\"fdtd_update_hz\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"tmax\":%d,\"block_size\":%d}}\n",
-           t_hz, N, TMAX, block_size);
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
-           total_ms, bw_gb);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes (%d steps/pass)\n",
+            total_gpu_ms, num_iters, TMAX);
 
     HIP_CHECK(hipFree(d_ex));
     HIP_CHECK(hipFree(d_ey));

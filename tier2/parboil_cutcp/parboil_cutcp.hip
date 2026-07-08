@@ -6,29 +6,26 @@
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
-// Output (stdout): JSON-lines
+// Environment variables:
+//   BENCH_PARAM_num_atoms, BENCH_PARAM_block_size,
+//   BENCH_PARAM_grid_spacing, BENCH_PARAM_cutoff_radius
+//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
+//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
+//
+// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
+// carrying the GPU event time and host wall-clock time, then a summary whose
+// total_time_ms is the SUM of all iterations' GPU event times. Throughput
+// (interactions/sec) is derived downstream from time_ms and params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -136,7 +133,8 @@ int main(int argc, char** argv) {
     if (env_val) grid_spacing = (float)atof(env_val);
     env_val = getenv("BENCH_PARAM_cutoff_radius");
     if (env_val) cutoff = (float)atof(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     float cutoff2 = cutoff * cutoff;
     int grid_side = GRID_DIM_SIDE;
@@ -149,8 +147,9 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "CUTCP  |  Atoms: %d  |  Grid: %d^3 = %d  |  Cutoff: %.1f  |  "
-            "Spacing: %.2f  |  Iterations: 5 warmup + %d timed\n\n",
-            num_atoms, grid_side, total_grid_points, cutoff, grid_spacing);
+            "Spacing: %.2f  |  Iterations: %d warmup + %d timed\n\n",
+            num_atoms, grid_side, total_grid_points, cutoff, grid_spacing,
+            num_warmup, num_iters);
 
     // Generate synthetic atom data
     std::vector<float> h_atoms_x(num_atoms), h_atoms_y(num_atoms);
@@ -182,56 +181,25 @@ int main(int argc, char** argv) {
 
     int gridSize = (total_grid_points + block_size - 1) / block_size;
 
-    auto run_cutcp = [&]() {
-        cutcp_kernel<<<dim3(gridSize), dim3(block_size)>>>(
-            d_atoms, d_potential, num_atoms, grid_side, grid_spacing, cutoff, cutoff2);
-    };
+    char params[192];
+    snprintf(params, sizeof(params),
+             "\"num_atoms\":%d,\"block_size\":%d,"
+             "\"grid_spacing\":%.2f,\"cutoff_radius\":%.1f",
+             num_atoms, block_size, grid_spacing, cutoff);
 
-    // Warmup
-    for (int w = 0; w < num_warmup; ++w) {
-        run_cutcp();
-        HIP_CHECK(hipDeviceSynchronize());
-    }
+    // Warmup + timed iterations, each recorded individually. The kernel
+    // rewrites d_potential as a pure function of the constant atom data, so
+    // repeated launches do identical work — no per-iteration reset needed.
+    double total_gpu_ms =
+        bench_run_loop("cutcp_kernel", num_warmup, num_iters, params, [&]() {
+            cutcp_kernel<<<dim3(gridSize), dim3(block_size)>>>(
+                d_atoms, d_potential, num_atoms, grid_side, grid_spacing,
+                cutoff, cutoff2);
+        });
 
-    // Timed iterations
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        run_cutcp();
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
-    }
-
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    double sum = 0.0;
-    for (int i = 0; i < 1; ++i) sum += times[i];
-    double avg_ms = sum / 1;
-    double total_ms = sum;
-
-    double interactions = (double)num_atoms * (double)total_grid_points;
-    double ginteractions_per_sec = interactions / (avg_ms * 1e-3) / 1e9;
-
-    printf("{\"type\":\"kernel\",\"name\":\"cutcp_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_atoms\":%d,\"block_size\":%d,"
-           "\"grid_spacing\":%.2f,\"cutoff_radius\":%.1f}}\n",
-           avg_ms, num_atoms, block_size, grid_spacing, cutoff);
-
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"ginteractions_per_sec\",\"value\":%.4f}]}\n",
-           total_ms, ginteractions_per_sec);
-
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
-    fprintf(stderr, "Throughput:   %.4f Ginteractions/sec\n", ginteractions_per_sec);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
+            total_gpu_ms, num_iters);
 
     // Verification
     {

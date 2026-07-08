@@ -14,41 +14,24 @@
 //   --avg_nnz_per_row K  Average non-zeros per row      (default: 10)
 //   --block_size B       GPU thread-block size          (default: 256)
 //
-// Output (stdout): CSV row —
-//   kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-// Output (stderr): GFLOPS, verification PASS/FAIL
+// Environment variables (override argv):
+//   BENCH_PARAM_num_rows, BENCH_PARAM_avg_nnz_per_row, BENCH_PARAM_block_size
+//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
+//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
+//
+// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
+// carrying the GPU event time and host wall-clock time, then a summary whose
+// total_time_ms is the SUM of all iterations' GPU event times. GFLOPS is
+// derived downstream from time_ms and params.
+// Output (stderr): verification PASS/FAIL
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <cfloat>
-#include <vector>
 
-// ---------------------------------------------------------------------------
-// Inlined bench_common_hip.h utilities
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
-
-struct BenchResult {
-    const char* kernel_name;
-    const char* problem_size;
-    int         iterations;
-    double      avg_ms;
-    double      min_ms;
-    double      max_ms;
-    double      stddev_ms;
-};
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -59,80 +42,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
         }
     }
     return defaultVal;
-}
-
-
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
-
-static int g_num_warmup = 5;
-
-template <typename Func>
-static BenchResult runBenchmark(const char* kernel_name,
-                                const char* problem_size,
-                                int         iterations,
-                                Func        func) {
-    BenchmarkTimer timer;
-
-    // Warmup
-    for (int w = 0; w < g_num_warmup; ++w) {
-        func();
-    }
-    HIP_CHECK(hipDeviceSynchronize());
-
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        timer.record_start();
-        func();
-        timer.record_stop();
-        times[i] = static_cast<double>(timer.elapsed_ms());
-    }
-
-    double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        sum += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg = sum / 1;
-
-    double variance = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        double d = times[i] - avg;
-        variance += d * d;
-    }
-    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
-
-    BenchResult r;
-    r.kernel_name  = kernel_name;
-    r.problem_size = problem_size;
-    r.iterations   = iterations;
-    r.avg_ms       = avg;
-    r.min_ms       = mn;
-    r.max_ms       = mx;
-    r.stddev_ms    = stddev;
-    return r;
 }
 
 // ---------------------------------------------------------------------------
@@ -261,7 +170,8 @@ int main(int argc, char** argv)
     if (env_val) avg_nnz = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     // Generate sparse matrix
     int*   h_row_ptr  = nullptr;
@@ -311,29 +221,22 @@ int main(int argc, char** argv)
     dim3 block(block_size);
     dim3 grid((num_rows + block_size - 1) / block_size);
 
-    char problemSize[64];
-    snprintf(problemSize, sizeof(problemSize), "%d", num_rows);
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"num_rows\":%d,\"avg_nnz_per_row\":%d,\"block_size\":%d",
+             num_rows, avg_nnz, block_size);
 
-    g_num_warmup = num_warmup;
-    BenchResult r = runBenchmark(
-        "spmv_csr", problemSize, 1, [&]() {
-        spmv_csr<<<grid, block>>>(d_row_ptr, d_col_idx, d_values, d_x, d_y, num_rows);
-    });
+    // Warmup + timed iterations, each recorded individually. The kernel reads
+    // the constant matrix/vector and overwrites y from scratch, so repeated
+    // launches perform identical work — no state reset needed.
+    double total_gpu_ms =
+        bench_run_loop("spmv_csr", num_warmup, num_iters, params, [&]() {
+            spmv_csr<<<grid, block>>>(d_row_ptr, d_col_idx, d_values, d_x, d_y, num_rows);
+        });
 
-    // GFLOPS = 2 * total_nnz (one multiply + one add per NNZ)
-    double gflops = 2.0 * (double)total_nnz / (r.avg_ms * 1e-3) / 1e9;
-
-    // JSON-lines output
-    printf("{\"type\":\"kernel\",\"name\":\"spmv_csr\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_rows\":%d,\"avg_nnz_per_row\":%d,\"block_size\":%d"
-           "}}\n",
-           r.avg_ms, num_rows, avg_nnz, block_size);
-
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
-           r.avg_ms, gflops);
-
-    fprintf(stderr, "GFLOPS: %.4f  (avg %.4f ms)\n", gflops, r.avg_ms);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
+            total_gpu_ms, num_iters);
 
     // Verification: copy result back and check a sample of rows
     HIP_CHECK(hipMemcpy(h_y, d_y, (size_t)num_rows * sizeof(float),

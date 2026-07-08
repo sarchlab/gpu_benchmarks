@@ -10,29 +10,25 @@
 //
 //   --size N         Number of input bytes (default: 16777216 = 16M)
 //
-// Output (stdout): CSV — chai_hsto,<N>,<time_ms>,<GBs>
+// Environment variables (override argv):
+//   BENCH_PARAM_size, BENCH_PARAM_num_bins, BENCH_PARAM_block_size
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): one {"type":"kernel",...} JSON line per timed pass
+// carrying the GPU event time (time_ms) and host wall-clock time
+// (host_time_ms) of the histogram kernel (the per-pass bin reset is
+// untimed), then a summary whose total_time_ms is the SUM of all recorded
+// GPU event times. GB/s is derived downstream from time_ms and params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -132,7 +128,8 @@ int main(int argc, char** argv) {
     if (env_val) num_bins = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int N     = size;
 
@@ -147,7 +144,8 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Histogram  |  N: %d (%.2f MB)  |  Bins: %d  |  "
             "Iterations: %d warmup + %d timed\n\n",
-            N, (double)data_bytes / (1024.0 * 1024.0), num_bins, num_warmup);
+            N, (double)data_bytes / (1024.0 * 1024.0), num_bins, num_warmup,
+            num_iters);
 
     // Generate random input data (deterministic seed)
     unsigned char* h_data = (unsigned char*)malloc(data_bytes);
@@ -175,65 +173,47 @@ int main(int argc, char** argv) {
     // Cap grid size to avoid too many blocks
     if (gridSize > 1024) gridSize = 1024;
 
-    auto run_histo = [&]() {
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"num_bins\":%d,\"block_size\":%d",
+             size, num_bins, block_size);
+
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t lap;
+
+    // One histogram pass: the bins MUST be zeroed before every launch or
+    // later passes would accumulate counts on top of earlier ones. The
+    // memset stays outside the timed bracket — only the kernel is measured.
+    auto run_pass = [&](bool timed) {
         HIP_CHECK(hipMemset(d_histo, 0, histo_bytes));
-        histogram_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_data, d_histo, N);
+        if (timed) {
+            lap = bench_time_op(&timer, [&]() {
+                histogram_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_data, d_histo, N);
+            });
+        } else {
+            histogram_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_data, d_histo, N);
+            HIP_CHECK(hipDeviceSynchronize());
+        }
     };
 
-    // -------------------------------------------------------------------
-    // Warmup
-    // -------------------------------------------------------------------
     for (int w = 0; w < num_warmup; ++w) {
-        run_histo();
-        HIP_CHECK(hipDeviceSynchronize());
+        run_pass(false);
     }
 
-    // -------------------------------------------------------------------
-    // Timed iterations
-    // -------------------------------------------------------------------
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        run_histo();
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_pass(true);
+        bench_emit_iter("histogram_kernel", i, &lap, params);
+        total_gpu_ms += lap.gpu_ms;
+        fprintf(stderr, "histogram_kernel iter %d: gpu = %.3f ms, host = %.3f ms\n",
+                i, lap.gpu_ms, lap.host_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    // Compute average time
-    double sum = 0.0;
-    for (int i = 0; i < 1; ++i) sum += times[i];
-    double avg_ms = sum / 1;
-
-    // GB/s = N * sizeof(uint8_t) / time_s / 1e9
-    double gbs = (double)N * 1.0 / (avg_ms * 1e-3) / 1e9;
-
-    double total_ms = sum;
-
-    // JSON-lines kernel event
-    printf("{\"type\":\"kernel\",\"name\":\"histogram_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"num_bins\":%d,"
-           "\"block_size\":%d}}\n",
-           avg_ms, size, num_bins, block_size);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"throughput_gbps\",\"value\":%.2f}]}\n",
-           total_ms, gbs);
-
-    // Human-readable output to stderr
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
-    fprintf(stderr, "Throughput:   %.4f GB/s\n", gbs);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
+            total_gpu_ms, num_iters);
 
     // -------------------------------------------------------------------
     // Verification (compare GPU histogram against CPU reference)

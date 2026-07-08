@@ -2,7 +2,7 @@
   "benchmark": "shoc_triad",
   "tier": 2,
   "suite": "shoc",
-  "description": "Stream Triad: a[i] = b[i] + scalar * c[i]. Classic memory bandwidth benchmark measuring sustained GPU memory bandwidth in GB/s.",
+  "description": "Stream Triad: a[i] = b[i] + scalar * c[i]. Classic memory bandwidth benchmark; per-iteration kernel times are emitted and GB/s is derived downstream.",
   "scaling_param": {
     "name": "array_size",
     "description": "Number of float elements in each array",

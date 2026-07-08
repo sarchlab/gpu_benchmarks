@@ -1,6 +1,6 @@
 # tier2/cuda_scan_large — Work-Efficient Parallel Prefix Sum (Blelloch Scan)
 
-Benchmarks a **work-efficient parallel exclusive prefix sum** (Blelloch scan) on a large array of unsigned integers. Measures throughput in GB/s.
+Benchmarks a **work-efficient parallel exclusive prefix sum** (Blelloch scan) on a large array of unsigned integers. Emits per-iteration kernel times; GB/s is derived downstream.
 
 Derived from the [CUDA SDK scanLargeArray](https://github.com/NVIDIA/cuda-samples) sample.
 
@@ -12,7 +12,7 @@ Derived from the [CUDA SDK scanLargeArray](https://github.com/NVIDIA/cuda-sample
   2. **Scan of block sums** — recursively scan the array of block totals
   3. **Add block sums back** — add each scanned block total to all elements in the corresponding block
 - Handles arbitrarily large arrays via recursive decomposition
-- GB/s = 2 · N · sizeof(uint) / time\_sec / 10⁹
+- GB/s = 2 · N · sizeof(uint) / time\_sec / 10⁹ (derived downstream from the emitted times and params)
 
 ## Files
 
@@ -35,27 +35,39 @@ make PLATFORM=metal
 ## Run
 
 ```bash
-./cuda_scan_large                              # defaults: N=16777216, 5 iterations
+./cuda_scan_large                              # defaults: N=16777216
 ./cuda_scan_large --size 1048576               # smaller array (1M)
-./cuda_scan_large --size 16777216 --iterations 10
+BENCH_PARAM_num_iters=10 ./cuda_scan_large     # more timed passes
 ```
+
+Environment variables (override argv):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BENCH_PARAM_size` | 16777216 | Number of uint elements to scan |
+| `BENCH_PARAM_block_size` | 256 | Threads per block |
+| `BENCH_PARAM_verify` | true | CPU verification (true/false/skip) |
+| `BENCH_PARAM_num_warmup` | 3 | Untimed warmup passes |
+| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded individually |
 
 ## Output
 
-**stdout** — CSV timing row:
-```
-cuda_scan_large,16777216,3.4567,78.0000
-```
-
-Format: `cuda_scan_large,<N>,<time_ms>,<GBs>`
+**stdout** — JSON lines: per timed pass, one `{"type":"kernel",...}` record per
+kernel (`scan_block_kernel`, `add_block_sums_kernel`) with that pass's
+accumulated GPU event time (`time_ms`, summed over all recursion levels) and
+host wall-clock time (`host_time_ms`), followed by a
+`{"type":"summary","total_time_ms":...}` line whose value is the sum of all
+recorded GPU event times. Derived metrics (GB/s) are computed downstream from
+`time_ms` and the params.
 
 **stderr** — human-readable results:
 ```
 Device: NVIDIA GeForce RTX 4090 (id=0)
-Scan size: 16777216  |  Iterations: 5 warmup + 5 timed
+Scan size: 16777216  |  Iterations: 3 warmup + 7 timed
 
-Average time: 3.4567 ms
-Throughput:   78.0000 GB/s
+pass 0: scan_block gpu = 2.345 ms, add_block_sums gpu = 1.234 ms
+...
+Total GPU time: 25.123 ms over 7 passes
 PASS
 ```
 

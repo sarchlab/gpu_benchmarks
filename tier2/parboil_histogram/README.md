@@ -8,9 +8,9 @@ Derived from the Parboil benchmark suite histogram workload.
 1. Generate N random `uint32_t` values on the host (seeded at 42).
 2. Upload the data array to the GPU (once, reused across iterations).
 3. Launch a GPU kernel: each thread reads one element, computes `bin = val & 0xFF`, and performs `atomicAdd(&hist[bin], 1)`.
-4. Run **5 timed iterations** — the histogram buffer is zeroed before each iteration.
+4. Run `num_warmup` (default 3) untimed warmup passes, then `num_iters` (default 7) timed passes, each recorded individually — the histogram buffer is zeroed (untimed) before every pass.
 5. Copy the result histogram back and verify against a CPU reference (exact integer comparison of all 256 bins).
-6. Report average bandwidth (GB/s) and throughput (Melements/s).
+6. Emit per-iteration kernel times; bandwidth (GB/s) and throughput (Melements/s) are derived downstream.
 
 **Kernel configuration**: 256 threads per block, ⌈N/256⌉ blocks.
 
@@ -43,36 +43,42 @@ make clean
 ## Run
 
 ```bash
-./parboil_histogram                    # default: N=16M, 5 iterations
-./parboil_histogram --n 33554432       # custom N (32M elements)
-./parboil_histogram --iterations 10    # custom iteration count
+./parboil_histogram                          # default: N=16M
+./parboil_histogram --n 33554432             # custom N (32M elements)
+BENCH_PARAM_num_iters=10 ./parboil_histogram # custom timed-pass count
 ```
+
+Environment variables (override argv):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BENCH_PARAM_n` | 16777216 | Number of input elements |
+| `BENCH_PARAM_num_bins` | 256 | Histogram bins (echoed in params) |
+| `BENCH_PARAM_block_size` | 256 | Threads per block |
+| `BENCH_PARAM_num_warmup` | 3 | Untimed warmup passes |
+| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded individually |
 
 ## Output Format
 
 **stderr** (human-readable):
 ```
 Device: Apple M2 Pro
-N = 16777216 elements  |  Bins = 256  |  Iterations = 5
+N = 16777216 elements  |  Bins = 256  |  Iterations: 3 warmup + 7 timed
 
+histogram_kernel iter 0: gpu = 3.215 ms, host = 3.301 ms
+...
 Correctness check (all 256 bins): PASS
 
-Bandwidth:     XX.XX GB/s
-Throughput:    XXXX.XX Melements/s
-Timing:        avg X.XXXX ms  min X.XXXX ms  max X.XXXX ms  stddev X.XXXX ms
+Total GPU time: 22.501 ms over 7 iterations
 ```
 
-**stdout** (CSV for automated collection):
-```
-histogram,<N>,<time_ms>,<GBs>
-```
+**stdout** (JSON lines): one `{"type":"kernel","name":"histogram_kernel",...}`
+record per timed pass with that pass's GPU event time (`time_ms`) and host
+wall-clock time (`host_time_ms`), followed by a
+`{"type":"summary","total_time_ms":...}` line whose value is the sum of all
+recorded GPU event times.
 
-Example:
-```
-histogram,16777216,3.2145,20.87
-```
-
-## Performance Metric
+## Performance Metric (derived downstream)
 
 ```
 GB/s = N × sizeof(uint32_t) / time_s / 1e9
@@ -81,7 +87,8 @@ GB/s = N × sizeof(uint32_t) / time_s / 1e9
 Melements/s = N / time_s / 1e6
 ```
 
-where `time_s` is the average kernel execution time in seconds across all iterations.
+These are computed downstream from each record's `time_ms` and params; the
+benchmark itself emits raw times only.
 
 ## Correctness Verification
 
@@ -95,5 +102,5 @@ All 256 bins are compared exactly (integer equality). Prints `PASS` or `FAIL` to
 | N (elements) | 16,777,216 (16 × 1024 × 1024) |
 | Bins | 256 |
 | Block size | 256 threads |
-| Iterations | 5 |
+| Warmup / timed passes | 3 / 7 |
 | Bin mapping | `val & 0xFF` (lower 8 bits) |

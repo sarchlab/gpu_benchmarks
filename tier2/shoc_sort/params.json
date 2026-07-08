@@ -2,7 +2,7 @@
   "benchmark": "shoc_sort",
   "tier": 2,
   "suite": "shoc",
-  "description": "Bitonic sort on a large array of random unsigned integers. O(n log^2 n) compare-and-swap network. Measures throughput in Melements/s.",
+  "description": "Bitonic sort on a large array of random unsigned integers. O(n log^2 n) compare-and-swap network. Emits per-iteration kernel times; Melements/s is derived downstream.",
   "scaling_param": {
     "name": "size",
     "description": "Number of unsigned int elements to sort (must be power of 2)",

@@ -12,6 +12,20 @@ Derived from the [LoneStar GPU benchmark suite](https://iss.oden.utexas.edu/?p=p
 
 The benchmark exercises irregular memory access patterns (worklist, atomic operations), which are characteristic of graph and mesh algorithms on GPUs.
 
+Because refinement mutates the vertex positions (a refined mesh yields a smaller worklist and less work), the pristine vertex coordinates are re-uploaded before every measurement pass (untimed), so all warmup and recorded passes perform identical work.
+
+## Parameters
+
+| Env var | Description | Default |
+|---------|-------------|---------|
+| `BENCH_PARAM_num_triangles` | Number of triangles in the synthetic mesh | 100000 |
+| `BENCH_PARAM_block_size` | Threads per block | 256 |
+| `BENCH_PARAM_min_angle` | Minimum-angle quality threshold (degrees) | 30.0 |
+| `BENCH_PARAM_max_refine_iterations` | Check→refine rounds per pass | 5 |
+| `BENCH_PARAM_precision` | `half` \| `float` \| `double` (descriptor) | `float` |
+| `BENCH_PARAM_num_warmup` | Warmup passes (untimed) | 3 |
+| `BENCH_PARAM_num_iters` | Timed passes, each recorded | 7 |
+
 ## Files
 
 | File | Description |
@@ -42,15 +56,19 @@ BENCH_PARAM_num_triangles=200000 ./lonestar_dmr
 
 ## Output
 
-**stdout** — JSON-lines:
+**stdout** — JSON lines: per timed pass, one `kernel` record per kernel
+(each carrying that kernel's GPU event time and host time accumulated over
+the pass's refine rounds), then a `summary` whose `total_time_ms` is the sum
+of all recorded GPU event times:
 ```json
-{"type":"kernel","name":"dmr_check_kernel","time_ms":1.234,"params":{"num_triangles":100000,...}}
-{"type":"kernel","name":"dmr_refine_kernel","time_ms":1.234,"params":{"num_triangles":100000,...}}
-{"type":"summary","total_time_ms":2.468,"metrics":[{"name":"mtri_per_sec","value":123.45}]}
+{"type":"kernel","name":"dmr_check_kernel","iter":0,"time_ms":1.234000,"host_time_ms":1.301000,"params":{"num_triangles":100000,...}}
+{"type":"kernel","name":"dmr_refine_kernel","iter":0,"time_ms":1.234000,"host_time_ms":1.298000,"params":{"num_triangles":100000,...}}
+...
+{"type":"summary","total_time_ms":17.276000}
 ```
 
-**stderr** — human-readable device info and timing details.
+**stderr** — human-readable device info and per-pass timing details.
 
 ## Key Metrics
 
-- **Mtri/sec** — millions of triangles processed per second (input triangles / wall time)
+- **Mtri/sec** — millions of triangles processed per second (input triangles / time); derived downstream from `time_ms` and params

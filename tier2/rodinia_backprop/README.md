@@ -27,10 +27,11 @@ Where `sigmoid(x) = 1 / (1 + e^(-x))` and `lr = 0.1`.
 
 | Parameter | Default |
 |-----------|---------|
-| INPUT_N   | 65536   |
-| HIDDEN_N  | 1024    |
-| OUTPUT_N  | 1       |
-| Iterations| 5       |
+| INPUT_N  (`BENCH_PARAM_input`)  | 65536   |
+| HIDDEN_N (`BENCH_PARAM_hidden`) | 1024    |
+| OUTPUT_N (`BENCH_PARAM_output`) | 1       |
+| `BENCH_PARAM_num_warmup` (warmup epochs, untimed) | 3 |
+| `BENCH_PARAM_num_iters` (timed epochs, each recorded) | 7 |
 
 > The w1 weight matrix is `INPUT_N × HIDDEN_N = 65536 × 1024 = 64M floats = 256 MB`.
 
@@ -72,34 +73,40 @@ make clean
 ```bash
 ./rodinia_backprop                              # defaults
 ./rodinia_backprop --input 65536 --hidden 1024 # explicit sizes
-./rodinia_backprop --iterations 10             # more iterations
+BENCH_PARAM_num_iters=10 ./rodinia_backprop     # more recorded epochs
 ```
 
 ## Output Format
 
-**stderr** — device info + performance details:
+**stderr** — device info + per-epoch timing details:
 ```
 Device: Apple M2 Pro
-Network: 65536 → 1024 → 1  |  Iterations: 5
+Network: 65536 → 1024 → 1  |  Iterations: 3 warmup + 7 timed
 
-GFLOPS: 42.35  (avg 6.4231 ms, min 6.3980 ms, max 6.4890 ms)
+epoch 0: gpu = 6.423 ms
+...
+Total GPU time: 44.961 ms over 7 epochs
 ```
 
-**stdout** — CSV result:
+**stdout** — JSON lines: per timed epoch, one `kernel` record per kernel
+(all six kernels), then a `summary` whose `total_time_ms` is the sum of all
+recorded GPU event times:
 ```
-backprop,65536,1024,6.4231,42.35
+{"type":"kernel","name":"forward_hidden","iter":0,"time_ms":5.100000,"host_time_ms":5.160000,"params":{"input":65536,"hidden":1024,"output":1}}
+...
+{"type":"summary","total_time_ms":44.961000}
 ```
-
-CSV columns: `benchmark, input_n, hidden_n, time_ms, GFLOPS`
 
 ## GFLOPS Formula
 
 ```
-FLOPs per iteration ≈ 4 × INPUT_N × HIDDEN_N + 4 × HIDDEN_N × OUTPUT_N
-                     (forward + backward, 2 FLOPs per multiply-add)
+FLOPs per epoch ≈ 4 × INPUT_N × HIDDEN_N + 4 × HIDDEN_N × OUTPUT_N
+                 (forward + backward, 2 FLOPs per multiply-add)
 
 GFLOPS = FLOPs / (time_s × 10⁹)
 ```
+
+Derived downstream from the emitted `time_ms` and params; not reported by the binary.
 
 ## Notes
 
@@ -107,4 +114,6 @@ GFLOPS = FLOPs / (time_s × 10⁹)
 - Biases (`b1`, `b2`) initialized to `0`
 - Input initialized as `input[i] = (i % 256) / 256.0`
 - Target set to `1.0` for all output units
-- One warmup iteration before timing begins
+- Warmup epochs run before the recorded epochs; weight values drift across
+  epochs, but every kernel does a fixed amount of work regardless of the
+  values, so no state reset is needed between epochs

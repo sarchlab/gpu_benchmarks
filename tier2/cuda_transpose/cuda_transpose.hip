@@ -11,35 +11,25 @@
 //
 //   --size N  Matrix dimension N (N×N)  (default: 4096)
 //
-// Output (stdout): CSV rows —
-//   cuda_transpose,naive_<N>,<time_ms>,<GBs>
-//   cuda_transpose,optimized_<N>,<time_ms>,<GBs>
+// Environment variables (override argv):
+//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_tile_dim
+//   BENCH_PARAM_num_warmup   (warmup launches per variant, default 3)
+//   BENCH_PARAM_num_iters    (timed launches per variant, each recorded, default 7)
 //
+// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
+// of each variant (transpose_naive, transpose_optimized) carrying the GPU
+// event time and host wall-clock time, then a summary whose total_time_ms is
+// the SUM of all iterations' GPU event times. Effective bandwidth
+// (2*N*N*sizeof(float) / time) is derived downstream from time_ms and params.
 // Output (stderr): human-readable results
-//
-// Effective bandwidth = 2 * N * N * sizeof(float) / time_s / 1e9
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <cfloat>
-#include <vector>
 
-// ---------------------------------------------------------------------------
-// Error checking
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -121,62 +111,6 @@ __global__ void transpose_optimized(const float* __restrict__ idata,
 }
 
 // ---------------------------------------------------------------------------
-// GPU timer
-// ---------------------------------------------------------------------------
-
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
-
-// ---------------------------------------------------------------------------
-// Benchmark runner: 5 warmup + 5 timed iterations
-// ---------------------------------------------------------------------------
-
-static int WARMUP_ITERS = 5;
-static const int TIMED_ITERS  = 5;
-
-template <typename Func>
-static double runTransposeBench(Func func) {
-    BenchmarkTimer timer;
-
-    // Warmup
-    for (int i = 0; i < WARMUP_ITERS; ++i) {
-        func();
-    }
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Timed iterations
-    double total_ms = 0.0;
-    for (int i = 0; i < TIMED_ITERS; ++i) {
-        timer.record_start();
-        func();
-        timer.record_stop();
-        total_ms += static_cast<double>(timer.elapsed_ms());
-    }
-    return total_ms / TIMED_ITERS;  // average ms
-}
-
-// ---------------------------------------------------------------------------
 // CPU reference transpose (for verification)
 // ---------------------------------------------------------------------------
 
@@ -213,6 +147,8 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_tile_dim");
     if (env_val) tile_dim = atoi(env_val);
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     size_t num_elems = (size_t)N * N;
     size_t bytes     = num_elems * sizeof(float);
@@ -224,7 +160,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Matrix size: %d×%d  |  Warmup: %d  |  Timed: %d\n\n",
-            N, N, WARMUP_ITERS, TIMED_ITERS);
+            N, N, num_warmup, num_iters);
 
     // Host allocations
     float* h_idata = (float*)malloc(bytes);
@@ -245,22 +181,24 @@ int main(int argc, char** argv) {
     dim3 block(TILE_DIM, BLOCK_ROWS);
     dim3 grid((N + TILE_DIM - 1) / TILE_DIM, (N + TILE_DIM - 1) / TILE_DIM);
 
-    // Effective bandwidth: read + write = 2 * N * N * sizeof(float)
-    double data_bytes = 2.0 * (double)N * (double)N * sizeof(float);
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"block_size\":%d,\"tile_dim\":%d",
+             N, block_size, tile_dim);
+
+    // Both variants read d_idata (never modified) and overwrite d_odata in
+    // full; repeating a launch performs identical work regardless of the
+    // previous output values, so no per-iteration reset is needed.
 
     // -----------------------------------------------------------------------
     // Variant 1: Naive transpose
     // -----------------------------------------------------------------------
     HIP_CHECK(hipMemset(d_odata, 0, bytes));
 
-    double naive_ms = runTransposeBench([&]() {
-        transpose_naive<<<grid, block>>>(d_idata, d_odata, N, N);
-    });
-
-    double naive_gbs = data_bytes / (naive_ms * 1e-3) / 1e9;
-
-    fprintf(stderr, "Naive transpose:     avg %.4f ms  |  %.2f GB/s\n",
-            naive_ms, naive_gbs);
+    double total_gpu_ms =
+        bench_run_loop("transpose_naive", num_warmup, num_iters, params, [&]() {
+            transpose_naive<<<grid, block>>>(d_idata, d_odata, N, N);
+        });
 
     // Verify naive transpose
     HIP_CHECK(hipMemcpy(h_odata, d_odata, bytes, hipMemcpyDeviceToHost));
@@ -284,14 +222,10 @@ int main(int argc, char** argv) {
     // -----------------------------------------------------------------------
     HIP_CHECK(hipMemset(d_odata, 0, bytes));
 
-    double opt_ms = runTransposeBench([&]() {
-        transpose_optimized<<<grid, block>>>(d_idata, d_odata, N, N);
-    });
-
-    double opt_gbs = data_bytes / (opt_ms * 1e-3) / 1e9;
-
-    fprintf(stderr, "Optimized transpose: avg %.4f ms  |  %.2f GB/s\n",
-            opt_ms, opt_gbs);
+    total_gpu_ms +=
+        bench_run_loop("transpose_optimized", num_warmup, num_iters, params, [&]() {
+            transpose_optimized<<<grid, block>>>(d_idata, d_odata, N, N);
+        });
 
     // Verify optimized transpose
     HIP_CHECK(hipMemcpy(h_odata, d_odata, bytes, hipMemcpyDeviceToHost));
@@ -310,24 +244,11 @@ int main(int argc, char** argv) {
             (opt_errors == 0) ? "PASS" : "FAIL");
 
     // -----------------------------------------------------------------------
-    // JSON-lines output to stdout
+    // Summary: sum of every recorded iteration's GPU event time
     // -----------------------------------------------------------------------
-    double total_ms = naive_ms * TIMED_ITERS + opt_ms * TIMED_ITERS;
-
-    printf("{\"type\":\"kernel\",\"name\":\"transpose_naive\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"tile_dim\":%d}}\n",
-           naive_ms, N, block_size, tile_dim);
-
-    printf("{\"type\":\"kernel\",\"name\":\"transpose_optimized\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"tile_dim\":%d}}\n",
-           opt_ms, N, block_size, tile_dim);
-
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"naive_bandwidth_gbps\",\"value\":%.2f},"
-           "{\"name\":\"optimized_bandwidth_gbps\",\"value\":%.2f}]}\n",
-           total_ms, naive_gbs, opt_gbs);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations per variant\n",
+            total_gpu_ms, num_iters);
 
     // -----------------------------------------------------------------------
     // Cleanup

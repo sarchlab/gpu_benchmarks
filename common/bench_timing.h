@@ -175,6 +175,33 @@ static inline double bench_run_loop(const char *name, int num_warmup,
     return total_gpu_ms;
 }
 
+/**
+ * Multi-kernel workloads (tier2): run the whole workload num_iters times;
+ * within each pass, bracket every kernel launch with bench_time_op and
+ * accumulate into that kernel's per-pass bench_lap_t via bench_lap_add,
+ * then emit one record per kernel per pass with bench_emit_iter. The
+ * summary stays the sum of every emitted record's gpu time.
+ */
+template <typename LaunchFn>
+static inline bench_lap_t bench_time_op(bench_timer_t *t, LaunchFn op)
+{
+    bench_lap_begin(t, 0);
+    op();
+    return bench_lap_end(t, 0);
+}
+
+static inline void bench_lap_reset(bench_lap_t *acc)
+{
+    acc->gpu_ms  = 0.0;
+    acc->host_ms = 0.0;
+}
+
+static inline void bench_lap_add(bench_lap_t *acc, bench_lap_t lap)
+{
+    acc->gpu_ms  += lap.gpu_ms;
+    acc->host_ms += lap.host_ms;
+}
+
 /** bench_run_memcpy — shared runner for memcpy-based benchmarks
  *  (memory_bandwidth, pcie_bandwidth unidirectional tests). */
 static inline double bench_run_memcpy(const char *name, void *dst,

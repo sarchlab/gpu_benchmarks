@@ -2,7 +2,7 @@
   "benchmark": "polybench_bicg",
   "tier": 2,
   "suite": "polybench",
-  "description": "BiCG sub-kernel: computes s = A^T * r and q = A * p. Two matrix-vector products measuring memory bandwidth in GB/s.",
+  "description": "BiCG sub-kernel: computes s = A^T * r and q = A * p. Two matrix-vector products; per-pass kernel times are emitted and bandwidth is derived downstream.",
   "scaling_param": {
     "name": "m",
     "description": "Number of rows of matrix A (also sets N if square)",

@@ -14,42 +14,23 @@
 //   --edges_per_node E  Out-degree of each node          (default: 20)
 //   --block_size B      GPU thread-block size            (default: 256)
 //
-// Output (stdout): CSV row —
-//   kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-// Output (stderr): Effective bandwidth in GB/s
+// Environment variables (override argv):
+//   BENCH_PARAM_num_nodes, BENCH_PARAM_edges_per_node, BENCH_PARAM_block_size
+//   BENCH_PARAM_num_warmup   (warmup BFS passes, default 3)
+//   BENCH_PARAM_num_iters    (timed BFS passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// kernel (bfs_kernel, bfs_update) carrying that kernel's accumulated GPU
+// event time and host time within the pass, then a summary whose
+// total_time_ms is the SUM of all recorded GPU event times. Bandwidth /
+// edges-per-second are derived downstream from time_ms and params.
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
-#include <cfloat>
-#include <vector>
 
-// ---------------------------------------------------------------------------
-// Inlined bench_common_hip.h utilities
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
-
-struct BenchResult {
-    const char* kernel_name;
-    const char* problem_size;
-    int         iterations;
-    double      avg_ms;
-    double      min_ms;
-    double      max_ms;
-    double      stddev_ms;
-};
-
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -62,78 +43,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     return defaultVal;
 }
 
-
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
-
-template <typename Func>
-static BenchResult runBenchmark(const char* kernel_name,
-                                const char* problem_size,
-                                int         iterations,
-                                int         num_warmup,
-                                Func        func) {
-    BenchmarkTimer timer;
-
-    // Warmup
-    for (int w = 0; w < num_warmup; ++w) {
-        func();
-        HIP_CHECK(hipDeviceSynchronize());
-    }
-
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        timer.record_start();
-        func();
-        timer.record_stop();
-        times[i] = static_cast<double>(timer.elapsed_ms());
-    }
-
-    double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        sum += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg = sum / 1;
-
-    double variance = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        double d = times[i] - avg;
-        variance += d * d;
-    }
-    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
-
-    BenchResult r;
-    r.kernel_name  = kernel_name;
-    r.problem_size = problem_size;
-    r.iterations   = iterations;
-    r.avg_ms       = avg;
-    r.min_ms       = mn;
-    r.max_ms       = mx;
-    r.stddev_ms    = stddev;
-    return r;
-}
 
 // ---------------------------------------------------------------------------
 // BFS kernels
@@ -219,7 +128,8 @@ int main(int argc, char** argv) {
     if (env_val) edges_per_node = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     // Generate random graph
     int* h_row_offsets = nullptr;
@@ -263,35 +173,25 @@ int main(int argc, char** argv) {
     dim3 block(block_size);
     dim3 grid((num_nodes + block_size - 1) / block_size);
 
-    char problemSize[64];
-    snprintf(problemSize, sizeof(problemSize), "%d", num_nodes);
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"num_nodes\":%d,\"edges_per_node\":%d,\"block_size\":%d",
+             num_nodes, edges_per_node, block_size);
 
-    // Bandwidth accounting:
-    //   Each BFS iteration reads row_offsets (num_nodes+1 ints),
-    //   col_indices (num_edges ints), cost (num_nodes ints),
-    //   frontier (num_nodes ints), visited (num_nodes ints)
-    //   and writes cost (num_edges worst-case), frontier, visited, updated.
-    // We estimate conservatively as 2 * (row_offsets + col_indices + 3*nodes)
-    long long bytes_per_bfs =
-        2LL * ((long long)(num_nodes + 1 + num_edges + 3 * num_nodes) * sizeof(int));
+    // Per-kernel accumulators: each BFS pass launches both kernels once per
+    // BFS level; the accumulated GPU/host time of all levels within one pass
+    // becomes that pass's record for the kernel.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_kernel, acc_update;
 
-    // Per-kernel timing events and accumulators. The lambda below runs once
-    // per warmup pass and once timed; each invocation resets the accumulators
-    // and re-accumulates, so the surviving values reflect the timed pass.
-    hipEvent_t ev_start, ev_stop;
-    HIP_CHECK(hipEventCreate(&ev_start));
-    HIP_CHECK(hipEventCreate(&ev_stop));
-    double t_bfs_kernel = 0.0;
-    double t_bfs_update = 0.0;
+    // One full BFS pass. State is re-initialized at the start of every pass
+    // (untimed), so each pass measures the same traversal regardless of what
+    // earlier passes left behind.
+    auto run_bfs_pass = [&]() {
+        bench_lap_reset(&acc_kernel);
+        bench_lap_reset(&acc_update);
 
-    BenchResult r = runBenchmark(
-        "rodinia_bfs", problemSize, 1, num_warmup, [&]() {
-        // Reset per-kernel accumulators for this pass
-        t_bfs_kernel = 0.0;
-        t_bfs_update = 0.0;
-        float ms = 0.0f;
-
-        // Re-initialize BFS state for each timed run
         for (int i = 0; i < num_nodes; ++i) {
             h_cost[i]     = -1;
             h_frontier[i] = 0;
@@ -310,50 +210,39 @@ int main(int argc, char** argv) {
             h_updated = 0;
             HIP_CHECK(hipMemcpy(d_updated, &h_updated, sizeof(int), hipMemcpyHostToDevice));
 
-            HIP_CHECK(hipEventRecord(ev_start, 0));
-            bfs_kernel<<<grid, block>>>(d_row_offsets, d_col_indices, d_cost, d_frontier, num_nodes);
-            HIP_CHECK(hipEventRecord(ev_stop, 0));
-            HIP_CHECK(hipEventSynchronize(ev_stop));
-            HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));
-            t_bfs_kernel += ms;
+            bench_lap_add(&acc_kernel, bench_time_op(&timer, [&]() {
+                bfs_kernel<<<grid, block>>>(d_row_offsets, d_col_indices, d_cost, d_frontier, num_nodes);
+            }));
 
             h_updated = 0;
             HIP_CHECK(hipMemcpy(d_updated, &h_updated, sizeof(int), hipMemcpyHostToDevice));
 
-            HIP_CHECK(hipEventRecord(ev_start, 0));
-            bfs_update<<<grid, block>>>(d_frontier, d_cost, d_visited, d_updated, num_nodes);
-            HIP_CHECK(hipEventRecord(ev_stop, 0));
-            HIP_CHECK(hipEventSynchronize(ev_stop));
-            HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));
-            t_bfs_update += ms;
+            bench_lap_add(&acc_update, bench_time_op(&timer, [&]() {
+                bfs_update<<<grid, block>>>(d_frontier, d_cost, d_visited, d_updated, num_nodes);
+            }));
 
             HIP_CHECK(hipMemcpy(&h_updated, d_updated, sizeof(int), hipMemcpyDeviceToHost));
         }
-    });
+    };
 
-    HIP_CHECK(hipEventDestroy(ev_start));
-    HIP_CHECK(hipEventDestroy(ev_stop));
+    for (int w = 0; w < num_warmup; ++w) {
+        run_bfs_pass();
+    }
 
-    (void)r;  // BenchResult retained for structure; per-kernel times used below
-    double total_ms = t_bfs_kernel + t_bfs_update;
-    double bw_gb = (double)bytes_per_bfs / (total_ms * 1e-3) / 1e9;
-    fprintf(stderr, "Effective bandwidth: %.2f GB/s  (total %.4f ms/BFS)\n",
-            bw_gb, total_ms);
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_bfs_pass();
+        bench_emit_iter("bfs_kernel", i, &acc_kernel, params);
+        bench_emit_iter("bfs_update", i, &acc_update, params);
+        total_gpu_ms += acc_kernel.gpu_ms + acc_update.gpu_ms;
+        fprintf(stderr, "pass %d: bfs_kernel gpu = %.3f ms, bfs_update gpu = %.3f ms\n",
+                i, acc_kernel.gpu_ms, acc_update.gpu_ms);
+    }
 
-    // JSON-lines output
-    double edges_per_sec = (double)num_edges / (total_ms * 1e-3);
-    printf("{\"type\":\"kernel\",\"name\":\"bfs_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_nodes\":%d,\"edges_per_node\":%d,\"block_size\":%d"
-           "}}\n",
-           t_bfs_kernel, num_nodes, edges_per_node, block_size);
-    printf("{\"type\":\"kernel\",\"name\":\"bfs_update\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_nodes\":%d,\"edges_per_node\":%d,\"block_size\":%d"
-           "}}\n",
-           t_bfs_update, num_nodes, edges_per_node, block_size);
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f},"
-           "{\"name\":\"edges_per_sec\",\"value\":%.2f}]}\n",
-           total_ms, bw_gb, edges_per_sec);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // Cleanup
     HIP_CHECK(hipFree(d_row_offsets));

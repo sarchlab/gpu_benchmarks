@@ -6,30 +6,24 @@
 // Parameters are read from BENCH_PARAM_* environment variables,
 // with command-line --flags as fallback.
 //
-// Output (stdout): JSON-lines protocol
+// Environment variables:
+//   BENCH_PARAM_num_rows, BENCH_PARAM_nnz_per_row, BENCH_PARAM_precision
+//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
+//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
+//
+// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
+// carrying the GPU event time and host wall-clock time, then a summary whose
+// total_time_ms is the SUM of all iterations' GPU event times. Bandwidth and
+// GFLOPS are derived downstream from time_ms and params.
 // Output (stderr): Human-readable diagnostics
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <cfloat>
-#include <vector>
 
-// ---------------------------------------------------------------------------
-// Inlined utilities
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                          \
-    do {                                                                        \
-        hipError_t _e = (cmd);                                                  \
-        if (_e != hipSuccess) {                                                 \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                         \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                 \
-            exit(1);                                                            \
-        }                                                                       \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -51,30 +45,6 @@ static const char* parseStrParam(int argc, char** argv, const char* name,
     }
     return defaultVal;
 }
-
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
 
 // ---------------------------------------------------------------------------
 // CSR SpMV kernel: each thread handles one row
@@ -138,9 +108,18 @@ int main(int argc, char** argv)
     if (env_val) num_rows = atoi(env_val);
     env_val = getenv("BENCH_PARAM_nnz_per_row");
     if (env_val) nnz_per_row = atoi(env_val);
+    /* Validate string params against their known sets, so the values echoed
+     * into the JSON records are always canonical literals. */
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
-    int num_warmup = 5;
+    if (strcmp(precision, "float") != 0 && strcmp(precision, "double") != 0 &&
+        strcmp(precision, "half") != 0) {
+        fprintf(stderr, "Invalid precision '%s' (use float, double, half)\n",
+                precision);
+        return EXIT_FAILURE;
+    }
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int num_cols   = num_rows;
     int nnz        = num_rows * nnz_per_row;
@@ -198,25 +177,19 @@ int main(int argc, char** argv)
 
     int grid_size = (num_rows + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-    BenchmarkTimer timer;
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"num_rows\":%d,\"nnz_per_row\":%d,\"precision\":\"%s\"",
+             num_rows, nnz_per_row, precision);
 
-    // Warmup
-    for (int w = 0; w < num_warmup; ++w) {
-        spmv_csr_kernel<<<grid_size, BLOCK_SIZE>>>(
-            d_row_ptr, d_col_idx, d_values, d_x, d_y, num_rows);
-        HIP_CHECK(hipDeviceSynchronize());
-    }
-
-    // Timed iterations
-    std::vector<double> times(1);
-    for (int iter = 0; iter < 1; ++iter) {
-        timer.record_start();
-        spmv_csr_kernel<<<grid_size, BLOCK_SIZE>>>(
-            d_row_ptr, d_col_idx, d_values, d_x, d_y, num_rows);
-        timer.record_stop();
-        times[iter] = static_cast<double>(timer.elapsed_ms());
-        fprintf(stderr, "  iter %d: %.4f ms\n", iter, times[iter]);
-    }
+    // Warmup + timed iterations, each recorded individually. The kernel only
+    // reads the matrix and x (never modified) and fully overwrites y, so
+    // repeated launches perform identical work — no per-iteration reset.
+    double total_gpu_ms =
+        bench_run_loop("spmv_csr_kernel", num_warmup, num_iters, params, [&]() {
+            spmv_csr_kernel<<<grid_size, BLOCK_SIZE>>>(
+                d_row_ptr, d_col_idx, d_values, d_x, d_y, num_rows);
+        });
 
     // Copy result back
     HIP_CHECK(hipMemcpy(h_y, d_y, (size_t)num_rows * sizeof(float), hipMemcpyDeviceToHost));
@@ -238,38 +211,9 @@ int main(int argc, char** argv)
     fprintf(stderr, "Correctness check (first %d elements): %s\n\n",
             check_n, pass ? "PASS" : "FAIL");
 
-    // Statistics
-    double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        sum_ms += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg_ms = sum_ms / 1;
-    double total_ms = sum_ms;
-
-    // GB/s and GFLOPS
-    double data_bytes = (double)nnz * (sizeof(float) + sizeof(int))
-                 + (double)(num_rows + 1) * sizeof(int)
-                 + (double)num_rows * sizeof(float)
-                 + (double)num_rows * sizeof(float);
-    double gbps   = data_bytes / (avg_ms * 1e-3) / 1e9;
-    double gflops = 2.0 * (double)nnz / (avg_ms * 1e-3) / 1e9;
-
-    fprintf(stderr, "GB/s: %.2f  GFLOPS: %.2f  (avg %.4f ms, min %.4f ms, max %.4f ms)\n",
-            gbps, gflops, avg_ms, mn, mx);
-
-    // JSON-lines kernel event
-    printf("{\"type\":\"kernel\",\"name\":\"spmv_csr_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_rows\":%d,\"nnz_per_row\":%d,"
-           "\"precision\":\"%s\"}}\n",
-           avg_ms, num_rows, nnz_per_row, precision);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f},"
-           "{\"name\":\"gflops\",\"value\":%.2f}]}\n",
-           total_ms, gbps, gflops);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
+            total_gpu_ms, num_iters);
 
     // Cleanup
     HIP_CHECK(hipFree(d_row_ptr));

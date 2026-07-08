@@ -2,7 +2,7 @@
   "benchmark": "shoc_stencil2d",
   "tier": 2,
   "suite": "shoc",
-  "description": "9-point 2D star stencil applied iteratively on an NxN grid with ping-pong buffers. Measures effective memory bandwidth in GB/s.",
+  "description": "9-point 2D star stencil applied iteratively on an NxN grid with ping-pong buffers. Emits per-pass kernel times; effective memory bandwidth is derived downstream.",
   "scaling_param": {
     "name": "n",
     "description": "Grid dimension (NxN grid)",

@@ -48,32 +48,46 @@ make clean
 ## Run
 
 ```bash
-./rodinia_pathfinder [--rows R] [--cols C] [--iterations I]
+./rodinia_pathfinder [--rows R] [--cols C]
 ```
 
-| Option | Default | Description |
+| Option / Env var | Default | Description |
 |--------|---------|-------------|
-| `--rows R` | 100000 | Number of grid rows |
-| `--cols C` | 100 | Number of grid columns |
-| `--iterations I` | 3 | Number of timed benchmark iterations |
+| `--rows R` / `BENCH_PARAM_rows` | 100000 | Number of grid rows |
+| `--cols C` / `BENCH_PARAM_cols` | 100 | Number of grid columns |
+| `BENCH_PARAM_block_size` | 256 | Threads per block (descriptor) |
+| `BENCH_PARAM_num_warmup` | 3 | Warmup grid sweeps (untimed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed grid sweeps, each recorded |
 
 ## Output
 
+**stdout** — JSON lines: one `kernel` record per timed sweep (the GPU event
+time covers the whole rows−1 kernel-launch chain of that sweep), then a
+`summary` whose `total_time_ms` is the sum of all recorded GPU event times:
+
 ```
-benchmark,rows,cols,time_ms,GBs
-pathfinder,100000,100,45.2318,0.0267
+{"type":"kernel","name":"dynproc_kernel","iter":0,"time_ms":45.231800,"host_time_ms":45.610000,"params":{"cols":100,"rows":100000,"block_size":256}}
+...
+{"type":"summary","total_time_ms":316.622600}
 ```
+
+Derived metrics (GB/s) are computed downstream from `time_ms` and params.
 
 Informational output (stderr):
 - GPU device name
 - Grid dimensions
 - Verification result (against small CPU reference)
+- Per-sweep timing lines
 - Minimum cost in the final row
 
 ## Performance Notes
 
 - Memory access pattern: each row sweep reads `COLS` ints (src) + `COLS` ints (wall),
-  writes `COLS` ints (dst) → `3 × ROWS × COLS × 4` bytes per iteration
+  writes `COLS` ints (dst) → `3 × ROWS × COLS × 4` bytes per sweep
+- The `src` row is re-uploaded before every sweep (untimed), so each recorded
+  sweep performs an identical traversal
+- The rows−1 dependent kernel launches are timed as a single event bracket per
+  sweep (no interleaved transfers), preserving launch pipelining
 - The kernel is bandwidth-bound with minimal compute per element
 - Metal implementation batches `1000` row dispatches per command buffer to reduce
   host-side overhead

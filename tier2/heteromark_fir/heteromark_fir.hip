@@ -13,29 +13,29 @@
 //
 //   --size N         Number of input samples (default: 1048576)
 //
-// Output (stdout): CSV row — heteromark_fir,<N>,<time_ms>,<GBs>
+// Environment variables (override argv):
+//   BENCH_PARAM_size, BENCH_PARAM_num_taps, BENCH_PARAM_block_size
+//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
+//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
+//
+// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
+// carrying the GPU event time (time_ms) and host wall-clock time
+// (host_time_ms), then a summary whose total_time_ms is the SUM of all
+// iterations' GPU event times. Throughput (GB/s) is derived downstream
+// from time_ms and params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <vector>
 
 // ---------------------------------------------------------------------------
 // Error-checking macro
 // ---------------------------------------------------------------------------
 
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -134,7 +134,8 @@ int main(int argc, char** argv) {
     if (env_val) num_taps = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int N     = size;
     int taps  = num_taps;
@@ -151,7 +152,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "FIR filter  |  Samples: %d  |  Taps: %d  |  "
             "Iterations: %d warmup + %d timed\n\n",
-            N, taps, num_warmup);
+            N, taps, num_warmup, num_iters);
 
     // Host allocation + initialization
     float* h_input  = (float*)malloc(input_bytes);
@@ -190,66 +191,23 @@ int main(int argc, char** argv) {
     int blockSize = block_size;
     int gridSize  = (N + blockSize - 1) / blockSize;
 
-    // Lambda: run FIR filter
-    auto run_fir = [&]() {
-        fir_filter_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_input, d_output, d_coeff, N, taps);
-    };
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"num_taps\":%d,\"block_size\":%d",
+             size, num_taps, block_size);
 
-    // -------------------------------------------------------------------
-    // Warmup
-    // -------------------------------------------------------------------
-    for (int w = 0; w < num_warmup; ++w) {
-        run_fir();
-        HIP_CHECK(hipDeviceSynchronize());
-    }
+    // Warmup + timed iterations, each recorded individually. The kernel
+    // reads immutable input/coeff arrays and fully overwrites the output
+    // array every launch, so repeated launches perform identical work — no
+    // per-iteration state reset is needed.
+    double total_gpu_ms =
+        bench_run_loop("fir_filter_kernel", num_warmup, num_iters, params, [&]() {
+            fir_filter_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_input, d_output, d_coeff, N, taps);
+        });
 
-    // -------------------------------------------------------------------
-    // Timed iterations
-    // -------------------------------------------------------------------
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        run_fir();
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
-    }
-
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    // Compute average time
-    double sum = 0.0;
-    for (int i = 0; i < 1; ++i) sum += times[i];
-    double avg_ms = sum / 1;
-
-    // GB/s = (input_size + output_size) * sizeof(float) / time_s / 1e9
-    double total_bytes = (double)(input_bytes + output_bytes);
-    double gbs = total_bytes / (avg_ms * 1e-3) / 1e9;
-
-    double total_ms = sum;
-
-    // JSON-lines kernel event
-    printf("{\"type\":\"kernel\",\"name\":\"fir_filter_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"num_taps\":%d,"
-           "\"block_size\":%d}}\n",
-           avg_ms, size, num_taps, block_size);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"throughput_gbps\",\"value\":%.2f}]}\n",
-           total_ms, gbs);
-
-    // Human-readable output to stderr
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
-    fprintf(stderr, "Throughput:   %.4f GB/s\n", gbs);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
+            total_gpu_ms, num_iters);
 
     // -------------------------------------------------------------------
     // Verification (compare first 1024 samples with CPU reference)

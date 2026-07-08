@@ -12,7 +12,6 @@
 //   bicg_kernel2: q[i] = sum_j A[i,j] * p[j]   (one thread per row)
 //
 // Default: M = N = 4096
-// Measures memory bandwidth in GB/s (A is read twice per iteration).
 //
 // Compiles with hipcc (AMD ROCm) or nvcc -x cu (CUDA).
 //
@@ -22,30 +21,26 @@
 //   --m M            Number of rows    (default: 4096)
 //   --n N            Number of columns (default: 4096)
 //
-// Output (stdout): JSON-lines protocol
+// Environment variables (override argv):
+//   BENCH_PARAM_m, BENCH_PARAM_n, BENCH_PARAM_block_size
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// kernel (bicg_kernel1, bicg_kernel2) carrying that kernel's GPU event time
+// (time_ms) and host time (host_time_ms), then a summary whose total_time_ms
+// is the SUM of all recorded GPU event times. Bandwidth (GB/s) is derived
+// downstream from time_ms and params.
 // Output (stderr): device info, timing details
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <cfloat>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-// Inlined utilities
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -57,30 +52,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     }
     return defaultVal;
 }
-
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
 
 // ---------------------------------------------------------------------------
 // Kernel 1: s = A^T * r
@@ -152,7 +123,8 @@ int main(int argc, char** argv) {
     if (env_val) n = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     size_t bytes_A = (size_t)m * n * sizeof(float);
     size_t bytes_p = (size_t)n * sizeof(float);
@@ -199,28 +171,47 @@ int main(int argc, char** argv) {
     int grid_k1 = (n + block_size - 1) / block_size;  // kernel1: one thread per column
     int grid_k2 = (m + block_size - 1) / block_size;  // kernel2: one thread per row
 
-    BenchmarkTimer timer;
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"m\":%d,\"n\":%d,\"block_size\":%d", m, n, block_size);
 
-    // Warmup
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_k1, acc_k2;
+
+    // One full BiCG pass: both matrix-vector products, each timed separately.
+    // No per-pass reset is needed: inputs A/r/p are read-only and the outputs
+    // s/q are fully overwritten every pass, so repeated passes do identical
+    // work.
+    auto run_pass = [&]() {
+        bench_lap_reset(&acc_k1);
+        bench_lap_reset(&acc_k2);
+
+        bench_lap_add(&acc_k1, bench_time_op(&timer, [&]() {
+            bicg_kernel1<<<grid_k1, block_size>>>(d_A, d_r, d_s, m, n);
+        }));
+        bench_lap_add(&acc_k2, bench_time_op(&timer, [&]() {
+            bicg_kernel2<<<grid_k2, block_size>>>(d_A, d_p, d_q, m, n);
+        }));
+    };
+
+    // Warmup passes (records not emitted)
     for (int w = 0; w < num_warmup; ++w) {
-        bicg_kernel1<<<grid_k1, block_size>>>(d_A, d_r, d_s, m, n);
-        bicg_kernel2<<<grid_k2, block_size>>>(d_A, d_p, d_q, m, n);
+        run_pass();
     }
-    HIP_CHECK(hipDeviceSynchronize());
 
-    // Timed iterations — time each kernel separately
-    std::vector<double> k1_times(1), k2_times(1);
-    for (int iter = 0; iter < 1; ++iter) {
-        timer.record_start();
-        bicg_kernel1<<<grid_k1, block_size>>>(d_A, d_r, d_s, m, n);
-        timer.record_stop();
-        k1_times[iter] = static_cast<double>(timer.elapsed_ms());
-
-        timer.record_start();
-        bicg_kernel2<<<grid_k2, block_size>>>(d_A, d_p, d_q, m, n);
-        timer.record_stop();
-        k2_times[iter] = static_cast<double>(timer.elapsed_ms());
+    // Timed passes — one record per kernel per pass
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_pass();
+        bench_emit_iter("bicg_kernel1", i, &acc_k1, params);
+        bench_emit_iter("bicg_kernel2", i, &acc_k2, params);
+        total_gpu_ms += acc_k1.gpu_ms + acc_k2.gpu_ms;
+        fprintf(stderr, "pass %d: bicg_kernel1 gpu = %.3f ms, bicg_kernel2 gpu = %.3f ms\n",
+                i, acc_k1.gpu_ms, acc_k2.gpu_ms);
     }
+
+    bench_timer_destroy(&timer);
 
     // Copy results back
     HIP_CHECK(hipMemcpy(h_s, d_s, bytes_s, hipMemcpyDeviceToHost));
@@ -254,33 +245,9 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Correctness check (first %d s, %d q elements): %s\n\n",
             check_n, check_m, pass ? "PASS" : "FAIL");
 
-    // Compute statistics
-    double k1_sum = 0.0, k2_sum = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        k1_sum += k1_times[i];
-        k2_sum += k2_times[i];
-    }
-    double k1_avg = k1_sum / 1;
-    double k2_avg = k2_sum / 1;
-    double total_avg_ms = k1_avg + k2_avg;
-
-    // GB/s: A is read twice (kernel1 + kernel2), each is M*N*4 bytes
-    double gb   = 2.0 * (double)m * (double)n * sizeof(float) / 1e9;
-    double gbps = gb / (total_avg_ms * 1e-3);
-
-    fprintf(stderr, "Bandwidth: %.2f GB/s  (total avg %.4f ms: k1=%.4f k2=%.4f)\n",
-            gbps, total_avg_ms, k1_avg, k2_avg);
-
-    // JSON-lines output
-    printf("{\"type\":\"kernel\",\"name\":\"bicg_kernel1\",\"time_ms\":%.6f,"
-           "\"params\":{\"m\":%d,\"n\":%d,\"block_size\":%d}}\n",
-           k1_avg, m, n, block_size);
-    printf("{\"type\":\"kernel\",\"name\":\"bicg_kernel2\",\"time_ms\":%.6f,"
-           "\"params\":{\"m\":%d,\"n\":%d,\"block_size\":%d}}\n",
-           k2_avg, m, n, block_size);
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
-           total_avg_ms, gbps);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // Cleanup
     HIP_CHECK(hipFree(d_A));

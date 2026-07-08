@@ -13,29 +13,26 @@
 //   --degree D         Average degree per vertex (default: 16)
 //   --pr-iterations P  PageRank iterations per run (default: 20)
 //
-// Output (stdout): CSV row — graph_pr,<N_vertices>,<time_ms>,<GTEPS>
+// Environment variables (override argv):
+//   BENCH_PARAM_vertices, BENCH_PARAM_degree, BENCH_PARAM_pr_iterations
+//   BENCH_PARAM_num_warmup   (warmup PageRank passes, default 3)
+//   BENCH_PARAM_num_iters    (timed PageRank passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
+// pagerank_kernel carrying the accumulated GPU event time of all PR
+// iterations within the pass plus host wall-clock time, then a summary whose
+// total_time_ms is the SUM of all recorded GPU event times. GTEPS is derived
+// downstream from time_ms and params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -169,39 +166,6 @@ static void pagerank_cpu(int N, int pr_iters, float damping,
 }
 
 // ---------------------------------------------------------------------------
-// GPU PageRank: run pr_iters iterations
-// ---------------------------------------------------------------------------
-
-static void run_pagerank_gpu(int N, int pr_iters, float damping,
-                              int* d_col_offsets, int* d_row_indices,
-                              int* d_out_degree,
-                              float* d_rank_a, float* d_rank_b) {
-    float base_rank = (1.0f - damping) / (float)N;
-
-    // Initialize ranks
-    std::vector<float> h_init(N, 1.0f / (float)N);
-    HIP_CHECK(hipMemcpy(d_rank_a, h_init.data(), N * sizeof(float), hipMemcpyHostToDevice));
-
-    int blockSize = 256;
-    int gridSize  = (N + blockSize - 1) / blockSize;
-
-    float* cur = d_rank_a;
-    float* nxt = d_rank_b;
-
-    for (int iter = 0; iter < pr_iters; ++iter) {
-        pagerank_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
-            d_col_offsets, d_row_indices, d_out_degree, cur, nxt, damping, base_rank, N);
-        float* tmp = cur; cur = nxt; nxt = tmp;
-    }
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // If final result is in d_rank_b, copy to d_rank_a
-    if (cur != d_rank_a) {
-        HIP_CHECK(hipMemcpy(d_rank_a, cur, N * sizeof(float), hipMemcpyDeviceToDevice));
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -226,7 +190,8 @@ int main(int argc, char** argv) {
     if (env_val) degree = atoi(env_val);
     env_val = getenv("BENCH_PARAM_pr_iterations");
     if (env_val) pr_iterations = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int N         = vertices;
     int avg_deg   = degree;
@@ -246,8 +211,8 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "PageRank (pull-based)  |  Vertices: %d  |  Edges: %d  |  "
             "PR iterations: %d  |  Damping: %.2f  |  "
-            "Iterations: 5 warmup + %d timed\n\n",
-            N, num_edges, pr_iters, damping);
+            "Passes: %d warmup + %d timed\n\n",
+            N, num_edges, pr_iters, damping, num_warmup, num_iters);
 
     // Allocate device memory
     int *d_col_offsets, *d_row_indices, *d_out_degree;
@@ -263,61 +228,64 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(d_row_indices, row_indices.data(), num_edges * sizeof(int), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_out_degree, out_degree.data(), N * sizeof(int), hipMemcpyHostToDevice));
 
-    // -------------------------------------------------------------------
-    // Warmup
-    // -------------------------------------------------------------------
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"vertices\":%d,\"degree\":%d,\"pr_iterations\":%d",
+             vertices, degree, pr_iterations);
+
+    float base_rank = (1.0f - damping) / (float)N;
+    int blockSize = 256;
+    int gridSize  = (N + blockSize - 1) / blockSize;
+    std::vector<float> h_init(N, 1.0f / (float)N);
+
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_pr;
+
+    // One full PageRank pass: rank vector is re-initialized at the start of
+    // every pass (untimed), so each pass runs exactly pr_iters identical
+    // iterations regardless of what earlier passes left in the rank buffers.
+    auto run_pr_pass = [&]() {
+        bench_lap_reset(&acc_pr);
+
+        HIP_CHECK(hipMemcpy(d_rank_a, h_init.data(), N * sizeof(float),
+                            hipMemcpyHostToDevice));
+
+        float* cur = d_rank_a;
+        float* nxt = d_rank_b;
+        for (int iter = 0; iter < pr_iters; ++iter) {
+            bench_lap_add(&acc_pr, bench_time_op(&timer, [&]() {
+                pagerank_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+                    d_col_offsets, d_row_indices, d_out_degree, cur, nxt,
+                    damping, base_rank, N);
+            }));
+            float* tmp = cur; cur = nxt; nxt = tmp;
+        }
+
+        // Final result lands in d_rank_a for verification (untimed)
+        if (cur != d_rank_a) {
+            HIP_CHECK(hipMemcpy(d_rank_a, cur, N * sizeof(float),
+                                hipMemcpyDeviceToDevice));
+        }
+    };
+
     for (int w = 0; w < num_warmup; ++w) {
-        run_pagerank_gpu(N, pr_iters, damping, d_col_offsets, d_row_indices,
-                         d_out_degree, d_rank_a, d_rank_b);
+        run_pr_pass();
     }
 
-    // -------------------------------------------------------------------
-    // Timed iterations
-    // -------------------------------------------------------------------
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        run_pagerank_gpu(N, pr_iters, damping, d_col_offsets, d_row_indices,
-                         d_out_degree, d_rank_a, d_rank_b);
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_pr_pass();
+        bench_emit_iter("pagerank_kernel", i, &acc_pr, params);
+        total_gpu_ms += acc_pr.gpu_ms;
+        fprintf(stderr, "pass %d: pagerank_kernel gpu = %.3f ms, host = %.3f ms\n",
+                i, acc_pr.gpu_ms, acc_pr.host_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    // Compute average
-    double sum = 0.0;
-    for (int i = 0; i < 1; ++i) sum += times[i];
-    double avg_ms = sum / 1;
-
-    // GTEPS = N_edges * pr_iterations / time_s / 1e9
-    double gteps = (double)num_edges * (double)pr_iters / (avg_ms * 1e-3) / 1e9;
-
-    double total_ms = sum;
-
-    // JSON-lines kernel event
-    printf("{\"type\":\"kernel\",\"name\":\"pagerank_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"vertices\":%d,\"degree\":%d,\"pr_iterations\":%d"
-           "}}\n",
-           avg_ms, vertices, degree, pr_iterations);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"gteps\",\"value\":%.2f}]}\n",
-           total_ms, gteps);
-
-    // Human-readable output to stderr
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
-    fprintf(stderr, "Throughput:   %.4f GTEPS\n", gteps);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // -------------------------------------------------------------------
     // Verification (compare GPU result with CPU reference)

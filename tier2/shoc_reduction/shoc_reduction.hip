@@ -6,31 +6,32 @@
 // Parameters are read from BENCH_PARAM_* environment variables,
 // with command-line --flags as fallback.
 //
-// Output (stdout): JSON-lines protocol
+// Environment variables:
+//   BENCH_PARAM_size, BENCH_PARAM_block_size,
+//   BENCH_PARAM_precision (one of: float, double, half)
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass (one pass = the full multi-level
+// reduction), one {"type":"kernel","name":"reduce_kernel",...} JSON line
+// carrying the pass's accumulated GPU event time (time_ms) and host
+// wall-clock time (host_time_ms) over all reduce_kernel launches, then a
+// summary whose total_time_ms is the SUM of all recorded GPU event times.
+// Effective bandwidth (GB/s) is derived downstream from time_ms and params.
 // Output (stderr): Human-readable diagnostics
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <cfloat>
-#include <vector>
 
 // ---------------------------------------------------------------------------
 // Inlined bench_common_hip.h utilities
 // ---------------------------------------------------------------------------
 
 // Error-checking macro
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // Parse --<name> N from argv (returns defaultVal if not found)
 static int parseIntParam(int argc, char** argv, const char* name,
@@ -54,31 +55,6 @@ static const char* parseStrParam(int argc, char** argv, const char* name,
     }
     return defaultVal;
 }
-
-// HIP-event-based timer
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
 
 // ---------------------------------------------------------------------------
 // Reduction kernel — shared-memory tree reduction
@@ -113,16 +89,31 @@ __global__ void reduce_kernel(const float* __restrict__ input,
 }
 
 // ---------------------------------------------------------------------------
-// Two-pass GPU reduction
+// Multi-level GPU reduction. Every reduce_kernel launch is individually
+// bracketed with GPU events when a timer/accumulator pair is supplied
+// (device-to-device copies stay outside the timed brackets); passing
+// nullptrs runs untimed. `d_temp` is a pre-allocated scratch buffer for
+// intermediate passes (may be nullptr when the first pass yields one block).
 // ---------------------------------------------------------------------------
-static void gpu_reduce(const float* d_input, float* d_partial,
-                       float* d_result, int N, int block_size)
+static void gpu_reduce(const float* d_input, float* d_partial, float* d_temp,
+                       float* d_result, int N, int block_size,
+                       bench_timer_t* timer, bench_lap_t* acc)
 {
     int elems_per_block = block_size * 2;
     int num_blocks      = (N + elems_per_block - 1) / elems_per_block;
     int shared_bytes    = block_size * sizeof(float);
 
-    reduce_kernel<<<dim3(num_blocks), dim3(block_size), shared_bytes, 0>>>(d_input, d_partial, N);
+    auto timed_launch = [&](int grid, const float* src, float* dst, int n) {
+        if (timer) {
+            bench_lap_add(acc, bench_time_op(timer, [&]() {
+                reduce_kernel<<<dim3(grid), dim3(block_size), shared_bytes, 0>>>(src, dst, n);
+            }));
+        } else {
+            reduce_kernel<<<dim3(grid), dim3(block_size), shared_bytes, 0>>>(src, dst, n);
+        }
+    };
+
+    timed_launch(num_blocks, d_input, d_partial, N);
 
     if (num_blocks == 1) {
         HIP_CHECK(hipMemcpy(d_result, d_partial, sizeof(float),
@@ -132,32 +123,18 @@ static void gpu_reduce(const float* d_input, float* d_partial,
 
     int remaining = num_blocks;
     float* d_src  = d_partial;
-    float* d_dst  = nullptr;
-
-    float* d_temp = nullptr;
-    bool   allocated_temp = false;
 
     while (remaining > 1) {
         int next_blocks  = (remaining + elems_per_block - 1) / elems_per_block;
 
         if (next_blocks == 1) {
-            reduce_kernel<<<dim3(1), dim3(block_size), shared_bytes, 0>>>(
-                d_src, d_result, remaining);
+            timed_launch(1, d_src, d_result, remaining);
             remaining = 1;
         } else {
-            if (!allocated_temp) {
-                HIP_CHECK(hipMalloc(&d_temp, next_blocks * sizeof(float)));
-                allocated_temp = true;
-            }
-            reduce_kernel<<<dim3(next_blocks), dim3(block_size), shared_bytes, 0>>>(
-                d_src, d_temp, remaining);
+            timed_launch(next_blocks, d_src, d_temp, remaining);
             d_src     = d_temp;
             remaining = next_blocks;
         }
-    }
-
-    if (allocated_temp) {
-        HIP_CHECK(hipFree(d_temp));
     }
 }
 
@@ -197,7 +174,18 @@ int main(int argc, char** argv)
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
-    int num_warmup = 5;
+    // Validate the precision string against the known set — only canonical
+    // literals are ever emitted in the params JSON.
+    if (strcmp(precision, "float") == 0)       precision = "float";
+    else if (strcmp(precision, "double") == 0) precision = "double";
+    else if (strcmp(precision, "half") == 0)   precision = "half";
+    else {
+        fprintf(stderr, "Error: precision must be one of float, double, half "
+                "(got \"%s\")\n", precision);
+        return 1;
+    }
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int N     = size;
     size_t bytesIn = (size_t)N * sizeof(float);
@@ -210,7 +198,8 @@ int main(int argc, char** argv)
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Array size: %d floats (%.1f MiB)\n",
             N, (double)bytesIn / (1024.0 * 1024.0));
-    fprintf(stderr, "Block size: %d\n\n", block_size);
+    fprintf(stderr, "Block size: %d  |  %d warmup + %d timed passes\n\n",
+            block_size, num_warmup, num_iters);
 
     // Host allocation
     float* h_input = (float*)malloc(bytesIn);
@@ -229,51 +218,52 @@ int main(int argc, char** argv)
     HIP_CHECK(hipMalloc(&d_partial, (size_t)num_blocks * sizeof(float)));
     HIP_CHECK(hipMalloc(&d_result,  sizeof(float)));
 
+    // Scratch buffer for intermediate reduction passes, allocated once here
+    // so no allocation happens on the measured path.
+    float* d_temp = nullptr;
+    if (num_blocks > 1) {
+        int temp_blocks = (num_blocks + elems_per_block - 1) / elems_per_block;
+        HIP_CHECK(hipMalloc(&d_temp, (size_t)temp_blocks * sizeof(float)));
+    }
+
     HIP_CHECK(hipMemcpy(d_input, h_input, bytesIn, hipMemcpyHostToDevice));
+
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
+             size, block_size, precision);
+
+    // Per-pass accumulator over all reduce_kernel launches in one full
+    // multi-level reduction. The input array is never mutated and the
+    // partial/result buffers are fully overwritten each pass, so repeated
+    // passes perform identical work — no state reset is needed.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_reduce;
 
     // Warmup
     for (int w = 0; w < num_warmup; ++w) {
-        gpu_reduce(d_input, d_partial, d_result, N, block_size);
+        gpu_reduce(d_input, d_partial, d_temp, d_result, N, block_size,
+                   nullptr, nullptr);
         HIP_CHECK(hipDeviceSynchronize());
     }
 
-    // Timed iterations
-    BenchmarkTimer timer;
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        timer.record_start();
-        gpu_reduce(d_input, d_partial, d_result, N, block_size);
-        timer.record_stop();
-        times[i] = static_cast<double>(timer.elapsed_ms());
+    // Timed passes, each recorded individually
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        bench_lap_reset(&acc_reduce);
+        gpu_reduce(d_input, d_partial, d_temp, d_result, N, block_size,
+                   &timer, &acc_reduce);
+        bench_emit_iter("reduce_kernel", i, &acc_reduce, params);
+        total_gpu_ms += acc_reduce.gpu_ms;
+        fprintf(stderr, "pass %d: gpu = %.3f ms, host = %.3f ms\n",
+                i, acc_reduce.gpu_ms, acc_reduce.host_ms);
     }
 
-    // Statistics
-    double sum_t = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        sum_t += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg_ms = sum_t / 1;
-    double total_ms = sum_t;
-
-    // Effective bandwidth: 2 * N * sizeof(float) (read + result write)
-    double bandwidth_gb = 2.0 * (double)N * sizeof(float)
-                          / (avg_ms * 1e-3) / 1e9;
-
-    // JSON-lines kernel event
-    printf("{\"type\":\"kernel\",\"name\":\"reduce_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"precision\":\"%s\"}}\n",
-           avg_ms, size, block_size, precision);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
-           total_ms, bandwidth_gb);
-
-    fprintf(stderr, "Effective bandwidth: %.2f GB/s  (avg %.4f ms)\n",
-            bandwidth_gb, avg_ms);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // Verify
     float gpu_result = 0.0f;
@@ -296,6 +286,7 @@ int main(int argc, char** argv)
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_partial));
     HIP_CHECK(hipFree(d_result));
+    if (d_temp) HIP_CHECK(hipFree(d_temp));
     free(h_input);
 
     return (rel_err >= 1e-3) ? 1 : 0;

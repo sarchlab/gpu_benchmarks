@@ -2,7 +2,7 @@
   "benchmark": "npb_mg",
   "tier": 2,
   "suite": "npb",
-  "description": "Multi-Grid solver from the NAS Parallel Benchmarks. Performs V-cycle multigrid with Jacobi smoothing, restriction, and prolongation on a synthetic 3D grid. Grid size is rounded up to the nearest power of 2.",
+  "description": "Multi-Grid solver from the NAS Parallel Benchmarks. Performs V-cycle multigrid with Jacobi smoothing, restriction, and prolongation on a synthetic 3D grid. Grid size is rounded up to the nearest power of 2. Emits per-pass kernel times; throughput is derived downstream.",
   "scaling_param": {
     "name": "grid_size",
     "description": "Grid dimension N for NxNxN 3D grid (rounded to power of 2)",

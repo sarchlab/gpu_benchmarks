@@ -26,9 +26,12 @@ patterns that defeat caching and prefetching mechanisms.
 | `block_size`    | 256       | Threads per block                    |
 | `num_updates`   | 128       | Random updates per thread            |
 | `num_threads`   | 65536     | Total threads launched               |
-| `iterations`    | 5         | Number of timed iterations           |
+| `num_warmup`    | 3         | Warmup passes (untimed)              |
+| `num_iters`     | 7         | Timed passes, each recorded          |
 
 Parameters are read from `BENCH_PARAM_*` environment variables.
+The table is restored to its pristine contents before every pass (untimed),
+so each recorded pass performs identical work.
 
 ## Build & Run
 
@@ -48,10 +51,12 @@ BENCH_PARAM_table_size=2097152 BENCH_PARAM_num_updates=256 ./altis_gups
 
 ## Output Format
 
-**JSON-lines to stdout:**
+**JSON-lines to stdout** — one `kernel` record per timed pass, then a
+`summary` whose `total_time_ms` is the sum of all passes' GPU event times:
 ```json
-{"type":"kernel","name":"gups_kernel","time_ms":12.345,"params":{"table_size":1048576,...}}
-{"type":"summary","total_time_ms":61.725,"metrics":[{"name":"gups","value":0.682}]}
+{"type":"kernel","name":"gups_kernel","iter":0,"time_ms":12.345000,"host_time_ms":12.501000,"params":{"table_size":1048576,...}}
+...
+{"type":"summary","total_time_ms":86.415000}
 ```
 
 **Human-readable to stderr:**
@@ -59,8 +64,9 @@ BENCH_PARAM_table_size=2097152 BENCH_PARAM_num_updates=256 ./altis_gups
 Device: Apple M1
 GUPS benchmark  |  Table size: 1048576 (8.39 MB)  |  Updates/thread: 128  |  ...
 
-Average time: 12.3450 ms
-Throughput:   0.682000 GUPS (Giga Updates Per Second)
+gups_kernel iter 0: gpu = 12.345 ms, host = 12.501 ms
+...
+Total GPU time: 86.415 ms over 7 iterations
 PASS
 ```
 
@@ -68,7 +74,8 @@ PASS
 
 **GUPS** (Giga Updates Per Second) = `total_updates / time_seconds / 1e9`
 
-where `total_updates = actual_threads × num_updates`.
+where `total_updates = actual_threads × num_updates`. Derived downstream
+from the emitted `time_ms` and params; not reported by the binary.
 
 ## Verification
 

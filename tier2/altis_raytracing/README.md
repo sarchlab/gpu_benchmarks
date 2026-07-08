@@ -1,6 +1,6 @@
 # tier2/altis_raytracing — Simple Ray Tracing (Altis)
 
-Benchmarks a simple ray tracer on the GPU. Each thread casts one ray from a camera through an image plane, tests all spheres for intersection, and shades the nearest hit with Phong lighting. Measures throughput in Mrays/sec.
+Benchmarks a simple ray tracer on the GPU. Each thread casts one ray from a camera through an image plane, tests all spheres for intersection, and shades the nearest hit with Phong lighting. Emits per-iteration kernel times; throughput in Mrays/sec is derived downstream.
 
 Derived from the [Altis benchmark suite](https://github.com/utcs-scea/altis) ray tracing workload.
 
@@ -18,7 +18,17 @@ Derived from the [Altis benchmark suite](https://github.com/utcs-scea/altis) ray
   4. Write RGBA pixel to output
 - Camera at (0, 0, 5), looking along -Z, 90° FOV
 - Light direction: normalized (1, 1, 1)
-- Mrays/sec = W × H / time\_sec / 10⁶
+- Mrays/sec = W × H / time\_sec / 10⁶ (derived downstream from the emitted times)
+
+## Parameters
+
+| Env var | Description | Default |
+|---------|-------------|---------|
+| `BENCH_PARAM_width` | Image width in pixels | 1024 |
+| `BENCH_PARAM_height` | Image height in pixels | 1024 |
+| `BENCH_PARAM_spheres` | Number of spheres | 64 |
+| `BENCH_PARAM_num_warmup` | Warmup launches (untimed) | 3 |
+| `BENCH_PARAM_num_iters` | Timed launches, each recorded | 7 |
 
 ## Files
 
@@ -43,25 +53,29 @@ make PLATFORM=metal
 ```bash
 ./altis_raytracing                                # defaults: 1024x1024, 64 spheres
 ./altis_raytracing --width 512 --height 512       # smaller image
-./altis_raytracing --spheres 128 --iterations 10  # more spheres, more iterations
+./altis_raytracing --spheres 128                  # more spheres
 ```
 
 ## Output
 
-**stdout** — CSV timing row:
+**stdout** — JSON lines, one `kernel` record per timed iteration followed by a
+`summary` whose `total_time_ms` is the sum of all iterations' GPU event times:
 ```
-altis_raytracing,1024x1024,2.3456,447.1234
+{"type":"kernel","name":"raytrace_kernel","iter":0,"time_ms":2.345600,"host_time_ms":2.401000,"params":{"width":1024,"height":1024,"spheres":64}}
+...
+{"type":"summary","total_time_ms":16.419200}
 ```
 
-Format: `altis_raytracing,<WxH>,<time_ms>,<Mrays_per_sec>`
+Derived metrics (e.g. Mrays/sec) are computed downstream from `time_ms` and params.
 
 **stderr** — human-readable results:
 ```
 Device: Apple M2
-Ray Tracing  |  Image: 1024x1024  |  Spheres: 64  |  Iterations: 5 warmup + 5 timed
+Ray Tracing  |  Image: 1024x1024  |  Spheres: 64  |  Iterations: 3 warmup + 7 timed
 
-Average time: 2.3456 ms
-Throughput:   447.1234 Mrays/sec
+raytrace_kernel iter 0: gpu = 2.346 ms, host = 2.401 ms
+...
+Total GPU time: 16.419 ms over 7 iterations
 PASS
 ```
 

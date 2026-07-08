@@ -13,29 +13,25 @@
 //   --height H       Image height (default: 1024)
 //   --spheres S      Number of spheres (default: 64)
 //
-// Output (stdout): CSV — altis_raytracing,<WxH>,<time_ms>,<Mrays_per_sec>
+// Environment variables (override argv):
+//   BENCH_PARAM_width, BENCH_PARAM_height, BENCH_PARAM_spheres
+//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
+//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
+//
+// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
+// carrying the GPU event time and host wall-clock time, then a summary whose
+// total_time_ms is the SUM of all iterations' GPU event times. Mrays/sec is
+// derived downstream from time_ms and params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -304,8 +300,8 @@ int main(int argc, char** argv) {
     if (env_val) H = atoi(env_val);
     env_val = getenv("BENCH_PARAM_spheres");
     if (env_val) nSph = atoi(env_val);
-    int num_warmup = 5;
-
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int total_pixels = W * H;
     size_t image_bytes  = (size_t)total_pixels * 4;
@@ -318,7 +314,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Ray Tracing  |  Image: %dx%d  |  Spheres: %d  |  "
-            "Iterations: 5 warmup + %d timed\n\n", W, H, nSph);
+            "Iterations: %d warmup + %d timed\n\n", W, H, nSph,
+            num_warmup, num_iters);
 
     // Generate random spheres (deterministic seed)
     std::vector<Sphere> h_spheres(nSph);
@@ -354,64 +351,21 @@ int main(int argc, char** argv) {
     int blockSize = 256;
     int gridSize  = (total_pixels + blockSize - 1) / blockSize;
 
-    auto run_raytrace = [&]() {
-        raytrace_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_image, d_spheres, W, H, nSph);
-    };
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"width\":%d,\"height\":%d,\"spheres\":%d", W, H, nSph);
 
-    // -------------------------------------------------------------------
-    // Warmup
-    // -------------------------------------------------------------------
-    for (int w = 0; w < num_warmup; ++w) {
-        run_raytrace();
-        HIP_CHECK(hipDeviceSynchronize());
-    }
+    // Warmup + timed iterations, each recorded individually. The kernel only
+    // reads the sphere list and overwrites the output image from scratch, so
+    // repeated launches perform identical work — no state reset needed.
+    double total_gpu_ms =
+        bench_run_loop("raytrace_kernel", num_warmup, num_iters, params, [&]() {
+            raytrace_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_image, d_spheres, W, H, nSph);
+        });
 
-    // -------------------------------------------------------------------
-    // Timed iterations
-    // -------------------------------------------------------------------
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        run_raytrace();
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
-    }
-
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    // Compute average time
-    double sum = 0.0;
-    for (int i = 0; i < 1; ++i) sum += times[i];
-    double avg_ms = sum / 1;
-
-    // Mrays/sec = W * H / time_s / 1e6
-    double mrays = (double)(W * H) / (avg_ms * 1e-3) / 1e6;
-
-    double total_ms = sum;
-
-    // JSON-lines kernel event
-    printf("{\"type\":\"kernel\",\"name\":\"raytrace_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"width\":%d,\"height\":%d,\"spheres\":%d"
-           "}}\n",
-           avg_ms, W, H, nSph);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"mrays_per_sec\",\"value\":%.2f}]}\n",
-           total_ms, mrays);
-
-    // Human-readable output to stderr
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
-    fprintf(stderr, "Throughput:   %.4f Mrays/sec\n", mrays);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
+            total_gpu_ms, num_iters);
 
     // -------------------------------------------------------------------
     // Verification (compare a subset of pixels against CPU reference)

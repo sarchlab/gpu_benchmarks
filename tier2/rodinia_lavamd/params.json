@@ -2,7 +2,7 @@
   "benchmark": "rodinia_lavamd",
   "tier": 2,
   "suite": "rodinia",
-  "description": "Short-range molecular dynamics with cell-list decomposition. Computes Lennard-Jones type particle interactions within neighboring cells (26 neighbors + self = 27 cells per box) on an NxNxN grid of boxes.",
+  "description": "Short-range molecular dynamics with cell-list decomposition. Computes Lennard-Jones type particle interactions within neighboring cells (26 neighbors + self = 27 cells per box) on an NxNxN grid of boxes. Emits per-iteration kernel times; GFLOPS is derived downstream.",
   "scaling_param": {
     "name": "num_boxes",
     "description": "Number of boxes per dimension (total boxes = N^3)",

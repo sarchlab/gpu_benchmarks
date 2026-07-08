@@ -1,7 +1,6 @@
 // parboil_sgemm.hip — Parboil SGEMM benchmark (HIP, self-contained)
 //
 // Tiled single-precision GEMM: C = alpha*A*B + beta*C for NxN matrices.
-// Measures compute throughput in GFLOPS.
 //
 // Derived from the Parboil benchmark suite SGEMM workload.
 //
@@ -12,29 +11,24 @@
 //
 //   --size N         Matrix dimension N (NxN)  (default: 1024)
 //
-// Output (stdout): parboil_sgemm,<N>,<GFLOPS>
+// Environment variables (override argv):
+//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
+//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
+//
+// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
+// carrying the GPU event time (time_ms) and host wall-clock time
+// (host_time_ms), then a summary whose total_time_ms is the SUM of all
+// iterations' GPU event times. GFLOPS (2*N^3 / time) is derived downstream
+// from time_ms and params.
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <cfloat>
-#include <vector>
 
-// ---------------------------------------------------------------------------
-// Inlined HIP utility macros
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing helpers
@@ -50,32 +44,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     }
     return defaultVal;
 }
-
-// ---------------------------------------------------------------------------
-// HIP event timer
-// ---------------------------------------------------------------------------
-
-struct HipTimer {
-    hipEvent_t start, stop;
-    HipTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~HipTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void begin(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    float end(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
 
 // ---------------------------------------------------------------------------
 // Tiled SGEMM kernel (16x16 shared-memory tiles)
@@ -159,8 +127,20 @@ int main(int argc, char** argv)
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
-    if (env_val) precision = env_val;
-    int num_warmup = 5;
+    if (env_val) {
+        // Validate against the known enum set so the emitted params string is
+        // always a canonical literal, never raw env text.
+        if      (strcmp(env_val, "float")  == 0) precision = "float";
+        else if (strcmp(env_val, "double") == 0) precision = "double";
+        else if (strcmp(env_val, "half")   == 0) precision = "half";
+        else {
+            fprintf(stderr, "Invalid BENCH_PARAM_precision (expected float, "
+                            "double or half)\n");
+            return 1;
+        }
+    }
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     float alpha = 1.5f;
     float beta  = 1.2f;
@@ -205,55 +185,31 @@ int main(int argc, char** argv)
     dim3 block(TILE, TILE);
     dim3 grid((N + TILE - 1) / TILE, (N + TILE - 1) / TILE);
 
-    // Warmup
-    for (int w = 0; w < num_warmup; ++w) {
-        sgemm_kernel<<<grid, block>>>(d_A, d_B, d_C, N, alpha, beta);
-        HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipMemcpy(d_C, h_C, bytes, hipMemcpyHostToDevice));
-    }
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
+             N, block_size, precision);
 
-    // Timed iterations
-    HipTimer timer;
-    std::vector<double> times(1);
+    // Warmup + timed iterations, each recorded individually. The kernel
+    // rewrites C in place (beta*C term); float FMA timing is value-
+    // independent, so iterating without re-uploading C does not change the
+    // measured time and keeps the launch loop free of setup copies.
+    double total_gpu_ms =
+        bench_run_loop("sgemm_kernel", num_warmup, num_iters, params, [&]() {
+            sgemm_kernel<<<grid, block>>>(d_A, d_B, d_C, N, alpha, beta);
+        });
 
-    for (int i = 0; i < 1; ++i) {
-        // Reset C to initial state so beta accumulation is consistent
-        HIP_CHECK(hipMemcpy(d_C, h_C, bytes, hipMemcpyHostToDevice));
-        timer.begin();
-        sgemm_kernel<<<grid, block>>>(d_A, d_B, d_C, N, alpha, beta);
-        float ms = timer.end();
-        times[i] = (double)ms;
-    }
-
-    // Compute statistics
-    double sum_t = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        sum_t += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg_ms = sum_t / 1;
-
-    // GFLOPS: 2*N*N*N multiply-adds
-    double gflops = 2.0 * (double)N * (double)N * (double)N
-                    / (avg_ms * 1e-3) / 1e9;
-
-    // JSON-lines output
-    printf("{\"type\":\"kernel\",\"name\":\"sgemm_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"precision\":\"%s\"}}\n",
-           avg_ms, N, block_size, precision);
-
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
-           sum_t, gflops);
-
-    // Human-readable stderr
-    fprintf(stderr, "Performance: %.2f GFLOPS  (avg %.4f ms, min %.4f ms, max %.4f ms)\n",
-            gflops, avg_ms, mn, mx);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
+            total_gpu_ms, num_iters);
 
     // Correctness check (only for small N to keep runtime short)
     if (N <= 256) {
+        // The benchmark loop applied the in-place update repeatedly; redo a
+        // single application from the pristine C for verification.
+        HIP_CHECK(hipMemcpy(d_C, h_C, bytes, hipMemcpyHostToDevice));
+        sgemm_kernel<<<grid, block>>>(d_A, d_B, d_C, N, alpha, beta);
+        HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipMemcpy(h_C, d_C, bytes, hipMemcpyDeviceToHost));
         sgemm_cpu(h_A, h_B, h_ref, N, alpha, beta);
 

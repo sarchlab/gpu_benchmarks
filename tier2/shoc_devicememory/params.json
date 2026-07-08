@@ -2,7 +2,7 @@
   "benchmark": "shoc_devicememory",
   "tier": 2,
   "suite": "shoc",
-  "description": "Device global memory bandwidth benchmark with read-only, write-only, and read-write access patterns. Measures bandwidth in GB/s.",
+  "description": "Device global memory bandwidth benchmark with read-only, write-only, and read-write access patterns. Emits per-iteration kernel times; bandwidth in GB/s is derived downstream.",
   "scaling_param": {
     "name": "array_size_mb",
     "description": "Array size in megabytes",

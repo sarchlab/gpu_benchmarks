@@ -2,7 +2,7 @@
   "benchmark": "polybench_mvt",
   "tier": 2,
   "suite": "polybench",
-  "description": "Matrix-vector product and transpose: x1 = A * y1, x2 = A^T * y2 for NxN matrix A. Measures memory bandwidth in GB/s.",
+  "description": "Matrix-vector product and transpose: x1 = A * y1, x2 = A^T * y2 for NxN matrix A. Emits per-iteration kernel times; memory bandwidth (GB/s) is derived downstream.",
   "scaling_param": {
     "name": "n",
     "description": "Matrix dimension N (NxN matrix A)",

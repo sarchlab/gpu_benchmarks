@@ -50,19 +50,33 @@ BENCH_PARAM_num_boxes=15 ./rodinia_lavamd
 BENCH_PARAM_num_boxes=8 BENCH_PARAM_particles_per_box=200 ./rodinia_lavamd
 ```
 
+Environment variables override argv:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `BENCH_PARAM_num_boxes` | Boxes per dimension (total = N³) | 10 |
+| `BENCH_PARAM_block_size` | Threads per block | 128 |
+| `BENCH_PARAM_particles_per_box` | Particles per box | 100 |
+| `BENCH_PARAM_num_warmup` | Warmup launches (untimed) | 3 |
+| `BENCH_PARAM_num_iters` | Timed launches, each recorded | 7 |
+
 ## Output
 
-**stdout** — JSON-lines:
+**stdout** — JSON-lines: one `{"type":"kernel",...}` record per timed iteration carrying the GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`), then a summary whose `total_time_ms` is the sum of all iterations' GPU event times:
 ```
-{"type":"kernel","name":"lavamd_kernel","time_ms":12.345,"params":{"num_boxes":10,...}}
-{"type":"summary","total_time_ms":61.725,"metrics":[{"name":"gflops","value":45.67}]}
+{"type":"kernel","name":"lavamd_kernel","iter":0,"time_ms":12.345,"host_time_ms":12.501,"params":{"num_boxes":10,...}}
+{"type":"summary","total_time_ms":86.415}
 ```
+
+Derived metrics such as GFLOPS are computed downstream from `time_ms` and params.
 
 **stderr** — human-readable results:
 ```
 Device: Apple M4 Pro
-Boxes: 10×10×10 (1000 total)  |  Particles/box: 100  |  Iterations: 5
-Average time: 12.345 ms  |  Throughput: 45.67 GFLOPS
+Boxes: 10×10×10 (1000 total)  |  Particles/box: 100  |  Iterations: 3 warmup + 7 timed
+lavamd_kernel iter 0: gpu = 12.345 ms, host = 12.501 ms
+...
+Total GPU time: 86.415 ms over 7 iterations
 ```
 
 ## Platform Notes

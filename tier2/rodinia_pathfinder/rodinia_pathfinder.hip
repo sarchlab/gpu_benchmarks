@@ -11,30 +11,27 @@
 //   --rows R        Grid rows                  (default: 100000)
 //   --cols C        Grid columns               (default: 100)
 //
-// Output (stdout): CSV — benchmark,rows,cols,time_ms,GBs
+// Environment variables (override argv):
+//   BENCH_PARAM_rows, BENCH_PARAM_cols, BENCH_PARAM_block_size
+//   BENCH_PARAM_num_warmup   (warmup grid sweeps, default 3)
+//   BENCH_PARAM_num_iters    (timed grid sweeps, each recorded, default 7)
+//
+// Output (stdout): per timed sweep, one {"type":"kernel",...} JSON line for
+// dynproc_kernel carrying the GPU event time and host time of the whole
+// rows-1 launch chain, then a summary whose total_time_ms is the SUM of all
+// recorded GPU event times. Bandwidth (3*rows*cols*4 bytes / time) is
+// derived downstream from time_ms and params.
 // Output (stderr): Verification result and device info
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
 #include <climits>
 #include <vector>
 #include <algorithm>
 
-// ---------------------------------------------------------------------------
-// HIP error check
-// ---------------------------------------------------------------------------
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // PathFinder kernel
@@ -117,7 +114,8 @@ int main(int argc, char** argv) {
     if (env_val) rows = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size_param = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     // Print device info
     int device_id = 0;
@@ -213,63 +211,53 @@ int main(int argc, char** argv) {
 
     int nblocks = (cols + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-    // Warmup
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"cols\":%d,\"rows\":%d,\"block_size\":%d",
+             cols, rows, block_size_param);
+
+    // One full grid sweep. The sweep only reads d_wall (never modified) and
+    // ping-pongs d_src/d_dst, so d_src is re-initialized to row 0 before
+    // every sweep (untimed, as the old code did). The rows-1 dependent
+    // kernel launches contain no interleaved transfers, only host-side
+    // pointer swaps, so the whole chain is timed as ONE event bracket:
+    // per-launch brackets (up to 100k launches) would serialize the launch
+    // pipeline and distort the measurement.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t lap;
+    int* final_src = d_src;
+
+    auto run_sweep = [&]() {
+        HIP_CHECK(hipMemcpy(d_src, h_src, row_bytes, hipMemcpyHostToDevice));
+        int* src = d_src;
+        int* dst = d_dst;
+        lap = bench_time_op(&timer, [&]() {
+            for (int t = 1; t < rows; t++) {
+                dynproc_kernel<<<nblocks, BLOCK_SIZE>>>(d_wall, src, dst, cols, t);
+                int* tmp = src; src = dst; dst = tmp;
+            }
+        });
+        final_src = src;
+    };
+
     for (int w = 0; w < num_warmup; ++w) {
-        HIP_CHECK(hipMemcpy(d_src, h_src, row_bytes, hipMemcpyHostToDevice));
-        int* src = d_src;
-        int* dst = d_dst;
-        for (int t = 1; t < rows; t++) {
-            dynproc_kernel<<<nblocks, BLOCK_SIZE>>>(d_wall, src, dst, cols, t);
-            int* tmp = src; src = dst; dst = tmp;
-        }
-        HIP_CHECK(hipDeviceSynchronize());
+        run_sweep();
     }
 
-    // -----------------------------------------------------------------
-    // Timed iterations
-    // -----------------------------------------------------------------
-    hipEvent_t ev_start, ev_stop;
-    HIP_CHECK(hipEventCreate(&ev_start));
-    HIP_CHECK(hipEventCreate(&ev_stop));
-
-    std::vector<double> times(1);
-    for (int iter = 0; iter < 1; iter++) {
-        HIP_CHECK(hipMemcpy(d_src, h_src, row_bytes, hipMemcpyHostToDevice));
-
-        int* src = d_src;
-        int* dst = d_dst;
-
-        HIP_CHECK(hipEventRecord(ev_start, 0));
-
-        for (int t = 1; t < rows; t++) {
-            dynproc_kernel<<<nblocks, BLOCK_SIZE>>>(d_wall, src, dst, cols, t);
-            int* tmp = src; src = dst; dst = tmp;
-        }
-
-        HIP_CHECK(hipEventRecord(ev_stop, 0));
-        HIP_CHECK(hipEventSynchronize(ev_stop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));
-        times[iter] = (double)ms;
-
-        // Copy result back on last iteration
-        if (iter == 1 - 1) {
-            HIP_CHECK(hipMemcpy(h_result, src, row_bytes, hipMemcpyDeviceToHost));
-        }
+    double total_gpu_ms = 0.0;
+    for (int iter = 0; iter < num_iters; iter++) {
+        run_sweep();
+        bench_emit_iter("dynproc_kernel", iter, &lap, params);
+        total_gpu_ms += lap.gpu_ms;
+        fprintf(stderr, "dynproc_kernel iter %d: gpu = %.3f ms, host = %.3f ms\n",
+                iter, lap.gpu_ms, lap.host_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(ev_start));
-    HIP_CHECK(hipEventDestroy(ev_stop));
+    bench_timer_destroy(&timer);
 
-    // Compute stats
-    double sum = 0.0;
-    for (int i = 0; i < 1; i++) sum += times[i];
-    double avg_ms = sum / 1;
-
-    // GB/s: ROWS * COLS * sizeof(int) * 3 (2 reads: src+wall, 1 write: dst)
-    double total_bytes_accessed = (double)rows * cols * sizeof(int) * 3.0;
-    double gb_s = total_bytes_accessed / (avg_ms * 1e-3) / 1e9;
+    // Copy final-row result back from the last sweep
+    HIP_CHECK(hipMemcpy(h_result, final_src, row_bytes, hipMemcpyDeviceToHost));
 
     // Find min of result row
     int min_cost = h_result[0];
@@ -278,17 +266,9 @@ int main(int argc, char** argv) {
     }
     fprintf(stderr, "Min cost in final row: %d\n", min_cost);
 
-    double total_ms = sum;
-
-    // JSON-lines kernel event
-    printf("{\"type\":\"kernel\",\"name\":\"dynproc_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"cols\":%d,\"rows\":%d,\"block_size\":%d}}\n",
-           avg_ms, cols, rows, block_size_param);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.4f}]}\n",
-           total_ms, gb_s);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d sweeps\n",
+            total_gpu_ms, num_iters);
 
     // Cleanup
     HIP_CHECK(hipFree(d_wall));

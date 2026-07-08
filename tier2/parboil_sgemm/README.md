@@ -1,6 +1,6 @@
 # tier2/parboil_sgemm — Tiled Single-Precision GEMM (Parboil)
 
-Benchmarks tiled single-precision matrix multiplication: **C = α·A·B + β·C** for square N×N matrices. Measures compute throughput in GFLOPS.
+Benchmarks tiled single-precision matrix multiplication: **C = α·A·B + β·C** for square N×N matrices. Emits raw per-iteration kernel times; GFLOPS is derived downstream.
 
 Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parboil/parboil.aspx) SGEMM workload.
 
@@ -9,8 +9,8 @@ Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parbo
 - Square N×N single-precision matrix multiply: **C = alpha·A·B + beta·C**
 - Default: N=1024, alpha=1.5, beta=1.2
 - Tiled kernel: 16×16 thread tiles load sub-matrices into shared/threadgroup memory to improve cache reuse
-- 5 timed iterations (+ 1 warmup), reports average
-- GFLOPS = 2·N³ / time\_sec / 1e9
+- `BENCH_PARAM_num_warmup` warmup launches (default 3), then `BENCH_PARAM_num_iters` timed launches (default 7), each recorded individually
+- GFLOPS = 2·N³ / time\_sec / 1e9 (derived downstream from `time_ms` and params)
 
 ## Files
 
@@ -34,25 +34,31 @@ make PLATFORM=metal
 ## Run
 
 ```bash
-./parboil_sgemm                      # defaults: 1024×1024, 5 iterations
+./parboil_sgemm                      # defaults: 1024×1024
 ./parboil_sgemm --size 2048
-./parboil_sgemm --size 512 --iterations 10
+BENCH_PARAM_num_iters=10 ./parboil_sgemm --size 512
 ```
 
 ## Output
 
-**stdout** — CSV result:
+**stdout** — JSON lines: one `kernel` record per timed iteration with the GPU
+event time (`time_ms`) and host wall-clock time (`host_time_ms`), then a
+summary whose `total_time_ms` is the sum of all iterations' GPU event times:
 ```
-parboil_sgemm,1024,4321.56
+{"type":"kernel","name":"sgemm_kernel","iter":0,"time_ms":0.495,"host_time_ms":0.520,"params":{"size":1024,"block_size":256,"precision":"float"}}
+...
+{"type":"summary","total_time_ms":3.465}
 ```
-Format: `parboil_sgemm,<N>,<GFLOPS>`
+GFLOPS is derived downstream from `time_ms` and params.
 
 **stderr** — human-readable results:
 ```
 Device: AMD Radeon RX 7900 XTX (id=0)
-Matrix size: 1024×1024  |  alpha=1.5  beta=1.2  |  Iterations: 5
+Matrix size: 1024×1024  |  alpha=1.5  beta=1.2
 
-Performance: 4321.56 GFLOPS  (avg 0.4950 ms, min 0.4900 ms, max 0.5050 ms)
+sgemm_kernel iter 0: gpu = 0.495 ms, host = 0.520 ms
+...
+Total GPU time: 3.465 ms over 7 iterations
 Skipping verification for large size
 ```
 

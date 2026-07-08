@@ -16,21 +16,25 @@ Two GPU kernels are executed per iteration:
 
 ## Metric
 
-**GB/s** (memory bandwidth) — matrix A is read twice per iteration (once per kernel):
+**GB/s** (memory bandwidth) — matrix A is read twice per pass (once per kernel):
 
 ```
 GB/s = (2 * NX * NY * 4 bytes) / time_s / 1e9
 ```
 
+Derived downstream from the emitted `time_ms` and params; not reported by the binary.
+
 ## Output
 
-```
-polybench_atax,<NX>x<NY>,<GB/s>
-```
+**stdout** — JSON lines: per timed pass, one `kernel` record per kernel
+(`atax_kernel1`, `atax_kernel2`) with GPU event time and host time, then a
+`summary` whose `total_time_ms` is the sum of all recorded GPU event times:
 
-Example:
 ```
-polybench_atax,4096x4096,245.73
+{"type":"kernel","name":"atax_kernel1","iter":0,"time_ms":1.234000,"host_time_ms":1.290000,"params":{"nx":4096,"ny":4096,"block_size":256}}
+{"type":"kernel","name":"atax_kernel2","iter":0,"time_ms":2.345000,"host_time_ms":2.401000,"params":{"nx":4096,"ny":4096,"block_size":256}}
+...
+{"type":"summary","total_time_ms":25.053000}
 ```
 
 ## Build
@@ -48,23 +52,25 @@ make PLATFORM=metal
 ## Run
 
 ```bash
-# Default: NX=NY=4096, 5 iterations
+# Default: NX=NY=4096
 ./polybench_atax
 
 # Custom size
 ./polybench_atax --nx 2048 --ny 2048
 
-# More iterations
-./polybench_atax --nx 4096 --ny 4096 --iterations 10
+# More recorded passes
+BENCH_PARAM_num_iters=10 ./polybench_atax
 ```
 
 ## Parameters
 
-| Flag | Default | Description |
+| Flag / Env var | Default | Description |
 |------|---------|-------------|
-| `--nx NX` | 4096 | Number of matrix rows |
-| `--ny NY` | 4096 | Number of matrix columns |
-| `--iterations I` | 5 | Number of timed iterations (plus 1 warmup) |
+| `--nx NX` / `BENCH_PARAM_nx` | 4096 | Number of matrix rows |
+| `--ny NY` / `BENCH_PARAM_ny` | 4096 | Number of matrix columns |
+| `BENCH_PARAM_block_size` | 256 | Threads per block |
+| `BENCH_PARAM_num_warmup` | 3 | Warmup passes (untimed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded |
 
 ## Platform Notes
 

@@ -2,7 +2,7 @@
   "benchmark": "polybench_atax",
   "tier": 2,
   "suite": "polybench",
-  "description": "Computes y = A^T * (A * x) where A is NxN. Two-phase matrix-vector product benchmark measuring memory bandwidth in GB/s.",
+  "description": "Computes y = A^T * (A * x) where A is NxN. Two-phase matrix-vector product benchmark; emits per-iteration kernel times from which memory bandwidth in GB/s is derived downstream.",
   "scaling_param": {
     "name": "nx",
     "description": "Number of rows (and columns, when ny=nx) of matrix A",

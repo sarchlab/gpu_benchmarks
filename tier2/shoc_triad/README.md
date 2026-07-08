@@ -39,42 +39,55 @@ make PLATFORM=cuda
 ## Running
 
 ```bash
-./shoc_triad [--array_size N] [--block_size B] [--iterations I]
+./shoc_triad [--array_size N] [--block_size B]
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--array_size N` | `4194304` | Number of `float` elements (4 M ≈ 16 MiB per array) |
 | `--block_size B` | `256` | GPU thread-block size (HIP/CUDA only) |
-| `--iterations I` | `20` | Number of timed kernel launches |
+
+Environment variables `BENCH_PARAM_array_size`, `BENCH_PARAM_block_size`, and
+`BENCH_PARAM_precision` override the flags. In addition:
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `BENCH_PARAM_num_warmup` | 3 | Warmup launches (untimed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed launches, each recorded |
 
 > Note: `--block_size` is ignored on Metal (thread-group size is set automatically).
 
 ## Output
 
-**stdout** — CSV row with timing statistics:
+**stdout** — JSON lines, one `kernel` record per timed iteration carrying the
+GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`), then a
+`summary` whose `total_time_ms` is the sum of all iterations' GPU event times:
 ```
-kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-triad,4194304,20,0.3142,0.3098,0.3301,0.0042
+{"type":"kernel","name":"triad_kernel","iter":0,"time_ms":0.314200,"host_time_ms":0.330000,"params":{"array_size":4194304,"block_size":256,"precision":"float"}}
+...
+{"type":"summary","total_time_ms":2.199400}
 ```
 
 **stderr** — human-readable summary:
 ```
 Device: Apple M4 Pro
 Array size: 4194304 floats (16.0 MiB)
-Iterations: 20
+Block size: 256
 
-Effective bandwidth: 153.47 GB/s  (avg 0.3142 ms)
+triad_kernel iter 0: gpu = 0.314 ms, host = 0.330 ms
+...
+Total GPU time: 2.199 ms over 7 iterations
 PASS
 ```
 
 ## Bandwidth Formula
 
 ```
-Bandwidth (GB/s) = 3 × N × sizeof(float) / avg_time_seconds / 1e9
+Bandwidth (GB/s) = 3 × N × sizeof(float) / time_seconds / 1e9
 ```
 
 The factor of 3 accounts for two reads (`b`, `c`) and one write (`a`).
+Derived downstream from the emitted `time_ms` and params.
 
 ## Example Results
 

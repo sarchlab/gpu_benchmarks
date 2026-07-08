@@ -2,7 +2,7 @@
   "benchmark": "parboil_spmv",
   "tier": 2,
   "suite": "parboil",
-  "description": "CSR sparse matrix-vector multiplication y = A*x. Each thread computes one output row. Measures throughput in GFLOPS.",
+  "description": "CSR sparse matrix-vector multiplication y = A*x. Each thread computes one output row. Emits per-iteration kernel times; GFLOPS is derived downstream.",
   "scaling_param": {
     "name": "num_rows",
     "description": "Number of matrix rows",

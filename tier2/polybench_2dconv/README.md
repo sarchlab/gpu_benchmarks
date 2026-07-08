@@ -1,7 +1,8 @@
 # tier2/polybench_2dconv — PolyBench 2D Convolution
 
 GPU benchmark for PolyBench 2D Convolution. Applies a fixed 3×3 kernel to an
-N×N input matrix, measuring throughput in GFLOPS.
+N×N input matrix. Emits raw per-iteration kernel times; throughput (GFLOPS)
+is derived downstream.
 
 ## Algorithm
 
@@ -22,7 +23,8 @@ c = {{0.8, 0.2, 0.3},
      {0.1, 0.2, 0.5}}
 ```
 
-**GFLOPS** = `2 × 9 × (N−2)² / time_s / 1e9`
+**GFLOPS** = `2 × 9 × (N−2)² / time_s / 1e9` (derived downstream from the
+emitted times and params)
 
 ## Files
 
@@ -57,28 +59,43 @@ make PLATFORM=metal   # Apple Metal (clang++)
 ## Run
 
 ```bash
-./polybench_2dconv [--size N] [--iterations I]
+./polybench_2dconv [--size N]
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--size N` | 2048 | Matrix dimension N×N |
-| `--iterations I` | 5 | Number of timed iterations |
+
+| Environment variable | Default | Description |
+|----------------------|---------|-------------|
+| `BENCH_PARAM_size` | 2048 | Matrix dimension N×N (overrides `--size`) |
+| `BENCH_PARAM_block_size` | 256 | Reported thread-block size |
+| `BENCH_PARAM_precision` | float | Precision label (`half`, `float`, `double`) |
+| `BENCH_PARAM_num_warmup` | 3 | Warmup launches (untimed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed launches, each recorded |
 
 ## Output
 
-**stdout** (CSV):
+**stdout** — JSON lines, one kernel record per timed iteration with the GPU
+event time (`time_ms`) and host wall-clock time (`host_time_ms`), then a
+summary whose `total_time_ms` is the sum of all iterations' GPU event times:
 ```
-kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-polybench_2dconv,2048,5,3.2100,3.1800,3.2400,0.0240
+{"type":"kernel","name":"convolution2D_kernel","iter":0,"time_ms":3.210000,"host_time_ms":3.270000,"params":{"size":2048,"block_size":256,"precision":"float"}}
+...
+{"type":"summary","total_time_ms":22.470000}
 ```
+
+Derived metrics such as GFLOPS are computed downstream from `time_ms` and
+the params.
 
 **stderr**:
 ```
 Device: NVIDIA A100 (id=0)
-Matrix: 2048×2048  |  Iterations: 5
+Matrix: 2048×2048
 
-GFLOPS: 23.14  (avg 3.2100 ms)
+convolution2D_kernel iter 0: gpu = 3.210 ms, host = 3.270 ms
+...
+Total GPU time: 22.470 ms over 7 iterations
 ```
 
 ## Notes
@@ -87,4 +104,5 @@ GFLOPS: 23.14  (avg 3.2100 ms)
 - Input is initialized with `rand() % 100 / 10.0f` using seed 42 (reproducible).
 - Metal: shader source is compiled at runtime from `polybench_2dconv.metal`
   (must reside alongside the binary).
-- The benchmark runs one warmup pass before the timed iterations.
+- The benchmark runs `BENCH_PARAM_num_warmup` warmup launches (default 3)
+  before the timed iterations.

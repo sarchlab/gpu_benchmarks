@@ -11,29 +11,26 @@
 //
 //   --size N         Number of mesh cells (default: 97000)
 //
-// Output (stdout): CSV row — altis_cfd,<N>,<time_ms>,<Mcells_per_sec>
+// Environment variables (override argv):
+//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// kernel (compute_flux_kernel, rk_update_kernel) carrying that kernel's
+// accumulated GPU event time and host time within the pass (summed over the
+// RK stages), then a summary whose total_time_ms is the SUM of all recorded
+// GPU event times. Mcells/sec is derived downstream from time_ms and params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -326,8 +323,15 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
-    int num_warmup = 5;
-
+    // Validate string params so the values echoed into the JSON records are
+    // always canonical literals (never raw env text).
+    if (strcmp(precision, "half") != 0 && strcmp(precision, "float") != 0 &&
+        strcmp(precision, "double") != 0) {
+        fprintf(stderr, "Invalid precision '%s' (use half, float, double)\n", precision);
+        return EXIT_FAILURE;
+    }
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     // Print device info
     int device_id = 0;
@@ -336,7 +340,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "CFD Euler solver  |  Cells: %d  |  Neighbors: %d  |  "
-            "Iterations: 5 warmup + %d timed\n\n", N, NUM_NEIGHBORS);
+            "Iterations: %d warmup + %d timed\n\n",
+            N, NUM_NEIGHBORS, num_warmup, num_iters);
 
     // -----------------------------------------------------------------------
     // Generate synthetic mesh data
@@ -434,46 +439,10 @@ int main(int argc, char** argv) {
     // RK coefficients for 2-stage scheme: stage 0 -> coeff=0, stage 1 -> coeff=0.5
     float rk_coeffs[RK_STEPS] = {0.0f, 0.5f};
 
-    // Lambda: run one full RK time step.
-    // When timing events are supplied, each kernel launch is wrapped in its own
-    // event pair and its elapsed time is accumulated into the matching sum, so
-    // each distinct kernel reports its OWN separately measured GPU time
-    // (accumulated across the RK_STEPS stages).
-    auto run_cfd_step = [&](hipEvent_t* evStart, hipEvent_t* evStop,
-                            double* t_flux, double* t_rk) {
-        // Save initial state
-        HIP_CHECK(hipMemcpy(d_rho_old,    d_rho,    cell_bytes, hipMemcpyDeviceToDevice));
-        HIP_CHECK(hipMemcpy(d_mx_old,     d_mx,     cell_bytes, hipMemcpyDeviceToDevice));
-        HIP_CHECK(hipMemcpy(d_my_old,     d_my,     cell_bytes, hipMemcpyDeviceToDevice));
-        HIP_CHECK(hipMemcpy(d_mz_old,     d_mz,     cell_bytes, hipMemcpyDeviceToDevice));
-        HIP_CHECK(hipMemcpy(d_energy_old, d_energy, cell_bytes, hipMemcpyDeviceToDevice));
-
-        for (int stage = 0; stage < RK_STEPS; ++stage) {
-            // Compute fluxes
-            if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            compute_flux_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
-                d_rho, d_mx, d_my, d_mz, d_energy, d_neighbors, d_normals, d_areas, d_flux_rho, d_flux_mx, d_flux_my, d_flux_mz, d_flux_energy, N);
-            if (evStart) {
-                HIP_CHECK(hipEventRecord(*evStop, 0));
-                HIP_CHECK(hipEventSynchronize(*evStop));
-                float ms = 0.0f;
-                HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
-                *t_flux += (double)ms;
-            }
-
-            // RK update
-            if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            rk_update_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
-                d_rho, d_mx, d_my, d_mz, d_energy, d_rho_old, d_mx_old, d_my_old, d_mz_old, d_energy_old, d_flux_rho, d_flux_mx, d_flux_my, d_flux_mz, d_flux_energy, d_volumes, DT, rk_coeffs[stage], N);
-            if (evStart) {
-                HIP_CHECK(hipEventRecord(*evStop, 0));
-                HIP_CHECK(hipEventSynchronize(*evStop));
-                float ms = 0.0f;
-                HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
-                *t_rk += (double)ms;
-            }
-        }
-    };
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
+             N, block_size, precision);
 
     // Lambda: upload initial conditions
     auto upload_initial = [&]() {
@@ -484,58 +453,64 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_energy, h_energy.data(), cell_bytes, hipMemcpyHostToDevice));
     };
 
-    // -----------------------------------------------------------------------
-    // Warmup
-    // -----------------------------------------------------------------------
+    // Per-kernel accumulators: each pass runs one full RK time step (RK_STEPS
+    // stages, each launching both kernels once); the accumulated GPU/host time
+    // within one pass becomes that pass's record for the kernel.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_flux, acc_rk;
+
+    // One full CFD pass. The initial conditions are re-uploaded at the start
+    // of every pass (untimed) — the solver advances the state in place, so
+    // each pass computes the same time step from identical data.
+    auto run_cfd_pass = [&]() {
+        bench_lap_reset(&acc_flux);
+        bench_lap_reset(&acc_rk);
+
+        upload_initial();
+
+        // Save initial state (untimed; setup for the RK update)
+        HIP_CHECK(hipMemcpy(d_rho_old,    d_rho,    cell_bytes, hipMemcpyDeviceToDevice));
+        HIP_CHECK(hipMemcpy(d_mx_old,     d_mx,     cell_bytes, hipMemcpyDeviceToDevice));
+        HIP_CHECK(hipMemcpy(d_my_old,     d_my,     cell_bytes, hipMemcpyDeviceToDevice));
+        HIP_CHECK(hipMemcpy(d_mz_old,     d_mz,     cell_bytes, hipMemcpyDeviceToDevice));
+        HIP_CHECK(hipMemcpy(d_energy_old, d_energy, cell_bytes, hipMemcpyDeviceToDevice));
+
+        for (int stage = 0; stage < RK_STEPS; ++stage) {
+            bench_lap_add(&acc_flux, bench_time_op(&timer, [&]() {
+                compute_flux_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+                    d_rho, d_mx, d_my, d_mz, d_energy, d_neighbors, d_normals, d_areas,
+                    d_flux_rho, d_flux_mx, d_flux_my, d_flux_mz, d_flux_energy, N);
+            }));
+
+            bench_lap_add(&acc_rk, bench_time_op(&timer, [&]() {
+                rk_update_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+                    d_rho, d_mx, d_my, d_mz, d_energy,
+                    d_rho_old, d_mx_old, d_my_old, d_mz_old, d_energy_old,
+                    d_flux_rho, d_flux_mx, d_flux_my, d_flux_mz, d_flux_energy,
+                    d_volumes, DT, rk_coeffs[stage], N);
+            }));
+        }
+    };
+
     for (int w = 0; w < num_warmup; ++w) {
-        upload_initial();
-        run_cfd_step(nullptr, nullptr, nullptr, nullptr);  // untimed full sequence
-        HIP_CHECK(hipDeviceSynchronize());
+        run_cfd_pass();
     }
 
-    // -----------------------------------------------------------------------
-    // Timed iterations — each kernel measured separately with its own
-    // accumulator (summed across the RK stages within run_cfd_step).
-    // -----------------------------------------------------------------------
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    double t_flux = 0.0;  // compute_flux_kernel
-    double t_rk   = 0.0;  // rk_update_kernel
-    for (int i = 0; i < 1; ++i) {
-        upload_initial();
-        run_cfd_step(&evStart, &evStop, &t_flux, &t_rk);
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_cfd_pass();
+        bench_emit_iter("compute_flux_kernel", i, &acc_flux, params);
+        bench_emit_iter("rk_update_kernel",    i, &acc_rk,   params);
+        total_gpu_ms += acc_flux.gpu_ms + acc_rk.gpu_ms;
+        fprintf(stderr, "pass %d: compute_flux gpu = %.3f ms, rk_update gpu = %.3f ms\n",
+                i, acc_flux.gpu_ms, acc_rk.gpu_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    double total_ms = t_flux + t_rk;
-    double avg_ms   = total_ms;
-
-    // Mcells/sec = N / time_s / 1e6
-    double mcells_per_sec = (double)N / (avg_ms * 1e-3) / 1e6;
-
-    // JSON-lines kernel events (one per kernel, each with its OWN measured time)
-    printf("{\"type\":\"kernel\",\"name\":\"compute_flux_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"precision\":\"%s\"}}\n",
-           t_flux, N, block_size, precision);
-
-    printf("{\"type\":\"kernel\",\"name\":\"rk_update_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"precision\":\"%s\"}}\n",
-           t_rk, N, block_size, precision);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"mcells_per_sec\",\"value\":%.2f}]}\n",
-           total_ms, mcells_per_sec);
-
-    // Human-readable output to stderr
-    fprintf(stderr, "Average time: %.4f ms  (flux=%.4f rk=%.4f)\n", avg_ms, t_flux, t_rk);
-    fprintf(stderr, "Throughput:   %.4f Mcells/sec\n", mcells_per_sec);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // -----------------------------------------------------------------------
     // Verification: compare GPU flux for first 256 cells with CPU reference

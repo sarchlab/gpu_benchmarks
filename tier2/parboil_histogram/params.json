@@ -2,7 +2,7 @@
   "benchmark": "parboil_histogram",
   "tier": 2,
   "suite": "parboil",
-  "description": "256-bin histogram of N random uint32 values using atomic operations. Each element mapped to a bin via lower 8 bits. Measures throughput in GB/s.",
+  "description": "256-bin histogram of N random uint32 values using atomic operations. Each element mapped to a bin via lower 8 bits. Emits per-iteration kernel times; GB/s is derived downstream.",
   "scaling_param": {
     "name": "n",
     "description": "Number of input uint32 elements",

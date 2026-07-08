@@ -14,12 +14,26 @@ simultaneously.
 | Parameter   | Default     | Description                         |
 |-------------|-------------|-------------------------------------|
 | `--size N`  | 4194304     | Number of elements (must be 2^k)    |
-| `--iterations I` | 5      | Number of timed iterations          |
+| `--block_size B` | 256    | GPU thread-block size               |
+| `--precision P` | uint    | Element type (uint/int/float)       |
+
+Environment variables (`BENCH_PARAM_size`, `BENCH_PARAM_block_size`,
+`BENCH_PARAM_precision`) override the CLI flags, plus:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BENCH_PARAM_num_warmup` | 3 | Untimed warmup passes |
+| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded individually |
 
 ## Output
 
-- **stdout** (CSV): `shoc_sort,<N>,<Melements/s>`
-- **stderr**: device info, per-iteration timing, correctness check
+- **stdout** (JSON lines): per timed pass, one
+  `{"type":"kernel","name":"bitonic_step",...}` record with that pass's
+  accumulated GPU event time (`time_ms`, summed over all compare-and-swap
+  steps) and host wall-clock time (`host_time_ms`), followed by a
+  `{"type":"summary","total_time_ms":...}` line whose value is the sum of all
+  recorded GPU event times. Melements/s is derived downstream.
+- **stderr**: device info, per-pass timing, correctness check
 
 ## Build
 
@@ -50,24 +64,19 @@ make PLATFORM=metal
 
 ```bash
 ./shoc_sort
-./shoc_sort --size 8388608 --iterations 10
+BENCH_PARAM_num_iters=10 ./shoc_sort --size 8388608
 ```
 
-### Example Output
+### Example Output (stderr)
 
 ```
 Device: NVIDIA A100-SXM4-80GB (id=0)
-Array size: 4194304 elements (16.0 MB) | Iterations: 5
+Array size: 4194304 elements (16.0 MB)
 
-  Iter 1: 45.2312 ms
-  Iter 2: 44.9841 ms
-  Iter 3: 45.1023 ms
-  Iter 4: 45.0512 ms
-  Iter 5: 45.2104 ms
-Throughput: 92.98 Melements/s  (avg 45.1158 ms, ...)
+pass 0: bitonic_step gpu = 45.231 ms, host = 47.102 ms
+...
 Correctness: PASS
-
-shoc_sort,4194304,92.98
+Total GPU time: 315.812 ms over 7 passes
 ```
 
 ## Files

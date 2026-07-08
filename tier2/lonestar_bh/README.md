@@ -30,7 +30,15 @@ This is a simplified 2D Barnes-Hut implementation:
 | `--bodies`   | 32768   | Number of bodies                |
 | `--timesteps`| 10      | Simulation timesteps per run    |
 | `--theta`    | 0.5     | Opening angle for BH criterion  |
-| `--iterations`| 5      | Timed iterations                |
+| `--iterations`| 5      | Legacy parameter (echoed in params; pass count comes from `BENCH_PARAM_num_iters`) |
+
+Environment variables (`BENCH_PARAM_bodies`, `BENCH_PARAM_timesteps`,
+`BENCH_PARAM_theta`, `BENCH_PARAM_iterations`) override the CLI flags, plus:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BENCH_PARAM_num_warmup` | 3 | Untimed warmup passes |
+| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded individually |
 
 ## Build
 
@@ -50,18 +58,20 @@ make PLATFORM=metal     # Apple Metal
 
 ## Output
 
-**CSV (stdout):**
-```
-lonestar_bh,32768,<time_ms>,<GFLOPS>
-```
+**JSON lines (stdout):** per timed pass, one `{"type":"kernel",...}` record per
+kernel (`bh_force_kernel`, `integrate_kernel`) with that pass's accumulated GPU
+event time (`time_ms`, summed over the timesteps) and host wall-clock time
+(`host_time_ms`), followed by a `{"type":"summary","total_time_ms":...}` line
+whose value is the sum of all recorded GPU event times. Derived metrics
+(GFLOPS) are computed downstream from `time_ms` and the params.
 
 **Human-readable (stderr):**
 ```
 Device: Apple M2
-Barnes-Hut N-body  |  Bodies: 32768  |  Theta: 0.50  |  Timesteps: 10
-Estimated FLOPs per run: 1.23e+10
-Average time: 45.1234 ms
-Throughput:   12.3456 GFLOPS
+Barnes-Hut N-body  |  Bodies: 32768  |  Theta: 0.50  |  Timesteps: 10  |  Iterations: 3 warmup + 7 timed
+pass 0: bh_force gpu = 42.123 ms, integrate gpu = 0.456 ms
+...
+Total GPU time: 300.123 ms over 7 passes
 Max relative error: 0.1234 (over 64 bodies)
 PASS
 ```

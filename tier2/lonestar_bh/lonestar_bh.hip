@@ -12,30 +12,27 @@
 // Usage:
 //   ./lonestar_bh [--bodies N] [--timesteps T] [--iterations I]
 //
-// Output (stdout): CSV — lonestar_bh,<N_bodies>,<time_ms>,<GFLOPS>
+// Environment variables (override argv):
+//   BENCH_PARAM_bodies, BENCH_PARAM_timesteps, BENCH_PARAM_theta,
+//   BENCH_PARAM_iterations (echoed in params; pass count is num_iters)
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// kernel (bh_force_kernel, integrate_kernel) carrying that kernel's
+// accumulated GPU event time and host time within the pass (summed over the
+// timesteps), then a summary whose total_time_ms is the SUM of all recorded
+// GPU event times. GFLOPS is derived downstream from time_ms and params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
 #include <vector>
-#include <cfloat>
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -379,11 +376,11 @@ int main(int argc, char** argv) {
     if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_theta");
     if (env_val) theta_p = atof(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int N         = bodies;
     int timesteps = timesteps_p;
-    int iters     = iterations;
     float theta   = (float)theta_p;
     float dt      = 0.001f;
     float eps2    = 0.01f;
@@ -410,7 +407,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Barnes-Hut N-body  |  Bodies: %d  |  Theta: %.2f  |  "
             "Timesteps: %d  |  Iterations: %d warmup + %d timed\n\n",
-            N, theta, timesteps, num_warmup, iters);
+            N, theta, timesteps, num_warmup, num_iters);
 
     // Allocate device arrays for bodies
     float *d_px, *d_py, *d_vx, *d_vy, *d_mass, *d_ax, *d_ay;
@@ -431,18 +428,23 @@ int main(int argc, char** argv) {
 
     QuadTree tree;
 
-    // Lambda: run one full simulation (timesteps)
-    // Returns total FLOP estimate.
-    // When timing events are supplied, each kernel launch is wrapped in its own
-    // event pair and its elapsed time is accumulated into the matching sum, so
-    // each distinct kernel reports its OWN separately measured GPU time
-    // (summed across the timesteps loop, and across the timed iterations).
-    auto run_simulation = [&](std::vector<float>& px, std::vector<float>& py,
-                              std::vector<float>& vx, std::vector<float>& vy,
-                              hipEvent_t* evStart, hipEvent_t* evStop,
-                              double* t_force, double* t_integrate) -> double {
-        double total_flops = 0.0;
+    char params[192];
+    snprintf(params, sizeof(params),
+             "\"bodies\":%d,\"timesteps\":%d,\"theta\":%.6f,\"iterations\":%d",
+             bodies, timesteps_p, theta_p, iterations);
 
+    // Per-kernel accumulators: each pass runs one full simulation (timesteps
+    // steps, each launching both kernels once); the accumulated GPU/host time
+    // within one pass becomes that pass's record for the kernel.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_force, acc_integrate;
+
+    // Lambda: run one full simulation (timesteps). Each kernel launch is
+    // bracketed with its own event pair; CPU tree builds, tree uploads and
+    // position copies stay OUTSIDE the timed brackets.
+    auto run_simulation = [&](std::vector<float>& px, std::vector<float>& py,
+                              std::vector<float>& vx, std::vector<float>& vy) {
         HIP_CHECK(hipMemcpy(d_px, px.data(), N * sizeof(float), hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_py, py.data(), N * sizeof(float), hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_vx, vx.data(), N * sizeof(float), hipMemcpyHostToDevice));
@@ -460,107 +462,48 @@ int main(int argc, char** argv) {
             upload_tree(tree, &d_tcx, &d_tcy, &d_tmass, &d_tbw, &d_tchild, num_nodes);
 
             // Compute forces on GPU
-            if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            bh_force_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
-                d_px, d_py, d_mass, d_ax, d_ay, d_tcx, d_tcy, d_tmass, d_tbw, d_tchild, num_nodes, N, theta, eps2);
-            if (evStart) {
-                HIP_CHECK(hipEventRecord(*evStop, 0));
-                HIP_CHECK(hipEventSynchronize(*evStop));
-                float ms = 0.0f;
-                HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
-                *t_force += (double)ms;
-            }
-            HIP_CHECK(hipDeviceSynchronize());
+            bench_lap_add(&acc_force, bench_time_op(&timer, [&]() {
+                bh_force_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+                    d_px, d_py, d_mass, d_ax, d_ay, d_tcx, d_tcy, d_tmass, d_tbw,
+                    d_tchild, num_nodes, N, theta, eps2);
+            }));
 
             // Integrate on GPU
-            if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            integrate_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
-                d_px, d_py, d_vx, d_vy, d_ax, d_ay, N, dt);
-            if (evStart) {
-                HIP_CHECK(hipEventRecord(*evStop, 0));
-                HIP_CHECK(hipEventSynchronize(*evStop));
-                float ms = 0.0f;
-                HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
-                *t_integrate += (double)ms;
-            }
-            HIP_CHECK(hipDeviceSynchronize());
-
-            // FLOP estimate: ~20 FLOPs per body-node interaction
-            // Each body traverses O(N/log(N)) nodes (BH approximation)
-            // Rough: ~20 * N * (N * 0.1) for theta=0.5
-            total_flops += 20.0 * N * (double)num_nodes * 0.3;
+            bench_lap_add(&acc_integrate, bench_time_op(&timer, [&]() {
+                integrate_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+                    d_px, d_py, d_vx, d_vy, d_ax, d_ay, N, dt);
+            }));
         }
-
-        // Copy final positions back
-        HIP_CHECK(hipMemcpy(px.data(), d_px, N * sizeof(float), hipMemcpyDeviceToHost));
-        HIP_CHECK(hipMemcpy(py.data(), d_py, N * sizeof(float), hipMemcpyDeviceToHost));
-        HIP_CHECK(hipMemcpy(vx.data(), d_vx, N * sizeof(float), hipMemcpyDeviceToHost));
-        HIP_CHECK(hipMemcpy(vy.data(), d_vy, N * sizeof(float), hipMemcpyDeviceToHost));
-
-        return total_flops;
     };
 
-    // -------------------------------------------------------------------
-    // Warmup
-    // -------------------------------------------------------------------
-    double flops_est = 0.0;
-    for (int w = 0; w < num_warmup; ++w) {
-        auto wpx = h_px, wpy = h_py, wvx = h_vx, wvy = h_vy;
-        flops_est = run_simulation(wpx, wpy, wvx, wvy,
-                                   nullptr, nullptr, nullptr, nullptr);  // untimed
-    }
-    fprintf(stderr, "Estimated FLOPs per run: %.2e\n", flops_est);
-
-    // -------------------------------------------------------------------
-    // Timed iterations — each kernel measured separately with its own
-    // accumulator (summed across the timesteps loop and the timed iters).
-    // -------------------------------------------------------------------
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    double t_force = 0.0;      // bh_force_kernel
-    double t_integrate = 0.0;  // integrate_kernel
-    std::vector<double> flops_per_iter((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
+    // One full simulation pass. Every pass starts from a fresh copy of the
+    // initial body state (positions/velocities), so each pass simulates the
+    // same trajectory and builds the same trees regardless of earlier passes.
+    auto run_pass = [&]() {
+        bench_lap_reset(&acc_force);
+        bench_lap_reset(&acc_integrate);
         auto tpx = h_px, tpy = h_py, tvx = h_vx, tvy = h_vy;
-        flops_per_iter[i] = run_simulation(tpx, tpy, tvx, tvy,
-                                           &evStart, &evStop, &t_force, &t_integrate);
+        run_simulation(tpx, tpy, tvx, tvy);
+    };
+
+    for (int w = 0; w < num_warmup; ++w) {
+        run_pass();
     }
 
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    // Compute average (per iteration) for FLOPS metric
-    double sum_flops = 0.0;
-    for (int i = 0; i < iters; ++i) {
-        sum_flops += flops_per_iter[i];
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_pass();
+        bench_emit_iter("bh_force_kernel",  i, &acc_force,     params);
+        bench_emit_iter("integrate_kernel", i, &acc_integrate, params);
+        total_gpu_ms += acc_force.gpu_ms + acc_integrate.gpu_ms;
+        fprintf(stderr, "pass %d: bh_force gpu = %.3f ms, integrate gpu = %.3f ms\n",
+                i, acc_force.gpu_ms, acc_integrate.gpu_ms);
     }
-    double total_ms = t_force + t_integrate;     // total measured GPU time
-    double avg_ms = total_ms / iters;            // per-iteration average
-    double avg_flops = sum_flops / iters;
-    double gflops = avg_flops / (avg_ms * 1e-3) / 1e9;
 
-    // JSON-lines kernel events (each kernel reports its OWN total measured time)
-    printf("{\"type\":\"kernel\",\"name\":\"bh_force_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"bodies\":%d,\"timesteps\":%d,\"theta\":%.6f,"
-           "\"iterations\":%d}}\n",
-           t_force, bodies, timesteps_p, theta_p, iterations);
-
-    printf("{\"type\":\"kernel\",\"name\":\"integrate_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"bodies\":%d,\"timesteps\":%d,\"theta\":%.6f,"
-           "\"iterations\":%d}}\n",
-           t_integrate, bodies, timesteps_p, theta_p, iterations);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
-           total_ms, gflops);
-
-    // Human-readable to stderr
-    fprintf(stderr, "Average time: %.4f ms  (force=%.4f integrate=%.4f total)\n",
-            avg_ms, t_force, t_integrate);
-    fprintf(stderr, "Throughput:   %.4f GFLOPS\n", gflops);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // -------------------------------------------------------------------
     // Verification: compare BH forces vs direct O(N^2) on small subset

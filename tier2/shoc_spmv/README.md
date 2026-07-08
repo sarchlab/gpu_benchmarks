@@ -62,37 +62,43 @@ make clean
 ./shoc_spmv
 ```
 
-The benchmark uses compile-time constants:
-- `NUM_ROWS = 16384`
-- `NNZ_PER_ROW = 32`
-- `ITERATIONS = 5`
+Parameters (env vars override `--flags`):
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `BENCH_PARAM_num_rows` | 16384 | Matrix rows (and columns) |
+| `BENCH_PARAM_nnz_per_row` | 32 | Non-zeros per row |
+| `BENCH_PARAM_precision` | `float` | `float` \| `double` \| `half` (descriptor) |
+| `BENCH_PARAM_num_warmup` | 3 | Warmup launches (untimed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed launches, each recorded |
 
 ## Output Format
 
 **stderr** — Human-readable progress:
 ```
 Device: <device_name>
-Rows: 16384  |  NNZ_per_row: 32  |  Total NNZ: 524288  |  Iterations: 5
+Rows: 16384  |  NNZ_per_row: 32  |  Total NNZ: 524288
 
-  iter 0: X.XXXX ms
-  iter 1: X.XXXX ms
-  ...
+spmv_csr_kernel iter 0: gpu = X.XXX ms, host = X.XXX ms
+...
 Correctness check (first 32 elements): PASS
 
-GB/s: XX.XX  GFLOPS: XX.XX  (avg X.XXXX ms, min X.XXXX ms, max X.XXXX ms, stddev X.XXXX ms)
+Total GPU time: X.XXX ms over 7 iterations
 ```
 
-**stdout** — CSV result:
+**stdout** — JSON lines: one `kernel` record per timed iteration, then a
+`summary` whose `total_time_ms` is the sum of all iterations' GPU event
+times:
 ```
-spmv,<NUM_ROWS>,<NNZ_PER_ROW>,<avg_time_ms>,<GB/s>,<GFLOPS>
-```
-
-Example:
-```
-spmv,16384,32,0.2345,17.89,4.47
+{"type":"kernel","name":"spmv_csr_kernel","iter":0,"time_ms":0.234500,"host_time_ms":0.289000,"params":{"num_rows":16384,"nnz_per_row":32,"precision":"float"}}
+...
+{"type":"summary","total_time_ms":1.641500}
 ```
 
 ## Performance Metrics
+
+Both metrics below are derived downstream from the emitted `time_ms` and
+params; the binary does not report them.
 
 **Memory Bandwidth (GB/s):**
 ```

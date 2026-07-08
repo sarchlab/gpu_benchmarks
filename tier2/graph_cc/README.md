@@ -29,7 +29,9 @@ number of iterations is reached.
 | `avg_degree`      | 16       | Average edges per vertex                 |
 | `max_iterations`  | 100      | Max label propagation iterations per run |
 | `block_size`      | 256      | Threads per block                        |
-| `iterations`      | 5        | Number of timed benchmark iterations     |
+| `iterations`      | 5        | Legacy iteration-count param (echoed in records) |
+| `num_warmup`      | 3        | Warmup CC passes (not recorded)          |
+| `num_iters`       | 7        | Timed CC passes, each recorded           |
 
 Parameters are read from `BENCH_PARAM_*` environment variables.
 
@@ -51,10 +53,13 @@ BENCH_PARAM_num_vertices=500000 BENCH_PARAM_avg_degree=8 ./graph_cc
 
 ## Output Format
 
-**JSON-lines to stdout:**
+**JSON-lines to stdout:** one `kernel` record per timed pass with the
+accumulated GPU event time (`time_ms`) and host time (`host_time_ms`) of all
+label-propagation iterations in that pass, then a summary whose
+`total_time_ms` is the sum of all recorded GPU event times:
 ```json
-{"type":"kernel","name":"cc_propagate_kernel","time_ms":15.234,"params":{"num_vertices":100000,...}}
-{"type":"summary","total_time_ms":76.17,"metrics":[{"name":"mteps","value":1234.56},{"name":"avg_cc_iterations","value":12.0}]}
+{"type":"kernel","name":"cc_propagate_kernel","iter":0,"time_ms":15.234,"host_time_ms":16.001,"params":{"num_vertices":100000,...}}
+{"type":"summary","total_time_ms":76.17}
 ```
 
 **Human-readable to stderr:**
@@ -62,16 +67,17 @@ BENCH_PARAM_num_vertices=500000 BENCH_PARAM_avg_degree=8 ./graph_cc
 Device: Apple M1
 Connected Components (label propagation)  |  Vertices: 100000  |  Edges: 1600000  |  ...
 
-Average time: 15.2340 ms
-Avg CC iterations: 12.0
-Throughput:   1234.56 MTEPS
+pass 0: gpu = 15.234 ms, host = 16.001 ms (12 CC iterations)
+...
+Total GPU time: 76.170 ms over 7 passes
 PASS
 ```
 
-## Metrics
+## Metrics (derived downstream)
 
-- **MTEPS** (Mega Traversed Edges Per Second) = `num_edges × avg_cc_iterations / time_seconds / 1e6`
-- **avg_cc_iterations** — Average number of label propagation iterations to convergence.
+Derived downstream from `time_ms` and params — not reported by the binary:
+
+- **MTEPS** (Mega Traversed Edges Per Second) = `num_edges × cc_iterations / time_seconds / 1e6`
 
 ## Verification
 

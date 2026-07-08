@@ -50,29 +50,46 @@ make PLATFORM=metal
 ## Run
 
 ```bash
-./rodinia_srad                                            # defaults: 512×512, 50 SRAD iters/launch, 20 iters
+./rodinia_srad                                            # defaults: 512×512, 50 SRAD iters/pass
 ./rodinia_srad --image_size 1024
-./rodinia_srad --image_size 256 --num_iterations 100 --iterations 30
+BENCH_PARAM_num_iters=10 ./rodinia_srad --image_size 256 --num_iterations 100
 ./rodinia_srad --lambda 0.5
 ```
 
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BENCH_PARAM_image_size` | 512 | Image dimension (N×N) |
+| `BENCH_PARAM_num_iterations` | 50 | SRAD iterations per pass |
+| `BENCH_PARAM_block_size` | 16 | Thread-block dimension (B×B) |
+| `BENCH_PARAM_num_warmup` | 3 | Warmup passes (not recorded) |
+| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded |
+
 ## Output
 
-**stdout** — CSV timing row:
+**stdout** — JSON lines: per timed pass, one `kernel` record per kernel
+(`srad1`, `srad2`) with that kernel's accumulated GPU event time (`time_ms`)
+and host time (`host_time_ms`) across the pass's SRAD iterations, then a
+summary whose `total_time_ms` is the sum of all recorded GPU event times:
+```json
+{"type":"kernel","name":"srad1","iter":0,"time_ms":6.123,"host_time_ms":7.001,"params":{"image_size":512,"num_iterations":50,"block_size":16}}
+{"type":"kernel","name":"srad2","iter":0,"time_ms":6.222,"host_time_ms":7.100,"params":{"image_size":512,"num_iterations":50,"block_size":16}}
+{"type":"summary","total_time_ms":86.415}
 ```
-kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-rodinia_srad,512x512,20,12.3456,12.1000,12.8000,0.1500
-```
+Effective bandwidth is derived downstream from `time_ms` and params.
 
 **stderr** — human-readable results:
 ```
 Device: Apple M4 Pro
-Image: 512×512  |  SRAD iters/launch: 50  |  Benchmark iters: 20
+Image: 512×512  |  SRAD iters/launch: 50
 
-Effective bandwidth: 180.45 GB/s  (avg 12.3456 ms, 50 SRAD iters/launch)
+pass 0: srad1 gpu = 6.123 ms, srad2 gpu = 6.222 ms
+...
+Total GPU time: 86.415 ms over 7 passes (50 SRAD iters/pass)
 ```
 
-## Bandwidth Calculation
+## Bandwidth Calculation (derived downstream)
 
 Effective bandwidth accounts for all six device buffers accessed per SRAD iteration:
 - **srad1**: reads `J` (1×), writes `dN`, `dS`, `dW`, `dE`, `c` (5×) → 6 arrays

@@ -52,6 +52,15 @@ make clean
 ./rodinia_kmeans --points 65536 --dims 32 --clusters 16 --max_iter 20
 ```
 
+| Environment variable | Default | Description |
+|----------------------|---------|-------------|
+| `BENCH_PARAM_points` | 16384 | Number of data points (overrides `--points`) |
+| `BENCH_PARAM_dims` | 16 | Dimensions per point (overrides `--dims`) |
+| `BENCH_PARAM_clusters` | 8 | Number of clusters (overrides `--clusters`) |
+| `BENCH_PARAM_max_iter` | 10 | Max k-means iterations per pass (overrides `--max_iter`) |
+| `BENCH_PARAM_num_warmup` | 3 | Warmup clustering passes (untimed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed clustering passes, each recorded |
+
 ## Output
 
 Per-iteration convergence info is printed to **stderr**:
@@ -63,28 +72,24 @@ Per-iteration convergence info is printed to **stderr**:
 Final stability check: changed=0  delta=0.000000  PASS
 ```
 
-Performance metrics are printed to **stdout** in CSV format:
+Timing records are printed to **stdout** as JSON lines: per timed clustering
+pass, one kernel record per kernel (`kmeans_assign_kernel`,
+`kmeans_update_kernel`) carrying that kernel's GPU event time (`time_ms`)
+and host wall-clock time (`host_time_ms`) accumulated over the pass's
+k-means iterations, then a summary whose `total_time_ms` is the sum of all
+recorded GPU event times. Centroids and membership are reset to their
+initial state before every pass (untimed), so each pass converges over
+identical work:
 
 ```
-kmeans,N,K,D,<iterations>,<time_ms>,<Gpoints_per_s>
+{"type":"kernel","name":"kmeans_assign_kernel","iter":0,"time_ms":8.123400,"host_time_ms":8.500000,"params":{"points":16384,"dims":16,"clusters":8,"max_iter":10}}
+{"type":"kernel","name":"kmeans_update_kernel","iter":0,"time_ms":4.222200,"host_time_ms":4.610000,"params":{...}}
+...
+{"type":"summary","total_time_ms":86.419200}
 ```
 
-Example:
-
-```
-kmeans,16384,8,16,7,12.3456,0.009302
-```
-
-### Columns
-
-| Column | Description |
-|--------|-------------|
-| `N` | Number of data points |
-| `K` | Number of clusters |
-| `D` | Number of dimensions |
-| `iterations` | Actual iterations run |
-| `time_ms` | Total GPU time in milliseconds |
-| `Gpoints_per_s` | Throughput: N × iterations / time_s / 1e9 |
+Derived metrics such as points/sec are computed downstream from `time_ms`
+and the params.
 
 ## Platform Notes
 

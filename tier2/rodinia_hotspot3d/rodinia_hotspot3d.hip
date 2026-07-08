@@ -6,31 +6,26 @@
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
-// Output (stdout): JSON-lines
+// Environment variables (override argv):
+//   BENCH_PARAM_grid_size, BENCH_PARAM_block_size,
+//   BENCH_PARAM_num_iterations, BENCH_PARAM_amb_temp
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line
+// carrying the kernel's accumulated GPU event time and host wall-clock time
+// over the pass's num_iterations stencil steps, then a summary whose
+// total_time_ms is the SUM of all recorded GPU event times. Effective
+// bandwidth is derived downstream from time_ms and params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
-#include <cfloat>
-#include <vector>
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -139,7 +134,8 @@ int main(int argc, char** argv) {
     if (env_val) num_iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_amb_temp");
     if (env_val) amb_temp = (float)atof(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int nx = grid_size, ny = grid_size, nz = grid_size;
     long long total_cells = (long long)nx * ny * nz;
@@ -168,9 +164,9 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Grid: %d×%d×%d  |  Block: %d³  |  Steps/launch: %d  |  "
-            "Iterations: %d warmup + %d timed\n\n",
-            nx, ny, nz, block_dim, num_iterations, num_warmup);
+    fprintf(stderr, "Grid: %d×%d×%d  |  Block: %d³  |  Steps/pass: %d  |  "
+            "Passes: %d warmup + %d timed\n\n",
+            nx, ny, nz, block_dim, num_iterations, num_warmup, num_iters);
 
     // Host allocations
     size_t bytes = (size_t)total_cells * sizeof(float);
@@ -197,71 +193,54 @@ int main(int argc, char** argv) {
                       (ny + block_dim - 1) / block_dim,
                       (nz + block_dim - 1) / block_dim);
 
-    // Warmup
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"grid_size\":%d,\"block_size\":%d,\"num_iterations\":%d,\"amb_temp\":%.1f",
+             grid_size, block_dim, num_iterations, amb_temp);
+
+    // Per-pass accumulator: each pass runs num_iterations stencil steps with
+    // ping-pong buffers; the accumulated GPU/host time becomes that pass's
+    // record.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_hotspot;
+
+    // One full HotSpot3D pass. The temperature grid evolves across steps, so
+    // the pristine grid is re-uploaded (untimed) at the start of every pass
+    // to keep each pass's work identical.
+    auto run_hotspot_pass = [&]() {
+        bench_lap_reset(&acc_hotspot);
+
+        HIP_CHECK(hipMemcpy(d_temp_src, h_temp, bytes, hipMemcpyHostToDevice));
+        float* src = d_temp_src;
+        float* dst = d_temp_dst;
+        for (int k = 0; k < num_iterations; ++k) {
+            bench_lap_add(&acc_hotspot, bench_time_op(&timer, [&]() {
+                hotspot3d_kernel<<<grid_dim_val, block>>>(
+                    src, dst, d_power, nx, ny, nz, step_div_cap,
+                    Rx_1, Ry_1, Rz_1, Ra_1, amb_temp);
+            }));
+            float* tmp = src; src = dst; dst = tmp;
+        }
+    };
+
     for (int w = 0; w < num_warmup; ++w) {
-        HIP_CHECK(hipMemcpy(d_temp_src, h_temp, bytes, hipMemcpyHostToDevice));
-        float* src = d_temp_src;
-        float* dst = d_temp_dst;
-        for (int k = 0; k < num_iterations; ++k) {
-            hotspot3d_kernel<<<grid_dim_val, block>>>(
-                src, dst, d_power, nx, ny, nz, step_div_cap, Rx_1, Ry_1, Rz_1, Ra_1, amb_temp);
-            float* tmp = src; src = dst; dst = tmp;
-        }
-        HIP_CHECK(hipDeviceSynchronize());
+        run_hotspot_pass();
     }
 
-    // Timed iterations
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        HIP_CHECK(hipMemcpy(d_temp_src, h_temp, bytes, hipMemcpyHostToDevice));
-
-        float* src = d_temp_src;
-        float* dst = d_temp_dst;
-
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        for (int k = 0; k < num_iterations; ++k) {
-            hotspot3d_kernel<<<grid_dim_val, block>>>(
-                src, dst, d_power, nx, ny, nz, step_div_cap, Rx_1, Ry_1, Rz_1, Ra_1, amb_temp);
-            float* tmp = src; src = dst; dst = tmp;
-        }
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_hotspot_pass();
+        bench_emit_iter("hotspot3d_kernel", i, &acc_hotspot, params);
+        total_gpu_ms += acc_hotspot.gpu_ms;
+        fprintf(stderr, "pass %d: hotspot3d_kernel gpu = %.3f ms, host = %.3f ms\n",
+                i, acc_hotspot.gpu_ms, acc_hotspot.host_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    // Compute statistics
-    double sum = 0.0;
-    for (int i = 0; i < 1; ++i) sum += times[i];
-    double avg_ms = sum / 1;
-    double total_ms = sum;
-
-    // Effective bandwidth: 2 reads (temp_src, power) + 1 write (temp_dst) per step
-    double bytes_per_step = 3.0 * (double)total_cells * sizeof(float);
-    double total_bytes    = bytes_per_step * num_iterations;
-    double bw_gb = total_bytes / (avg_ms * 1e-3) / 1e9;
-
-    fprintf(stderr, "Effective bandwidth: %.2f GB/s  (avg %.4f ms, %d steps/iter)\n",
-            bw_gb, avg_ms, num_iterations);
-
-    // JSON-lines output
-    printf("{\"type\":\"kernel\",\"name\":\"hotspot3d_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"grid_size\":%d,\"block_size\":%d,\"num_iterations\":%d,"
-           "\"amb_temp\":%.1f}}\n",
-           avg_ms, grid_size, block_dim, num_iterations, amb_temp);
-
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"bandwidth_gbps\",\"value\":%.2f}]}\n",
-           total_ms, bw_gb);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes (%d steps/pass)\n",
+            total_gpu_ms, num_iters, num_iterations);
 
     // Cleanup
     HIP_CHECK(hipFree(d_temp_src));

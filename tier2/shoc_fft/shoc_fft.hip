@@ -1,7 +1,6 @@
 // shoc_fft.hip — SHOC FFT benchmark (HIP, self-contained)
 //
 // Cooley-Tukey radix-2 iterative FFT on N complex elements (float2).
-// Measures throughput in GFLOPS = 5*N*log2(N) / time_s / 1e9.
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
@@ -10,34 +9,31 @@
 //
 //   --size N         FFT size (must be power of 2, default: 1048576)
 //
-// Output (stdout): JSON-lines protocol
+// Environment variables (override argv):
+//   BENCH_PARAM_size, BENCH_PARAM_precision (float|double|half),
+//   BENCH_PARAM_batch_count
+//   BENCH_PARAM_num_warmup   (warmup FFT passes, default 3)
+//   BENCH_PARAM_num_iters    (timed FFT passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// kernel (bit_reverse_kernel, fft_butterfly_kernel — the latter accumulated
+// over all log2(N) stage launches) carrying GPU event time and host
+// wall-clock time, then a summary whose total_time_ms is the SUM of all
+// recorded GPU event times. GFLOPS is derived downstream from time_ms and
+// params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <cfloat>
-#include <vector>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -188,7 +184,15 @@ int main(int argc, char** argv) {
     if (env_val) precision = env_val;
     env_val = getenv("BENCH_PARAM_batch_count");
     if (env_val) batch_count = atoi(env_val);
-    int num_warmup = 5;
+    /* Validate string params against their known sets, so the values echoed
+     * into the JSON records are always canonical literals. */
+    if (strcmp(precision, "float") != 0 && strcmp(precision, "double") != 0 &&
+        strcmp(precision, "half") != 0) {
+        fprintf(stderr, "Invalid precision '%s' (use float, double, half)\n", precision);
+        return EXIT_FAILURE;
+    }
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     if (!isPowerOfTwo(N)) {
         fprintf(stderr, "Error: N=%d must be a power of 2\n", N);
@@ -205,8 +209,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "FFT size: %d (2^%d) warmup + %d timed\n\n",
-            N, log2N, num_warmup);
+    fprintf(stderr, "FFT size: %d (2^%d)  |  Passes: %d warmup + %d timed\n\n",
+            N, log2N, num_warmup, num_iters);
 
     // Host allocation + initialization
     float2* h_data = (float2*)malloc(bytes);
@@ -226,87 +230,54 @@ int main(int argc, char** argv) {
     int gridBitRev    = (N       + blockSize - 1) / blockSize;
     int gridButterfly = (N / 2   + blockSize - 1) / blockSize;
 
-    // Lambda: run a full FFT (bit-reversal + all butterfly stages)
-    auto run_fft = [&]() {
-        bit_reverse_kernel<<<dim3(gridBitRev), dim3(blockSize)>>>(d_data, N, log2N);
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"precision\":\"%s\",\"batch_count\":%d",
+             N, precision, batch_count);
+
+    // Per-kernel accumulators: each pass runs one full FFT; the butterfly
+    // accumulator sums all log2(N) stage launches within the pass.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_br, acc_bf;
+
+    // One full FFT pass. The FFT transforms d_data IN PLACE, so the pristine
+    // input is re-uploaded (untimed) at the start of every pass to keep each
+    // pass's work identical and the verification below meaningful.
+    auto run_fft_pass = [&]() {
+        bench_lap_reset(&acc_br);
+        bench_lap_reset(&acc_bf);
+
+        HIP_CHECK(hipMemcpy(d_data, h_orig, bytes, hipMemcpyHostToDevice));
+
+        bench_lap_add(&acc_br, bench_time_op(&timer, [&]() {
+            bit_reverse_kernel<<<dim3(gridBitRev), dim3(blockSize)>>>(d_data, N, log2N);
+        }));
         for (int s = 0; s < log2N; ++s) {
-            fft_butterfly_kernel<<<dim3(gridButterfly), dim3(blockSize)>>>(d_data, N, s);
+            bench_lap_add(&acc_bf, bench_time_op(&timer, [&]() {
+                fft_butterfly_kernel<<<dim3(gridButterfly), dim3(blockSize)>>>(d_data, N, s);
+            }));
         }
     };
 
-    // -------------------------------------------------------------------
-    // Warmup
-    // -------------------------------------------------------------------
     for (int w = 0; w < num_warmup; ++w) {
-        HIP_CHECK(hipMemcpy(d_data, h_orig, bytes, hipMemcpyHostToDevice));
-        run_fft();
-        HIP_CHECK(hipDeviceSynchronize());
+        run_fft_pass();
     }
 
-    // -------------------------------------------------------------------
-    // Timed iterations — time bit_reverse and butterfly separately
-    // -------------------------------------------------------------------
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    std::vector<double> br_times(1);
-    std::vector<double> bf_times(1);
-    for (int i = 0; i < 1; ++i) {
-        HIP_CHECK(hipMemcpy(d_data, h_orig, bytes, hipMemcpyHostToDevice));
-
-        // Time bit-reverse kernel
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        bit_reverse_kernel<<<dim3(gridBitRev), dim3(blockSize)>>>(d_data, N, log2N);
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        br_times[i] = (double)ms;
-
-        // Time all butterfly stages
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        for (int s = 0; s < log2N; ++s) {
-            fft_butterfly_kernel<<<dim3(gridButterfly), dim3(blockSize)>>>(d_data, N, s);
-        }
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        bf_times[i] = (double)ms;
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_fft_pass();
+        bench_emit_iter("bit_reverse_kernel",   i, &acc_br, params);
+        bench_emit_iter("fft_butterfly_kernel", i, &acc_bf, params);
+        total_gpu_ms += acc_br.gpu_ms + acc_bf.gpu_ms;
+        fprintf(stderr, "pass %d: bit_reverse gpu = %.3f ms, butterfly gpu = %.3f ms\n",
+                i, acc_br.gpu_ms, acc_bf.gpu_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    // Compute average times
-    double br_sum = 0.0, bf_sum = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        br_sum += br_times[i];
-        bf_sum += bf_times[i];
-    }
-    double br_avg_ms = br_sum / 1;
-    double bf_avg_ms = bf_sum / 1;
-    double total_avg_ms = br_avg_ms + bf_avg_ms;
-
-    // GFLOPS = 5 * N * log2(N) / time_s / 1e9
-    double flops  = 5.0 * (double)N * (double)log2N;
-    double gflops = flops / (total_avg_ms * 1e-3) / 1e9;
-
-    // JSON-lines output
-    printf("{\"type\":\"kernel\",\"name\":\"bit_reverse_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"precision\":\"%s\",\"batch_count\":%d}}\n",
-           br_avg_ms, N, precision, batch_count);
-    printf("{\"type\":\"kernel\",\"name\":\"fft_butterfly_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"precision\":\"%s\",\"batch_count\":%d}}\n",
-           bf_avg_ms, N, precision, batch_count);
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.4f}]}\n",
-           total_avg_ms, gflops);
-
-    // Human-readable output to stderr
-    fprintf(stderr, "Average time: %.4f ms (bit_reverse: %.4f ms, butterfly: %.4f ms)\n",
-            total_avg_ms, br_avg_ms, bf_avg_ms);
-    fprintf(stderr, "Performance:  %.4f GFLOPS\n", gflops);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // -------------------------------------------------------------------
     // Verification (only for small sizes)

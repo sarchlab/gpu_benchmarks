@@ -15,30 +15,27 @@
 //   --clusters K    Number of clusters          (default: 8)
 //   --max_iter M    Maximum iterations          (default: 10)
 //
-// Output (stdout): CSV row — kmeans,N,K,D,<iterations>,<time_ms>,<Gpoints_per_s>
+// Environment variables (override argv):
+//   BENCH_PARAM_points, BENCH_PARAM_dims, BENCH_PARAM_clusters,
+//   BENCH_PARAM_max_iter
+//   BENCH_PARAM_num_warmup   (warmup clustering passes, default 3)
+//   BENCH_PARAM_num_iters    (timed clustering passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// kernel (kmeans_assign_kernel, kmeans_update_kernel) carrying that kernel's
+// accumulated GPU event time (time_ms) and host wall-clock time
+// (host_time_ms) over the pass's k-means iterations, then a summary whose
+// total_time_ms is the SUM of all recorded GPU event times. Points/sec is
+// derived downstream from time_ms and params.
 // Output (stderr): Per-iteration delta, convergence status, PASS/FAIL
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
 #include <cfloat>
-#include <vector>
 
-// ---------------------------------------------------------------------------
-// HIP error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -144,7 +141,8 @@ int main(int argc, char** argv)
     if (env_val) K = atoi(env_val);
     env_val = getenv("BENCH_PARAM_max_iter");
     if (env_val) max_iter = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     // Print device info
     int device_id = 0;
@@ -160,11 +158,12 @@ int main(int argc, char** argv)
     size_t points_bytes  = (size_t)N * D * sizeof(float);
     size_t centers_bytes = (size_t)K * D * sizeof(float);
 
-    float* h_points      = (float*)malloc(points_bytes);
-    float* h_centers     = (float*)malloc(centers_bytes);
-    float* h_new_centers = (float*)malloc(centers_bytes);
-    int*   h_counts      = (int*)malloc((size_t)K * sizeof(int));
-    int*   h_membership  = (int*)malloc((size_t)N * sizeof(int));
+    float* h_points       = (float*)malloc(points_bytes);
+    float* h_centers_init = (float*)malloc(centers_bytes);
+    float* h_centers      = (float*)malloc(centers_bytes);
+    float* h_new_centers  = (float*)malloc(centers_bytes);
+    int*   h_counts       = (int*)malloc((size_t)K * sizeof(int));
+    int*   h_membership   = (int*)malloc((size_t)N * sizeof(int));
     int*   h_membership_prev = (int*)malloc((size_t)N * sizeof(int));
 
     // Initialize points randomly in [0, 1)^D
@@ -174,14 +173,8 @@ int main(int argc, char** argv)
         h_points[i] = (float)(seed >> 8) / (float)(1 << 24);
     }
 
-    // Initialize centers as first K points
-    memcpy(h_centers, h_points, centers_bytes);
-
-    // Initialize membership to -1
-    for (int i = 0; i < N; ++i) {
-        h_membership[i]      = -1;
-        h_membership_prev[i] = -1;
-    }
+    // Initial centers = first K points (kept pristine for per-pass resets)
+    memcpy(h_centers_init, h_points, centers_bytes);
 
     // -----------------------------------------------------------------------
     // Device allocations
@@ -198,8 +191,7 @@ int main(int argc, char** argv)
     HIP_CHECK(hipMalloc(&d_counts,      (size_t)K * sizeof(int)));
     HIP_CHECK(hipMalloc(&d_membership,  (size_t)N * sizeof(int)));
 
-    HIP_CHECK(hipMemcpy(d_points,  h_points,  points_bytes,  hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_centers, h_centers, centers_bytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_points, h_points, points_bytes, hipMemcpyHostToDevice));
 
     // -----------------------------------------------------------------------
     // Kernel launch parameters
@@ -207,90 +199,107 @@ int main(int argc, char** argv)
     const int block_size = 256;
     const int grid_size  = (N + block_size - 1) / block_size;
 
-    // -----------------------------------------------------------------------
-    // Timing
-    // -----------------------------------------------------------------------
-    hipEvent_t ev_start, ev_stop;
-    HIP_CHECK(hipEventCreate(&ev_start));
-    HIP_CHECK(hipEventCreate(&ev_stop));
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"points\":%d,\"dims\":%d,\"clusters\":%d,\"max_iter\":%d",
+             N, D, K, max_iter);
 
-    // Warmup
-    for (int w = 0; w < num_warmup; ++w) {
-        kmeans_assign_kernel<<<dim3(grid_size), dim3(block_size)>>>(
-            d_points, d_centers, d_membership, N, D, K);
-        HIP_CHECK(hipDeviceSynchronize());
-    }
+    // Per-kernel accumulators: each clustering pass runs the k-means loop
+    // to convergence (or max_iter); the accumulated GPU/host time of all
+    // k-means iterations within one pass becomes that pass's record.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_assign, acc_update;
 
-    // -----------------------------------------------------------------------
-    // Main K-Means iteration loop — assign and update timed separately
-    // -----------------------------------------------------------------------
-    double t_assign = 0.0;
-    double t_update = 0.0;
-    float ev_ms = 0.0f;
+    // One full clustering pass. K-means converges: centroids and membership
+    // MUST be reset to their initial state before every pass (untimed),
+    // otherwise later passes would start from converged centroids and run
+    // fewer k-means iterations. Host-side center division, convergence
+    // checks, and all memcpys stay outside the timed brackets.
+    int iter = 0;   // k-means iterations executed in the most recent pass
+    auto run_kmeans_pass = [&]() {
+        bench_lap_reset(&acc_assign);
+        bench_lap_reset(&acc_update);
 
-    int iter = 0;
-    for (iter = 0; iter < max_iter; ++iter) {
+        // Reset centroids and membership history to pristine initial state
+        memcpy(h_centers, h_centers_init, centers_bytes);
+        HIP_CHECK(hipMemcpy(d_centers, h_centers, centers_bytes, hipMemcpyHostToDevice));
+        for (int i = 0; i < N; ++i) {
+            h_membership[i]      = -1;
+            h_membership_prev[i] = -1;
+        }
 
-        // --- Step 1: assign ---
-        HIP_CHECK(hipEventRecord(ev_start, 0));
-        kmeans_assign_kernel<<<dim3(grid_size), dim3(block_size)>>>(
-            d_points, d_centers, d_membership, N, D, K);
-        HIP_CHECK(hipEventRecord(ev_stop, 0));
-        HIP_CHECK(hipEventSynchronize(ev_stop));
-        HIP_CHECK(hipEventElapsedTime(&ev_ms, ev_start, ev_stop));
-        t_assign += (double)ev_ms;
+        for (iter = 0; iter < max_iter; ++iter) {
 
-        // --- Step 2: zero accumulators ---
-        HIP_CHECK(hipMemset(d_new_centers, 0, centers_bytes));
-        HIP_CHECK(hipMemset(d_counts,      0, (size_t)K * sizeof(int)));
+            // --- Step 1: assign ---
+            bench_lap_add(&acc_assign, bench_time_op(&timer, [&]() {
+                kmeans_assign_kernel<<<dim3(grid_size), dim3(block_size)>>>(
+                    d_points, d_centers, d_membership, N, D, K);
+            }));
 
-        // --- Step 3: accumulate ---
-        HIP_CHECK(hipEventRecord(ev_start, 0));
-        kmeans_update_kernel<<<dim3(grid_size), dim3(block_size)>>>(
-            d_points, d_new_centers, d_counts, d_membership, N, D);
-        HIP_CHECK(hipEventRecord(ev_stop, 0));
-        HIP_CHECK(hipEventSynchronize(ev_stop));
-        HIP_CHECK(hipEventElapsedTime(&ev_ms, ev_start, ev_stop));
-        t_update += (double)ev_ms;
+            // --- Step 2: zero accumulators (untimed) ---
+            HIP_CHECK(hipMemset(d_new_centers, 0, centers_bytes));
+            HIP_CHECK(hipMemset(d_counts,      0, (size_t)K * sizeof(int)));
 
-        // --- Step 4: copy back and divide on CPU ---
-        HIP_CHECK(hipMemcpy(h_new_centers, d_new_centers, centers_bytes,   hipMemcpyDeviceToHost));
-        HIP_CHECK(hipMemcpy(h_counts,      d_counts,      (size_t)K * sizeof(int), hipMemcpyDeviceToHost));
-        HIP_CHECK(hipMemcpy(h_membership,  d_membership,  (size_t)N * sizeof(int), hipMemcpyDeviceToHost));
+            // --- Step 3: accumulate ---
+            bench_lap_add(&acc_update, bench_time_op(&timer, [&]() {
+                kmeans_update_kernel<<<dim3(grid_size), dim3(block_size)>>>(
+                    d_points, d_new_centers, d_counts, d_membership, N, D);
+            }));
 
-        for (int k = 0; k < K; ++k) {
-            if (h_counts[k] > 0) {
-                for (int d = 0; d < D; ++d) {
-                    h_new_centers[k * D + d] /= (float)h_counts[k];
+            // --- Step 4: copy back and divide on CPU (untimed) ---
+            HIP_CHECK(hipMemcpy(h_new_centers, d_new_centers, centers_bytes,   hipMemcpyDeviceToHost));
+            HIP_CHECK(hipMemcpy(h_counts,      d_counts,      (size_t)K * sizeof(int), hipMemcpyDeviceToHost));
+            HIP_CHECK(hipMemcpy(h_membership,  d_membership,  (size_t)N * sizeof(int), hipMemcpyDeviceToHost));
+
+            for (int k = 0; k < K; ++k) {
+                if (h_counts[k] > 0) {
+                    for (int d = 0; d < D; ++d) {
+                        h_new_centers[k * D + d] /= (float)h_counts[k];
+                    }
+                } else {
+                    // Empty cluster — keep old center
+                    memcpy(&h_new_centers[k * D], &h_centers[k * D], (size_t)D * sizeof(float));
                 }
-            } else {
-                // Empty cluster — keep old center
-                memcpy(&h_new_centers[k * D], &h_centers[k * D], (size_t)D * sizeof(float));
+            }
+
+            // --- Step 5: check convergence ---
+            int changed = 0;
+            for (int i = 0; i < N; ++i) {
+                if (h_membership[i] != h_membership_prev[i]) ++changed;
+            }
+            double delta = (double)changed / (double)N;
+            fprintf(stderr, "  iter %2d: changed=%-6d  delta=%.6f\n", iter + 1, changed, delta);
+
+            // Update centers on device
+            memcpy(h_centers, h_new_centers, centers_bytes);
+            HIP_CHECK(hipMemcpy(d_centers, h_centers, centers_bytes, hipMemcpyHostToDevice));
+
+            memcpy(h_membership_prev, h_membership, (size_t)N * sizeof(int));
+
+            if (delta < 1e-4) {
+                iter++;   // count this iteration
+                break;
             }
         }
+    };
 
-        // --- Step 5: check convergence ---
-        int changed = 0;
-        for (int i = 0; i < N; ++i) {
-            if (h_membership[i] != h_membership_prev[i]) ++changed;
-        }
-        double delta = (double)changed / (double)N;
-        fprintf(stderr, "  iter %2d: changed=%-6d  delta=%.6f\n", iter + 1, changed, delta);
-
-        // Update centers on device
-        memcpy(h_centers, h_new_centers, centers_bytes);
-        HIP_CHECK(hipMemcpy(d_centers, h_centers, centers_bytes, hipMemcpyHostToDevice));
-
-        memcpy(h_membership_prev, h_membership, (size_t)N * sizeof(int));
-
-        if (delta < 1e-4) {
-            iter++;   // count this iteration
-            break;
-        }
+    for (int w = 0; w < num_warmup; ++w) {
+        run_kmeans_pass();
     }
 
-    // Total measured GPU time = sum of per-kernel accumulators
-    double time_ms = t_assign + t_update;
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_kmeans_pass();
+        bench_emit_iter("kmeans_assign_kernel", i, &acc_assign, params);
+        bench_emit_iter("kmeans_update_kernel", i, &acc_update, params);
+        total_gpu_ms += acc_assign.gpu_ms + acc_update.gpu_ms;
+        fprintf(stderr, "pass %d: assign gpu = %.3f ms, update gpu = %.3f ms "
+                "(%d k-means iterations)\n",
+                i, acc_assign.gpu_ms, acc_update.gpu_ms, iter);
+    }
+
+    bench_timer_destroy(&timer);
 
     // -----------------------------------------------------------------------
     // Verify convergence: run one extra assign pass, check delta < 1%
@@ -315,24 +324,10 @@ int main(int argc, char** argv)
     // -----------------------------------------------------------------------
     // Report
     // -----------------------------------------------------------------------
-    double gpoints_per_s = (double)N * (double)iter / ((double)time_ms * 1e-3) / 1e9;
-
-    // JSON-lines kernel events
-    printf("{\"type\":\"kernel\",\"name\":\"kmeans_assign_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"points\":%d,\"dims\":%d,\"clusters\":%d,\"max_iter\":%d}}\n",
-           t_assign, N, D, K, max_iter);
-
-    printf("{\"type\":\"kernel\",\"name\":\"kmeans_update_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"points\":%d,\"dims\":%d,\"clusters\":%d,\"max_iter\":%d}}\n",
-           t_update, N, D, K, max_iter);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"gpoints_per_s\",\"value\":%.6f}]}\n",
-           (double)time_ms, gpoints_per_s);
-
-    fprintf(stderr, "Iterations: %d  Time: %.4f ms  Throughput: %.6f Gpoints/s\n",
-            iter, (double)time_ms, gpoints_per_s);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes "
+            "(last pass: %d k-means iterations)\n",
+            total_gpu_ms, num_iters, iter);
 
     // -----------------------------------------------------------------------
     // Cleanup
@@ -342,10 +337,9 @@ int main(int argc, char** argv)
     HIP_CHECK(hipFree(d_new_centers));
     HIP_CHECK(hipFree(d_counts));
     HIP_CHECK(hipFree(d_membership));
-    HIP_CHECK(hipEventDestroy(ev_start));
-    HIP_CHECK(hipEventDestroy(ev_stop));
 
     free(h_points);
+    free(h_centers_init);
     free(h_centers);
     free(h_new_centers);
     free(h_counts);

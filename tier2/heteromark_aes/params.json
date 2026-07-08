@@ -2,7 +2,7 @@
   "benchmark": "heteromark_aes",
   "tier": 2,
   "suite": "heteromark",
-  "description": "AES-256 ECB encryption on GPU. Each thread encrypts one 16-byte block through 14 rounds. Measures throughput in GB/s.",
+  "description": "AES-256 ECB encryption on GPU. Each thread encrypts one 16-byte block through 14 rounds. Throughput (GB/s) is derived downstream from the emitted per-iteration times.",
   "scaling_param": {
     "name": "size",
     "description": "Number of 16-byte blocks to encrypt",

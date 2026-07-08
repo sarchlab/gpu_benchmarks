@@ -5,28 +5,27 @@
 // and refines them by inserting circumcenters (simplified Ruppert's algorithm).
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
+//
+// Environment variables (override argv):
+//   BENCH_PARAM_num_triangles, BENCH_PARAM_block_size, BENCH_PARAM_min_angle,
+//   BENCH_PARAM_max_refine_iterations, BENCH_PARAM_precision
+//   BENCH_PARAM_num_warmup   (warmup refinement passes, default 3)
+//   BENCH_PARAM_num_iters    (timed refinement passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// kernel (dmr_check_kernel, dmr_refine_kernel) carrying that kernel's
+// accumulated GPU event time and host time within the pass, then a summary
+// whose total_time_ms is the SUM of all recorded GPU event times.
+// Triangles-per-second is derived downstream from time_ms and params.
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <cfloat>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -210,9 +209,18 @@ int main(int argc, char** argv) {
     if (env_val) min_angle = (float)atof(env_val);
     env_val = getenv("BENCH_PARAM_max_refine_iterations");
     if (env_val) max_refine_iters = atoi(env_val);
+    /* Validate string params against their known sets, so the values echoed
+     * into the JSON records are always canonical literals. */
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
-    int num_warmup = 5;
+    if (strcmp(precision, "half") != 0 && strcmp(precision, "float") != 0 &&
+        strcmp(precision, "double") != 0) {
+        fprintf(stderr, "Invalid precision '%s' (use half, float, double)\n",
+                precision);
+        return EXIT_FAILURE;
+    }
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int num_vertices = num_triangles * 2;
 
@@ -223,8 +231,9 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "DMR: Delaunay Mesh Refinement  |  Triangles: %d  |  "
             "Vertices: %d  |  min_angle: %.1f deg  |  refine_iters: %d  |  "
-            "Iterations: 5 warmup + %d timed\n\n",
-            num_triangles, num_vertices, min_angle, max_refine_iters);
+            "Iterations: %d warmup + %d timed\n\n",
+            num_triangles, num_vertices, min_angle, max_refine_iters,
+            num_warmup, num_iters);
 
     // Generate synthetic mesh data
     std::vector<float> h_vx(num_vertices), h_vy(num_vertices);
@@ -269,28 +278,38 @@ int main(int argc, char** argv) {
 
     int gridTri = (num_triangles + block_size - 1) / block_size;
 
-    // Run the DMR refinement loop. When timing events are supplied, each kernel
-    // launch is wrapped in its own event pair and its elapsed time is added to
-    // the matching accumulator, so each distinct kernel reports its OWN
-    // separately measured GPU time (summed across the refine loop).
-    auto run_dmr = [&](hipEvent_t* evStart, hipEvent_t* evStop,
-                       double* t_check, double* t_refine) {
+    char params[224];
+    snprintf(params, sizeof(params),
+             "\"num_triangles\":%d,\"block_size\":%d,\"min_angle\":%.1f,"
+             "\"max_refine_iterations\":%d,\"precision\":\"%s\"",
+             num_triangles, block_size, min_angle, max_refine_iters, precision);
+
+    // Per-kernel accumulators: each refinement pass launches both kernels once
+    // per refine round; the accumulated GPU/host time of all rounds within one
+    // pass becomes that pass's record for the kernel.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_check, acc_refine;
+
+    // One full refinement pass. Refinement mutates the vertex coordinates,
+    // which shrinks the bad-triangle worklist — a refined mesh would give
+    // later passes LESS work — so the pristine vertex positions are re-uploaded
+    // at the start of every pass (untimed) to keep each pass identical.
+    auto run_dmr_pass = [&]() {
+        bench_lap_reset(&acc_check);
+        bench_lap_reset(&acc_refine);
+
         HIP_CHECK(hipMemcpy(d_vx, h_vx_bak.data(), vert_bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_vy, h_vy_bak.data(), vert_bytes, hipMemcpyHostToDevice));
 
         for (int r = 0; r < max_refine_iters; ++r) {
             HIP_CHECK(hipMemset(d_worklist_count, 0, sizeof(int)));
 
-            if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            dmr_check_kernel<<<dim3(gridTri), dim3(block_size)>>>(
-                d_tri_v0, d_tri_v1, d_tri_v2, d_vx, d_vy, d_worklist, d_worklist_count, min_angle, num_triangles);
-            if (evStart) {
-                HIP_CHECK(hipEventRecord(*evStop, 0));
-                HIP_CHECK(hipEventSynchronize(*evStop));
-                float ms = 0.0f;
-                HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
-                *t_check += (double)ms;
-            }
+            bench_lap_add(&acc_check, bench_time_op(&timer, [&]() {
+                dmr_check_kernel<<<dim3(gridTri), dim3(block_size)>>>(
+                    d_tri_v0, d_tri_v1, d_tri_v2, d_vx, d_vy, d_worklist,
+                    d_worklist_count, min_angle, num_triangles);
+            }));
 
             int h_wl_count = 0;
             HIP_CHECK(hipMemcpy(&h_wl_count, d_worklist_count, sizeof(int),
@@ -299,64 +318,32 @@ int main(int argc, char** argv) {
             if (h_wl_count == 0) break;
 
             int gridWL = (h_wl_count + block_size - 1) / block_size;
-            if (evStart) HIP_CHECK(hipEventRecord(*evStart, 0));
-            dmr_refine_kernel<<<dim3(gridWL), dim3(block_size)>>>(
-                d_worklist, h_wl_count, d_tri_v0, d_tri_v1, d_tri_v2, d_vx, d_vy, num_vertices, num_triangles);
-            if (evStart) {
-                HIP_CHECK(hipEventRecord(*evStop, 0));
-                HIP_CHECK(hipEventSynchronize(*evStop));
-                float ms = 0.0f;
-                HIP_CHECK(hipEventElapsedTime(&ms, *evStart, *evStop));
-                *t_refine += (double)ms;
-            }
+            bench_lap_add(&acc_refine, bench_time_op(&timer, [&]() {
+                dmr_refine_kernel<<<dim3(gridWL), dim3(block_size)>>>(
+                    d_worklist, h_wl_count, d_tri_v0, d_tri_v1, d_tri_v2,
+                    d_vx, d_vy, num_vertices, num_triangles);
+            }));
         }
     };
 
-    // Warmup
     for (int w = 0; w < num_warmup; ++w) {
-        run_dmr(nullptr, nullptr, nullptr, nullptr);  // untimed full sequence
-        HIP_CHECK(hipDeviceSynchronize());
+        run_dmr_pass();
     }
 
-    // Timed iterations — each kernel measured separately with its own
-    // accumulator (summed across the refine loop inside run_dmr).
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    double t_check = 0.0;   // dmr_check_kernel
-    double t_refine = 0.0;  // dmr_refine_kernel
-    for (int i = 0; i < 1; ++i) {
-        run_dmr(&evStart, &evStop, &t_check, &t_refine);
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_dmr_pass();
+        bench_emit_iter("dmr_check_kernel", i, &acc_check, params);
+        bench_emit_iter("dmr_refine_kernel", i, &acc_refine, params);
+        total_gpu_ms += acc_check.gpu_ms + acc_refine.gpu_ms;
+        fprintf(stderr, "pass %d: check gpu = %.3f ms, refine gpu = %.3f ms\n",
+                i, acc_check.gpu_ms, acc_refine.gpu_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    double total_ms = t_check + t_refine;
-    double avg_ms = total_ms;
-    double mtri_per_sec = (double)num_triangles / (avg_ms * 1e-3) / 1e6;
-
-    fprintf(stderr, "Performance: %.2f Mtri/sec  (total %.4f ms: check=%.4f refine=%.4f)\n",
-            mtri_per_sec, avg_ms, t_check, t_refine);
-
-    printf("{\"type\":\"kernel\",\"name\":\"dmr_check_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_triangles\":%d,\"block_size\":%d,"
-           "\"min_angle\":%.1f,\"max_refine_iterations\":%d,"
-           "\"precision\":\"%s\"}}\n",
-           t_check, num_triangles, block_size, min_angle,
-           max_refine_iters, precision);
-
-    printf("{\"type\":\"kernel\",\"name\":\"dmr_refine_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_triangles\":%d,\"block_size\":%d,"
-           "\"min_angle\":%.1f,\"max_refine_iterations\":%d,"
-           "\"precision\":\"%s\"}}\n",
-           t_refine, num_triangles, block_size, min_angle,
-           max_refine_iters, precision);
-
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"mtri_per_sec\",\"value\":%.2f}]}\n",
-           total_ms, mtri_per_sec);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     HIP_CHECK(hipFree(d_vx));
     HIP_CHECK(hipFree(d_vy));

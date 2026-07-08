@@ -35,27 +35,39 @@ make PLATFORM=metal
 ## Run
 
 ```bash
-./npb_ep                              # defaults: N=16777216, 5 iterations
+./npb_ep                              # defaults: N=16777216
 ./npb_ep --size 1048576               # smaller workload
-./npb_ep --size 16777216 --iterations 10
 ```
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BENCH_PARAM_size` | 16777216 | Number of Gaussian pairs |
+| `BENCH_PARAM_block_size` | 256 | Threads per block |
+| `BENCH_PARAM_seed` | 271828183 | RNG seed parameter (recorded in params) |
+| `BENCH_PARAM_num_warmup` | 3 | Warmup launches (untimed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed launches, each recorded |
 
 ## Output
 
-**stdout** — CSV timing row:
+**stdout** — JSON lines: one `{"type":"kernel",...}` record per timed iteration with `time_ms` (GPU event time) and `host_time_ms` (host wall-clock), then a summary whose `total_time_ms` is the sum of all iterations' GPU event times:
 ```
-npb_ep,16777216,8.2345,2.0380
+{"type":"kernel","name":"ep_kernel","iter":0,"time_ms":8.2345,"host_time_ms":8.3011,"params":{"size":16777216,...}}
+...
+{"type":"summary","total_time_ms":57.6415}
 ```
 
-Format: `npb_ep,<N>,<time_ms>,<Gpairs_per_sec>`
+Derived metrics (Gpairs/sec) are computed downstream from `time_ms` and the params. Bin counters are reset (untimed) before every launch so each iteration performs identical work.
 
 **stderr** — human-readable results:
 ```
 Device: AMD Radeon RX 7900 XTX (id=0)
-EP pairs: 16777216 (2^24)  |  Iterations: 5 warmup + 5 timed
+EP pairs: 16777216 (2^24)  |  Iterations: 3 warmup + 7 timed
 
-Average time: 8.2345 ms
-Performance:  2.0380 Gpairs/sec
+ep_kernel iter 0: gpu = 8.234 ms, host = 8.301 ms
+...
+Total GPU time: 57.642 ms over 7 iterations
 
 Bin counts (GPU vs CPU, N=1048576):
   Bin 0: GPU=697254  CPU=697254

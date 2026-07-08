@@ -11,15 +11,22 @@
 //
 //   --size N         Number of Gaussian pairs (default: 16777216 = 2^24)
 //
-// Output (stdout): CSV row — npb_ep,<N>,<time_ms>,<Gpairs_per_sec>
+// Environment variables (override argv):
+//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_seed
+//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
+//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
+//
+// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
+// carrying the GPU event time and host wall-clock time, then a summary whose
+// total_time_ms is the SUM of all iterations' GPU event times.
+// Gpairs/sec is derived downstream from time_ms and params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <vector>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -28,19 +35,7 @@
 // Number of annular bins
 #define NUM_BINS 10
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -166,8 +161,8 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_seed");
     if (env_val) seed_param = atoi(env_val);
-    int num_warmup = 5;
-
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     // Print device info
     int device_id = 0;
@@ -175,8 +170,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "EP pairs: %d (2^%.0f) warmup + %d timed\n\n",
-            N, log2((double)N), num_warmup);
+    fprintf(stderr, "EP pairs: %d (2^%.0f)  |  Iterations: %d warmup + %d timed\n\n",
+            N, log2((double)N), num_warmup, num_iters);
 
     // Device allocation for bins
     unsigned long long* d_bins;
@@ -186,66 +181,44 @@ int main(int argc, char** argv) {
     int blockSize = block_size;
     int gridSize  = (N + blockSize - 1) / blockSize;
 
-    // Lambda: run EP kernel
-    auto run_ep = [&]() {
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"block_size\":%d,\"seed\":%d",
+             N, block_size, seed_param);
+
+    // One EP pass. The kernel derives every thread's RNG seed from its
+    // thread index, so each launch performs identical work; the bins are
+    // atomically ACCUMULATED, so they are reset (untimed) before each launch
+    // to keep the verification below meaningful.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+
+    for (int w = 0; w < num_warmup; ++w) {
         HIP_CHECK(hipMemset(d_bins, 0, NUM_BINS * sizeof(unsigned long long)));
         ep_kernel<<<dim3(gridSize), dim3(blockSize)>>>(N, d_bins);
-    };
-
-    // -------------------------------------------------------------------
-    // Warmup
-    // -------------------------------------------------------------------
-    for (int w = 0; w < num_warmup; ++w) {
-        run_ep();
         HIP_CHECK(hipDeviceSynchronize());
     }
 
-    // -------------------------------------------------------------------
-    // Timed iterations
-    // -------------------------------------------------------------------
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        // Reset bins outside the timed bracket
+        HIP_CHECK(hipMemset(d_bins, 0, NUM_BINS * sizeof(unsigned long long)));
+        HIP_CHECK(hipDeviceSynchronize());
 
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        run_ep();
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
+        bench_lap_t lap = bench_time_op(&timer, [&]() {
+            ep_kernel<<<dim3(gridSize), dim3(blockSize)>>>(N, d_bins);
+        });
 
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
+        bench_emit_iter("ep_kernel", i, &lap, params);
+        total_gpu_ms += lap.gpu_ms;
+        fprintf(stderr, "ep_kernel iter %d: gpu = %.3f ms, host = %.3f ms\n",
+                i, lap.gpu_ms, lap.host_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    // Compute average time
-    double sum = 0.0;
-    for (int i = 0; i < 1; ++i) sum += times[i];
-    double avg_ms = sum / 1;
-
-    // G pairs/sec = N / time_s / 1e9
-    double gpairs_sec = (double)N / (avg_ms * 1e-3) / 1e9;
-
-    double total_ms = sum;
-
-    // JSON-lines kernel event
-    printf("{\"type\":\"kernel\",\"name\":\"ep_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"seed\":%d}}\n",
-           avg_ms, N, block_size, seed_param);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"gpairs_per_sec\",\"value\":%.2f}]}\n",
-           total_ms, gpairs_sec);
-
-    // Human-readable output to stderr
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
-    fprintf(stderr, "Performance:  %.4f Gpairs/sec\n", gpairs_sec);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
+            total_gpu_ms, num_iters);
 
     // -------------------------------------------------------------------
     // Verification: compare GPU bins against CPU reference

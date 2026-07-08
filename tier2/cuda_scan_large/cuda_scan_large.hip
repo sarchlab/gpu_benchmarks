@@ -6,8 +6,6 @@
 //   2. Scan of block sums
 //   3. Add block sums back to each block
 //
-// Measures throughput in GB/s = 2 * N * sizeof(uint) / time_s / 1e9.
-//
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
 // Usage:
@@ -15,29 +13,24 @@
 //
 //   --size N         Number of elements (default: 16777216 = 16M)
 //
-// Output (stdout): CSV row — cuda_scan_large,<N>,<time_ms>,<GBs>
+// Environment variables (override argv):
+//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_verify
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// kernel (scan_block_kernel, add_block_sums_kernel) carrying that kernel's
+// accumulated GPU event time and host time within the pass (summed over all
+// recursion levels), then a summary whose total_time_ms is the SUM of all
+// recorded GPU event times. GB/s is derived downstream from time_ms + params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
-#include <vector>
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -150,12 +143,12 @@ __global__ void add_block_sums_kernel(
 // Recursive scan for large arrays
 // ---------------------------------------------------------------------------
 
-// When accumulators are supplied, each kernel launch is timed separately and
-// summed across ALL recursion levels into the corresponding accumulator.
-// Passing nullptr (warmup) runs untimed.
+// Each kernel launch is bracketed with its own event pair (bench_time_op) and
+// summed across ALL recursion levels into the corresponding accumulator. The
+// hipMalloc/hipFree of the block-sums buffer stay OUTSIDE the timed brackets.
 static void scan_recursive(unsigned int* d_data, int N,
-                           double* block_acc, double* add_acc,
-                           hipEvent_t kStart, hipEvent_t kStop) {
+                           bench_timer_t* timer,
+                           bench_lap_t* acc_block, bench_lap_t* acc_add) {
     int numBlocks = (N + ELEMENTS_PER_BLOCK - 1) / ELEMENTS_PER_BLOCK;
 
     unsigned int* d_block_sums = nullptr;
@@ -164,32 +157,18 @@ static void scan_recursive(unsigned int* d_data, int N,
     }
 
     // Phase 1: Block-level scan
-    if (block_acc) {
-        HIP_CHECK(hipEventRecord(kStart, 0));
+    bench_lap_add(acc_block, bench_time_op(timer, [&]() {
         scan_block_kernel<<<dim3(numBlocks), dim3(BLOCK_SIZE)>>>(d_data, d_block_sums, N);
-        HIP_CHECK(hipEventRecord(kStop, 0));
-        HIP_CHECK(hipEventSynchronize(kStop));
-        float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
-        *block_acc += (double)_ms;
-    } else {
-        scan_block_kernel<<<dim3(numBlocks), dim3(BLOCK_SIZE)>>>(d_data, d_block_sums, N);
-    }
+    }));
 
     if (numBlocks > 1) {
         // Phase 2: Recursively scan the block sums
-        scan_recursive(d_block_sums, numBlocks, block_acc, add_acc, kStart, kStop);
+        scan_recursive(d_block_sums, numBlocks, timer, acc_block, acc_add);
 
         // Phase 3: Add scanned block sums back to each block
-        if (add_acc) {
-            HIP_CHECK(hipEventRecord(kStart, 0));
+        bench_lap_add(acc_add, bench_time_op(timer, [&]() {
             add_block_sums_kernel<<<dim3(numBlocks), dim3(BLOCK_SIZE)>>>(d_data, d_block_sums, N);
-            HIP_CHECK(hipEventRecord(kStop, 0));
-            HIP_CHECK(hipEventSynchronize(kStop));
-            float _ms = 0.0f; HIP_CHECK(hipEventElapsedTime(&_ms, kStart, kStop));
-            *add_acc += (double)_ms;
-        } else {
-            add_block_sums_kernel<<<dim3(numBlocks), dim3(BLOCK_SIZE)>>>(d_data, d_block_sums, N);
-        }
+        }));
 
         HIP_CHECK(hipFree(d_block_sums));
     }
@@ -242,7 +221,15 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_verify");
     if (env_val) verify = env_val;
-    int num_warmup = 5;
+    // Validate string params so the values echoed into the JSON records are
+    // always canonical literals (never raw env text).
+    if (strcmp(verify, "true") != 0 && strcmp(verify, "false") != 0 &&
+        strcmp(verify, "skip") != 0) {
+        fprintf(stderr, "Invalid verify '%s' (use true, false, skip)\n", verify);
+        return EXIT_FAILURE;
+    }
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int N     = size;
 
@@ -254,7 +241,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Scan size: %d warmup + %d timed\n\n", N, num_warmup);
+    fprintf(stderr, "Scan size: %d  |  Iterations: %d warmup + %d timed\n\n",
+            N, num_warmup, num_iters);
 
     // Host allocation + initialization
     unsigned int* h_input  = (unsigned int*)malloc(bytes);
@@ -267,63 +255,46 @@ int main(int argc, char** argv) {
     unsigned int* d_data;
     HIP_CHECK(hipMalloc(&d_data, bytes));
 
-    // Per-kernel timing events (used only when accumulators are supplied)
-    hipEvent_t kStart, kStop;
-    HIP_CHECK(hipEventCreate(&kStart));
-    HIP_CHECK(hipEventCreate(&kStop));
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"",
+             size, block_size, verify);
 
-    // Lambda: run full scan. When accumulators are supplied, each kernel type
-    // is timed and summed across all recursion levels; nullptr runs untimed.
-    auto run_scan = [&](double* block_acc, double* add_acc) {
+    // Per-kernel accumulators: each pass runs one full hierarchical scan; the
+    // accumulated GPU/host time across all recursion levels within one pass
+    // becomes that pass's record for the kernel.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_block, acc_add;
+
+    // One full scan pass. The scan is IN PLACE, so the pristine input is
+    // re-uploaded at the start of every pass (untimed) — otherwise later
+    // passes would scan already-scanned data.
+    auto run_scan_pass = [&]() {
+        bench_lap_reset(&acc_block);
+        bench_lap_reset(&acc_add);
         HIP_CHECK(hipMemcpy(d_data, h_input, bytes, hipMemcpyHostToDevice));
-        scan_recursive(d_data, N, block_acc, add_acc, kStart, kStop);
+        scan_recursive(d_data, N, &timer, &acc_block, &acc_add);
     };
 
-    // -------------------------------------------------------------------
-    // Warmup
-    // -------------------------------------------------------------------
     for (int w = 0; w < num_warmup; ++w) {
-        run_scan(nullptr, nullptr);
-        HIP_CHECK(hipDeviceSynchronize());
+        run_scan_pass();
     }
 
-    // -------------------------------------------------------------------
-    // Timed iterations — each kernel type summed across all recursion levels
-    // -------------------------------------------------------------------
-    double block_ms = 0.0, add_ms = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        run_scan(&block_ms, &add_ms);
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_scan_pass();
+        bench_emit_iter("scan_block_kernel",     i, &acc_block, params);
+        bench_emit_iter("add_block_sums_kernel", i, &acc_add,   params);
+        total_gpu_ms += acc_block.gpu_ms + acc_add.gpu_ms;
+        fprintf(stderr, "pass %d: scan_block gpu = %.3f ms, add_block_sums gpu = %.3f ms\n",
+                i, acc_block.gpu_ms, acc_add.gpu_ms);
     }
 
-    HIP_CHECK(hipEventDestroy(kStart));
-    HIP_CHECK(hipEventDestroy(kStop));
-
-    double total_ms = block_ms + add_ms;
-    double avg_ms = total_ms;
-
-    // GB/s = 2 * N * sizeof(uint) / time_s / 1e9
-    double data_bytes = 2.0 * (double)N * sizeof(unsigned int);
-    double gbs = data_bytes / (avg_ms * 1e-3) / 1e9;
-
-    // JSON-lines kernel events
-    printf("{\"type\":\"kernel\",\"name\":\"scan_block_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"verify\":\"%s\"}}\n",
-           block_ms, size, block_size, verify);
-
-    printf("{\"type\":\"kernel\",\"name\":\"add_block_sums_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"verify\":\"%s\"}}\n",
-           add_ms, size, block_size, verify);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"throughput_gbps\",\"value\":%.2f}]}\n",
-           total_ms, gbs);
-
-    // Human-readable output to stderr
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
-    fprintf(stderr, "Throughput:   %.4f GB/s\n", gbs);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // -------------------------------------------------------------------
     // Verification

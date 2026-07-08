@@ -2,7 +2,7 @@
   "benchmark": "heteromark_pagerank",
   "tier": 2,
   "suite": "heteromark",
-  "description": "Iterative PageRank (power method) on a synthetic Erdos-Renyi CSR graph. PR[v] = (1-d)/N + d * sum(PR[u]/degree[u]). Measures edges/sec.",
+  "description": "Iterative PageRank (power method) on a synthetic Erdos-Renyi CSR graph. PR[v] = (1-d)/N + d * sum(PR[u]/degree[u]). Emits per-iteration kernel times; edges/sec is derived downstream.",
   "scaling_param": {
     "name": "vertices",
     "description": "Number of vertices in the synthetic graph",

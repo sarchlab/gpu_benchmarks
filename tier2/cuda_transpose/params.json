@@ -2,7 +2,7 @@
   "benchmark": "cuda_transpose",
   "tier": 2,
   "suite": "cuda_sdk",
-  "description": "Shared-memory tiled matrix transpose with two variants: naive (strided writes) and optimized (bank-conflict-free with +1 padding). Measures bandwidth in GB/s.",
+  "description": "Shared-memory tiled matrix transpose with two variants: naive (strided writes) and optimized (bank-conflict-free with +1 padding). Emits per-iteration kernel times; bandwidth in GB/s is derived downstream.",
   "scaling_param": {
     "name": "size",
     "description": "Matrix dimension N (NxN single-precision matrix)",

@@ -4,33 +4,28 @@
 // O(n log^2 n) compare-and-swap network.
 //
 // Parameters are read from BENCH_PARAM_* environment variables,
-// with command-line --flags as fallback.
+// with command-line --flags as fallback:
+//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
 //
-// Output (stdout): JSON-lines protocol
+// Output (stdout): per timed pass, one {"type":"kernel","name":"bitonic_step",
+// ...} JSON line carrying the pass's accumulated GPU event time (summed over
+// all compare-and-swap steps) and host time, then a summary whose
+// total_time_ms is the SUM of all recorded GPU event times. Melements/s is
+// derived downstream from time_ms and params.
 // Output (stderr): Human-readable diagnostics
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
-#include <cfloat>
-#include <vector>
-#include <algorithm>
 
 // ---------------------------------------------------------------------------
 // Inlined HIP utilities
 // ---------------------------------------------------------------------------
 
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -53,30 +48,6 @@ static const char* parseStrParam(int argc, char** argv, const char* name,
     return defaultVal;
 }
 
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
-
 // ---------------------------------------------------------------------------
 // Bitonic sort kernel
 // ---------------------------------------------------------------------------
@@ -96,16 +67,20 @@ __global__ void bitonic_step(unsigned int* data, int j, int k) {
 }
 
 // ---------------------------------------------------------------------------
-// GPU bitonic sort driver
+// GPU bitonic sort driver — every compare-and-swap step is bracketed with its
+// own event pair and accumulated into `acc`, so one full sort yields one
+// accumulated lap for the bitonic_step kernel.
 // ---------------------------------------------------------------------------
-static void bitonic_sort_gpu(unsigned int* d_data, int N, int block_size) {
+static void bitonic_sort_gpu(unsigned int* d_data, int N, int block_size,
+                             bench_timer_t* timer, bench_lap_t* acc) {
     int grid = (N + block_size - 1) / block_size;
     for (int k = 2; k <= N; k <<= 1) {
         for (int j = k >> 1; j > 0; j >>= 1) {
-            bitonic_step<<<dim3(grid), dim3(block_size)>>>(d_data, j, k);
+            bench_lap_add(acc, bench_time_op(timer, [&]() {
+                bitonic_step<<<dim3(grid), dim3(block_size)>>>(d_data, j, k);
+            }));
         }
     }
-    HIP_CHECK(hipDeviceSynchronize());
 }
 
 // ---------------------------------------------------------------------------
@@ -146,7 +121,15 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
-    int num_warmup = 5;
+    // Validate string params so the values echoed into the JSON records are
+    // always canonical literals (never raw env text).
+    if (strcmp(precision, "uint") != 0 && strcmp(precision, "int") != 0 &&
+        strcmp(precision, "float") != 0) {
+        fprintf(stderr, "Invalid precision '%s' (use uint, int, float)\n", precision);
+        return EXIT_FAILURE;
+    }
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int N     = size;
 
@@ -188,41 +171,43 @@ int main(int argc, char** argv) {
     unsigned int* d_data;
     HIP_CHECK(hipMalloc(&d_data, bytes));
 
-    BenchmarkTimer timer;
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
+             size, block_size, precision);
 
-    // Warmup
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc;
+
+    // One full sort pass. The sort is IN PLACE, but the bitonic network is
+    // DATA-INDEPENDENT: it executes the exact same compare-and-swap sequence
+    // regardless of element order, so sorting already-sorted data takes the
+    // same time. We still re-upload the pristine unsorted input every pass
+    // (untimed, as the old code did) so the post-loop correctness check
+    // verifies a genuine sort of random data.
+    auto run_sort_pass = [&]() {
+        bench_lap_reset(&acc);
+        HIP_CHECK(hipMemcpy(d_data, h_orig, bytes, hipMemcpyHostToDevice));
+        bitonic_sort_gpu(d_data, N, block_size, &timer, &acc);
+    };
+
     for (int w = 0; w < num_warmup; ++w) {
-        HIP_CHECK(hipMemcpy(d_data, h_orig, bytes, hipMemcpyHostToDevice));
-        bitonic_sort_gpu(d_data, N, block_size);
+        run_sort_pass();
     }
 
-    // Timed iterations
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        HIP_CHECK(hipMemcpy(d_data, h_orig, bytes, hipMemcpyHostToDevice));
-        timer.record_start();
-        bitonic_sort_gpu(d_data, N, block_size);
-        timer.record_stop();
-        times[i] = static_cast<double>(timer.elapsed_ms());
-        fprintf(stderr, "  Iter %d: %.4f ms\n", i + 1, times[i]);
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_sort_pass();
+        bench_emit_iter("bitonic_step", i, &acc, params);
+        total_gpu_ms += acc.gpu_ms;
+        fprintf(stderr, "pass %d: bitonic_step gpu = %.3f ms, host = %.3f ms\n",
+                i, acc.gpu_ms, acc.host_ms);
     }
 
-    // Statistics
-    double sum_ms = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        sum_ms += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg_ms = sum_ms / 1;
-    double total_ms = sum_ms;
+    bench_timer_destroy(&timer);
 
-    double melems_per_sec = (double)N / (avg_ms * 1e-3) / 1e6;
-
-    fprintf(stderr, "Throughput: %.2f Melements/s  (avg %.4f ms, min %.4f ms, max %.4f ms)\n",
-            melems_per_sec, avg_ms, mn, mx);
-
-    // Correctness check
+    // Correctness check (result of the last pass)
     HIP_CHECK(hipMemcpy(h_data, d_data, bytes, hipMemcpyDeviceToHost));
     if (verify_sorted(h_data, N)) {
         fprintf(stderr, "Correctness: PASS\n");
@@ -230,16 +215,9 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Correctness: FAIL\n");
     }
 
-    // JSON-lines kernel event
-    printf("{\"type\":\"kernel\",\"name\":\"bitonic_step\",\"time_ms\":%.6f,"
-           "\"params\":{\"size\":%d,\"block_size\":%d,"
-           "\"precision\":\"%s\"}}\n",
-           avg_ms, size, block_size, precision);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"melements_per_sec\",\"value\":%.2f}]}\n",
-           total_ms, melems_per_sec);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // Cleanup
     HIP_CHECK(hipFree(d_data));

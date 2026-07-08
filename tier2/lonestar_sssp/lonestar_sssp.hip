@@ -10,32 +10,29 @@
 //
 //   --vertices N     Number of vertices (default: 65536)
 //   --degree D       Average degree per vertex (default: 16)
-//   --iterations I   Timed iterations (default: 5)
+//   --iterations I   Legacy iteration-count param (echoed in records)
 //
-// Output (stdout): CSV row — lonestar_sssp,<N_vertices>,<time_ms>,<Medges_per_sec>
+// Environment variables (override argv):
+//   BENCH_PARAM_vertices, BENCH_PARAM_degree, BENCH_PARAM_iterations,
+//   BENCH_PARAM_block_size
+//   BENCH_PARAM_num_warmup   (warmup SSSP passes, default 3)
+//   BENCH_PARAM_num_iters    (timed SSSP passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
+// bellman_ford_kernel carrying the accumulated GPU event time (time_ms) and
+// host time (host_time_ms) of all Bellman-Ford iterations within the pass,
+// then a summary whose total_time_ms is the SUM of all recorded GPU event
+// times. Medges/sec is derived downstream from time_ms and params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
 #include <vector>
 #include <climits>
 
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -170,8 +167,12 @@ static int bellman_ford_cpu(int N, const std::vector<int>& row_offsets,
 static int run_sssp_gpu(int N, int num_edges,
                          int* d_row_offsets, int* d_col_indices,
                          int* d_weights, int* d_dist, int* d_changed,
-                         int source, int blkSize) {
-    // Initialize distances on device
+                         int source, int blkSize,
+                         bench_timer_t* timer, bench_lap_t* acc) {
+    bench_lap_reset(acc);
+
+    // Reset per-pass state (untimed): distances back to INT_MAX / source = 0
+    // so every pass performs the same convergence work.
     std::vector<int> h_dist(N, INT_MAX);
     h_dist[source] = 0;
     HIP_CHECK(hipMemcpy(d_dist, h_dist.data(), N * sizeof(int), hipMemcpyHostToDevice));
@@ -185,9 +186,10 @@ static int run_sssp_gpu(int N, int num_edges,
         int h_changed = 0;
         HIP_CHECK(hipMemcpy(d_changed, &h_changed, sizeof(int), hipMemcpyHostToDevice));
 
-        bellman_ford_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
-            d_row_offsets, d_col_indices, d_weights, d_dist, d_changed, N);
-        HIP_CHECK(hipDeviceSynchronize());
+        bench_lap_add(acc, bench_time_op(timer, [&]() {
+            bellman_ford_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
+                d_row_offsets, d_col_indices, d_weights, d_dist, d_changed, N);
+        }));
 
         HIP_CHECK(hipMemcpy(&h_changed, d_changed, sizeof(int), hipMemcpyDeviceToHost));
         total_iters++;
@@ -225,11 +227,11 @@ int main(int argc, char** argv) {
     if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int N       = vertices;
     int avg_deg = degree;
-    int iters   = iterations;
     int source  = 0;
 
     // Generate CSR graph
@@ -244,7 +246,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "SSSP (Bellman-Ford)  |  Vertices: %d  |  Edges: %d  |  "
-            "Iterations: %d warmup + %d timed\n\n", N, num_edges, num_warmup, iters);
+            "Passes: %d warmup + %d timed\n\n", N, num_edges, num_warmup, num_iters);
 
     // Allocate device memory
     int *d_row_offsets, *d_col_indices, *d_weights, *d_dist, *d_changed;
@@ -259,70 +261,44 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(d_col_indices, col_indices.data(), num_edges * sizeof(int), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_weights, weights.data(), num_edges * sizeof(int), hipMemcpyHostToDevice));
 
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"vertices\":%d,\"degree\":%d,\"iterations\":%d,\"block_size\":%d",
+             vertices, degree, iterations, block_size);
+
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc;
+
     // -------------------------------------------------------------------
-    // Warmup
+    // Warmup passes (records not emitted)
     // -------------------------------------------------------------------
     int bf_iters = 0;
     for (int w = 0; w < num_warmup; ++w) {
         bf_iters = run_sssp_gpu(N, num_edges, d_row_offsets, d_col_indices,
-                                d_weights, d_dist, d_changed, source, block_size);
+                                d_weights, d_dist, d_changed, source, block_size,
+                                &timer, &acc);
     }
     fprintf(stderr, "Bellman-Ford converged in %d iterations\n", bf_iters);
 
     // -------------------------------------------------------------------
-    // Timed iterations
+    // Timed passes — one record per pass with the accumulated kernel time
     // -------------------------------------------------------------------
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    std::vector<double> times((size_t)iters);
-    std::vector<int> iter_counts((size_t)iters);
-    for (int i = 0; i < iters; ++i) {
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        iter_counts[i] = run_sssp_gpu(N, num_edges, d_row_offsets, d_col_indices,
-                                       d_weights, d_dist, d_changed, source, block_size);
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        int pass_iters = run_sssp_gpu(N, num_edges, d_row_offsets, d_col_indices,
+                                      d_weights, d_dist, d_changed, source, block_size,
+                                      &timer, &acc);
+        bench_emit_iter("bellman_ford_kernel", i, &acc, params);
+        total_gpu_ms += acc.gpu_ms;
+        fprintf(stderr, "pass %d: gpu = %.3f ms, host = %.3f ms (%d BF iterations)\n",
+                i, acc.gpu_ms, acc.host_ms, pass_iters);
     }
 
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    // Compute average
-    double sum = 0.0;
-    int total_bf_iters = 0;
-    for (int i = 0; i < iters; ++i) {
-        sum += times[i];
-        total_bf_iters += iter_counts[i];
-    }
-    double avg_ms = sum / iters;
-    double avg_bf_iters = (double)total_bf_iters / iters;
-
-    // Medges/sec = N_edges * bf_iterations / time_s / 1e6
-    double medges_per_sec = (double)num_edges * avg_bf_iters / (avg_ms * 1e-3) / 1e6;
-
-    double total_ms = sum;
-
-    // JSON-lines kernel event
-    printf("{\"type\":\"kernel\",\"name\":\"bellman_ford_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"vertices\":%d,\"degree\":%d,\"iterations\":%d,"
-           "\"block_size\":%d}}\n",
-           avg_ms, vertices, degree, iterations, block_size);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"medges_per_sec\",\"value\":%.2f}]}\n",
-           total_ms, medges_per_sec);
-
-    // Human-readable output to stderr
-    fprintf(stderr, "Average time: %.4f ms\n", avg_ms);
-    fprintf(stderr, "BF iterations (avg): %.1f\n", avg_bf_iters);
-    fprintf(stderr, "Throughput:   %.4f Medges/sec\n", medges_per_sec);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     // -------------------------------------------------------------------
     // Verification (compare GPU result with CPU reference)

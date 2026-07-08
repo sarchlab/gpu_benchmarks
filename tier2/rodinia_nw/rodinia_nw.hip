@@ -14,41 +14,28 @@
 //   --block_size B       Block size (threads per block)          (default: 16)
 //   --penalty P          Gap penalty                             (default: 2)
 //
-// Output (stdout): CSV — kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-// Output (stderr): GCUPS and effective GB/s
+// Environment variables (override argv):
+//   BENCH_PARAM_sequence_length, BENCH_PARAM_block_size, BENCH_PARAM_penalty
+//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//
+// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// kernel (nw_kernel1, nw_kernel2) carrying that kernel's accumulated GPU
+// event time and host time within the pass (summed over the wavefront
+// diagonals), then a summary whose total_time_ms is the SUM of all recorded
+// GPU event times. GCUPS / GB/s are derived downstream from time_ms + params.
+// Output (stderr): device info, per-pass timing
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
-#include <cfloat>
-#include <vector>
 
 // ---------------------------------------------------------------------------
-// Inlined bench_common_hip.h utilities
+// Inlined utilities
 // ---------------------------------------------------------------------------
 
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
-
-struct BenchResult {
-    const char* kernel_name;
-    const char* problem_size;
-    int         iterations;
-    double      avg_ms;
-    double      min_ms;
-    double      max_ms;
-    double      stddev_ms;
-};
-
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -59,79 +46,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
         }
     }
     return defaultVal;
-}
-
-
-struct BenchmarkTimer {
-    hipEvent_t start, stop;
-    BenchmarkTimer() {
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-    ~BenchmarkTimer() {
-        (void)hipEventDestroy(start);
-        (void)hipEventDestroy(stop);
-    }
-    void record_start(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(start, stream));
-    }
-    void record_stop(hipStream_t stream = 0) {
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-    }
-    float elapsed_ms() const {
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        return ms;
-    }
-};
-
-template <typename Func>
-static BenchResult runBenchmark(const char* kernel_name,
-                                const char* problem_size,
-                                int         iterations,
-                                int         num_warmup,
-                                Func        func) {
-    BenchmarkTimer timer;
-
-    // Warmup
-    for (int w = 0; w < num_warmup; ++w) {
-        func();
-        HIP_CHECK(hipDeviceSynchronize());
-    }
-
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        timer.record_start();
-        func();
-        timer.record_stop();
-        times[i] = static_cast<double>(timer.elapsed_ms());
-    }
-
-    double sum = 0.0, mn = DBL_MAX, mx = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        sum += times[i];
-        if (times[i] < mn) mn = times[i];
-        if (times[i] > mx) mx = times[i];
-    }
-    double avg = sum / 1;
-
-    double variance = 0.0;
-    for (int i = 0; i < 1; ++i) {
-        double d = times[i] - avg;
-        variance += d * d;
-    }
-    double stddev = (1 > 1) ? sqrt(variance / (1 - 1)) : 0.0;
-
-    BenchResult r;
-    r.kernel_name  = kernel_name;
-    r.problem_size = problem_size;
-    r.iterations   = iterations;
-    r.avg_ms       = avg;
-    r.min_ms       = mn;
-    r.max_ms       = mx;
-    r.stddev_ms    = stddev;
-    return r;
 }
 
 // ---------------------------------------------------------------------------
@@ -336,7 +250,8 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_penalty");
     if (env_val) penalty = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     // Round sequence length up to a multiple of block_size
     int num_blocks = (seq_len + block_size - 1) / block_size;
@@ -385,82 +300,66 @@ int main(int argc, char** argv) {
     size_t shared_mem = (size_t)(block_size + 1) * (block_size + 1) * sizeof(int)
                       + (size_t)block_size * sizeof(int);
 
-    char problemSize[64];
-    snprintf(problemSize, sizeof(problemSize), "%d", seq_len);
-    (void)problemSize;
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"sequence_length\":%d,\"block_size\":%d,\"penalty\":%d",
+             seq_len, block_size, penalty);
 
-    // Per-kernel timing accumulators.
-    double t_kernel1 = 0.0, t_kernel2 = 0.0;
+    // Per-kernel accumulators: each pass fills the whole DP matrix; the
+    // accumulated GPU/host time of all wavefront diagonals within one pass
+    // becomes that pass's record for the kernel.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_k1, acc_k2;
 
-    // Runs the full kernel sequence once. When `timed`, Phase 1 and Phase 2 are
-    // each wrapped in their own event pair so each kernel reports its own time.
-    BenchmarkTimer timer;
-    auto run_nw = [&](bool timed) {
-        // Reset matrix borders for each run
+    // One full NW pass. The DP matrix (with its borders) is re-uploaded at
+    // the start of every pass (untimed): the kernels fill it in place, so
+    // this keeps every pass computing from identical initial state.
+    auto run_nw_pass = [&]() {
+        bench_lap_reset(&acc_k1);
+        bench_lap_reset(&acc_k2);
+
         HIP_CHECK(hipMemcpy(d_matrix, h_matrix,
                             matrix_elems * sizeof(int),
                             hipMemcpyHostToDevice));
 
         // Phase 1: upper-left triangle (nw_kernel1)
-        if (timed) timer.record_start();
         for (int diag = 0; diag < num_blocks; diag++) {
             int n_blocks = diag + 1;
-            nw_kernel1<<<dim3(n_blocks), dim3(block_size), shared_mem, 0>>>(
-                d_seq, d_matrix, cols, penalty, diag, block_size);
-        }
-        if (timed) {
-            timer.record_stop();
-            t_kernel1 += static_cast<double>(timer.elapsed_ms());
+            bench_lap_add(&acc_k1, bench_time_op(&timer, [&]() {
+                nw_kernel1<<<dim3(n_blocks), dim3(block_size), shared_mem, 0>>>(
+                    d_seq, d_matrix, cols, penalty, diag, block_size);
+            }));
         }
 
         // Phase 2: lower-right triangle (nw_kernel2)
-        if (timed) timer.record_start();
         for (int diag = 0; diag < num_blocks - 1; diag++) {
             int n_blocks = num_blocks - 1 - diag;
-            nw_kernel2<<<dim3(n_blocks), dim3(block_size), shared_mem, 0>>>(
-                d_seq, d_matrix, cols, penalty, diag, num_blocks, block_size);
+            bench_lap_add(&acc_k2, bench_time_op(&timer, [&]() {
+                nw_kernel2<<<dim3(n_blocks), dim3(block_size), shared_mem, 0>>>(
+                    d_seq, d_matrix, cols, penalty, diag, num_blocks, block_size);
+            }));
         }
-        if (timed) {
-            timer.record_stop();
-            t_kernel2 += static_cast<double>(timer.elapsed_ms());
-        }
-
-        HIP_CHECK(hipDeviceSynchronize());
     };
 
-    // Warmup — full kernel sequence, untimed
     for (int w = 0; w < num_warmup; ++w) {
-        run_nw(false);
+        run_nw_pass();
     }
 
-    // Timed run — each kernel measured separately
-    for (int i = 0; i < 1; ++i) {
-        run_nw(true);
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        run_nw_pass();
+        bench_emit_iter("nw_kernel1", i, &acc_k1, params);
+        bench_emit_iter("nw_kernel2", i, &acc_k2, params);
+        total_gpu_ms += acc_k1.gpu_ms + acc_k2.gpu_ms;
+        fprintf(stderr, "pass %d: nw_kernel1 gpu = %.3f ms, nw_kernel2 gpu = %.3f ms\n",
+                i, acc_k1.gpu_ms, acc_k2.gpu_ms);
     }
 
-    double total_ms = t_kernel1 + t_kernel2;
-
-    // Performance metrics
-    long cells     = (long)seq_len * seq_len;
-    double gcups   = (double)cells / (total_ms * 1e-3) / 1e9;
-    double eff_bw  = (double)cells * 4 * sizeof(int) / (total_ms * 1e-3) / 1e9;
-
-    // JSON-lines kernel events (one per kernel name in params.json)
-    printf("{\"type\":\"kernel\",\"name\":\"nw_kernel1\",\"time_ms\":%.6f,"
-           "\"params\":{\"sequence_length\":%d,\"block_size\":%d,\"penalty\":%d}}\n",
-           t_kernel1, seq_len, block_size, penalty);
-
-    printf("{\"type\":\"kernel\",\"name\":\"nw_kernel2\",\"time_ms\":%.6f,"
-           "\"params\":{\"sequence_length\":%d,\"block_size\":%d,\"penalty\":%d}}\n",
-           t_kernel2, seq_len, block_size, penalty);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"gcups\",\"value\":%.2f},{\"name\":\"effective_gbps\",\"value\":%.2f}]}\n",
-           total_ms, gcups, eff_bw);
-
-    fprintf(stderr, "GCUPS: %.2f  |  Effective GB/s: %.2f  (k1=%.4f k2=%.4f ms)\n",
-            gcups, eff_bw, t_kernel1, t_kernel2);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
+            total_gpu_ms, num_iters);
 
     HIP_CHECK(hipFree(d_seq));
     HIP_CHECK(hipFree(d_matrix));

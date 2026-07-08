@@ -6,31 +6,30 @@
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
-// Output (stdout): JSON-lines
+// Environment variables (override argv):
+//   BENCH_PARAM_num_boxes, BENCH_PARAM_block_size, BENCH_PARAM_particles_per_box
+//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
+//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
+//
+// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
+// carrying the GPU event time (time_ms) and host wall-clock time
+// (host_time_ms), then a summary whose total_time_ms is the SUM of all
+// iterations' GPU event times. GFLOPS is derived downstream from time_ms
+// and params.
 // Output (stderr): human-readable results
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
-#include <cfloat>
 #include <vector>
 
 // ---------------------------------------------------------------------------
 // Error-checking macro
 // ---------------------------------------------------------------------------
 
-#define HIP_CHECK(cmd)                                                         \
-    do {                                                                       \
-        hipError_t _e = (cmd);                                                 \
-        if (_e != hipSuccess) {                                                \
-            fprintf(stderr, "HIP error %s at %s:%d\n",                        \
-                    hipGetErrorString(_e), __FILE__, __LINE__);                \
-            exit(1);                                                           \
-        }                                                                      \
-    } while (0)
+#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -154,7 +153,8 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_particles_per_box");
     if (env_val) particles_per_box = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int nb = num_boxes;
     int total_boxes     = nb * nb * nb;
@@ -167,7 +167,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Boxes: %d×%d×%d (%d total)  |  Particles/box: %d  |  "
             "Iterations: %d warmup + %d timed\n\n",
-            nb, nb, nb, total_boxes, particles_per_box, num_warmup);
+            nb, nb, nb, total_boxes, particles_per_box, num_warmup, num_iters);
 
     size_t pos_bytes    = (size_t)total_particles * sizeof(float);
     size_t force_bytes  = (size_t)total_particles * sizeof(float);
@@ -237,63 +237,25 @@ int main(int argc, char** argv) {
     dim3 grid(total_boxes);
     dim3 block(block_size);
 
-    for (int w = 0; w < num_warmup; ++w) {
-        HIP_CHECK(hipMemset(d_force_x, 0, force_bytes));
-        HIP_CHECK(hipMemset(d_force_y, 0, force_bytes));
-        HIP_CHECK(hipMemset(d_force_z, 0, force_bytes));
-        HIP_CHECK(hipMemset(d_energy,  0, force_bytes));
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"num_boxes\":%d,\"block_size\":%d,\"particles_per_box\":%d",
+             num_boxes, block_size, particles_per_box);
 
-        lavamd_kernel<<<grid, block>>>(
-            d_pos_x, d_pos_y, d_pos_z, d_force_x, d_force_y, d_force_z, d_energy, d_neighbor_list, d_neighbor_count, particles_per_box, total_boxes);
-        HIP_CHECK(hipDeviceSynchronize());
-    }
+    // Warmup + timed iterations, each recorded individually. The kernel
+    // reads immutable position/neighbor arrays and fully OVERWRITES (does
+    // not accumulate into) the force/energy outputs every launch, so
+    // repeated launches perform identical work; the old per-iteration
+    // hipMemset of the outputs was unnecessary and is dropped.
+    double total_gpu_ms =
+        bench_run_loop("lavamd_kernel", num_warmup, num_iters, params, [&]() {
+            lavamd_kernel<<<grid, block>>>(
+                d_pos_x, d_pos_y, d_pos_z, d_force_x, d_force_y, d_force_z, d_energy, d_neighbor_list, d_neighbor_count, particles_per_box, total_boxes);
+        });
 
-    hipEvent_t evStart, evStop;
-    HIP_CHECK(hipEventCreate(&evStart));
-    HIP_CHECK(hipEventCreate(&evStop));
-
-    std::vector<double> times(1);
-    for (int i = 0; i < 1; ++i) {
-        HIP_CHECK(hipMemset(d_force_x, 0, force_bytes));
-        HIP_CHECK(hipMemset(d_force_y, 0, force_bytes));
-        HIP_CHECK(hipMemset(d_force_z, 0, force_bytes));
-        HIP_CHECK(hipMemset(d_energy,  0, force_bytes));
-
-        HIP_CHECK(hipEventRecord(evStart, 0));
-        lavamd_kernel<<<grid, block>>>(
-            d_pos_x, d_pos_y, d_pos_z, d_force_x, d_force_y, d_force_z, d_energy, d_neighbor_list, d_neighbor_count, particles_per_box, total_boxes);
-        HIP_CHECK(hipEventRecord(evStop, 0));
-        HIP_CHECK(hipEventSynchronize(evStop));
-
-        float ms = 0.0f;
-        HIP_CHECK(hipEventElapsedTime(&ms, evStart, evStop));
-        times[i] = (double)ms;
-    }
-
-    HIP_CHECK(hipEventDestroy(evStart));
-    HIP_CHECK(hipEventDestroy(evStop));
-
-    double sum = 0.0;
-    for (int i = 0; i < 1; ++i) sum += times[i];
-    double avg_ms = sum / 1;
-    double total_ms = sum;
-
-    double avg_neighbors = 0;
-    for (int i = 0; i < total_boxes; ++i) avg_neighbors += h_neighbor_count[i];
-    avg_neighbors /= total_boxes;
-    double flops = (double)total_particles * avg_neighbors * particles_per_box * 20.0;
-    double gflops = flops / (avg_ms * 1e-3) / 1e9;
-
-    fprintf(stderr, "Average time: %.4f ms  |  Throughput: %.2f GFLOPS\n", avg_ms, gflops);
-
-    printf("{\"type\":\"kernel\",\"name\":\"lavamd_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"num_boxes\":%d,\"block_size\":%d,"
-           "\"particles_per_box\":%d}}\n",
-           avg_ms, num_boxes, block_size, particles_per_box);
-
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
-           total_ms, gflops);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
+            total_gpu_ms, num_iters);
 
     HIP_CHECK(hipFree(d_pos_x));
     HIP_CHECK(hipFree(d_pos_y));

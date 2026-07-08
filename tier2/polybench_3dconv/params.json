@@ -2,7 +2,7 @@
   "benchmark": "polybench_3dconv",
   "tier": 2,
   "suite": "polybench",
-  "description": "3D convolution over an NxNxN volume with a small 3D filter. Each output voxel is the weighted sum of its neighborhood. Measures compute throughput in GFLOPS.",
+  "description": "3D convolution over an NxNxN volume with a small 3D filter. Each output voxel is the weighted sum of its neighborhood. Emits per-iteration kernel times; GFLOPS is derived downstream.",
   "scaling_param": {
     "name": "size",
     "description": "Volume dimension N (NxNxN grid)",

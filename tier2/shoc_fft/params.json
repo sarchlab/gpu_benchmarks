@@ -2,7 +2,7 @@
   "benchmark": "shoc_fft",
   "tier": 2,
   "suite": "shoc",
-  "description": "Cooley-Tukey radix-2 iterative FFT on N complex elements (float2). Measures throughput in GFLOPS.",
+  "description": "Cooley-Tukey radix-2 iterative FFT on N complex elements (float2). Emits per-pass, per-kernel GPU times; GFLOPS is derived downstream.",
   "scaling_param": {
     "name": "size",
     "description": "FFT size in complex elements (must be power of 2)",

@@ -38,29 +38,41 @@ make PLATFORM=metal
 ## Run
 
 ```bash
-./parboil_stencil                                          # defaults: 64×64×64, 10 timesteps, 5 iters
+./parboil_stencil                                          # defaults: 64×64×64, 10 timesteps
 ./parboil_stencil --grid_dim 128
-./parboil_stencil --grid_dim 64 --num_timesteps 20 --iterations 10
+./parboil_stencil --grid_dim 64 --num_timesteps 20
 ```
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BENCH_PARAM_grid_dim` | 64 | Grid dimension N (N×N×N) |
+| `BENCH_PARAM_num_timesteps` | 10 | Stencil time-steps per pass |
+| `BENCH_PARAM_block_size` | 256 | Threads per block (recorded in params) |
+| `BENCH_PARAM_num_warmup` | 3 | Warmup passes (untimed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded |
 
 ## Output
 
-**stdout** — CSV timing row followed by CSV summary:
+**stdout** — JSON lines: per timed pass, one `{"type":"kernel",...}` record carrying the stencil kernel's accumulated GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`) over the pass's `num_timesteps` launches, then a summary whose `total_time_ms` is the sum of all recorded GPU event times:
 ```
-kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-stencil3d,64x64x64,5,1.2345,1.2000,1.3000,0.0234
-parboil_stencil,64x64x64,3.4567
+{"type":"kernel","name":"stencil3d","iter":0,"time_ms":1.2345,"host_time_ms":1.3011,"params":{"grid_dim":64,...}}
+...
+{"type":"summary","total_time_ms":8.6415}
 ```
 
 **stderr** — human-readable results:
 ```
 Device: Apple M4 Pro
-Grid: 64×64×64  |  Timesteps/launch: 10  |  Iterations: 5
+Grid: 64×64×64  |  Timesteps/pass: 10  |  Passes: 3 warmup + 7 timed
 
-GFLOPS: 3.46  |  GB/s: 13.83  (avg 1.2345 ms, 10 timesteps/iter)
+pass 0: stencil3d gpu = 1.234 ms, host = 1.301 ms
+...
+Total GPU time: 8.642 ms over 7 passes (10 timesteps/pass)
 ```
 
-## Performance Metrics
+## Performance Metrics (derived downstream from time_ms and params)
 
 - **GFLOPS** = 8 × interior_cells × num_timesteps / time_s / 1e9
 - **GB/s** = 8 × sizeof(float) × interior_cells × num_timesteps / time_s / 1e9

@@ -19,13 +19,18 @@ The matrix is stored in-place:
 
 ## Verification
 
-After the warmup run the benchmark reconstructs **A = L·U** on the CPU and
+After the warmup passes the benchmark reconstructs **A = L·U** on the CPU and
 checks: `||A - LU||_F / ||A||_F < 1e-4`.
+
+The factorization is in place, so every pass (warmup and timed) re-uploads the
+pristine matrix before factoring; the re-upload is outside the timed brackets.
 
 ## Performance Metric
 
+Derived downstream from the emitted per-iteration times:
+
 ```
-GFLOPS = (2/3 · N³) / time_s / 1e9
+GFLOPS = (2/3 · N³) / time_s / 1e9   (derived downstream)
 ```
 
 ## Build
@@ -49,33 +54,43 @@ Requirements:
 ## Run
 
 ```bash
-./rodinia_lud                        # default: N=512, 3 iterations
+./rodinia_lud                        # default: N=512
 ./rodinia_lud --size 1024            # larger matrix
-./rodinia_lud --size 512 --iterations 5
 ```
 
 `N` must be divisible by the block size (16).
 
 ## Output
 
-Progress and verification are printed to **stderr**; the CSV result line goes
-to **stdout**:
+Progress and verification are printed to **stderr**. **stdout** carries JSON
+lines: per timed pass, one `kernel` record per kernel (`lud_diagonal`,
+`lud_perimeter`, `lud_internal`) with that kernel's accumulated GPU event time
+across all block steps in the pass, then a `summary` whose `total_time_ms` is
+the sum of all recorded GPU event times:
 
-```
-lud,<N>,<time_ms>,<GFLOPS>
+```json
+{"type":"kernel","name":"lud_diagonal","iter":0,"time_ms":0.512300,"host_time_ms":0.850000,"params":{"size":512,"block_size":256,"verify":"true"}}
+{"type":"kernel","name":"lud_perimeter","iter":0,"time_ms":3.123400,"host_time_ms":3.500000,"params":{"size":512,"block_size":256,"verify":"true"}}
+{"type":"kernel","name":"lud_internal","iter":0,"time_ms":8.710000,"host_time_ms":9.100000,"params":{"size":512,"block_size":256,"verify":"true"}}
+...
+{"type":"summary","total_time_ms":86.421000}
 ```
 
-Example:
-```
-lud,512,12.3456,9.15
-```
+Derived metrics (e.g. GFLOPS) are computed downstream from `time_ms` and params.
 
 ## Parameters
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--size N` | 512 | Matrix dimension (must be divisible by 16) |
-| `--iterations I` | 3 | Number of timed iterations (average is reported) |
+
+| Env var | Description | Default |
+|---------|-------------|---------|
+| `BENCH_PARAM_size` | Matrix dimension N | 512 |
+| `BENCH_PARAM_block_size` | Threads-per-block label echoed into records | 256 |
+| `BENCH_PARAM_verify` | Verification mode (true, false, skip) | true |
+| `BENCH_PARAM_num_warmup` | Warmup passes (untimed) | 3 |
+| `BENCH_PARAM_num_iters` | Timed passes, each recorded | 7 |
 
 ## Reference
 

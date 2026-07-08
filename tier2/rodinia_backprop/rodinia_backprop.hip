@@ -20,7 +20,15 @@
  * Usage:
  *   ./rodinia_backprop [--input N] [--hidden H] [--output O]
  *
- * Output (stdout): CSV — backprop,<input_n>,<hidden_n>,<time_ms>,<GFLOPS>
+ * Environment variables (override argv):
+ *   BENCH_PARAM_input, BENCH_PARAM_hidden, BENCH_PARAM_output
+ *   BENCH_PARAM_num_warmup   (warmup epochs, default 3)
+ *   BENCH_PARAM_num_iters    (timed epochs, each recorded, default 7)
+ *
+ * Output (stdout): per timed epoch, one {"type":"kernel",...} JSON line per
+ * kernel carrying that kernel's GPU event time and host time within the
+ * epoch, then a summary whose total_time_ms is the SUM of all recorded GPU
+ * event times. GFLOPS is derived downstream from time_ms and params.
  * Output (stderr): device info, timing details
  *
  * Build:
@@ -28,8 +36,12 @@
  *   make PLATFORM=rocm   # AMD
  */
 
+/* Shared timing harness. Under nvcc the hip* names used by the harness are
+ * rewritten to cuda* by hip_cuda_compat.h; the benchmark's own gpu* macro
+ * layer below stays for its non-timing calls. */
+#include "../../common/bench_timing.h"
+
 #ifdef __HIP__
-  #include <hip/hip_runtime.h>
   #define GPU_API hip
   #define gpuMalloc       hipMalloc
   #define gpuFree         hipFree
@@ -37,12 +49,6 @@
   #define gpuMemcpyHtoD   hipMemcpyHostToDevice
   #define gpuMemcpyDtoH   hipMemcpyDeviceToHost
   #define gpuDeviceSynchronize hipDeviceSynchronize
-  #define gpuEventCreate  hipEventCreate
-  #define gpuEventRecord  hipEventRecord
-  #define gpuEventSynchronize hipEventSynchronize
-  #define gpuEventElapsedTime hipEventElapsedTime
-  #define gpuEventDestroy hipEventDestroy
-  typedef hipEvent_t gpuEvent_t;
   #define gpuGetDeviceProperties hipGetDeviceProperties
   typedef hipDeviceProp_t gpuDeviceProp_t;
 #else
@@ -53,12 +59,6 @@
   #define gpuMemcpyHtoD   cudaMemcpyHostToDevice
   #define gpuMemcpyDtoH   cudaMemcpyDeviceToHost
   #define gpuDeviceSynchronize cudaDeviceSynchronize
-  #define gpuEventCreate  cudaEventCreate
-  #define gpuEventRecord  cudaEventRecord
-  #define gpuEventSynchronize cudaEventSynchronize
-  #define gpuEventElapsedTime cudaEventElapsedTime
-  #define gpuEventDestroy cudaEventDestroy
-  typedef cudaEvent_t gpuEvent_t;
   #define gpuGetDeviceProperties cudaGetDeviceProperties
   typedef cudaDeviceProp gpuDeviceProp_t;
 #endif
@@ -231,14 +231,15 @@ int main(int argc, char* argv[])
     if (env_val) hidden_n = atoi(env_val);
     env_val = getenv("BENCH_PARAM_output");
     if (env_val) output_n = atoi(env_val);
-    int num_warmup = 5;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     // Print device info
     gpuDeviceProp_t prop;
     gpuGetDeviceProperties(&prop, 0);
     fprintf(stderr, "Device: %s\n", prop.name);
-    fprintf(stderr, "Network: %d → %d → %d\n\n",
-            input_n, hidden_n, output_n);
+    fprintf(stderr, "Network: %d → %d → %d  |  Iterations: %d warmup + %d timed\n\n",
+            input_n, hidden_n, output_n, num_warmup, num_iters);
 
     // -----------------------------------------------------------------------
     // Host allocation and initialization
@@ -299,146 +300,87 @@ int main(int argc, char* argv[])
     dim3 grid2d((input_n  + 15) / 16,
                 (hidden_n + 15) / 16);
 
-    // Per-kernel timing events and accumulators
-    gpuEvent_t ev_start, ev_stop;
-    gpuEventCreate(&ev_start);
-    gpuEventCreate(&ev_stop);
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"input\":%d,\"hidden\":%d,\"output\":%d",
+             input_n, hidden_n, output_n);
 
-    double t_forward_hidden        = 0.0;
-    double t_forward_output        = 0.0;
-    double t_backward_output_delta = 0.0;
-    double t_backward_hidden_delta = 0.0;
-    double t_update_w1             = 0.0;
-    double t_update_w2             = 0.0;
+    // Per-kernel accumulators — each epoch launches every kernel once; each
+    // kernel's GPU/host time within the epoch becomes that epoch's record.
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t acc_fwd_hid, acc_fwd_out, acc_bwd_out, acc_bwd_hid,
+                acc_upd_w1, acc_upd_w2;
 
-    // Lambda: one forward + backward pass.
-    // When timed==true, each kernel launch is wrapped in its own event pair
-    // and its elapsed time is added to that kernel's accumulator.
-    auto run_epoch = [&](bool timed) {
-        float ms = 0.0f;
+    // One forward + backward epoch. The weight updates mutate w1/w2 across
+    // epochs, but every kernel runs fixed-trip-count loops with no
+    // data-dependent control flow, so only floating-point VALUES drift —
+    // the amount of work (and its timing) is value-independent. No reset.
+    auto run_epoch = [&]() {
+        bench_lap_reset(&acc_fwd_hid);
+        bench_lap_reset(&acc_fwd_out);
+        bench_lap_reset(&acc_bwd_out);
+        bench_lap_reset(&acc_bwd_hid);
+        bench_lap_reset(&acc_upd_w1);
+        bench_lap_reset(&acc_upd_w2);
 
         // --- Forward ---
-        if (timed) gpuEventRecord(ev_start, 0);
-        forward_hidden<<<grid_hid, BLOCK_SZ>>>(
-            d_input, d_w1, d_b1, d_hidden, input_n, hidden_n);
-        if (timed) {
-            gpuEventRecord(ev_stop, 0);
-            gpuEventSynchronize(ev_stop);
-            gpuEventElapsedTime(&ms, ev_start, ev_stop);
-            t_forward_hidden += ms;
-        }
-
-        if (timed) gpuEventRecord(ev_start, 0);
-        forward_output<<<grid_out, BLOCK_SZ>>>(
-            d_hidden, d_w2, d_b2, d_output, hidden_n, output_n);
-        if (timed) {
-            gpuEventRecord(ev_stop, 0);
-            gpuEventSynchronize(ev_stop);
-            gpuEventElapsedTime(&ms, ev_start, ev_stop);
-            t_forward_output += ms;
-        }
+        bench_lap_add(&acc_fwd_hid, bench_time_op(&timer, [&]() {
+            forward_hidden<<<grid_hid, BLOCK_SZ>>>(
+                d_input, d_w1, d_b1, d_hidden, input_n, hidden_n);
+        }));
+        bench_lap_add(&acc_fwd_out, bench_time_op(&timer, [&]() {
+            forward_output<<<grid_out, BLOCK_SZ>>>(
+                d_hidden, d_w2, d_b2, d_output, hidden_n, output_n);
+        }));
 
         // --- Backward ---
-        if (timed) gpuEventRecord(ev_start, 0);
-        backward_output_delta<<<grid_out, BLOCK_SZ>>>(
-            d_output, d_target, d_delta_out, output_n);
-        if (timed) {
-            gpuEventRecord(ev_stop, 0);
-            gpuEventSynchronize(ev_stop);
-            gpuEventElapsedTime(&ms, ev_start, ev_stop);
-            t_backward_output_delta += ms;
-        }
-
-        if (timed) gpuEventRecord(ev_start, 0);
-        backward_hidden_delta<<<grid_hid, BLOCK_SZ>>>(
-            d_hidden, d_w2, d_delta_out, d_delta_hid, hidden_n, output_n);
-        if (timed) {
-            gpuEventRecord(ev_stop, 0);
-            gpuEventSynchronize(ev_stop);
-            gpuEventElapsedTime(&ms, ev_start, ev_stop);
-            t_backward_hidden_delta += ms;
-        }
-
-        if (timed) gpuEventRecord(ev_start, 0);
-        update_w1<<<grid2d, block2d>>>(
-            d_w1, d_input, d_delta_hid, input_n, hidden_n, LR);
-        if (timed) {
-            gpuEventRecord(ev_stop, 0);
-            gpuEventSynchronize(ev_stop);
-            gpuEventElapsedTime(&ms, ev_start, ev_stop);
-            t_update_w1 += ms;
-        }
-
-        if (timed) gpuEventRecord(ev_start, 0);
-        update_w2<<<grid_hid, BLOCK_SZ>>>(
-            d_w2, d_hidden, d_delta_out, hidden_n, output_n, LR);
-        if (timed) {
-            gpuEventRecord(ev_stop, 0);
-            gpuEventSynchronize(ev_stop);
-            gpuEventElapsedTime(&ms, ev_start, ev_stop);
-            t_update_w2 += ms;
-        }
+        bench_lap_add(&acc_bwd_out, bench_time_op(&timer, [&]() {
+            backward_output_delta<<<grid_out, BLOCK_SZ>>>(
+                d_output, d_target, d_delta_out, output_n);
+        }));
+        bench_lap_add(&acc_bwd_hid, bench_time_op(&timer, [&]() {
+            backward_hidden_delta<<<grid_hid, BLOCK_SZ>>>(
+                d_hidden, d_w2, d_delta_out, d_delta_hid, hidden_n, output_n);
+        }));
+        bench_lap_add(&acc_upd_w1, bench_time_op(&timer, [&]() {
+            update_w1<<<grid2d, block2d>>>(
+                d_w1, d_input, d_delta_hid, input_n, hidden_n, LR);
+        }));
+        bench_lap_add(&acc_upd_w2, bench_time_op(&timer, [&]() {
+            update_w2<<<grid_hid, BLOCK_SZ>>>(
+                d_w2, d_hidden, d_delta_out, hidden_n, output_n, LR);
+        }));
     };
 
     // -----------------------------------------------------------------------
-    // Warmup (full kernel sequence, untimed)
+    // Warmup epochs (records not emitted), then timed epochs — one JSON
+    // record per kernel per epoch.
     // -----------------------------------------------------------------------
     for (int w = 0; w < num_warmup; ++w) {
-        run_epoch(false);
-        gpuDeviceSynchronize();
+        run_epoch();
     }
 
-    // -----------------------------------------------------------------------
-    // Timed iterations — each kernel timed separately into its accumulator
-    // -----------------------------------------------------------------------
-    for (int it = 0; it < 1; it++) {
-        run_epoch(true);
+    double total_gpu_ms = 0.0;
+    for (int it = 0; it < num_iters; it++) {
+        run_epoch();
+        bench_emit_iter("forward_hidden",        it, &acc_fwd_hid, params);
+        bench_emit_iter("forward_output",        it, &acc_fwd_out, params);
+        bench_emit_iter("backward_output_delta", it, &acc_bwd_out, params);
+        bench_emit_iter("backward_hidden_delta", it, &acc_bwd_hid, params);
+        bench_emit_iter("update_w1",             it, &acc_upd_w1, params);
+        bench_emit_iter("update_w2",             it, &acc_upd_w2, params);
+        double epoch_gpu_ms = acc_fwd_hid.gpu_ms + acc_fwd_out.gpu_ms +
+                              acc_bwd_out.gpu_ms + acc_bwd_hid.gpu_ms +
+                              acc_upd_w1.gpu_ms + acc_upd_w2.gpu_ms;
+        total_gpu_ms += epoch_gpu_ms;
+        fprintf(stderr, "epoch %d: gpu = %.3f ms\n", it, epoch_gpu_ms);
     }
 
-    gpuEventDestroy(ev_start);
-    gpuEventDestroy(ev_stop);
-
-    // -----------------------------------------------------------------------
-    // Statistics
-    // -----------------------------------------------------------------------
-    double sum_ms = t_forward_hidden + t_forward_output +
-                    t_backward_output_delta + t_backward_hidden_delta +
-                    t_update_w1 + t_update_w2;
-    double avg_ms = sum_ms;
-
-    // GFLOPS: approximate (forward ≈ 2*INPUT*HIDDEN + 2*HIDDEN*OUTPUT,
-    //                       backward ≈ same)
-    double flops = 4.0 * (double)input_n * hidden_n +
-                   4.0 * (double)hidden_n * output_n;
-    double gflops = flops / (avg_ms * 1e-3) / 1e9;
-
-    fprintf(stderr, "GFLOPS: %.2f  (total %.4f ms)\n",
-            gflops, avg_ms);
-
-    // JSON-lines kernel events (one per kernel in params.json)
-    printf("{\"type\":\"kernel\",\"name\":\"forward_hidden\",\"time_ms\":%.6f,"
-           "\"params\":{\"input\":%d,\"hidden\":%d,\"output\":%d}}\n",
-           t_forward_hidden, input_n, hidden_n, output_n);
-    printf("{\"type\":\"kernel\",\"name\":\"forward_output\",\"time_ms\":%.6f,"
-           "\"params\":{\"input\":%d,\"hidden\":%d,\"output\":%d}}\n",
-           t_forward_output, input_n, hidden_n, output_n);
-    printf("{\"type\":\"kernel\",\"name\":\"backward_output_delta\",\"time_ms\":%.6f,"
-           "\"params\":{\"input\":%d,\"hidden\":%d,\"output\":%d}}\n",
-           t_backward_output_delta, input_n, hidden_n, output_n);
-    printf("{\"type\":\"kernel\",\"name\":\"backward_hidden_delta\",\"time_ms\":%.6f,"
-           "\"params\":{\"input\":%d,\"hidden\":%d,\"output\":%d}}\n",
-           t_backward_hidden_delta, input_n, hidden_n, output_n);
-    printf("{\"type\":\"kernel\",\"name\":\"update_w1\",\"time_ms\":%.6f,"
-           "\"params\":{\"input\":%d,\"hidden\":%d,\"output\":%d}}\n",
-           t_update_w1, input_n, hidden_n, output_n);
-    printf("{\"type\":\"kernel\",\"name\":\"update_w2\",\"time_ms\":%.6f,"
-           "\"params\":{\"input\":%d,\"hidden\":%d,\"output\":%d}}\n",
-           t_update_w2, input_n, hidden_n, output_n);
-
-    // JSON-lines summary event
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"gflops\",\"value\":%.2f}]}\n",
-           sum_ms, gflops);
+    bench_timer_destroy(&timer);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms over %d epochs\n",
+            total_gpu_ms, num_iters);
 
     // -----------------------------------------------------------------------
     // Cleanup

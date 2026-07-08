@@ -2,7 +2,7 @@
   "benchmark": "rodinia_kmeans",
   "tier": 2,
   "suite": "rodinia",
-  "description": "K-means clustering: assigns N D-dimensional points to K clusters, iteratively updating centers until convergence. Measures throughput in Gpoints/s.",
+  "description": "K-means clustering: assigns N D-dimensional points to K clusters, iteratively updating centers until convergence. Throughput (points/s) is derived downstream from the emitted per-iteration times.",
   "scaling_param": {
     "name": "points",
     "description": "Number of data points to cluster",

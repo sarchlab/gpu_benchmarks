@@ -22,6 +22,20 @@ func openDatabase(dbPath string) *sql.DB {
 		os.Exit(ExitDB)
 	}
 
+	// Migrations for databases created before these columns existed.
+	// SQLite has no ADD COLUMN IF NOT EXISTS; a duplicate-column error
+	// just means the migration already ran.
+	for _, mig := range []string{
+		"ALTER TABLE kernel_results ADD COLUMN host_time_ms REAL",
+		"ALTER TABLE kernel_results ADD COLUMN iteration INTEGER",
+	} {
+		if _, err := db.Exec(mig); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column name") {
+			eprintf("Database error: %v\n", err)
+			os.Exit(ExitDB)
+		}
+	}
+
 	_, err = db.Exec("PRAGMA foreign_keys = ON")
 	if err != nil {
 		eprintf("Database error: %v\n", err)

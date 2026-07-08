@@ -1132,10 +1132,18 @@ func cmdRun(args runArgs) int {
 					}
 					runID, _ := res.LastInsertId()
 					for _, kr := range kernels {
+						var hostTime sql.NullFloat64
+						if kr.HostTimeMS != nil {
+							hostTime = sql.NullFloat64{Float64: *kr.HostTimeMS, Valid: true}
+						}
+						var iteration sql.NullInt64
+						if kr.Iteration != nil {
+							iteration = sql.NullInt64{Int64: int64(*kr.Iteration), Valid: true}
+						}
 						_, _ = db.Exec(
-							"INSERT INTO kernel_results (run_id,kernel_name,time_ms,ordinal) "+
-								"VALUES (?,?,?,?)",
-							runID, kr.Name, kr.TimeMS, kr.Ordinal,
+							"INSERT INTO kernel_results (run_id,kernel_name,time_ms,ordinal,"+
+								"host_time_ms,iteration) VALUES (?,?,?,?,?,?)",
+							runID, kr.Name, kr.TimeMS, kr.Ordinal, hostTime, iteration,
 						)
 					}
 					if summary != nil {

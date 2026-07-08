@@ -51,7 +51,9 @@ CREATE TABLE IF NOT EXISTS kernel_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
     kernel_name TEXT NOT NULL, time_ms REAL NOT NULL,
-    ordinal INTEGER NOT NULL DEFAULT 0
+    ordinal INTEGER NOT NULL DEFAULT 0,
+    host_time_ms REAL,
+    iteration INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_kernel_run ON kernel_results(run_id);
 CREATE INDEX IF NOT EXISTS idx_kernel_name ON kernel_results(kernel_name);

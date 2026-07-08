@@ -2,7 +2,7 @@
   "benchmark": "shared_mem_bandwidth",
   "tier": 1,
   "suite": "microbench",
-  "description": "Measures GPU shared memory (LDS/SMEM) bandwidth with two access patterns: no-conflict (stride-1, zero bank conflicts) and conflict (all warp lanes access the same bank, 32-way bank conflict). Reports bandwidth in GB/s.",
+  "description": "Measures GPU shared memory (LDS/SMEM) bandwidth with two access patterns: no-conflict (stride-1, zero bank conflicts) and conflict (all warp lanes access the same bank, 32-way bank conflict). Emits per-iteration GPU event time and host time records (total = sum of kernel times); bandwidth in GB/s is derived downstream.",
   "scaling_param": {
     "name": "inner_iters",
     "description": "Number of inner-loop iterations per kernel launch; controls total shared memory traffic",

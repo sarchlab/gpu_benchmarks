@@ -6,8 +6,9 @@
 executing a tight chain of shuffle operations on every GPU thread.
 
 Each thread performs `ops_per_thread` shuffle operations in a dependency
-chain (each shuffle uses the result of the previous one), and the achieved
-throughput is expressed as effective data movement rate:
+chain (each shuffle uses the result of the previous one). The binary emits
+raw per-iteration kernel times; the effective data movement rate is derived
+downstream from each record's `time_ms` and params:
 
 ```
 GB/s = (num_threads × ops_per_thread × sizeof(int)) / elapsed_seconds / 1e9
@@ -90,49 +91,44 @@ make clean
 
 ## Output Format
 
-### Human-readable (stderr)
+Human-readable progress goes to stderr; stdout carries JSON lines — one
+record per timed iteration of each selected variant, plus a final summary:
 
 ```
-Device          : Apple M2 (id=0)
-Grid            : 1024 blocks × 256 threads = 262144 total threads
-SIMD width      : 32
-Ops / thread    : 4096
-Warmup iters    : 5
-Timed iters     : 5
-
-shfl_xor     : 12.345 ms total, 2.469 ms/kernel, 428.12 GB/s
-shfl         : 12.567 ms total, 2.513 ms/kernel, 420.34 GB/s
-shfl_up      : 12.890 ms total, 2.578 ms/kernel, 409.78 GB/s
-shfl_down    : 12.456 ms total, 2.491 ms/kernel, 424.01 GB/s
-
-Done.
+{"type":"kernel","name":"shfl_xor_kernel","iter":0,"time_ms":2.469123,"host_time_ms":2.561234,"params":{"ops_per_thread":4096,"num_blocks":1024,"threads_per_block":256}}
+...
+{"type":"kernel","name":"shfl_kernel","iter":0,"time_ms":2.513456,"host_time_ms":2.601234,"params":{...}}
+...
+{"type":"kernel","name":"shfl_up_kernel","iter":0,"time_ms":2.578901,"host_time_ms":2.671234,"params":{...}}
+...
+{"type":"kernel","name":"shfl_down_kernel","iter":0,"time_ms":2.491234,"host_time_ms":2.581234,"params":{...}}
+...
+{"type":"summary","total_time_ms":70.512345}
 ```
 
-### CSV (stdout)
-
-```
-warp_shuffle,shfl_xor,2.469,428.12
-warp_shuffle,shfl,2.513,420.34
-warp_shuffle,shfl_up,2.578,409.78
-warp_shuffle,shfl_down,2.491,424.01
-```
-
-Format: `warp_shuffle,<variant>,<time_ms>,<GBs>`
+- Each variant emits one record per timed iteration — no averaging.
+- `time_ms` is the GPU event time for that launch; `host_time_ms` is the
+  host wall-clock around launch + sync.
+- `total_time_ms` is the sum of all emitted iterations' GPU event times
+  across every variant that ran.
+- GB/s is not printed; it is derived downstream from `time_ms` and params.
 
 ## Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `ops_per_thread` (argv[1]) | 4096 | Shuffle iterations per thread |
-| `THREADS_PER_BLOCK` (compile-time) | 256 | Threads per block / threadgroup |
-| `NUM_BLOCKS` (compile-time) | 1024 | Number of blocks in the dispatch grid |
-| `NUM_WARMUP` (compile-time) | 5 | Warm-up iterations (not timed) |
-| `NUM_ITERATIONS` (compile-time) | 5 | Timed kernel repetitions |
+| `BENCH_PARAM_ops_per_thread` (or argv[1]) | 4096 | Shuffle iterations per thread |
+| `BENCH_PARAM_threads_per_block` | 256 | Threads per block / threadgroup |
+| `BENCH_PARAM_num_blocks` | 1024 | Number of blocks in the dispatch grid |
+| `BENCH_PARAM_shuffle_variant` | all | Variant(s) to run (`shfl_xor`, `shfl`, `shfl_up`, `shfl_down`, `all`) |
+| `BENCH_PARAM_num_warmup` | 3 | Warm-up launches per variant (not timed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed launches per variant, each recorded individually |
 
 ## Notes
 
-- Results are in GB/s (effective data moved through shuffle network).
-- 5 warm-up kernel launches are performed before timing to exclude driver and
+- GB/s (effective data moved through the shuffle network) is derived
+  downstream from the recorded times; the binary itself only emits raw times.
+- Warm-up kernel launches are performed before timing to exclude driver and
   JIT compilation overhead.
 - **CUDA/HIP**: HIP events (`hipEvent_t`) are used for high-resolution
   GPU-side timing. HIP shuffle intrinsics (`__shfl_xor`, etc.) do not require

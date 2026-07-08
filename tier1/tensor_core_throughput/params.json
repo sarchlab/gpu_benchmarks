@@ -2,7 +2,7 @@
   "benchmark": "tensor_core_throughput",
   "tier": 1,
   "suite": "microbench",
-  "description": "Measures Tensor Core throughput (TOPS) using WMMA 16x16x16 tiles for a tiled GEMM (D = A * B + C). Tests FP16 via rocWMMA/nvcuda::wmma, and TF32 on NVIDIA Ampere+ (sm_80+). Reports TOPS.",
+  "description": "Measures Tensor Core throughput (TOPS) using WMMA 16x16x16 tiles for a tiled GEMM (D = A * B + C). Tests FP16 via rocWMMA/nvcuda::wmma, and TF32 on NVIDIA Ampere+ (sm_80+). Emits per-iteration GPU event time and host time records (total = sum of kernel times); TOPS is derived downstream.",
   "scaling_param": {
     "name": "matrix_dim",
     "description": "Square matrix dimension M=N=K; must be a multiple of 16 (WMMA tile size)",

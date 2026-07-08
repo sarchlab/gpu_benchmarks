@@ -9,7 +9,7 @@ between the host (CPU) and the GPU.  Three tests are run in sequence:
 |------|-------------|
 | **H2D (unidirectional)** | Pinned host memory → GPU global memory |
 | **D2H (unidirectional)** | GPU global memory → pinned host memory |
-| **Bidirectional** | Concurrent H2D and D2H; reports aggregate GB/s |
+| **Bidirectional** | Concurrent H2D and D2H; measures aggregate throughput |
 
 Pinned (page-locked) host memory is used for H2D and D2H tests to eliminate
 paging overhead and obtain the best possible transfer throughput.
@@ -86,47 +86,42 @@ make clean
 
 ## Example Output
 
-### CUDA / HIP
+Progress and device info go to stderr; stdout carries JSON lines — one record
+per timed iteration of each selected test, plus a final summary:
 
 ```
-Device          : NVIDIA A100-SXM4-80GB (id=0)
-Transfer size   : 256 MiB (268435456 bytes)
-Iterations/test : 20
-
-H2D (unidirectional)          :    25.41 GB/s
-D2H (unidirectional)          :    26.08 GB/s
-Bidirectional (H2D + D2H)     :    49.73 GB/s  (aggregate)
-
-Done.
+{"type":"kernel","name":"memcpy_h2d","iter":0,"time_ms":10.482133,"host_time_ms":10.598210,"params":{"buffer_size_mb":256,"transfer_type":"all","use_pinned_memory":"true"}}
+...
+{"type":"kernel","name":"memcpy_d2h","iter":0,"time_ms":10.213450,"host_time_ms":10.330122,"params":{...}}
+...
+{"type":"kernel","name":"memcpy_bidir","iter":0,"time_ms":10.791022,"host_time_ms":10.902311,"params":{...}}
+...
+{"type":"summary","total_time_ms":221.412045}
 ```
 
-### Metal (Apple M3)
-
-```
-Device          : Apple M3 Max
-Transfer size   : 256 MiB (268435456 bytes)
-Iterations/test : 20
-Note            : Apple Silicon uses unified memory; H2D/D2H
-                  measures shared↔private memory fabric copy overhead.
-
-H2D (unidirectional)          :    58.34 GB/s
-D2H (unidirectional)          :    61.92 GB/s
-Bidirectional (H2D + D2H)     :   112.45 GB/s  (aggregate)
-
-Done.
-```
+- Each test (`memcpy_h2d`, `memcpy_d2h`, `memcpy_bidir`) emits one record per
+  timed iteration — no averaging.
+- `time_ms` is the GPU event time for that transfer; `host_time_ms` is the
+  host wall-clock around it.
+- `total_time_ms` is the sum of all emitted iterations' GPU event times.
+- GB/s is not printed; it is derived downstream from `time_ms` and
+  `buffer_size_mb` (bidirectional moves 2 × buffer bytes per iteration).
 
 ## Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `buffer_size_mb` (argv[1]) | 256 | Transfer buffer size in MiB per direction |
-| `NUM_ITERATIONS` (compile-time) | 20 | Repetitions averaged per test |
+| `BENCH_PARAM_buffer_size_mb` (or argv[1]) | 256 | Transfer buffer size in MiB per direction |
+| `BENCH_PARAM_transfer_type` | all | Test(s) to run (`h2d`, `d2h`, `bidir`, `all`) |
+| `BENCH_PARAM_use_pinned_memory` | true | Use pinned (page-locked) host memory |
+| `BENCH_PARAM_num_warmup` | 3 | Warm-up transfers per test (not timed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed transfers per test, each recorded individually |
 
 ## Notes
 
-- All bandwidth values are in SI GB/s (1 GB = 10⁹ bytes).
-- A single warm-up transfer is performed before each timed loop to exclude
+- Bandwidth in SI GB/s (1 GB = 10⁹ bytes) is derived downstream from the
+  recorded times.
+- Warm-up transfers are performed before each timed loop to exclude
   one-time link-training and TLB-mapping costs.
 - **CUDA**: CUDA events provide GPU-side timing with microsecond resolution.
   Pinned host memory is allocated with `cudaMallocHost()`.

@@ -88,83 +88,33 @@ make clean
 
 ## Example Output
 
-### CUDA / HIP
+Each invocation runs a single `flops_per_byte` ratio. Progress and device
+info go to stderr; stdout carries JSON lines — one record per timed
+iteration plus a final summary:
 
 ```
-Device          : NVIDIA A100-SXM4-80GB (id=0)
-Array size      : 256 MiB (67108864 elements, 268435456 bytes)
-Warmup iters    : 5
-Timed iters     : 5
-Ratios          : 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0
-
-FLOP/byte          Time (ms)      GFLOPS
---------           --------      --------
-0.5                   0.183       146.50
-1.0                   0.185       290.10
-2.0                   0.210       512.30
-4.0                   0.380       565.20
-8.0                   0.740       580.40
-16.0                  1.460       587.10
-32.0                  2.900       590.80
-64.0                  5.780       592.60
-mixbench,0.5,0.183,146.50
-mixbench,1.0,0.185,290.10
-mixbench,2.0,0.210,512.30
-mixbench,4.0,0.380,565.20
-mixbench,8.0,0.740,580.40
-mixbench,16.0,1.460,587.10
-mixbench,32.0,2.900,590.80
-mixbench,64.0,5.780,592.60
-
-Done.
+{"type":"kernel","name":"mixbench_kernel","iter":0,"time_ms":0.380124,"host_time_ms":0.462201,"params":{"buffer_size_mb":256,"flops_per_byte":4.0,"threads_per_block":256}}
+...
+{"type":"summary","total_time_ms":2.660831}
 ```
 
-### Metal (Apple M3)
-
-```
-Device          : Apple M3 Max
-Array size      : 256 MiB (67108864 elements, 268435456 bytes)
-Warmup iters    : 5
-Timed iters     : 5
-Ratios          : 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0
-
-FLOP/byte          Time (ms)      GFLOPS
---------           --------      --------
-0.5                   0.350        76.50
-1.0                   0.360       148.70
-2.0                   0.420       255.20
-4.0                   0.710       301.30
-8.0                   1.350       317.20
-16.0                  2.680       319.50
-32.0                  5.340       320.70
-64.0                 10.650       321.40
-mixbench,0.5,0.350,76.50
-mixbench,1.0,0.360,148.70
-mixbench,2.0,0.420,255.20
-mixbench,4.0,0.710,301.30
-mixbench,8.0,1.350,317.20
-mixbench,16.0,2.680,319.50
-mixbench,32.0,5.340,320.70
-mixbench,64.0,10.650,321.40
-
-Done.
-```
+- Every timed iteration is emitted individually — no averaging.
+- `time_ms` is the GPU event time for that single kernel launch;
+  `host_time_ms` is the host wall-clock around launch + sync.
+- `total_time_ms` is the sum of all iterations' GPU event times.
+- GFLOPS is not printed; it is derived downstream from `time_ms` and the
+  params in each record. The roofline curve is traced by sweeping
+  `flops_per_byte` across invocations.
 
 ## Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `buffer_size_mb` (argv[1]) | 256 | Array size in MiB |
-| `WARMUP_ITERATIONS` (compile-time) | 5 | Warmup runs per ratio |
-| `TIMED_ITERATIONS` (compile-time) | 5 | Timed runs averaged per ratio |
-
-## CSV Output Format
-
-One CSV line per ratio (to stdout, interspersed with human-readable output):
-
-```
-mixbench,<flops_per_byte>,<time_ms>,<achieved_gflops>
-```
+| `BENCH_PARAM_buffer_size_mb` (or argv[1]) | 256 | Array size in MiB |
+| `BENCH_PARAM_flops_per_byte` | 4.0 | Target FLOP/byte ratio for this invocation |
+| `BENCH_PARAM_threads_per_block` | 256 | Threads per block |
+| `BENCH_PARAM_num_warmup` | 3 | Warmup runs (not timed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed runs, each recorded individually |
 
 ## Operational Intensity Calculation
 

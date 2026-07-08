@@ -51,11 +51,14 @@ pattern that hardware stream-prefetchers could exploit.
 | ROCm/HIP | `hipEvent_t`  — GPU-side hardware timer |
 | Metal    | `mach_absolute_time()` — wall-clock timer on Apple Silicon |
 
-`NUM_ITERS` consecutive kernel launches are timed after one warm-up launch.
-The reported latency is:
+`BENCH_PARAM_num_iters` (default 7) consecutive kernel launches are timed
+after `BENCH_PARAM_num_warmup` (default 3) untimed warm-up launches (the cold
+fill lap is discarded). Every timed launch is emitted as its own record — no
+averaging or min-keeping. Latency is not printed by the binary; it is derived
+downstream from each record's `time_ms` and `num_accesses` params:
 
 ```
-latency_ns = total_elapsed_ns / (num_accesses × num_iters)
+latency_ns = time_ms × 1e6 / num_accesses
 ```
 
 ### Cache Level Targeting
@@ -101,54 +104,31 @@ make clean
 ./cache_latency
 ```
 
+Parameters are set via `BENCH_PARAM_*` environment variables (e.g.
+`BENCH_PARAM_array_bytes`, `BENCH_PARAM_cacheline_bytes`,
+`BENCH_PARAM_measure_laps`, `BENCH_PARAM_rng_seed`), plus the harness
+controls `BENCH_PARAM_num_warmup` (untimed warm-up launches, default 3) and
+`BENCH_PARAM_num_iters` (timed launches, each recorded, default 7).
+
 For the Metal build, `cache_latency.metal` must be in the same directory as
 the `cache_latency` binary (the host code loads it at runtime).
 
 ## Example Output
 
-### CUDA / ROCm
+Progress and device info go to stderr; stdout carries JSON lines — one record
+per timed iteration plus a final summary:
 
 ```
-=== cache_latency microbenchmark ===
-Device : NVIDIA A100-SXM4-40GB (id=0)
-Method : single-thread pointer chasing (random permutation)
-Each test: one warm-up + 5 timed kernel launch(es)
-
-Running tests...
-  [L1 cache  ] array = 16 KB, accesses = 10000000, iters = 5
-  [L2 cache  ] array = 2048 KB, accesses = 2000000, iters = 5
-  [Global mem] array = 65536 KB, accesses = 300000, iters = 5
-
-Cache level     Array size    Latency
-──────────      ──────────    ──────────
-L1 cache          16 KB        28.14 ns
-L2 cache        2048 KB       126.83 ns
-Global mem     65536 KB       482.37 ns
-
-Done.
+{"type":"kernel","name":"pointer_chase_kernel","iter":0,"time_ms":12.483200,"host_time_ms":12.561004,"params":{"array_bytes":16384,"num_accesses":1024,"warmup_accesses":256,"measure_laps":4,"cacheline_bytes":64,"rng_seed":42}}
+...
+{"type":"summary","total_time_ms":87.512300}
 ```
 
-### Metal (Apple Silicon)
-
-```
-=== cache_latency microbenchmark ===
-Device : Apple M3 Pro
-Method : single-thread pointer chasing (random permutation)
-Each test: one warm-up + 5 timed kernel launch(es)
-
-Running tests...
-  [L1 cache  ] array = 16 KB, accesses = 10000000, iters = 5
-  [L2 cache  ] array = 2048 KB, accesses = 2000000, iters = 5
-  [Global mem] array = 65536 KB, accesses = 300000, iters = 5
-
-Cache level     Array size    Latency
-──────────      ──────────    ──────────
-L1 cache          16 KB        XX.XX ns
-L2 cache        2048 KB       XXX.XX ns
-Global mem     65536 KB       XXX.XX ns
-
-Done.
-```
+- `time_ms` is the GPU event time for that launch; `host_time_ms` is the host
+  wall-clock around launch + sync.
+- `total_time_ms` is the sum of all iterations' GPU event times.
+- No latency figure is printed; ns/access is derived downstream from
+  `time_ms` and `num_accesses`.
 
 *(Actual values depend on GPU model, clock frequency, and cache configuration.)*
 

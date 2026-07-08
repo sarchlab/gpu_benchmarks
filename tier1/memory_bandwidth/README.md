@@ -77,45 +77,42 @@ make clean
 
 ## Example Output
 
-### CUDA / HIP
+Progress and device info go to stderr; stdout carries JSON lines — one record
+per timed iteration of each selected direction, plus a final summary:
 
 ```
-Device: NVIDIA A100-SXM4-80GB (id=0)
-Transfer size: 256 MiB (268435456 bytes)
-Iterations per test: 20
-
-H2D bandwidth :    25.34 GB/s
-D2H bandwidth :    26.11 GB/s
-D2D bandwidth :   871.52 GB/s
-
-Done.
+{"type":"kernel","name":"memcpy_h2d","iter":0,"time_ms":10.482133,"host_time_ms":10.598210,"params":{"buffer_size_mb":256,"transfer_type":"all","use_pinned_memory":"true"}}
+...
+{"type":"kernel","name":"memcpy_d2h","iter":0,"time_ms":10.213450,"host_time_ms":10.330122,"params":{...}}
+...
+{"type":"kernel","name":"memcpy_d2d","iter":0,"time_ms":0.612340,"host_time_ms":0.701234,"params":{...}}
+...
+{"type":"summary","total_time_ms":149.312045}
 ```
 
-### Metal (Apple M3)
-
-```
-Device: Apple M3 Max
-Transfer size: 256 MiB (268435456 bytes)
-Iterations per test: 20
-
-H2D bandwidth :    58.12 GB/s
-D2H bandwidth :    62.44 GB/s
-D2D bandwidth :   391.87 GB/s
-
-Done.
-```
+- Each direction (`memcpy_h2d`, `memcpy_d2h`, `memcpy_d2d`) emits one record
+  per timed iteration — no averaging.
+- `time_ms` is the GPU event time for that single transfer; `host_time_ms` is
+  the host wall-clock around it.
+- `total_time_ms` is the sum of all emitted iterations' GPU event times.
+- Bandwidth (GB/s) is not printed; it is derived downstream from `time_ms`
+  and `buffer_size_mb`.
 
 ## Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `buffer_size_mb` (argv[1]) | 256 | Transfer buffer size in MiB |
-| `NUM_ITERATIONS` (compile-time) | 20 | Repetitions averaged per test |
+| `BENCH_PARAM_buffer_size_mb` (or argv[1]) | 256 | Transfer buffer size in MiB |
+| `BENCH_PARAM_transfer_type` | all | Direction(s) to run (`h2d`, `d2h`, `d2d`, `all`) |
+| `BENCH_PARAM_use_pinned_memory` | true | Use pinned (page-locked) host memory |
+| `BENCH_PARAM_num_warmup` | 3 | Warm-up transfers per direction (not timed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed transfers per direction, each recorded individually |
 
 ## Notes
 
-- Results are in SI gigabytes per second (1 GB = 10⁹ bytes).
-- A warm-up transfer is performed before timing to exclude one-time setup costs.
+- Bandwidth in SI gigabytes per second (1 GB = 10⁹ bytes) is derived
+  downstream from the recorded times.
+- Warm-up transfers are performed before timing to exclude one-time setup costs.
 - **CUDA/HIP**: CUDA/HIP events are used for high-resolution GPU-side timing.
 - **Metal**: `mach_absolute_time()` wall-clock timing is used; command buffers
   are serialized (`waitUntilCompleted`) for accurate measurement.

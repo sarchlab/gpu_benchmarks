@@ -42,6 +42,9 @@ latency and achieve full issue-rate throughput.
 | FLOPs per packed FMA call | **4** |
 | GFLOPS formula | `(threads × fmas_per_thread × 4) / elapsed_s / 1e9` |
 
+The binary does not print GFLOPS; it is derived downstream from each
+recorded iteration's `time_ms` and params using the formula above.
+
 ---
 
 ## Build
@@ -76,37 +79,32 @@ make clean
 |---|---|---|
 | `fmas_per_thread` | `4096` | Number of packed FMA iterations per thread. Increase on very fast GPUs so the kernel runs for at least ~5 ms. |
 
+Parameters can also be set via environment variables
+(`BENCH_PARAM_fmas_per_thread`, `BENCH_PARAM_num_blocks`,
+`BENCH_PARAM_threads_per_block`), plus the measurement-harness controls:
+
+| Env var | Default | Description |
+|---|---|---|
+| `BENCH_PARAM_num_warmup` | `3` | Warm-up kernel launches (not timed) |
+| `BENCH_PARAM_num_iters` | `7` | Timed kernel launches, each recorded individually |
+
 ---
 
-## Example output (CUDA / HIP)
+## Example output
+
+Progress and device info go to stderr; stdout carries JSON lines — one record
+per timed iteration plus a final summary:
 
 ```
-Device          : NVIDIA A100-SXM4-80GB (id=0)
-Grid            : 1024 blocks × 256 threads = 262144 total threads
-FMAs / thread   : 4096  (__hfma2, 4 FLOPs each)
-Kernel repeats  : 10
-
-Elapsed time    : 28.107 ms (2.811 ms / kernel)
-Total FLOPs     : 42949672960
-FP16 Throughput : 1527.74 GFLOPS
-
-Done.
+{"type":"kernel","name":"fp16_fma_kernel","iter":0,"time_ms":2.811214,"host_time_ms":2.902341,"params":{"fmas_per_thread":4096,"num_blocks":1,"threads_per_block":256}}
+...
+{"type":"summary","total_time_ms":19.678498}
 ```
 
-## Example output (Metal)
-
-```
-Device          : Apple M3 Pro
-Grid            : 1024 blocks × 256 threads = 262144 total threads
-FMAs / thread   : 4096  (fma(half2,...), 4 FLOPs each)
-Kernel repeats  : 10
-
-Elapsed time    : 12.543 ms (1.254 ms / kernel)
-Total FLOPs     : 42949672960
-FP16 Throughput : 3424.89 GFLOPS
-
-Done.
-```
+Every timed iteration is emitted individually (no averaging); `time_ms` is
+the GPU event time, `host_time_ms` the host wall-clock around launch + sync,
+and `total_time_ms` is the sum of all iterations' GPU event times. No GFLOPS
+figure is printed — it is derived downstream.
 
 > **Note:** The Metal binary must be run from the directory containing
 > `fp16_throughput.metal`, or the `.metal` file must reside next to the

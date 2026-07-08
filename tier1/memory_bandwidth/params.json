@@ -2,7 +2,7 @@
   "benchmark": "memory_bandwidth",
   "tier": 1,
   "suite": "microbench",
-  "description": "Measures GPU memory bandwidth in three directions: Host-to-Device (H2D), Device-to-Host (D2H), and Device-to-Device (D2D) using hipMemcpy with pinned host memory. Reports bandwidth in GB/s.",
+  "description": "Measures GPU memory bandwidth in three directions: Host-to-Device (H2D), Device-to-Host (D2H), and Device-to-Device (D2D) using hipMemcpy with pinned host memory. Emits per-iteration GPU event time and host time records (total = sum of transfer times); bandwidth in GB/s is derived downstream.",
   "scaling_param": {
     "name": "buffer_size_mb",
     "description": "Transfer buffer size in MiB; controls the total data volume per transfer",

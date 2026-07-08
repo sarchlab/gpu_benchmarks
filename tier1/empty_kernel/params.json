@@ -2,7 +2,7 @@
   "benchmark": "empty_kernel",
   "tier": 1,
   "suite": "microbench",
-  "description": "Measures the time to launch a single empty kernel (no work), so the time is pure dispatch / grid-scheduling / completion cost. Sweeping num_blocks shows how overhead grows with grid size; block_size is swept as a non-scaling parameter. Reports launch_sync_us (host wall-clock launch+synchronize round trip per launch) and gpu_event_us (GPU event time bracketing each launch), both averaged over a fixed number of iterations.",
+  "description": "Measures the time to launch a single empty kernel (no work), so the time is pure dispatch / grid-scheduling / completion cost. Sweeping num_blocks shows how overhead grows with grid size; block_size is swept as a non-scaling parameter. Emits one record per timed launch with the GPU event time (time_ms) and the host wall-clock launch+synchronize time (host_time_ms) — no averaging; the summary total is the sum of the per-launch GPU event times.",
   "scaling_param": {
     "name": "num_blocks",
     "description": "Number of thread blocks in the (empty) grid; primary axis for launch/scheduling overhead",

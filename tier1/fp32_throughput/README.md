@@ -10,6 +10,9 @@ Because each FMA counts as **2 floating-point operations** (1 multiply + 1
 add), and all values live in registers (no memory traffic), the result directly
 reflects the arithmetic throughput of the GPU rather than memory bandwidth.
 
+The binary emits raw per-iteration kernel times; GFLOPS is derived downstream
+from each record's `time_ms` and params:
+
 ```
 GFLOPS = (num_threads × fmas_per_thread × 2) / elapsed_seconds / 1e9
 ```
@@ -80,51 +83,37 @@ make clean
 
 ## Example Output
 
-### CUDA / HIP
+Progress and device info go to stderr; stdout carries JSON lines — one record
+per timed iteration plus a final summary:
 
 ```
-Device          : NVIDIA RTX 4090 (id=0)
-SMs             : 128
-Grid            : 1024 blocks × 256 threads = 262144 total threads
-FMAs / thread   : 4096
-Kernel repeats  : 10
-
-Elapsed time    : 5.241 ms (0.524 ms / kernel)
-Total FLOPs     : 21474836480
-FP32 Throughput : 4097.82 GFLOPS
-
-Done.
+{"type":"kernel","name":"fp32_fma_kernel","iter":0,"time_ms":0.524128,"host_time_ms":0.601342,"params":{"fmas_per_thread":4096,"num_blocks":1,"threads_per_block":256}}
+...
+{"type":"summary","total_time_ms":3.668901}
 ```
 
-### Metal (Apple M3)
-
-```
-Device          : Apple M3 Max
-Grid            : 1024 blocks × 256 threads = 262144 total threads
-FMAs / thread   : 4096
-Kernel repeats  : 10
-
-Elapsed time    : 8.613 ms (0.861 ms / kernel)
-Total FLOPs     : 21474836480
-FP32 Throughput : 2493.11 GFLOPS
-
-Done.
-```
+- `time_ms` is the GPU event time for that single kernel launch;
+  `host_time_ms` is the host wall-clock around launch + sync.
+- Every timed iteration is emitted individually — no averaging.
+- `total_time_ms` is the sum of all iterations' GPU event times.
+- GFLOPS is not printed; it is derived downstream from `time_ms` and params.
 
 ## Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `fmas_per_thread` (argv[1]) | 4096 | FMA iterations per thread (rounded to nearest multiple of 4) |
-| `THREADS_PER_BLOCK` (compile-time) | 256 | Threads per block / threadgroup |
-| `NUM_BLOCKS` (compile-time) | 1024 | Number of blocks in the dispatch grid |
-| `NUM_ITERATIONS` (compile-time) | 10 | Kernel repetitions averaged for timing |
+| `BENCH_PARAM_fmas_per_thread` (or argv[1]) | 4096 | FMA iterations per thread (rounded to nearest multiple of 4) |
+| `BENCH_PARAM_threads_per_block` | 256 | Threads per block / threadgroup |
+| `BENCH_PARAM_num_blocks` | 1 | Number of blocks in the dispatch grid |
+| `BENCH_PARAM_num_warmup` | 3 | Warm-up kernel launches (not timed) |
+| `BENCH_PARAM_num_iters` | 7 | Timed kernel launches, each recorded individually |
 
 ## Notes
 
-- Results are in GFLOPS (10⁹ floating-point operations per second).
-- A warm-up kernel launch is performed before timing to exclude driver and JIT
-  compilation overhead.
+- GFLOPS (10⁹ floating-point operations per second) is derived downstream
+  from the recorded times; the binary itself only emits raw times.
+- Warm-up kernel launches are performed before timing to exclude driver and
+  JIT compilation overhead.
 - **CUDA/HIP**: CUDA/HIP events are used for high-resolution GPU-side timing.
 - **Metal**: `mach_absolute_time()` wall-clock timing is used; command buffers
   are serialized (`waitUntilCompleted`) for accurate measurement.

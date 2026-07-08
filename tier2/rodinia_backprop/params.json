@@ -8,20 +8,18 @@
     "description": "Input layer size (number of input neurons). Must be a multiple of 16; one 16-row block per 16 input units. The original standard run uses 65536.",
     "type": "int",
     "values": [
-      1024,
-      2048,
-      4096,
-      8192,
       16384,
       32768,
+      49152,
       65536,
+      98304,
       131072,
+      196608,
       262144,
+      393216,
       524288,
-      1048576,
-      2097152,
-      4194304,
-      8388608
+      786432,
+      1048560
     ]
   },
   "non_scaling_params": [

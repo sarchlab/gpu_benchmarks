@@ -22,11 +22,20 @@
  * Environment variables (override argv):
  *   BENCH_PARAM_matrix_dim
  *   BENCH_PARAM_precision          ("fp16", "tf32", or "all")
+ *   BENCH_PARAM_num_warmup         (warmup launches, default 3)
+ *   BENCH_PARAM_num_iters          (timed launches, each recorded, default 7)
+ *
+ * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
+ * the GPU event time and host wall-clock time, then a summary whose
+ * total_time_ms is the SUM of all iterations' GPU event times. TOPS is
+ * derived downstream as 2*matrix_dim^3 / time.
  */
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+#include "../../common/bench_timing.h"
 
 // ---------------------------------------------------------------------------
 // Platform abstraction
@@ -113,7 +122,6 @@ static const int WMMA_M                    = 16;
 static const int WMMA_N                    = 16;
 static const int WMMA_K                    = 16;
 static const int WARP_SIZE                 = 32;
-static const int DEFAULT_WARMUP_ITERATIONS = 5;
 
 // ---------------------------------------------------------------------------
 // FP16 WMMA GEMM kernel
@@ -203,57 +211,46 @@ __global__ void wmma_tf32_gemm(const float *A, const float *B, float *C,
 // ---------------------------------------------------------------------------
 
 /**
- * Run a kernel multiple times and measure average time.
- * Returns TOPS via out parameter.
+ * Warm up, then run `num_iters` recorded launches of one precision.
+ * Emits one JSON record per iteration; returns the sum of the recorded
+ * iterations' GPU event times (ms). TOPS is derived downstream as
+ * 2*matrix_dim^3 / time.
  */
 template <typename LaunchFn>
-static void benchmark_kernel(const char *kernel_name, const char *precision_str,
-                             int M, int N, int K,
-                             int warmup_iters,
-                             int matrix_dim,
-                             LaunchFn launch_fn,
-                             double *out_avg_ms, double *out_tops)
+static double benchmark_kernel(const char *kernel_name, const char *precision_str,
+                               int num_warmup, int num_iters,
+                               int matrix_dim,
+                               LaunchFn launch_fn)
 {
-    gpuEvent_t ev_start, ev_stop;
-    GPU_CHECK(gpuEventCreate(&ev_start));
-    GPU_CHECK(gpuEventCreate(&ev_stop));
-
-    /* Warmup iterations. */
-    for (int i = 0; i < warmup_iters; ++i) {
+    /* Warmup launches — each synced. */
+    for (int i = 0; i < num_warmup; ++i) {
         launch_fn();
+        GPU_CHECK(gpuDeviceSynchronize());
     }
-    GPU_CHECK(gpuDeviceSynchronize());
 
-    /* Timed kernel launch. */
-    GPU_CHECK(gpuEventRecord(ev_start, 0));
-    launch_fn();
-    GPU_CHECK(gpuEventRecord(ev_stop, 0));
-    GPU_CHECK(gpuEventSynchronize(ev_stop));
+    char params[128];
+    snprintf(params, sizeof(params),
+             "\"matrix_dim\":%d,\"precision\":\"%s\"",
+             matrix_dim, precision_str);
 
-    float elapsed_ms = 0.0f;
-    GPU_CHECK(gpuEventElapsedTime(&elapsed_ms, ev_start, ev_stop));
+    /* Timed iterations — each recorded individually. */
+    bench_timer_t timer;
+    bench_timer_create(&timer);
 
-    double avg_ms = (double)elapsed_ms;
-    double avg_s  = avg_ms * 1e-3;
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        bench_lap_begin(&timer, 0);
+        launch_fn();
+        bench_lap_t lap = bench_lap_end(&timer, 0);
 
-    /* TOPS = 2 * M * N * K / time_s / 1e12 */
-    double ops  = 2.0 * (double)M * (double)N * (double)K;
-    double tops = ops / avg_s / 1e12;
+        bench_emit_iter(kernel_name, i, &lap, params);
+        total_gpu_ms += lap.gpu_ms;
+        fprintf(stderr, "%-8s iter %d: gpu = %.3f ms, host = %.3f ms\n",
+                precision_str, i, lap.gpu_ms, lap.host_ms);
+    }
 
-    fprintf(stderr, "%-8s  %.3f ms  %.3f TOPS\n", precision_str, avg_ms, tops);
-
-    /* JSON-lines output to stdout: kernel event */
-    printf("{\"type\":\"kernel\",\"name\":\"%s\",\"time_ms\":%.6f,"
-           "\"params\":{\"matrix_dim\":%d,\"precision\":\"%s\","
-           "\"warmup_iterations\":%d}}\n",
-           kernel_name, avg_ms, matrix_dim, precision_str,
-           warmup_iters);
-
-    *out_avg_ms = avg_ms;
-    *out_tops   = tops;
-
-    GPU_CHECK(gpuEventDestroy(ev_start));
-    GPU_CHECK(gpuEventDestroy(ev_stop));
+    bench_timer_destroy(&timer);
+    return total_gpu_ms;
 }
 
 // ---------------------------------------------------------------------------
@@ -285,8 +282,8 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
 
-    int warmup_iterations = DEFAULT_WARMUP_ITERATIONS;
-
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     int M = dim, N = dim, K = dim;
 
@@ -300,10 +297,9 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Matrix (M×N×K)   : %d × %d × %d\n", M, N, K);
     fprintf(stderr, "WMMA tile        : %d × %d × %d\n", WMMA_M, WMMA_N, WMMA_K);
     fprintf(stderr, "Precision        : %s\n", precision);
-    fprintf(stderr, "Warmup iters     : %d\n\n", warmup_iterations);
+    fprintf(stderr, "Warmup / iters   : %d / %d\n\n", num_warmup, num_iters);
 
-    double total_time_ms = 0.0;
-    double max_tops = 0.0;
+    double total_gpu_ms = 0.0;
 
     bool run_fp16 = (strcmp(precision, "fp16") == 0 || strcmp(precision, "all") == 0);
     bool run_tf32 = (strcmp(precision, "tf32") == 0 || strcmp(precision, "all") == 0);
@@ -327,15 +323,11 @@ int main(int argc, char *argv[])
         dim3 grid(M / WMMA_M, N / WMMA_N);
         dim3 block(WARP_SIZE);
 
-        double avg_ms, tops;
-        benchmark_kernel("wmma_fp16_gemm", "fp16", M, N, K,
-                         warmup_iterations, dim,
-                         [&]() {
+        total_gpu_ms += benchmark_kernel("wmma_fp16_gemm", "fp16",
+                                         num_warmup, num_iters, dim,
+                                         [&]() {
             wmma_fp16_gemm<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
-        }, &avg_ms, &tops);
-
-        total_time_ms += avg_ms;
-        if (tops > max_tops) max_tops = tops;
+        });
 
         GPU_CHECK(gpuFree(d_A));
         GPU_CHECK(gpuFree(d_B));
@@ -363,15 +355,11 @@ int main(int argc, char *argv[])
             dim3 grid(M / WMMA_M, N / WMMA_N);
             dim3 block(WARP_SIZE);
 
-            double avg_ms, tops;
-            benchmark_kernel("wmma_tf32_gemm", "tf32", M, N, K,
-                             warmup_iterations, dim,
-                             [&]() {
+            total_gpu_ms += benchmark_kernel("wmma_tf32_gemm", "tf32",
+                                             num_warmup, num_iters, dim,
+                                             [&]() {
                 wmma_tf32_gemm<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
-            }, &avg_ms, &tops);
-
-            total_time_ms += avg_ms;
-            if (tops > max_tops) max_tops = tops;
+            });
 
             GPU_CHECK(gpuFree(d_A));
             GPU_CHECK(gpuFree(d_B));
@@ -387,10 +375,8 @@ int main(int argc, char *argv[])
     }
 #endif
 
-    /* Summary */
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"TFLOPS\",\"value\":%.3f}]}\n",
-           total_time_ms, max_tops);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     fprintf(stderr, "\nDone.\n");
     return EXIT_SUCCESS;

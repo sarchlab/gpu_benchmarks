@@ -37,12 +37,20 @@
  *   BENCH_PARAM_fmas_per_thread
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_threads_per_block
+ *   BENCH_PARAM_num_warmup       (warmup launches, default 3)
+ *   BENCH_PARAM_num_iters        (timed launches, each recorded, default 7)
+ *
+ * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
+ * the GPU event time and host wall-clock time, then a summary whose
+ * total_time_ms is the SUM of all iterations' GPU event times. Derived
+ * metrics (GFLOPS) are intentionally not computed here — derive them
+ * downstream from time and the work-descriptor params.
  */
 
 #include <cstdio>
 #include <cstdlib>
 
-#include "../../common/hip_cuda_compat.h"
+#include "../../common/bench_timing.h"
 
 // ---------------------------------------------------------------------------
 // Error-checking helper
@@ -65,7 +73,6 @@
 static const int DEFAULT_FMAS_PER_THREAD = 4096;
 static const int DEFAULT_THREADS_PER_BLOCK = 256;
 static const int DEFAULT_NUM_BLOCKS = 1024;
-static const int DEFAULT_NUM_WARMUP = 5;
 
 // ---------------------------------------------------------------------------
 // FP64 FMA kernel
@@ -126,7 +133,8 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_threads_per_block");
     if (env_val) threads_per_block = atoi(env_val);
 
-    int num_warmup = DEFAULT_NUM_WARMUP;
+    const int num_warmup = bench_num_warmup();
+    const int num_iters  = bench_num_iters();
 
     /* Print device information to stderr. */
     int device_id = 0;
@@ -140,53 +148,44 @@ int main(int argc, char *argv[])
            num_blocks, threads_per_block,
            num_blocks * threads_per_block);
     fprintf(stderr, "FMAs / thread   : %d\n", fmas_per_thread);
-    fprintf(stderr, "Warmup iters    : %d\n\n", num_warmup);
+    fprintf(stderr, "Warmup / iters  : %d / %d\n\n", num_warmup, num_iters);
 
     double *d_out = nullptr;
     HIP_CHECK(hipMalloc(&d_out, sizeof(double)));
 
-    hipEvent_t ev_start, ev_stop;
-    HIP_CHECK(hipEventCreate(&ev_start));
-    HIP_CHECK(hipEventCreate(&ev_stop));
-
-    /* Warm-up launches. */
+    /* Warm-up launches — not timed. */
     for (int w = 0; w < num_warmup; ++w) {
         fp64_fma_kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(d_out, fmas_per_thread);
+        HIP_CHECK(hipDeviceSynchronize());
     }
-    HIP_CHECK(hipDeviceSynchronize());
 
-    /* Timed kernel launch. */
-    HIP_CHECK(hipEventRecord(ev_start, 0));
-    fp64_fma_kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(d_out, fmas_per_thread);
-    HIP_CHECK(hipEventRecord(ev_stop, 0));
-    HIP_CHECK(hipEventSynchronize(ev_stop));
+    /* Timed iterations — each recorded individually. */
+    bench_timer_t timer;
+    bench_timer_create(&timer);
 
-    float elapsed_ms = 0.0f;
-    HIP_CHECK(hipEventElapsedTime(&elapsed_ms, ev_start, ev_stop));
+    char params[160];
+    snprintf(params, sizeof(params),
+             "\"fmas_per_thread\":%d,\"num_blocks\":%d,\"threads_per_block\":%d",
+             fmas_per_thread, num_blocks, threads_per_block);
 
-    long long num_threads  = static_cast<long long>(num_blocks) * threads_per_block;
-    long long total_flops  = num_threads
-                             * static_cast<long long>(fmas_per_thread)
-                             * 2LL;
-    double elapsed_s       = static_cast<double>(elapsed_ms) * 1e-3;
-    double gflops          = static_cast<double>(total_flops) / elapsed_s / 1e9;
+    double total_gpu_ms = 0.0;
+    for (int i = 0; i < num_iters; ++i) {
+        bench_lap_begin(&timer, 0);
+        fp64_fma_kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(d_out, fmas_per_thread);
+        bench_lap_t lap = bench_lap_end(&timer, 0);
 
-    fprintf(stderr, "Elapsed time    : %.3f ms\n", elapsed_ms);
-    fprintf(stderr, "Total FLOPs     : %lld\n", total_flops);
-    fprintf(stderr, "FP64 Throughput : %.2f GFLOPS\n", gflops);
+        bench_emit_iter("fp64_fma_kernel", i, &lap, params);
+        total_gpu_ms += lap.gpu_ms;
+        fprintf(stderr, "iter %d: gpu = %.3f ms, host = %.3f ms\n",
+                i, lap.gpu_ms, lap.host_ms);
+    }
 
-    /* JSON-lines output to stdout. */
-    printf("{\"type\":\"kernel\",\"name\":\"fp64_fma_kernel\",\"time_ms\":%.6f,"
-           "\"params\":{\"fmas_per_thread\":%d,\"num_blocks\":%d,"
-           "\"threads_per_block\":%d}}\n",
-           (double)elapsed_ms, fmas_per_thread, num_blocks, threads_per_block);
+    bench_emit_summary(total_gpu_ms);
+    fprintf(stderr, "Total GPU time  : %.3f ms over %d iterations\n",
+            total_gpu_ms, num_iters);
 
-    printf("{\"type\":\"summary\",\"total_time_ms\":%.6f,"
-           "\"metrics\":[{\"name\":\"GFLOPS\",\"value\":%.2f}]}\n",
-           (double)elapsed_ms, gflops);
-
-    HIP_CHECK(hipEventDestroy(ev_start));
-    HIP_CHECK(hipEventDestroy(ev_stop));
+    /* Clean up. */
+    bench_timer_destroy(&timer);
     HIP_CHECK(hipFree(d_out));
 
     fprintf(stderr, "\nDone.\n");

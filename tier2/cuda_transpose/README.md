@@ -23,8 +23,8 @@ Two transpose variants are benchmarked:
 | `BENCH_PARAM_size` | Matrix dimension N (N×N) | 4096 |
 | `BENCH_PARAM_block_size` | Threads per block (descriptor) | 256 |
 | `BENCH_PARAM_tile_dim` | Tile dimension (descriptor) | 32 |
-| `BENCH_PARAM_num_warmup` | Warmup launches per variant (untimed) | 3 |
-| `BENCH_PARAM_num_iters` | Timed launches per variant, each recorded | 7 |
+| `BENCH_PARAM_warmup` | Warmup launches per variant (untimed) | 3 |
+| `BENCH_PARAM_iteration` | Timed launches per variant, each recorded | 7 |
 
 ## Files
 

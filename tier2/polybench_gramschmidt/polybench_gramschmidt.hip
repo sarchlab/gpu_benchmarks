@@ -25,8 +25,8 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_m, BENCH_PARAM_n, BENCH_PARAM_passes, BENCH_PARAM_block_size
-//   BENCH_PARAM_num_warmup   (warmup iterations, default 3)
-//   BENCH_PARAM_num_iters    (timed iterations, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup iterations, default 3)
+//   BENCH_PARAM_iteration    (timed iterations, each recorded, default 7)
 //
 // Output (stdout): per timed iteration, one {"type":"kernel",...} JSON line
 // per kernel (gram_norm, gram_norm_finish, gram_normalize, gram_project)
@@ -230,6 +230,11 @@ int main(int argc, char** argv)
             HIP_CHECK(hipMemset(d_Q, 0, bytes_Q));
             HIP_CHECK(hipMemset(d_R, 0, bytes_R));
             HIP_CHECK(hipDeviceSynchronize());
+
+            /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+             * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+             * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+            bench_pass_warm();
 
             for (int k = 0; k < N; ++k) {
                 // Step 1: zero nrm_buf (untimed), then accumulate ||A[:,k]||^2

@@ -36,8 +36,8 @@
  *   BENCH_PARAM_measure_laps      (default 4 timed laps of steady-state hits)
  *   BENCH_PARAM_num_accesses      (overrides the timed-access count)
  *   BENCH_PARAM_rng_seed
- *   BENCH_PARAM_num_warmup        (untimed cold-fill launches, default 3)
- *   BENCH_PARAM_num_iters         (timed launches, each recorded, default 7)
+ *   BENCH_PARAM_warmup        (untimed cold-fill launches, default 3)
+ *   BENCH_PARAM_iteration         (timed launches, each recorded, default 7)
  *
  * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
  * the GPU event time and host wall-clock time, then a summary whose

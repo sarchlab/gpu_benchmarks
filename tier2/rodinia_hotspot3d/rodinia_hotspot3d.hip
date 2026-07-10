@@ -9,8 +9,8 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_grid_size, BENCH_PARAM_block_size,
 //   BENCH_PARAM_num_iterations, BENCH_PARAM_amb_temp
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line
 // carrying the kernel's accumulated GPU event time and host wall-clock time
@@ -214,6 +214,11 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_temp_src, h_temp, bytes, hipMemcpyHostToDevice));
         float* src = d_temp_src;
         float* dst = d_temp_dst;
+        /* Cold-cache calibration: evict the LLC and hold the clock high before
+         * the pass's first timed launch, so it runs cold. No-op when
+         * BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         for (int k = 0; k < num_iterations; ++k) {
             bench_lap_add(&acc_hotspot, bench_time_op(&timer, [&]() {
                 hotspot3d_kernel<<<grid_dim_val, block>>>(

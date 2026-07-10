@@ -9,8 +9,8 @@
 // Environment variables:
 //   BENCH_PARAM_table_size, BENCH_PARAM_block_size, BENCH_PARAM_num_updates,
 //   BENCH_PARAM_num_threads
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed pass carrying
 // the GPU event time and host wall-clock time, then a summary whose
@@ -151,6 +151,10 @@ int main(int argc, char** argv) {
 
     auto run_pass = [&]() {
         reset_table();
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
         lap = bench_time_op(&timer, [&]() {
             gups_kernel<<<dim3(gridSize), dim3(block_size)>>>(
                 d_table, table_size, num_updates, seed_base);

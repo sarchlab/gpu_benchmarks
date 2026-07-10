@@ -20,8 +20,8 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_grid_dim, BENCH_PARAM_num_timesteps, BENCH_PARAM_block_size
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line
 // carrying the stencil kernel's accumulated GPU event time and host
@@ -158,6 +158,10 @@ int main(int argc, char** argv) {
         bench_lap_reset(&acc_stencil);
         float* src = d_A;
         float* dst = d_B;
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
         for (int t = 0; t < num_timesteps; ++t) {
             bench_lap_add(&acc_stencil, bench_time_op(&timer, [&]() {
                 stencil3d<<<grid, block>>>(src, dst, nx, ny, nz, c0, c1);

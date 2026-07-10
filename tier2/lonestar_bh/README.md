@@ -30,15 +30,15 @@ This is a simplified 2D Barnes-Hut implementation:
 | `--bodies`   | 32768   | Number of bodies                |
 | `--timesteps`| 10      | Simulation timesteps per run    |
 | `--theta`    | 0.5     | Opening angle for BH criterion  |
-| `--iterations`| 5      | Legacy parameter (echoed in params; pass count comes from `BENCH_PARAM_num_iters`) |
+| `--iterations`| 5      | Legacy parameter (echoed in params; pass count comes from `BENCH_PARAM_iteration`) |
 
 Environment variables (`BENCH_PARAM_bodies`, `BENCH_PARAM_timesteps`,
 `BENCH_PARAM_theta`, `BENCH_PARAM_iterations`) override the CLI flags, plus:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BENCH_PARAM_num_warmup` | 3 | Untimed warmup passes |
-| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded individually |
+| `BENCH_PARAM_warmup` | 3 | Untimed warmup passes |
+| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded individually |
 
 ## Build
 

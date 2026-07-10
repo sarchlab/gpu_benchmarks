@@ -29,8 +29,8 @@
  *   BENCH_PARAM_buffer_size_mb
  *   BENCH_PARAM_flops_per_byte
  *   BENCH_PARAM_threads_per_block
- *   BENCH_PARAM_num_warmup       (warmup launches, default 3)
- *   BENCH_PARAM_num_iters        (timed launches, each recorded, default 7)
+ *   BENCH_PARAM_warmup       (warmup launches, default 3)
+ *   BENCH_PARAM_iteration        (timed launches, each recorded, default 7)
  *
  * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
  * the GPU event time and host wall-clock time, then a summary whose

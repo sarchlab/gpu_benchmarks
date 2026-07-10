@@ -43,8 +43,8 @@ BENCH_PARAM_size=65536 ./heteromark_aes       # env vars override argv
 ```
 
 Environment variables: `BENCH_PARAM_size`, `BENCH_PARAM_block_size`,
-`BENCH_PARAM_key_length`, plus `BENCH_PARAM_num_warmup` (warmup passes,
-default 3) and `BENCH_PARAM_num_iters` (timed passes, each recorded,
+`BENCH_PARAM_key_length`, plus `BENCH_PARAM_warmup` (warmup passes,
+default 3) and `BENCH_PARAM_iteration` (timed passes, each recorded,
 default 7).
 
 ## Output

@@ -32,8 +32,8 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_points, BENCH_PARAM_features, BENCH_PARAM_clusters,
 //   BENCH_PARAM_max_iter
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (invert_mapping, kmeansPoint) carrying that kernel's accumulated GPU
@@ -237,6 +237,11 @@ int main(int argc, char** argv) {
         bench_lap_reset(&acc_invert);
         bench_lap_reset(&acc_assign);
         memcpy(h_centers, h_centers_ini, centers_bytes);
+
+        /* Cold-cache calibration: evict the LLC and hold the clock high before
+         * the pass's first timed launch, so it runs cold. No-op when
+         * BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
 
         bench_lap_add(&acc_invert, bench_time_op(&timer, [&]() {
             invert_mapping<<<num_blocks, num_threads>>>(feature_flipped_d, feature_d,

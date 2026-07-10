@@ -15,8 +15,8 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_verify
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (lud_diagonal, lud_perimeter, lud_internal) carrying that kernel's
@@ -269,6 +269,11 @@ int main(int argc, char **argv)
         bench_lap_reset(&acc_internal);
 
         HIP_CHECK(hipMemcpy(d_a, h_a, bytes, hipMemcpyHostToDevice));
+
+        /* Cold-cache calibration: evict the LLC and hold the clock high before
+         * the pass's first timed launch, so it runs cold. No-op when
+         * BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
 
         for (int k = 0; k < num_blocks; k++) {
             bench_lap_add(&acc_diagonal, bench_time_op(&timer, [&]() {

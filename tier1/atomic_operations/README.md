@@ -34,8 +34,8 @@ Gops = (num_threads × ops_per_thread) / elapsed_seconds / 1e9
   atomically update a single global memory location. This measures the peak
   throughput of the GPU's atomic hardware units (L2 cache atomics on NVIDIA,
   dedicated atomic units on AMD/Apple).
-- Each operation type is benchmarked independently with `BENCH_PARAM_num_warmup`
-  (default 3) warmup launches and `BENCH_PARAM_num_iters` (default 7) timed
+- Each operation type is benchmarked independently with `BENCH_PARAM_warmup`
+  (default 3) warmup launches and `BENCH_PARAM_iteration` (default 7) timed
   iterations; every timed iteration is recorded individually.
 
 ## Build
@@ -112,8 +112,8 @@ per timed iteration plus a final summary:
 | `BENCH_PARAM_threads_per_block` | 256 | Threads per block / threadgroup |
 | `BENCH_PARAM_num_blocks` | 2048 | Number of blocks in the dispatch grid |
 | `BENCH_PARAM_atomic_op` | atomicAdd | Atomic operation to benchmark (`atomicAdd`, `atomicCAS`, `atomicMin`) |
-| `BENCH_PARAM_num_warmup` | 3 | Warm-up kernel launches (not timed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed kernel launches, each recorded individually |
+| `BENCH_PARAM_warmup` | 3 | Warm-up kernel launches (not timed) |
+| `BENCH_PARAM_iteration` | 7 | Timed kernel launches, each recorded individually |
 
 ## Notes
 

@@ -10,8 +10,8 @@
 // Environment variables:
 //   BENCH_PARAM_grid_dim, BENCH_PARAM_block_size, BENCH_PARAM_num_timesteps,
 //   BENCH_PARAM_tau
-//   BENCH_PARAM_num_warmup   (warmup simulation passes, default 3)
-//   BENCH_PARAM_num_iters    (timed simulation passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup simulation passes, default 3)
+//   BENCH_PARAM_iteration    (timed simulation passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
 // lbm_collide_stream_kernel carrying the GPU event time and host time
@@ -185,7 +185,7 @@ int main(int argc, char** argv) {
     if (env_val) num_timesteps = atoi(env_val);
     env_val = getenv("BENCH_PARAM_tau");
     if (env_val) tau = (float)atof(env_val);
-    /* BENCH_PARAM_iterations is superseded by BENCH_PARAM_num_iters. */
+    /* BENCH_PARAM_iterations is superseded by BENCH_PARAM_iteration. */
     const int num_warmup = bench_num_warmup();
     const int num_iters  = bench_num_iters();
 
@@ -243,6 +243,11 @@ int main(int argc, char** argv) {
 
         HIP_CHECK(hipMemcpy(d_f_src, h_f.data(), f_bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemset(d_f_dst, 0, f_bytes));
+
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
 
         for (int t = 0; t < num_timesteps; ++t) {
             bench_lap_add(&acc_lbm, bench_time_op(&timer, [&]() {

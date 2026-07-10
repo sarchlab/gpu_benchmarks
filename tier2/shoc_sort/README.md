@@ -37,8 +37,8 @@ CLI flags, plus:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BENCH_PARAM_num_warmup` | 3 | Untimed warmup passes |
-| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded individually |
+| `BENCH_PARAM_warmup` | 3 | Untimed warmup passes |
+| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded individually |
 
 ## Output
 
@@ -70,7 +70,7 @@ make PLATFORM=metal
 
 ```bash
 ./shoc_sort
-BENCH_PARAM_num_iters=10 ./shoc_sort --size 8388608
+BENCH_PARAM_iteration=10 ./shoc_sort --size 8388608
 ```
 
 ## Files

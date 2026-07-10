@@ -28,8 +28,8 @@ Environment variables (`BENCH_PARAM_vertices`, `BENCH_PARAM_degree`,
 
 | Env var | Default | Description |
 |---------|---------|-------------|
-| `BENCH_PARAM_num_warmup` | 3 | Warmup PageRank passes (untimed) |
-| `BENCH_PARAM_num_iters`  | 7 | Timed PageRank passes, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup PageRank passes (untimed) |
+| `BENCH_PARAM_iteration`  | 7 | Timed PageRank passes, each recorded |
 
 ## Build & Run
 

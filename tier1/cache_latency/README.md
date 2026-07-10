@@ -51,8 +51,8 @@ pattern that hardware stream-prefetchers could exploit.
 | ROCm/HIP | `hipEvent_t`  — GPU-side hardware timer |
 | Metal    | `mach_absolute_time()` — wall-clock timer on Apple Silicon |
 
-`BENCH_PARAM_num_iters` (default 7) consecutive kernel launches are timed
-after `BENCH_PARAM_num_warmup` (default 3) untimed warm-up launches (the cold
+`BENCH_PARAM_iteration` (default 7) consecutive kernel launches are timed
+after `BENCH_PARAM_warmup` (default 3) untimed warm-up launches (the cold
 fill lap is discarded). Every timed launch is emitted as its own record — no
 averaging or min-keeping. Latency is not printed by the binary; it is derived
 downstream from each record's `time_ms` and `num_accesses` params:
@@ -107,8 +107,8 @@ make clean
 Parameters are set via `BENCH_PARAM_*` environment variables (e.g.
 `BENCH_PARAM_array_bytes`, `BENCH_PARAM_cacheline_bytes`,
 `BENCH_PARAM_measure_laps`, `BENCH_PARAM_rng_seed`), plus the harness
-controls `BENCH_PARAM_num_warmup` (untimed warm-up launches, default 3) and
-`BENCH_PARAM_num_iters` (timed launches, each recorded, default 7).
+controls `BENCH_PARAM_warmup` (untimed warm-up launches, default 3) and
+`BENCH_PARAM_iteration` (timed launches, each recorded, default 7).
 
 For the Metal build, `cache_latency.metal` must be in the same directory as
 the `cache_latency` binary (the host code loads it at runtime).

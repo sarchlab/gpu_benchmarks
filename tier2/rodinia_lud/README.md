@@ -89,8 +89,8 @@ Derived metrics (e.g. GFLOPS) are computed downstream from `time_ms` and params.
 | `BENCH_PARAM_size` | Matrix dimension N | 512 |
 | `BENCH_PARAM_block_size` | Threads-per-block label echoed into records | 256 |
 | `BENCH_PARAM_verify` | Verification mode (true, false, skip) | true |
-| `BENCH_PARAM_num_warmup` | Warmup passes (untimed) | 3 |
-| `BENCH_PARAM_num_iters` | Timed passes, each recorded | 7 |
+| `BENCH_PARAM_warmup` | Warmup passes (untimed) | 3 |
+| `BENCH_PARAM_iteration` | Timed passes, each recorded | 7 |
 
 ## Reference
 

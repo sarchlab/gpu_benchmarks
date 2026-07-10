@@ -16,8 +16,8 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_sequence_length, BENCH_PARAM_block_size, BENCH_PARAM_penalty
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (nw_kernel1, nw_kernel2) carrying that kernel's accumulated GPU
@@ -322,6 +322,11 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_matrix, h_matrix,
                             matrix_elems * sizeof(int),
                             hipMemcpyHostToDevice));
+
+        /* Cold-cache calibration: evict the LLC and hold the clock high before
+         * the pass's first timed launch, so it runs cold. No-op when
+         * BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
 
         // Phase 1: upper-left triangle (nw_kernel1)
         for (int diag = 0; diag < num_blocks; diag++) {

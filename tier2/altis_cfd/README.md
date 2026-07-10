@@ -37,7 +37,7 @@ make PLATFORM=metal
 ```bash
 ./altis_cfd                              # defaults: N=97000
 ./altis_cfd --size 50000                 # fewer cells
-BENCH_PARAM_num_iters=10 ./altis_cfd     # more timed passes
+BENCH_PARAM_iteration=10 ./altis_cfd     # more timed passes
 ```
 
 Environment variables (override argv):
@@ -47,8 +47,8 @@ Environment variables (override argv):
 | `BENCH_PARAM_size` | 97000 | Number of mesh cells |
 | `BENCH_PARAM_block_size` | 256 | Threads per block |
 | `BENCH_PARAM_precision` | float | Floating-point precision (half/float/double) |
-| `BENCH_PARAM_num_warmup` | 3 | Untimed warmup passes |
-| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded individually |
+| `BENCH_PARAM_warmup` | 3 | Untimed warmup passes |
+| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded individually |
 
 ## Output
 

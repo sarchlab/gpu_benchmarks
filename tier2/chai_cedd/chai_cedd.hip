@@ -14,8 +14,8 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_width, BENCH_PARAM_height,
 //   BENCH_PARAM_threshold_low, BENCH_PARAM_threshold_high
-//   BENCH_PARAM_num_warmup   (warmup pipeline passes, default 3)
-//   BENCH_PARAM_num_iters    (timed pipeline passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup pipeline passes, default 3)
+//   BENCH_PARAM_iteration    (timed pipeline passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // pipeline kernel carrying that kernel's GPU event time and host wall-clock
@@ -451,6 +451,11 @@ int main(int argc, char** argv) {
         bench_lap_reset(&acc_magdir);
         bench_lap_reset(&acc_nms);
         bench_lap_reset(&acc_hyst);
+
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
 
         bench_lap_add(&acc_gauss, bench_time_op(&timer, [&]() {
             gaussian_blur_kernel<<<gridDim, blockDim>>>(d_input, d_blurred, W, H);

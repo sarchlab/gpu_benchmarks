@@ -15,8 +15,8 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_bodies, BENCH_PARAM_timesteps, BENCH_PARAM_iterations,
 //   BENCH_PARAM_block_size
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
 // nbody_kernel carrying the accumulated GPU event time of all timesteps in
@@ -194,7 +194,7 @@ int main(int argc, char** argv) {
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
     // `iters` is a legacy params.json key echoed into the records; the
-    // measured pass count is controlled by BENCH_PARAM_num_iters below.
+    // measured pass count is controlled by BENCH_PARAM_iteration below.
     const int num_warmup = bench_num_warmup();
     const int num_iters  = bench_num_iters();
 
@@ -250,6 +250,11 @@ int main(int argc, char** argv) {
 
         HIP_CHECK(hipMemcpy(d_pos, h_pos_orig.data(), bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_vel, h_vel_orig.data(), bytes, hipMemcpyHostToDevice));
+
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
 
         for (int t = 0; t < timesteps; ++t) {
             bench_lap_add(&acc_nbody, bench_time_op(&timer, [&]() {

@@ -91,8 +91,8 @@ make clean
 | `BENCH_PARAM_n` | 512 | Number of columns (overrides `--n`) |
 | `BENCH_PARAM_passes` | 3 | QR factorizations per recorded iteration (overrides `--passes`) |
 | `BENCH_PARAM_block_size` | 256 | Reported thread-block size |
-| `BENCH_PARAM_num_warmup` | 3 | Warmup iterations (untimed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed iterations, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup iterations (untimed) |
+| `BENCH_PARAM_iteration` | 7 | Timed iterations, each recorded |
 
 ## Output Format
 

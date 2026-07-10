@@ -55,8 +55,8 @@ BENCH_PARAM_grid_size=32 BENCH_PARAM_num_iterations=20 ./rodinia_hotspot3d
 | `BENCH_PARAM_block_size` | 8 | Thread-block dimension (B×B×B) |
 | `BENCH_PARAM_num_iterations` | 10 | Stencil time-steps per pass |
 | `BENCH_PARAM_amb_temp` | 80.0 | Ambient temperature |
-| `BENCH_PARAM_num_warmup` | 3 | Warmup passes (untimed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup passes (untimed) |
+| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded |
 
 ## Output
 

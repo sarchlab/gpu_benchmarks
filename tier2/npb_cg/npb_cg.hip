@@ -7,8 +7,8 @@
 // Environment variables:
 //   BENCH_PARAM_matrix_size, BENCH_PARAM_block_size,
 //   BENCH_PARAM_max_cg_iterations, BENCH_PARAM_nonzeros_per_row
-//   BENCH_PARAM_num_warmup   (warmup CG solves, default 3)
-//   BENCH_PARAM_num_iters    (timed CG solves, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup CG solves, default 3)
+//   BENCH_PARAM_iteration    (timed CG solves, each recorded, default 7)
 //
 // Output (stdout): per timed CG solve, one {"type":"kernel",...} JSON line per
 // kernel (spmv_kernel, dot_product_kernel, axpy_kernel, scale_kernel) carrying
@@ -259,6 +259,11 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_b, h_b.data(), vec_bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_r, d_b, vec_bytes, hipMemcpyDeviceToDevice));
         HIP_CHECK(hipMemcpy(d_p, d_r, vec_bytes, hipMemcpyDeviceToDevice));
+
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
 
         bench_lap_add(&acc_dot, bench_time_op(&timer, [&]() {
             dot_product_kernel<<<numBlocks, block_size, smem>>>(d_r, d_r, d_partial, N);

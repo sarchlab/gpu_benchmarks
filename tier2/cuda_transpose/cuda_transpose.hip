@@ -13,8 +13,8 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_tile_dim
-//   BENCH_PARAM_num_warmup   (warmup launches per variant, default 3)
-//   BENCH_PARAM_num_iters    (timed launches per variant, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup launches per variant, default 3)
+//   BENCH_PARAM_iteration    (timed launches per variant, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // of each variant (transpose_naive, transpose_optimized) carrying the GPU

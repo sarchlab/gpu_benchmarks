@@ -50,8 +50,8 @@ Environment variables:
 | `BENCH_PARAM_block_size` | Threads per block | 256 |
 | `BENCH_PARAM_num_vcycles` | V-cycles per solve | 5 |
 | `BENCH_PARAM_num_smooth_steps` | Smooth steps per level per direction | 3 |
-| `BENCH_PARAM_num_warmup` | Warmup passes (untimed) | 3 |
-| `BENCH_PARAM_num_iters` | Timed passes, each recorded | 7 |
+| `BENCH_PARAM_warmup` | Warmup passes (untimed) | 3 |
+| `BENCH_PARAM_iteration` | Timed passes, each recorded | 7 |
 
 ## Output
 

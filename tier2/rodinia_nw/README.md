@@ -52,8 +52,8 @@ Environment variables (override argv):
 | `BENCH_PARAM_sequence_length` | 2048 | Sequence length N |
 | `BENCH_PARAM_block_size` | 16 | Threads per block / tile edge |
 | `BENCH_PARAM_penalty` | 2 | Gap penalty |
-| `BENCH_PARAM_num_warmup` | 3 | Untimed warmup passes |
-| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded individually |
+| `BENCH_PARAM_warmup` | 3 | Untimed warmup passes |
+| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded individually |
 
 ## Output
 

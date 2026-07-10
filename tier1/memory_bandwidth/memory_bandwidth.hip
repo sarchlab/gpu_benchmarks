@@ -22,8 +22,8 @@
  *   BENCH_PARAM_buffer_size_mb
  *   BENCH_PARAM_transfer_type     (h2d, d2h, d2d, all)
  *   BENCH_PARAM_use_pinned_memory (true, false)
- *   BENCH_PARAM_num_warmup        (warmup copies per direction, default 3)
- *   BENCH_PARAM_num_iters         (timed copies per direction, each recorded, default 7)
+ *   BENCH_PARAM_warmup        (warmup copies per direction, default 3)
+ *   BENCH_PARAM_iteration         (timed copies per direction, each recorded, default 7)
  *
  * Output: one {"type":"kernel",...} JSON line per timed copy carrying the
  * GPU event time and host wall-clock time, then a summary whose

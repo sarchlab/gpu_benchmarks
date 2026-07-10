@@ -40,8 +40,8 @@ the valid block count. `img_height` should be a multiple of 16 (`UNROLL`), and
 | `BENCH_PARAM_img_height` | Input height (multiple of 16) | 4096 |
 | `BENCH_PARAM_histo_width` | Histogram width | 256 |
 | `BENCH_PARAM_histo_height` | Histogram height | 8192 |
-| `BENCH_PARAM_num_warmup` | Warmup passes (untimed) | 3 |
-| `BENCH_PARAM_num_iters` | Timed passes, each recorded | 7 |
+| `BENCH_PARAM_warmup` | Warmup passes (untimed) | 3 |
+| `BENCH_PARAM_iteration` | Timed passes, each recorded | 7 |
 
 ## Build / Run
 

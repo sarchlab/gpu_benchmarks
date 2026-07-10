@@ -41,8 +41,8 @@ BENCH_PARAM_size=1048576 ./npb_is     # env vars override argv
 ```
 
 Environment variables: `BENCH_PARAM_size`, `BENCH_PARAM_block_size`,
-`BENCH_PARAM_verify`, plus `BENCH_PARAM_num_warmup` (warmup sort passes,
-default 3) and `BENCH_PARAM_num_iters` (timed sort passes, each recorded,
+`BENCH_PARAM_verify`, plus `BENCH_PARAM_warmup` (warmup sort passes,
+default 3) and `BENCH_PARAM_iteration` (timed sort passes, each recorded,
 default 7).
 
 ## Output

@@ -29,8 +29,8 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_img_width, BENCH_PARAM_img_height,
 //   BENCH_PARAM_histo_width, BENCH_PARAM_histo_height
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for EACH
 // of the four kernels carrying that kernel's accumulated GPU event time, then a
@@ -537,6 +537,11 @@ int main(int argc, char** argv)
         HIP_CHECK(hipMemset(global_subhisto, 0, (size_t)img_width * histo_height * sizeof(unsigned int)));
         HIP_CHECK(hipMemset(global_histo, 0, (size_t)img_width * histo_height * sizeof(unsigned short)));
         HIP_CHECK(hipMemset(global_overflow, 0, (size_t)img_width * histo_height * sizeof(unsigned int)));
+
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
 
         // Kernel 1: prescan
         bench_lap_add(&acc_pre, bench_time_op(&timer, [&]() {

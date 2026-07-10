@@ -12,8 +12,8 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_num_bins, BENCH_PARAM_block_size
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed pass
 // carrying the GPU event time (time_ms) and host wall-clock time
@@ -187,6 +187,10 @@ int main(int argc, char** argv) {
     // memset stays outside the timed bracket — only the kernel is measured.
     auto run_pass = [&](bool timed) {
         HIP_CHECK(hipMemset(d_histo, 0, histo_bytes));
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
         if (timed) {
             lap = bench_time_op(&timer, [&]() {
                 histogram_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_data, d_histo, N);

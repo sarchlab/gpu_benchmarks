@@ -7,8 +7,8 @@
 // with command-line --flags as fallback:
 //   BENCH_PARAM_array_size_mb, BENCH_PARAM_block_size,
 //   BENCH_PARAM_transfer_mode (read | write | readwrite)
-//   BENCH_PARAM_num_warmup   (warmup launches per kernel, default 3)
-//   BENCH_PARAM_num_iters    (timed launches per kernel, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup launches per kernel, default 3)
+//   BENCH_PARAM_iteration    (timed launches per kernel, each recorded, default 7)
 //
 // Output (stdout): per enabled kernel, one {"type":"kernel",...} JSON line per
 // timed iteration carrying the GPU event time and host wall-clock time, then a

@@ -26,8 +26,8 @@
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_threads_per_block
  *   BENCH_PARAM_shuffle_variant   ("all", "shfl_xor", "shfl_up", "shfl_down", "shfl")
- *   BENCH_PARAM_num_warmup        (warmup launches per variant, default 3)
- *   BENCH_PARAM_num_iters         (timed launches per variant, each recorded, default 7)
+ *   BENCH_PARAM_warmup        (warmup launches per variant, default 3)
+ *   BENCH_PARAM_iteration         (timed launches per variant, each recorded, default 7)
  *
  * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
  * the GPU event time and host wall-clock time, then a summary whose

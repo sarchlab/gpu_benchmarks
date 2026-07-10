@@ -904,8 +904,8 @@ func cmdRun(args runArgs) int {
 						// timing harness's warmup + repeated iterations: nvbit
 						// slows every launch, and duplicate launches multiply
 						// trace size and timeout risk without adding coverage.
-						"BENCH_PARAM_num_warmup=0",
-						"BENCH_PARAM_num_iters=1",
+						"BENCH_PARAM_warmup=0",
+						"BENCH_PARAM_iteration=1",
 					)
 					if args.traceSample != "" {
 						env = append(env, fmt.Sprintf("PTRACE_SAMPLE=%s", args.traceSample))

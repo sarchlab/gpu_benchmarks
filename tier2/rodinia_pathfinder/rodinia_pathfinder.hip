@@ -23,8 +23,8 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_cols, BENCH_PARAM_rows, BENCH_PARAM_pyramid_height
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
 // dynproc_kernel carrying the accumulated GPU event time of all pyramidal
@@ -242,6 +242,11 @@ int main(int argc, char** argv) {
         bench_lap_reset(&acc);
         HIP_CHECK(hipMemcpy(gpuResult[0], data, row_bytes, hipMemcpyHostToDevice));
         int src = 1, dst = 0;
+        /* Cold-cache calibration: evict the LLC and hold the clock high before
+         * the pass's first timed launch, so it runs cold. No-op when
+         * BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         for (int t = 0; t < rows - 1; t += pyramid_height) {
             int temp = src; src = dst; dst = temp;
             int it = MIN(pyramid_height, rows - t - 1);

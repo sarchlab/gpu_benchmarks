@@ -34,8 +34,8 @@ host driver is restructured for the per-iteration timing harness and JSON output
 | `BENCH_PARAM_lattice_dim` | Lattice side nx=ny=nz (multiple of 8) | 144 |
 | `BENCH_PARAM_grid_spacing` | Lattice spacing h (Å); 0.5 keeps BIN_LENGTH/(8h)=1 | 0.5 |
 | `BENCH_PARAM_cutoff_radius` | Interaction cutoff (Å) | 12.0 |
-| `BENCH_PARAM_num_warmup` | Warmup passes (untimed) | 3 |
-| `BENCH_PARAM_num_iters` | Timed passes, each recorded | 7 |
+| `BENCH_PARAM_warmup` | Warmup passes (untimed) | 3 |
+| `BENCH_PARAM_iteration` | Timed passes, each recorded | 7 |
 
 `grid_spacing` is fixed at 0.5 by the neighbor-list branch condition
 (`BIN_LENGTH/(8h)` must be integral). `block_size` is not tunable — the region

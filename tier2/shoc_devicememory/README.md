@@ -22,8 +22,8 @@ Derived from the [SHOC benchmark suite](https://github.com/vetter/shoc) DeviceMe
 | `BENCH_PARAM_array_size_mb` | 64 | Array size in MB |
 | `BENCH_PARAM_block_size` | 256 | Threads per block |
 | `BENCH_PARAM_transfer_mode` | readwrite | Access pattern(s): read, write, readwrite |
-| `BENCH_PARAM_num_warmup` | 3 | Warmup launches per kernel (untimed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed launches per kernel, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup launches per kernel (untimed) |
+| `BENCH_PARAM_iteration` | 7 | Timed launches per kernel, each recorded |
 
 ## Files
 

@@ -23,8 +23,8 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_m, BENCH_PARAM_n, BENCH_PARAM_block_size
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (bicg_kernel1, bicg_kernel2) carrying that kernel's GPU event time
@@ -186,6 +186,11 @@ int main(int argc, char** argv) {
     auto run_pass = [&]() {
         bench_lap_reset(&acc_k1);
         bench_lap_reset(&acc_k2);
+
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
 
         bench_lap_add(&acc_k1, bench_time_op(&timer, [&]() {
             bicg_kernel1<<<grid_k1, block_size>>>(d_A, d_r, d_s, m, n);

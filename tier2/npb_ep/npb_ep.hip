@@ -31,8 +31,8 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_m           (class exponent M, default 28 = Class A)
 //   BENCH_PARAM_block_size  (threads per block, default 256)
-//   BENCH_PARAM_num_warmup  (warmup passes, default 3)
-//   BENCH_PARAM_num_iters   (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup  (warmup passes, default 3)
+//   BENCH_PARAM_iteration   (timed passes, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed pass carrying
 // the GPU event time and host wall-clock time of the single gpu_kernel launch,
@@ -314,6 +314,10 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemset(q_device,  0, size_q));
         HIP_CHECK(hipMemset(sx_device, 0, size_sx));
         HIP_CHECK(hipMemset(sy_device, 0, size_sy));
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
         *lap_out = bench_time_op(&timer, [&]() {
             gpu_kernel<<<dim3(blocks_per_grid), dim3(threads_per_block)>>>(
                 q_device, sx_device, sy_device, an, (int)nn);

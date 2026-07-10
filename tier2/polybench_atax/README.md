@@ -59,7 +59,7 @@ make PLATFORM=metal
 ./polybench_atax --nx 2048 --ny 2048
 
 # More recorded passes
-BENCH_PARAM_num_iters=10 ./polybench_atax
+BENCH_PARAM_iteration=10 ./polybench_atax
 ```
 
 ## Parameters
@@ -69,8 +69,8 @@ BENCH_PARAM_num_iters=10 ./polybench_atax
 | `--nx NX` / `BENCH_PARAM_nx` | 4096 | Number of matrix rows |
 | `--ny NY` / `BENCH_PARAM_ny` | 4096 | Number of matrix columns |
 | `BENCH_PARAM_block_size` | 256 | Threads per block |
-| `BENCH_PARAM_num_warmup` | 3 | Warmup passes (untimed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup passes (untimed) |
+| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded |
 
 ## Platform Notes
 

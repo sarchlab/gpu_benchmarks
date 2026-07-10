@@ -28,8 +28,8 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_input
-//   BENCH_PARAM_num_warmup   (warmup epochs, default 3)
-//   BENCH_PARAM_num_iters    (timed epochs, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup epochs, default 3)
+//   BENCH_PARAM_iteration    (timed epochs, each recorded, default 7)
 //
 // Output (stdout): per timed epoch, one {"type":"kernel",...} JSON line for each
 // of the two kernels carrying that kernel's GPU event time and host time, then a
@@ -252,6 +252,11 @@ int main(int argc, char** argv) {
 
         HIP_CHECK(hipMemcpy(d_input_hidden,       h_weights.data(),      sz_w, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_input_prev_weights, h_prev_weights.data(), sz_w, hipMemcpyHostToDevice));
+
+        /* Cold-cache calibration: evict the LLC and hold the clock high before
+         * the pass's first timed launch, so it runs cold. No-op when
+         * BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
 
         bench_lap_add(&acc_fwd, bench_time_op(&timer, [&]() {
             bpnn_layerforward_CUDA<<<grid, threads>>>(

@@ -62,8 +62,8 @@ BENCH_PARAM_boxes1d=8 ./rodinia_lavamd
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BENCH_PARAM_boxes1d` | 10 | Boxes per dimension (total boxes = `boxes1d³`) |
-| `BENCH_PARAM_num_warmup` | 3 | Warmup passes (untimed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup passes (untimed) |
+| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded |
 
 `particles_per_box` (100) and `number_threads` (128) are fixed compile-time
 constants (`NUMBER_PAR_PER_BOX`, `NUMBER_THREADS`) in the original kernel and are

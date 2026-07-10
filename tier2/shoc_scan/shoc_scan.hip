@@ -9,8 +9,8 @@
 //
 // Environment variables:
 //   BENCH_PARAM_array_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (scan_block_kernel, add_block_sums_kernel) carrying that kernel's
@@ -271,6 +271,11 @@ int main(int argc, char** argv) {
     auto run_scan_pass = [&]() {
         bench_lap_reset(&acc_scan);
         bench_lap_reset(&acc_add);
+        /* Cold-cache calibration: evict the LLC and hold the clock high before
+         * the pass's first timed launch, so it runs cold. No-op when
+         * BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         scan_recursive(d_output, d_input, N_padded, block_size,
                        &timer, &acc_scan, &acc_add);
     };

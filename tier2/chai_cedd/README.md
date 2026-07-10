@@ -49,8 +49,8 @@ make PLATFORM=metal
 | `BENCH_PARAM_height` | 2048 | Image height |
 | `BENCH_PARAM_threshold_low` | 50 | Low hysteresis threshold |
 | `BENCH_PARAM_threshold_high` | 150 | High hysteresis threshold |
-| `BENCH_PARAM_num_warmup` | 3 | Warmup pipeline passes (untimed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed pipeline passes, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup pipeline passes (untimed) |
+| `BENCH_PARAM_iteration` | 7 | Timed pipeline passes, each recorded |
 
 ## Output
 

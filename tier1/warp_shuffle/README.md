@@ -121,8 +121,8 @@ record per timed iteration of each selected variant, plus a final summary:
 | `BENCH_PARAM_threads_per_block` | 256 | Threads per block / threadgroup |
 | `BENCH_PARAM_num_blocks` | 1024 | Number of blocks in the dispatch grid |
 | `BENCH_PARAM_shuffle_variant` | all | Variant(s) to run (`shfl_xor`, `shfl`, `shfl_up`, `shfl_down`, `all`) |
-| `BENCH_PARAM_num_warmup` | 3 | Warm-up launches per variant (not timed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed launches per variant, each recorded individually |
+| `BENCH_PARAM_warmup` | 3 | Warm-up launches per variant (not timed) |
+| `BENCH_PARAM_iteration` | 7 | Timed launches per variant, each recorded individually |
 
 ## Notes
 

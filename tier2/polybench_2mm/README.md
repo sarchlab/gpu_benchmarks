@@ -51,8 +51,8 @@ Environment variables override argv:
 | `BENCH_PARAM_alpha` | Scaling factor alpha | 1.5 |
 | `BENCH_PARAM_beta` | Scaling factor beta | 1.2 |
 | `BENCH_PARAM_precision` | One of `half`, `float`, `double` | `float` |
-| `BENCH_PARAM_num_warmup` | Warmup passes (untimed) | 3 |
-| `BENCH_PARAM_num_iters` | Timed passes, each recorded | 7 |
+| `BENCH_PARAM_warmup` | Warmup passes (untimed) | 3 |
+| `BENCH_PARAM_iteration` | Timed passes, each recorded | 7 |
 
 ## Output
 

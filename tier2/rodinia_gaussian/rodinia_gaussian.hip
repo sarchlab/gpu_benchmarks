@@ -17,8 +17,8 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_verify
-//   BENCH_PARAM_num_warmup   (warmup elimination passes, default 3)
-//   BENCH_PARAM_num_iters    (timed elimination passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup elimination passes, default 3)
+//   BENCH_PARAM_iteration    (timed elimination passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (fan1, fan2) carrying that kernel's accumulated GPU event time
@@ -210,6 +210,11 @@ int main(int argc, char** argv)
         HIP_CHECK(hipMemcpy(d_a, h_a, bytes_a, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_b, h_b, bytes_b, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemset(d_m, 0, bytes_a));
+
+        /* Cold-cache calibration: evict the LLC and hold the clock high before
+         * the pass's first timed launch, so it runs cold. No-op when
+         * BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
 
         for (int t = 0; t < N - 1; ++t) {
             int remaining = N - t - 1;

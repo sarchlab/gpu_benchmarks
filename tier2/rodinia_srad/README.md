@@ -52,7 +52,7 @@ make PLATFORM=metal
 ```bash
 ./rodinia_srad                                  # defaults: 512×512, 100 SRAD iters/pass, lambda 0.5
 ./rodinia_srad --image_size 1024
-BENCH_PARAM_num_iters=10 ./rodinia_srad --image_size 256 --num_iterations 200
+BENCH_PARAM_iteration=10 ./rodinia_srad --image_size 256 --num_iterations 200
 ./rodinia_srad --lambda 0.3
 ```
 
@@ -63,8 +63,8 @@ BENCH_PARAM_num_iters=10 ./rodinia_srad --image_size 256 --num_iterations 200
 | `BENCH_PARAM_image_size` | 512 | Image dimension (N×N, rounded up to a multiple of 16) |
 | `BENCH_PARAM_num_iterations` | 100 | SRAD iterations per pass (each runs both kernels) |
 | `BENCH_PARAM_lambda` | 0.5 | Diffusion step size in (0,1) |
-| `BENCH_PARAM_num_warmup` | 3 | Warmup passes (not recorded) |
-| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup passes (not recorded) |
+| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded |
 
 `block_size` is fixed at the original compile-time `BLOCK_SIZE=16` and is
 emitted as a param for downstream derivation only.

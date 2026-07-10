@@ -23,8 +23,8 @@
  *   BENCH_PARAM_block_size
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_access_pattern   ("no_conflict", "conflict", or "both")
- *   BENCH_PARAM_num_warmup       (warmup launches per pattern, default 3)
- *   BENCH_PARAM_num_iters        (timed launches per pattern, each recorded, default 7)
+ *   BENCH_PARAM_warmup       (warmup launches per pattern, default 3)
+ *   BENCH_PARAM_iteration        (timed launches per pattern, each recorded, default 7)
  *
  * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
  * the GPU event time and host wall-clock time, then a summary whose

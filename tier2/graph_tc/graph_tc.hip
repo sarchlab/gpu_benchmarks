@@ -15,8 +15,8 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_vertices, BENCH_PARAM_avg_degree, BENCH_PARAM_block_size,
 //   BENCH_PARAM_verify (true|false|skip)
-//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
-//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup launches, default 3)
+//   BENCH_PARAM_iteration    (timed launches, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // carrying the GPU event time and host wall-clock time, then a summary whose

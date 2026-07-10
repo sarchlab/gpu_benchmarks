@@ -52,8 +52,8 @@ Environment variables `BENCH_PARAM_array_size`, `BENCH_PARAM_block_size`, and
 
 | Env var | Default | Description |
 |---------|---------|-------------|
-| `BENCH_PARAM_num_warmup` | 3 | Warmup launches (untimed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed launches, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup launches (untimed) |
+| `BENCH_PARAM_iteration` | 7 | Timed launches, each recorded |
 
 > Note: `--block_size` is ignored on Metal (thread-group size is set automatically).
 

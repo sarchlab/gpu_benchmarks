@@ -21,8 +21,8 @@ Derived from the [Altis benchmark suite](https://github.com/utcs-scea/altis) Par
 | `BENCH_PARAM_size` | 100000 | Number of particles |
 | `BENCH_PARAM_num_particles_ratio` | 0.5 | Resampling threshold ratio (0.25, 0.5, 0.75, 1.0) |
 | `BENCH_PARAM_seed` | 42 | RNG seed |
-| `BENCH_PARAM_num_warmup` | 3 | Warmup filter passes (not recorded) |
-| `BENCH_PARAM_num_iters` | 7 | Timed filter passes, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup filter passes (not recorded) |
+| `BENCH_PARAM_iteration` | 7 | Timed filter passes, each recorded |
 
 ## Files
 
@@ -47,7 +47,7 @@ make PLATFORM=metal
 ```bash
 ./altis_particlefilter                              # defaults: N=100000
 ./altis_particlefilter --size 50000                 # fewer particles
-BENCH_PARAM_num_iters=10 ./altis_particlefilter --size 100000
+BENCH_PARAM_iteration=10 ./altis_particlefilter --size 100000
 ```
 
 ## Output

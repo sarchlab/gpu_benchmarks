@@ -13,8 +13,8 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (compute_flux_kernel, rk_update_kernel) carrying that kernel's
@@ -475,6 +475,11 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_my_old,     d_my,     cell_bytes, hipMemcpyDeviceToDevice));
         HIP_CHECK(hipMemcpy(d_mz_old,     d_mz,     cell_bytes, hipMemcpyDeviceToDevice));
         HIP_CHECK(hipMemcpy(d_energy_old, d_energy, cell_bytes, hipMemcpyDeviceToDevice));
+
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
 
         for (int stage = 0; stage < RK_STEPS; ++stage) {
             bench_lap_add(&acc_flux, bench_time_op(&timer, [&]() {

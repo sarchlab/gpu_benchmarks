@@ -13,7 +13,7 @@ Benchmarks a sparse iterative Conjugate Gradient (CG) solver from the NAS Parall
   4. **Dot product** — `rr_new = dot(r, r)` for convergence check
   5. **Scale + AXPY** — direction update `p = r + beta * p`
 - Default: 25 CG iterations per solve, 3 warmup + 7 timed solves
-  (`BENCH_PARAM_num_warmup` / `BENCH_PARAM_num_iters`)
+  (`BENCH_PARAM_warmup` / `BENCH_PARAM_iteration`)
 
 ## Parameters
 
@@ -23,8 +23,8 @@ Benchmarks a sparse iterative Conjugate Gradient (CG) solver from the NAS Parall
 | `BENCH_PARAM_block_size` | 256 | Threads per block |
 | `BENCH_PARAM_max_cg_iterations` | 25 | CG iterations per solve |
 | `BENCH_PARAM_nonzeros_per_row` | 7 | Nonzeros per matrix row |
-| `BENCH_PARAM_num_warmup` | 3 | Warmup CG solves (untimed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed CG solves, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup CG solves (untimed) |
+| `BENCH_PARAM_iteration` | 7 | Timed CG solves, each recorded |
 
 ## Files
 

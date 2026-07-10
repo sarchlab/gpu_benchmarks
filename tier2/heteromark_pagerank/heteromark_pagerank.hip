@@ -13,8 +13,8 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_vertices, BENCH_PARAM_pr_iterations, BENCH_PARAM_damping_factor
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
 // pagerank_kernel carrying the accumulated GPU event time of all PageRank
@@ -252,6 +252,11 @@ int main(int argc, char** argv) {
 
         for (int i = 0; i < N; ++i) h_pr[i] = 1.0f / (float)N;
         HIP_CHECK(hipMemcpy(d_prOld, h_pr.data(), N * sizeof(float), hipMemcpyHostToDevice));
+
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
 
         for (int it = 0; it < prIters; ++it) {
             bench_lap_add(&acc_pagerank, bench_time_op(&timer, [&]() {

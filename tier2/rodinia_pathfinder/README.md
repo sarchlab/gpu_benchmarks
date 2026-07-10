@@ -35,8 +35,8 @@ there are `ceil((100-1)/20) = 5` launches per pass; the last advances
 | `--cols` / `BENCH_PARAM_cols` | 100000 | matches the original standard run |
 | `--rows` / `BENCH_PARAM_rows` | 100 | wide/short grid, as in the original run |
 | `--pyramid_height` / `BENCH_PARAM_pyramid_height` | 20 | as in the original run |
-| `BENCH_PARAM_num_warmup` | 3 | warmup passes (untimed) |
-| `BENCH_PARAM_num_iters` | 7 | timed passes, each recorded |
+| `BENCH_PARAM_warmup` | 3 | warmup passes (untimed) |
+| `BENCH_PARAM_iteration` | 7 | timed passes, each recorded |
 
 `BLOCK_SIZE` is a fixed compile-time `256` in the original kernel; the emitted
 `block_size` descriptor reflects that fixed value. `pyramid_height` must be

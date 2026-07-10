@@ -8,8 +8,8 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_alpha,
 //   BENCH_PARAM_beta, BENCH_PARAM_precision (one of: half, float, double)
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel launch (mm_kernel_1, mm_kernel_2) carrying its GPU event time
@@ -197,6 +197,11 @@ int main(int argc, char** argv) {
 
         HIP_CHECK(hipMemcpy(d_D, h_D, bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_E, h_E, bytes, hipMemcpyHostToDevice));
+
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
 
         // mm_kernel #1: D = alpha*A*B + beta*D
         bench_lap_add(&acc_mm1, bench_time_op(&timer, [&]() {

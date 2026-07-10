@@ -31,8 +31,8 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_image_size, BENCH_PARAM_num_iterations, BENCH_PARAM_lambda
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (srad_cuda_1, srad_cuda_2) carrying that kernel's accumulated GPU
@@ -409,6 +409,11 @@ int main(int argc, char** argv) {
         bench_lap_reset(&acc_srad1);
         bench_lap_reset(&acc_srad2);
         memcpy(h_J, h_Jini, size_I * sizeof(float));
+
+        /* Cold-cache calibration: evict the LLC and hold the clock high before
+         * the pass's first timed launch, so it runs cold. No-op when
+         * BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
 
         for (int iter = 0; iter < niter; ++iter) {
             // Image-statistics reduction over the ROI -> q0sqr (CPU, untimed).

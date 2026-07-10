@@ -22,8 +22,8 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_num_atoms, BENCH_PARAM_lattice_dim,
 //   BENCH_PARAM_grid_spacing, BENCH_PARAM_cutoff_radius
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
 // cuda_cutoff_potential_lattice6overlap carrying the accumulated GPU event time
@@ -437,6 +437,10 @@ int main(int argc, char** argv) {
     // (immutable input bins), so passes are identical — no per-pass reset.
     auto run_pass = [&]() {
         bench_lap_reset(&acc);
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
         for (int zRegionIndex = 0; zRegionIndex < zRegionDim; zRegionIndex++) {
             bench_lap_add(&acc, bench_time_op(&timer, [&]() {
                 cuda_cutoff_potential_lattice6overlap<<<gridDim, blockDim, 0>>>(

@@ -15,8 +15,8 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_num_taps, BENCH_PARAM_block_size
-//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
-//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup launches, default 3)
+//   BENCH_PARAM_iteration    (timed launches, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // carrying the GPU event time (time_ms) and host wall-clock time

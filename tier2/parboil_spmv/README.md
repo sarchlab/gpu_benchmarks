@@ -36,8 +36,8 @@ value is `0` so the product is unchanged.
 | `BENCH_PARAM_avg_nnz_per_row` / `--avg_nnz_per_row` | Avg non-zeros per row (depth < 5000) | 80 |
 | `BENCH_PARAM_block_size` / `--block_size` | Override block size (0 = original `compute_active_thread`) | 0 |
 | `--seed` | RNG seed for matrix generation | 42 |
-| `BENCH_PARAM_num_warmup` | Warmup launches (untimed) | 3 |
-| `BENCH_PARAM_num_iters` | Timed launches, each recorded | 7 |
+| `BENCH_PARAM_warmup` | Warmup launches (untimed) | 3 |
+| `BENCH_PARAM_iteration` | Timed launches, each recorded | 7 |
 
 Matrix and vector are generated synthetically (no `.mtx` file); sized to a
 Parboil-scale matrix (Dubcova3/mixtank are tens of thousands of rows).

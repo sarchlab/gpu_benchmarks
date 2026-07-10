@@ -27,8 +27,8 @@ Derived from the [Altis benchmark suite](https://github.com/utcs-scea/altis) ray
 | `BENCH_PARAM_width` | Image width in pixels | 1024 |
 | `BENCH_PARAM_height` | Image height in pixels | 1024 |
 | `BENCH_PARAM_spheres` | Number of spheres | 64 |
-| `BENCH_PARAM_num_warmup` | Warmup launches (untimed) | 3 |
-| `BENCH_PARAM_num_iters` | Timed launches, each recorded | 7 |
+| `BENCH_PARAM_warmup` | Warmup launches (untimed) | 3 |
+| `BENCH_PARAM_iteration` | Timed launches, each recorded | 7 |
 
 ## Files
 

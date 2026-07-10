@@ -24,8 +24,8 @@ Environment variables (`BENCH_PARAM_*`) override the flags. In addition:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BENCH_PARAM_num_warmup` | 3 | Warmup SSSP passes (not recorded) |
-| `BENCH_PARAM_num_iters`  | 7 | Timed SSSP passes, each recorded  |
+| `BENCH_PARAM_warmup` | 3 | Warmup SSSP passes (not recorded) |
+| `BENCH_PARAM_iteration`  | 7 | Timed SSSP passes, each recorded  |
 
 ## Build & Run
 

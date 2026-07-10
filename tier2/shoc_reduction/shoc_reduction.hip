@@ -9,8 +9,8 @@
 // Environment variables:
 //   BENCH_PARAM_size, BENCH_PARAM_block_size,
 //   BENCH_PARAM_precision (one of: float, double, half)
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass (one pass = the full multi-level
 // reduction), one {"type":"kernel","name":"reduce_kernel",...} JSON line
@@ -252,6 +252,11 @@ int main(int argc, char** argv)
     double total_gpu_ms = 0.0;
     for (int i = 0; i < num_iters; ++i) {
         bench_lap_reset(&acc_reduce);
+        /* Cold-cache calibration: evict the LLC and hold the clock high before
+         * the pass's first timed launch, so it runs cold. No-op when
+         * BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         gpu_reduce(d_input, d_partial, d_temp, d_result, N, block_size,
                    &timer, &acc_reduce);
         bench_emit_iter("reduce_kernel", i, &acc_reduce, params);

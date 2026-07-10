@@ -19,8 +19,8 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_precision
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_warmup   (warmup passes, default 3)
+//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // distinct kernel (radixSortBlocks, findRadixOffsets, scan, vectorAddUniform4,
@@ -677,6 +677,11 @@ int main(int argc, char** argv) {
 
         HIP_CHECK(hipMemcpy(dKeys, hKeys, bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(dVals, hVals, bytes, hipMemcpyHostToDevice));
+
+        /* Cold-cache calibration: evict the LLC and hold the clock high before
+         * the pass's first timed launch, so it runs cold. No-op when
+         * BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
 
         for (int bit = 0; bit < SORT_BITS; bit += 4) {
             radixSortStep(4, bit, (uint4*)dKeys, (uint4*)dVals,

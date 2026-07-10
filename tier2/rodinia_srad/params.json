@@ -44,15 +44,6 @@
       ]
     },
     {
-      "name": "block_size",
-      "description": "Thread-block dimension (BxB); fixed compile-time BLOCK_SIZE=16 in the original kernels",
-      "type": "int",
-      "default": 16,
-      "values": [
-        16
-      ]
-    },
-    {
       "name": "lambda",
       "description": "Diffusion step size in (0,1)",
       "type": "float",

@@ -17,19 +17,6 @@
   },
   "non_scaling_params": [
     {
-      "name": "class",
-      "description": "NAS problem class, derived from M (24->S, 25->W, 28->A, 30->B, 32->C)",
-      "type": "string",
-      "default": "A",
-      "values": [
-        "S",
-        "W",
-        "A",
-        "B",
-        "C"
-      ]
-    },
-    {
       "name": "block_size",
       "description": "Number of threads per block",
       "type": "int",

@@ -24,15 +24,6 @@
   },
   "non_scaling_params": [
     {
-      "name": "hidden",
-      "description": "Hidden layer size. Fixed at 16: the kernels tile with HEIGHT=WIDTH=16 and index the weight matrix with a (hid+1) stride, so hid==16 is baked into the original algorithm (not a tunable knob).",
-      "type": "int",
-      "default": 16,
-      "values": [
-        16
-      ]
-    },
-    {
       "name": "vector_add_warmup",
       "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
       "type": "enum",

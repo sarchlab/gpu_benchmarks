@@ -29,24 +29,6 @@
   },
   "non_scaling_params": [
     {
-      "name": "particles_per_box",
-      "description": "Particles in each box; fixed compile-time NUMBER_PAR_PER_BOX=100 in the original kernel",
-      "type": "int",
-      "default": 100,
-      "values": [
-        100
-      ]
-    },
-    {
-      "name": "number_threads",
-      "description": "Threads per block; fixed compile-time NUMBER_THREADS=128 in the original",
-      "type": "int",
-      "default": 128,
-      "values": [
-        128
-      ]
-    },
-    {
       "name": "vector_add_warmup",
       "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
       "type": "enum",

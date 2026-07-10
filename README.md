@@ -24,42 +24,54 @@ This suite contains **130 benchmarks across five tiers** of increasing complexit
 
 ## Measurement Methodology
 
-The Tier 1 and Tier 2 benchmarks measure **cold-cache kernel execution time at a boosted GPU clock** — a well-defined, reproducible hardware state, free of the two artifacts that dominate naive GPU timing: an idle GPU's *lowered clock* (making a launch look artificially slow) and a re-run kernel's *cache-resident data* (making memory-bound kernels look artificially fast). The methodology is split between the **benchmarks** (self-contained binaries that produce one correct measurement) and the **harness** (the `gpubench` runner, which orchestrates sweeps, repetition, and result collection).
+The Tier 1 and Tier 2 benchmarks measure **cold-cache kernel execution time at a boosted GPU clock** — a well-defined, reproducible hardware state, free of the two artifacts that dominate naive GPU timing: an idle GPU's *lowered clock* (making a launch look artificially slow) and a re-run kernel's *cache-resident data* (making memory-bound kernels look artificially fast).
 
-### Benchmark principles
+The rules split cleanly by implementation language: everything that matters when writing the **C/C++/HIP/CUDA benchmark code** is a *benchmark rule*; everything that matters when writing the **Go runner (`gpubench`)** is a *harness rule*. A benchmark binary is a complete, correct measurement on its own; the harness only decides which binaries to run, with which parameters, how many times, and where the output goes.
 
-Every C++ benchmark builds on shared measurement code (`common/bench_timing.h` + `common/bench_warmup.h`) so these guarantees are implemented once and hold uniformly:
+### Benchmark rules (C/C++/HIP/CUDA)
 
-1. **One measurement per execution.** A benchmark binary executes its operation **exactly once** and times it — there is no in-program warmup or iteration loop. The single run is the **full algorithm**: an iterative benchmark still runs its complete algorithm (BFS its whole traversal, k-means its whole `max_iter` refinement, a stencil all its timesteps) — "once" means the algorithm is not *repeated*, not that it is truncated.
+**Sourcing and code structure:**
 
-2. **Cold cache, warm clock.** Immediately before the timed operation, the benchmark runs a single **vector-add warmer** — a grid-stride read-modify-write kernel over a scratch buffer **larger than the last-level cache** (768 MB, above the MI300X 256 MB Infinity/MALL cache and far above any NVIDIA L2):
+1. **Use the original, unmodified benchmark.** Tier 2 kernels are taken from their upstream suites (Rodinia, SHOC, PolyBench, Parboil, …) with kernel code kept faithful to the original. Modifications are limited to what portability or correctness demands (e.g. fixing an out-of-bounds read that faults on AMD), never to change the algorithm being measured.
+
+2. **HIP and CUDA share one source.** Each benchmark is a single `.hip` file that compiles under both `hipcc` (AMD) and `nvcc` (NVIDIA) via `common/hip_cuda_compat.h`. There are no per-vendor copies that could diverge or acquire vendor-specific overhead.
+
+3. **Minimize common code; keep it header-only.** The shared infrastructure is three headers (`common/hip_cuda_compat.h`, `common/bench_timing.h`, `common/bench_warmup.h`) — nothing to build or link separately, so every benchmark compiles standalone with one compiler invocation.
+
+**Measurement:**
+
+4. **One measurement per execution.** A benchmark binary executes its operation **exactly once** and times it — no in-program warmup or iteration loop. The single run is the **full algorithm**: an iterative benchmark still runs its complete algorithm (BFS its whole traversal, k-means its whole `max_iter` refinement, a stencil all its timesteps) — "once" means the algorithm is not *repeated*, not that it is truncated.
+
+5. **Cold cache, warm clock.** Immediately before the timed operation, the benchmark runs a single **vector-add warmer** — a grid-stride read-modify-write kernel over a scratch buffer **larger than the last-level cache** (768 MB, above the MI300X 256 MB Infinity/MALL cache and far above any NVIDIA L2):
 
    - Its sustained ALU + memory traffic **boosts the clock** up from idle.
    - One pass over the >LLC buffer **evicts the benchmark's working set** from the last-level cache; because the warmer touches *different data with a different kernel*, it never warms the benchmark's own buffers.
 
-   The timed operation therefore starts cold-cache at a boosted clock. (There is no vendor cache-flush API — NVIDIA exposes only `cudaCtxResetPersistingL2Cache` and AMD flushes at dispatch coherence boundaries — so the over-sized-buffer eviction is the portable idiom.) The warmer is controlled by one measurement parameter:
+   The timed operation therefore starts cold-cache at a boosted clock. (There is no vendor cache-flush API — NVIDIA exposes only `cudaCtxResetPersistingL2Cache` and AMD flushes at dispatch coherence boundaries — so the over-sized-buffer eviction is the portable idiom.) The warmer is controlled by one measurement parameter, read by the benchmark from its environment:
 
    | Parameter | Env var | Default | Meaning |
    |-----------|---------|---------|---------|
    | `vector_add_warmup` | `BENCH_PARAM_vector_add_warmup` | `true` | When on, the vector-add warmer boosts the clock and evicts the LLC just before the timed run. Set `false` to time the operation as-is (warm cache, whatever clock state the GPU is in). |
 
-3. **The timed bracket contains only the operation under test.** Host-side setup, `hipMalloc`, initial Host→Device uploads, and result verification all happen outside the timed region.
+6. **The timed bracket contains only the operation under test.** Host-side setup, `hipMalloc`, initial Host→Device uploads, and result verification all happen outside the timed region.
 
-4. **Dual timing, raw output.** The timed run records both the **GPU event time** (`hipEvent`/`cudaEvent`) and the **host wall-clock time** of the same launch, so scheduling/launch overhead is visible but separable. Benchmarks never compute GFLOPS, GB/s, or latency — they emit raw time(s) plus the work-descriptor parameters as JSON lines, and all derived metrics are computed downstream from the database. A multi-kernel benchmark emits **one record per kernel** (accumulated across that kernel's launches within the run), and `summary.total_time_ms` is their sum; data reuse *between* kernels within the run (kernel B reading kernel A's output) is left intact — it is part of the algorithm being measured; only the state *entering* the run is cold.
+7. **Dual timing, raw output.** The timed run records both the **GPU event time** (`hipEvent`/`cudaEvent`) and the **host wall-clock time** of the same launch, so scheduling/launch overhead is visible but separable. Benchmarks never compute GFLOPS, GB/s, or latency — they emit raw time(s) plus the work-descriptor parameters as JSON lines on stdout, and all derived metrics are computed downstream. A multi-kernel benchmark emits **one record per kernel** (accumulated across that kernel's launches within the run), and `summary.total_time_ms` is their sum; data reuse *between* kernels within the run (kernel B reading kernel A's output) is left intact — it is part of the algorithm being measured; only the state *entering* the run is cold.
 
-5. **Deterministic, equivalent runs.** Benchmarks that mutate their inputs re-initialize device state before the timed run, so the measured work is identical on every execution.
+8. **Deterministic, equivalent runs.** Benchmarks that mutate their inputs re-initialize device state before the timed run, so the measured work is identical on every execution.
 
-6. **Every declared parameter drives execution.** A parameter in `params.json` is read by the benchmark and changes what runs; parameters that would merely be echoed into records are not declared.
+9. **Every declared parameter drives execution.** A parameter in `params.json` is read by the benchmark and changes what runs; parameters that would merely be echoed into records are not declared.
 
-### Harness principles
+### Harness rules (Go, `gpubench`)
 
-The `gpubench` runner orchestrates the benchmarks without altering what they measure:
+1. **Orchestrate, never alter.** The harness selects parameter configurations, launches benchmark processes with `BENCH_PARAM_*` environment variables, and stores their stdout — it contains no measurement logic and never post-processes a time.
 
-1. **Repetition = process re-execution.** Because each benchmark execution is one complete, independent measurement, `gpubench run --reps N` simply runs the binary N times from scratch (fresh `hipMalloc`, fresh context, fresh clock state) — every sample is fully independent, capturing process- and allocation-level variance. Take the **minimum** GPU time across reps for the least-perturbed sample; use higher rep counts only when characterizing run-to-run variance itself.
+2. **Repetition = process re-execution.** Because each benchmark execution is one complete, independent measurement, `gpubench run --reps N` simply runs the binary N times from scratch (fresh `hipMalloc`, fresh context, fresh clock state) — every sample is fully independent, capturing process- and allocation-level variance. Take the **minimum** GPU time across reps for the least-perturbed sample; use higher rep counts only when characterizing run-to-run variance itself.
 
-2. **Measurement controls are fixed, not swept.** `vector_add_warmup` is a measurement control, not a workload parameter, so it is **not** part of the non-scaling sweep — it is fixed for a whole run to its default unless overridden globally: `gpubench run --vector-add-warmup true|false`. The value used is recorded per run in the database.
+3. **Measurement controls are fixed, not swept.** `vector_add_warmup` is a measurement control, not a workload parameter, so it is excluded from the non-scaling cartesian sweep — it is fixed for a whole run to its default unless overridden globally: `gpubench run --vector-add-warmup true|false`. The value used is recorded per run in the database.
 
-3. **Traces capture only the real kernels.** During NVBit trace collection the harness forces `vector_add_warmup=false` so a trace contains exactly the kernel(s) under test and never the warmer.
+4. **Store raw, derive downstream.** Every run's parameters, per-kernel times, and summary land in SQLite exactly as emitted; GFLOPS/GB/s/latency are computed later by analysis scripts, never at collection time.
+
+5. **Traces capture only the real kernels.** During NVBit trace collection the harness forces `vector_add_warmup=false` so a trace contains exactly the kernel(s) under test and never the warmer.
 
 ---
 

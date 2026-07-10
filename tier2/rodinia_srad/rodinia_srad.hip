@@ -106,25 +106,27 @@ srad_cuda_1(
   __shared__ float  west[BLOCK_SIZE][BLOCK_SIZE];
 
   //load data to shared memory
-  north[ty][tx] = J_cuda[index_n];
-  south[ty][tx] = J_cuda[index_s];
-  if ( by == 0 ){
-  north[ty][tx] = J_cuda[BLOCK_SIZE * bx + tx];
-  }
-  else if ( by == gridDim.y - 1 ){
-  south[ty][tx] = J_cuda[cols * BLOCK_SIZE * (gridDim.y - 1) + BLOCK_SIZE * bx + cols * ( BLOCK_SIZE - 1 ) + tx];
-  }
+  // NOTE: the original Rodinia srad_v2 issues these neighbour reads
+  // unconditionally and then overwrites the border blocks afterwards, which
+  // performs an out-of-bounds read of J_cuda at the image edges (index_n/_w
+  // go negative on the top/left borders, index_s/_e past the end on the
+  // bottom/right). NVIDIA tolerates the OOB read; AMD (MI300X) faults with an
+  // illegal memory access. Selecting the index with a ternary avoids issuing
+  // the out-of-bounds access while producing identical results.
+  north[ty][tx] = ( by == 0 )
+                  ? J_cuda[BLOCK_SIZE * bx + tx]
+                  : J_cuda[index_n];
+  south[ty][tx] = ( by == gridDim.y - 1 )
+                  ? J_cuda[cols * BLOCK_SIZE * (gridDim.y - 1) + BLOCK_SIZE * bx + cols * ( BLOCK_SIZE - 1 ) + tx]
+                  : J_cuda[index_s];
    __syncthreads();
 
-  west[ty][tx] = J_cuda[index_w];
-  east[ty][tx] = J_cuda[index_e];
-
-  if ( bx == 0 ){
-  west[ty][tx] = J_cuda[cols * BLOCK_SIZE * by + cols * ty];
-  }
-  else if ( bx == gridDim.x - 1 ){
-  east[ty][tx] = J_cuda[cols * BLOCK_SIZE * by + BLOCK_SIZE * ( gridDim.x - 1) + cols * ty + BLOCK_SIZE-1];
-  }
+  west[ty][tx] = ( bx == 0 )
+                 ? J_cuda[cols * BLOCK_SIZE * by + cols * ty]
+                 : J_cuda[index_w];
+  east[ty][tx] = ( bx == gridDim.x - 1 )
+                 ? J_cuda[cols * BLOCK_SIZE * by + BLOCK_SIZE * ( gridDim.x - 1) + cols * ty + BLOCK_SIZE-1]
+                 : J_cuda[index_e];
 
   __syncthreads();
 
@@ -261,19 +263,18 @@ srad_cuda_2(
 
     __syncthreads();
 
-	south_c[ty][tx] = C_cuda[index_s];
-
-	if ( by == gridDim.y - 1 ){
-	south_c[ty][tx] = C_cuda[cols * BLOCK_SIZE * (gridDim.y - 1) + BLOCK_SIZE * bx + cols * ( BLOCK_SIZE - 1 ) + tx];
-	}
+	// Same OOB-read avoidance as srad_cuda_1: index_s/index_e run past the end
+	// of C_cuda on the bottom/right borders. Select the in-bounds index rather
+	// than reading OOB and overwriting (which faults on AMD).
+	south_c[ty][tx] = ( by == gridDim.y - 1 )
+	                  ? C_cuda[cols * BLOCK_SIZE * (gridDim.y - 1) + BLOCK_SIZE * bx + cols * ( BLOCK_SIZE - 1 ) + tx]
+	                  : C_cuda[index_s];
 	__syncthreads();
 
 
-	east_c[ty][tx] = C_cuda[index_e];
-
-	if ( bx == gridDim.x - 1 ){
-	east_c[ty][tx] = C_cuda[cols * BLOCK_SIZE * by + BLOCK_SIZE * ( gridDim.x - 1) + cols * ty + BLOCK_SIZE-1];
-	}
+	east_c[ty][tx] = ( bx == gridDim.x - 1 )
+	                 ? C_cuda[cols * BLOCK_SIZE * by + BLOCK_SIZE * ( gridDim.x - 1) + cols * ty + BLOCK_SIZE-1]
+	                 : C_cuda[index_e];
 
     __syncthreads();
 

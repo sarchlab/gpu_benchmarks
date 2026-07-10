@@ -21,8 +21,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
-//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
-//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // carrying the GPU event time (time_ms) and host wall-clock time
@@ -102,9 +100,6 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Invalid precision '%s' (use half, float, double)\n", precision);
         return 1;
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     int NI = N, NJ = N;
     size_t matSize = (size_t)NI * NJ * sizeof(float);
 
@@ -144,13 +139,12 @@ int main(int argc, char** argv) {
     // read-only and output B is fully overwritten every launch, so repeated
     // launches perform identical work — no per-iteration reset needed.
     double total_gpu_ms =
-        bench_run_loop("convolution2D_kernel", num_warmup, num_iters, params, [&]() {
+        bench_run_once("convolution2D_kernel", params, [&]() {
             convolution2D_kernel<<<grid, block>>>(d_A, d_B, NI, NJ);
         });
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     HIP_CHECK(hipFree(d_A));
     HIP_CHECK(hipFree(d_B));

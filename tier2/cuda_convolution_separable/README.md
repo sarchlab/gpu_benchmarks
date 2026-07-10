@@ -47,8 +47,8 @@ Environment variables override argv:
 | `BENCH_PARAM_width` | Image width | 4096 |
 | `BENCH_PARAM_height` | Image height | 4096 |
 | `BENCH_PARAM_radius` | Filter kernel radius | 8 |
-| `BENCH_PARAM_num_warmup` | Warmup passes (untimed) | 3 |
-| `BENCH_PARAM_num_iters` | Timed passes, each recorded | 7 |
+| `BENCH_PARAM_warmup` | Warmup passes (untimed) | 3 |
+| `BENCH_PARAM_iteration` | Timed passes, each recorded | 7 |
 
 ## Output
 

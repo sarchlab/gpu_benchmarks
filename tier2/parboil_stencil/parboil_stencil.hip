@@ -20,8 +20,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_grid_dim, BENCH_PARAM_num_timesteps, BENCH_PARAM_block_size
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line
 // carrying the stencil kernel's accumulated GPU event time and host
@@ -99,8 +97,6 @@ int main(int argc, char** argv) {
     if (env_val) num_timesteps = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     int nx = grid_dim;
     int ny = grid_dim;
@@ -116,8 +112,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Grid: %d×%d×%d  |  Timesteps/pass: %d  |  Passes: %d warmup + %d timed\n\n",
-            nx, ny, nz, num_timesteps, num_warmup, num_iters);
+    fprintf(stderr, "Grid: %d×%d×%d  |  Timesteps/pass: %d\n\n",
+            nx, ny, nz, num_timesteps);
 
     // Host allocation and initialization
     float* h_data = (float*)malloc(total * sizeof(float));
@@ -139,8 +135,8 @@ int main(int argc, char** argv) {
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"grid_dim\":%d,\"num_timesteps\":%d,\"iterations\":%d,\"block_size\":%d",
-             grid_dim, num_timesteps, num_iters, block_size);
+             "\"grid_dim\":%d,\"num_timesteps\":%d,\"block_size\":%d",
+             grid_dim, num_timesteps, block_size);
 
     // Per-pass accumulator: each pass launches the stencil num_timesteps
     // times (ping-pong); the accumulated GPU/host time becomes that pass's
@@ -158,6 +154,10 @@ int main(int argc, char** argv) {
         bench_lap_reset(&acc_stencil);
         float* src = d_A;
         float* dst = d_B;
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
         for (int t = 0; t < num_timesteps; ++t) {
             bench_lap_add(&acc_stencil, bench_time_op(&timer, [&]() {
                 stencil3d<<<grid, block>>>(src, dst, nx, ny, nz, c0, c1);
@@ -167,23 +167,18 @@ int main(int argc, char** argv) {
         }
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_stencil_pass();
-    }
+    run_stencil_pass();
 
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_stencil_pass();
-        bench_emit_iter("stencil3d", i, &acc_stencil, params);
-        total_gpu_ms += acc_stencil.gpu_ms;
-        fprintf(stderr, "pass %d: stencil3d gpu = %.3f ms, host = %.3f ms\n",
-                i, acc_stencil.gpu_ms, acc_stencil.host_ms);
-    }
+    bench_emit_iter("stencil3d", 0, &acc_stencil, params);
+    total_gpu_ms += acc_stencil.gpu_ms;
+    fprintf(stderr, "stencil3d gpu = %.3f ms, host = %.3f ms\n",
+            acc_stencil.gpu_ms, acc_stencil.host_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes (%d timesteps/pass)\n",
-            total_gpu_ms, num_iters, num_timesteps);
+    fprintf(stderr, "Total GPU time: %.3f ms (%d timesteps/pass)\n",
+            total_gpu_ms, num_timesteps);
 
     HIP_CHECK(hipFree(d_A));
     HIP_CHECK(hipFree(d_B));

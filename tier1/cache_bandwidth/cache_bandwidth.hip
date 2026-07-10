@@ -28,8 +28,6 @@
  * Environment variables (override argv):
  *   BENCH_PARAM_working_set_bytes
  *   BENCH_PARAM_mode             ("shared" | "private")
- *   BENCH_PARAM_num_warmup       (warmup launches, default 3)
- *   BENCH_PARAM_num_iters        (timed launches, each recorded, default 7)
  *
  * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
  * the GPU event time and host wall-clock time, then a summary whose
@@ -190,9 +188,6 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipMalloc(&d_sink, (size_t)num_blocks * tpb * sizeof(float)));
     HIP_CHECK(hipMemset(d_buf, 1, alloc_bytes));
 
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     char params[256];
     snprintf(params, sizeof(params),
              "\"working_set_bytes\":%zu,\"mode\":\"%s\","
@@ -200,17 +195,14 @@ int main(int argc, char *argv[])
              working_set_bytes, shared_mode ? "shared" : "private",
              blocks_per_cu, num_blocks, iters);
 
-    // Warmup (each launch synced, so the working set is resident before the
-    // first timed iteration) + timed iterations, each recorded individually.
     double total_gpu_ms =
-        bench_run_loop("bw_read_kernel", num_warmup, num_iters, params, [&]() {
+        bench_run_once("bw_read_kernel", params, [&]() {
             bw_read_kernel<<<dim3(num_blocks), dim3(tpb)>>>(
                 d_buf, vecs_per_window, windows, iters, shared_mode, d_sink);
         });
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     HIP_CHECK(hipFree(d_buf));
     HIP_CHECK(hipFree(d_sink));

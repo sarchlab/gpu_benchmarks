@@ -47,8 +47,8 @@ make PLATFORM=metal
 | `BENCH_PARAM_options` | 512 | Number of options |
 | `BENCH_PARAM_steps` | 1024 | Binomial tree steps per option |
 | `BENCH_PARAM_precision` | float | Precision label (float, double, half; recorded in params) |
-| `BENCH_PARAM_num_warmup` | 3 | Warmup launches (untimed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed launches, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup launches (untimed) |
+| `BENCH_PARAM_iteration` | 7 | Timed launches, each recorded |
 
 ## Output
 

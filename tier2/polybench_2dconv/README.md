@@ -71,8 +71,8 @@ make PLATFORM=metal   # Apple Metal (clang++)
 | `BENCH_PARAM_size` | 2048 | Matrix dimension N×N (overrides `--size`) |
 | `BENCH_PARAM_block_size` | 256 | Reported thread-block size |
 | `BENCH_PARAM_precision` | float | Precision label (`half`, `float`, `double`) |
-| `BENCH_PARAM_num_warmup` | 3 | Warmup launches (untimed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed launches, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup launches (untimed) |
+| `BENCH_PARAM_iteration` | 7 | Timed launches, each recorded |
 
 ## Output
 
@@ -104,5 +104,5 @@ Total GPU time: 22.470 ms over 7 iterations
 - Input is initialized with `rand() % 100 / 10.0f` using seed 42 (reproducible).
 - Metal: shader source is compiled at runtime from `polybench_2dconv.metal`
   (must reside alongside the binary).
-- The benchmark runs `BENCH_PARAM_num_warmup` warmup launches (default 3)
+- The benchmark runs `BENCH_PARAM_warmup` warmup launches (default 3)
   before the timed iterations.

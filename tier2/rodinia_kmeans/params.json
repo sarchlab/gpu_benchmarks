@@ -58,12 +58,13 @@
       ]
     },
     {
-      "name": "threads_per_block",
-      "description": "Threads per block; fixed at THREADS_PER_DIM^2=256 in the original geometry",
-      "type": "int",
-      "default": 256,
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
       "values": [
-        256
+        "true",
+        "false"
       ]
     }
   ],

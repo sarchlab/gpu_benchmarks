@@ -15,8 +15,6 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_vertices, BENCH_PARAM_avg_degree, BENCH_PARAM_block_size,
 //   BENCH_PARAM_verify (true|false|skip)
-//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
-//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // carrying the GPU event time and host wall-clock time, then a summary whose
@@ -224,9 +222,6 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Invalid verify '%s' (use true, false, skip)\n", verify);
         return EXIT_FAILURE;
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     int N = vertices;
     int D = avg_degree;
 
@@ -236,8 +231,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Triangle Counting  |  Vertices: %d  |  Avg Degree: %d  |  "
-            "Iterations: %d warmup + %d timed\n\n", N, D, num_warmup, num_iters);
+    fprintf(stderr, "Triangle Counting  |  Vertices: %d  |  Avg Degree: %d\n\n",
+            N, D);
 
     // Generate graph
     fprintf(stderr, "Generating random graph...\n");
@@ -291,14 +286,13 @@ int main(int argc, char** argv) {
     // edge_counts element on each launch, so no state reset is needed
     // between iterations.
     double total_gpu_ms =
-        bench_run_loop("triangle_count_kernel", num_warmup, num_iters, params, [&]() {
+        bench_run_once("triangle_count_kernel", params, [&]() {
             triangle_count_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
                 d_row_ptr, d_col_idx, d_edge_counts, num_edges, d_edge_src, d_edge_dst);
         });
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Sum up triangle counts from GPU
     std::vector<long long> h_edge_counts(num_edges);

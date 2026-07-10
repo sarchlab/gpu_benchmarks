@@ -8,8 +8,6 @@
 // Parameters are read from BENCH_PARAM_* environment variables,
 // with command-line --flags as fallback:
 //   BENCH_PARAM_array_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
-//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
-//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // carrying the GPU event time and host wall-clock time, then a summary whose
@@ -95,8 +93,6 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     // Validate precision against the supported set; params must carry
     // canonical literals, never raw env/argv text.
@@ -154,13 +150,12 @@ int main(int argc, char** argv) {
     // reads b and c and overwrites a from scratch, so repeated launches
     // perform identical work — no state reset needed.
     double total_gpu_ms =
-        bench_run_loop("triad_kernel", num_warmup, num_iters, params, [&]() {
+        bench_run_once("triad_kernel", params, [&]() {
             triad_kernel<<<dim3(grid), dim3(block_size)>>>(d_a, d_b, d_c, scalar, N);
         });
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Verify correctness
     HIP_CHECK(hipMemcpy(h_a, d_a, bytes, hipMemcpyDeviceToHost));

@@ -9,7 +9,7 @@ Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parbo
 - Square N×N single-precision matrix multiply: **C = alpha·A·B + beta·C**
 - Default: N=1024, alpha=1.5, beta=1.2
 - Tiled kernel: 16×16 thread tiles load sub-matrices into shared/threadgroup memory to improve cache reuse
-- `BENCH_PARAM_num_warmup` warmup launches (default 3), then `BENCH_PARAM_num_iters` timed launches (default 7), each recorded individually
+- `BENCH_PARAM_warmup` warmup launches (default 3), then `BENCH_PARAM_iteration` timed launches (default 7), each recorded individually
 - GFLOPS = 2·N³ / time\_sec / 1e9 (derived downstream from `time_ms` and params)
 
 ## Files
@@ -36,7 +36,7 @@ make PLATFORM=metal
 ```bash
 ./parboil_sgemm                      # defaults: 1024×1024
 ./parboil_sgemm --size 2048
-BENCH_PARAM_num_iters=10 ./parboil_sgemm --size 512
+BENCH_PARAM_iteration=10 ./parboil_sgemm --size 512
 ```
 
 ## Output

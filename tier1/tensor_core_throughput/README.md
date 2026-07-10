@@ -50,8 +50,8 @@ printed by the binary.
 
 ## Methodology
 
-- `BENCH_PARAM_num_warmup` (default 3) warmup iterations followed by
-  `BENCH_PARAM_num_iters` (default 7) timed iterations, each recorded
+- `BENCH_PARAM_warmup` (default 3) warmup iterations followed by
+  `BENCH_PARAM_iteration` (default 7) timed iterations, each recorded
   individually.
 - TOPS is derived downstream from each record's `time_ms` and `matrix_dim`:
   `TOPS = 2 × M × N × K / time_s / 10¹²`
@@ -64,8 +64,8 @@ printed by the binary.
 |-----------|---------|-------------|
 | `BENCH_PARAM_matrix_dim` (or argv[1]) | 4096 | Square matrix dimension M=N=K (multiple of 16) |
 | `BENCH_PARAM_precision` | fp16 | WMMA fragment precision (`fp16`, `tf32`, `all`) |
-| `BENCH_PARAM_num_warmup` | 3 | Warm-up kernel launches (not timed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed kernel launches, each recorded individually |
+| `BENCH_PARAM_warmup` | 3 | Warm-up kernel launches (not timed) |
+| `BENCH_PARAM_iteration` | 7 | Timed kernel launches, each recorded individually |
 
 ## Requirements
 

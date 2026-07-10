@@ -113,8 +113,8 @@ iteration plus a final summary:
 | `BENCH_PARAM_buffer_size_mb` (or argv[1]) | 256 | Array size in MiB |
 | `BENCH_PARAM_flops_per_byte` | 4.0 | Target FLOP/byte ratio for this invocation |
 | `BENCH_PARAM_threads_per_block` | 256 | Threads per block |
-| `BENCH_PARAM_num_warmup` | 3 | Warmup runs (not timed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed runs, each recorded individually |
+| `BENCH_PARAM_warmup` | 3 | Warmup runs (not timed) |
+| `BENCH_PARAM_iteration` | 7 | Timed runs, each recorded individually |
 
 ## Operational Intensity Calculation
 

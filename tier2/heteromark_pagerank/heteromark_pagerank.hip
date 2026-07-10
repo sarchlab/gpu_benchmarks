@@ -13,8 +13,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_vertices, BENCH_PARAM_pr_iterations, BENCH_PARAM_damping_factor
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
 // pagerank_kernel carrying the accumulated GPU event time of all PageRank
@@ -188,9 +186,6 @@ int main(int argc, char** argv) {
     if (env_val) pr_iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_damping_factor");
     if (env_val) damping_factor = atof(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     int N       = vertices;
     int prIters = pr_iterations;
     float damping = (float)damping_factor;
@@ -201,8 +196,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Vertices: %d  |  PR iterations: %d  |  Warmup: %d\n\n",
-            N, prIters, num_warmup);
+    fprintf(stderr, "Vertices: %d  |  PR iterations: %d\n\n",
+            N, prIters);
 
     // Generate synthetic graph
     std::vector<int> rowPtr, colIdx, outDegree;
@@ -253,6 +248,11 @@ int main(int argc, char** argv) {
         for (int i = 0; i < N; ++i) h_pr[i] = 1.0f / (float)N;
         HIP_CHECK(hipMemcpy(d_prOld, h_pr.data(), N * sizeof(float), hipMemcpyHostToDevice));
 
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         for (int it = 0; it < prIters; ++it) {
             bench_lap_add(&acc_pagerank, bench_time_op(&timer, [&]() {
                 pagerank_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
@@ -266,23 +266,16 @@ int main(int argc, char** argv) {
         }
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_pagerank_pass();
-    }
-
+    run_pagerank_pass();
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_pagerank_pass();
-        bench_emit_iter("pagerank_kernel", i, &acc_pagerank, params);
-        total_gpu_ms += acc_pagerank.gpu_ms;
-        fprintf(stderr, "pass %d: pagerank_kernel gpu = %.3f ms, host = %.3f ms\n",
-                i, acc_pagerank.gpu_ms, acc_pagerank.host_ms);
-    }
+    bench_emit_iter("pagerank_kernel", 0, &acc_pagerank, params);
+    total_gpu_ms += acc_pagerank.gpu_ms;
+    fprintf(stderr, "pagerank_kernel gpu = %.3f ms, host = %.3f ms\n",
+            acc_pagerank.gpu_ms, acc_pagerank.host_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
     // Verification: compare GPU result against CPU reference

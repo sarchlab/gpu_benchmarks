@@ -23,8 +23,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_cols, BENCH_PARAM_rows, BENCH_PARAM_pyramid_height
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
 // dynproc_kernel carrying the accumulated GPU event time of all pyramidal
@@ -178,8 +176,6 @@ int main(int argc, char** argv) {
     env_val = getenv("BENCH_PARAM_cols");           if (env_val) cols = atoi(env_val);
     env_val = getenv("BENCH_PARAM_rows");           if (env_val) rows = atoi(env_val);
     env_val = getenv("BENCH_PARAM_pyramid_height"); if (env_val) pyramid_height = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     // pyramid_height must keep the small-block size positive.
     if (pyramid_height * HALO * 2 >= BLOCK_SIZE) {
@@ -242,6 +238,11 @@ int main(int argc, char** argv) {
         bench_lap_reset(&acc);
         HIP_CHECK(hipMemcpy(gpuResult[0], data, row_bytes, hipMemcpyHostToDevice));
         int src = 1, dst = 0;
+        /* Cold-cache calibration: evict the LLC and hold the clock high before
+         * the pass's first timed launch, so it runs cold. No-op when
+         * BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         for (int t = 0; t < rows - 1; t += pyramid_height) {
             int temp = src; src = dst; dst = temp;
             int it = MIN(pyramid_height, rows - t - 1);
@@ -254,18 +255,12 @@ int main(int argc, char** argv) {
         final_ret = dst;
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_pass();
-    }
-
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_pass();
-        bench_emit_iter("dynproc_kernel", i, &acc, params);
-        total_gpu_ms += acc.gpu_ms;
-        fprintf(stderr, "pass %d: dynproc_kernel gpu = %.3f ms, host = %.3f ms\n",
-                i, acc.gpu_ms, acc.host_ms);
-    }
+    run_pass();
+    bench_emit_iter("dynproc_kernel", 0, &acc, params);
+    total_gpu_ms += acc.gpu_ms;
+    fprintf(stderr, "dynproc_kernel gpu = %.3f ms, host = %.3f ms\n",
+            acc.gpu_ms, acc.host_ms);
 
     bench_timer_destroy(&timer);
 
@@ -283,7 +278,7 @@ int main(int argc, char** argv) {
     if (ok) fprintf(stderr, "Verification PASSED (%d x %d grid)\n", rows, cols);
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n", total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     HIP_CHECK(hipFree(gpuWall));
     HIP_CHECK(hipFree(gpuResult[0]));

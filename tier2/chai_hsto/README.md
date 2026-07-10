@@ -42,8 +42,8 @@ BENCH_PARAM_size=1048576 ./chai_hsto # env vars override argv
 ```
 
 Environment variables: `BENCH_PARAM_size`, `BENCH_PARAM_num_bins`,
-`BENCH_PARAM_block_size`, plus `BENCH_PARAM_num_warmup` (warmup passes,
-default 3) and `BENCH_PARAM_num_iters` (timed passes, each recorded,
+`BENCH_PARAM_block_size`, plus `BENCH_PARAM_warmup` (warmup passes,
+default 3) and `BENCH_PARAM_iteration` (timed passes, each recorded,
 default 7).
 
 ## Output

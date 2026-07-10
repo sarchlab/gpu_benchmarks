@@ -7,8 +7,6 @@
 // with command-line --flags as fallback:
 //   BENCH_PARAM_array_size_mb, BENCH_PARAM_block_size,
 //   BENCH_PARAM_transfer_mode (read | write | readwrite)
-//   BENCH_PARAM_num_warmup   (warmup launches per kernel, default 3)
-//   BENCH_PARAM_num_iters    (timed launches per kernel, each recorded, default 7)
 //
 // Output (stdout): per enabled kernel, one {"type":"kernel",...} JSON line per
 // timed iteration carrying the GPU event time and host wall-clock time, then a
@@ -107,8 +105,6 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_transfer_mode");
     if (env_val) transfer_mode = env_val;
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     // Validate transfer_mode against its known set and canonicalize it so the
     // params JSON never echoes raw env/argv text.
@@ -167,8 +163,7 @@ int main(int argc, char** argv) {
     if (run_read) {
         // readOnly_kernel only reads d_input and overwrites d_output;
         // repeated launches perform identical work.
-        total_gpu_ms += bench_run_loop("readOnly_kernel", num_warmup, num_iters,
-                                       params, [&]() {
+        total_gpu_ms += bench_run_once("readOnly_kernel", params, [&]() {
             readOnly_kernel<<<dim3(num_blocks), dim3(block_size)>>>(d_input, d_output, (int)N);
         });
     }
@@ -176,8 +171,7 @@ int main(int argc, char** argv) {
     // --- Write-only bandwidth ---
     if (run_write) {
         // writeOnly_kernel overwrites d_output from scratch every launch.
-        total_gpu_ms += bench_run_loop("writeOnly_kernel", num_warmup, num_iters,
-                                       params, [&]() {
+        total_gpu_ms += bench_run_once("writeOnly_kernel", params, [&]() {
             writeOnly_kernel<<<dim3(num_blocks), dim3(block_size)>>>(d_output, (int)N);
         });
     }
@@ -195,15 +189,13 @@ int main(int argc, char** argv) {
         // readWrite_kernel scales data in place by 1.0001; the float multiply
         // is value-independent (no control flow or memory-access pattern
         // depends on the data), so no per-iteration reset is needed.
-        total_gpu_ms += bench_run_loop("readWrite_kernel", num_warmup, num_iters,
-                                       params, [&]() {
+        total_gpu_ms += bench_run_once("readWrite_kernel", params, [&]() {
             readWrite_kernel<<<dim3(num_blocks), dim3(block_size)>>>(d_input, (int)N);
         });
     }
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms (%d iterations per kernel)\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_output));

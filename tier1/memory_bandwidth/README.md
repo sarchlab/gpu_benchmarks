@@ -105,8 +105,8 @@ per timed iteration of each selected direction, plus a final summary:
 | `BENCH_PARAM_buffer_size_mb` (or argv[1]) | 256 | Transfer buffer size in MiB |
 | `BENCH_PARAM_transfer_type` | all | Direction(s) to run (`h2d`, `d2h`, `d2d`, `all`) |
 | `BENCH_PARAM_use_pinned_memory` | true | Use pinned (page-locked) host memory |
-| `BENCH_PARAM_num_warmup` | 3 | Warm-up transfers per direction (not timed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed transfers per direction, each recorded individually |
+| `BENCH_PARAM_warmup` | 3 | Warm-up transfers per direction (not timed) |
+| `BENCH_PARAM_iteration` | 7 | Timed transfers per direction, each recorded individually |
 
 ## Notes
 

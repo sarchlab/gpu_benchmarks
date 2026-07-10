@@ -37,8 +37,8 @@ restructured for the per-iteration timing harness and JSON output.
 |----------|---------|-------------|
 | `BENCH_PARAM_n_ffts` | 32768 | Number of 512-point FFTs |
 | `BENCH_PARAM_precision` | float | `float` or `double` |
-| `BENCH_PARAM_num_warmup` | 3 | Warmup passes (untimed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup passes (untimed) |
+| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded |
 
 ## Output
 

@@ -8,8 +8,6 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_alpha,
 //   BENCH_PARAM_beta, BENCH_PARAM_precision (one of: half, float, double)
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel launch (mm_kernel_1, mm_kernel_2) carrying its GPU event time
@@ -131,9 +129,6 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     size_t bytes = (size_t)N * N * sizeof(float);
 
     // Print device info
@@ -143,8 +138,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "2MM: D=alpha*A*B+beta*D, E=alpha*C*D+beta*E  |  N=%d  |  "
-            "alpha=%.1f  beta=%.1f  |  %d warmup + %d timed\n\n",
-            N, alpha, beta, num_warmup, num_iters);
+            "alpha=%.1f  beta=%.1f\n\n",
+            N, alpha, beta);
 
     // Host allocations
     float* h_A = (float*)malloc(bytes);
@@ -198,6 +193,11 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_D, h_D, bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_E, h_E, bytes, hipMemcpyHostToDevice));
 
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         // mm_kernel #1: D = alpha*A*B + beta*D
         bench_lap_add(&acc_mm1, bench_time_op(&timer, [&]() {
             mm_kernel<<<grid, block>>>(d_A, d_B, d_D, N, alpha, beta);
@@ -209,24 +209,18 @@ int main(int argc, char** argv) {
         }));
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_2mm_pass();
-    }
+    run_2mm_pass();
 
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_2mm_pass();
-        bench_emit_iter("mm_kernel_1", i, &acc_mm1, params);
-        bench_emit_iter("mm_kernel_2", i, &acc_mm2, params);
-        total_gpu_ms += acc_mm1.gpu_ms + acc_mm2.gpu_ms;
-        fprintf(stderr, "pass %d: mm1 gpu = %.3f ms, mm2 gpu = %.3f ms\n",
-                i, acc_mm1.gpu_ms, acc_mm2.gpu_ms);
-    }
+    bench_emit_iter("mm_kernel_1", 0, &acc_mm1, params);
+    bench_emit_iter("mm_kernel_2", 0, &acc_mm2, params);
+    total_gpu_ms += acc_mm1.gpu_ms + acc_mm2.gpu_ms;
+    fprintf(stderr, "mm1 gpu = %.3f ms, mm2 gpu = %.3f ms\n",
+            acc_mm1.gpu_ms, acc_mm2.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     HIP_CHECK(hipFree(d_A));
     HIP_CHECK(hipFree(d_B));

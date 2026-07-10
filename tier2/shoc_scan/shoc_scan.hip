@@ -9,8 +9,6 @@
 //
 // Environment variables:
 //   BENCH_PARAM_array_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (scan_block_kernel, add_block_sums_kernel) carrying that kernel's
@@ -213,9 +211,6 @@ int main(int argc, char** argv) {
                 precision);
         return EXIT_FAILURE;
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     int N     = array_size;
 
     // Clamp block_size
@@ -271,30 +266,27 @@ int main(int argc, char** argv) {
     auto run_scan_pass = [&]() {
         bench_lap_reset(&acc_scan);
         bench_lap_reset(&acc_add);
+        /* Cold-cache calibration: evict the LLC and hold the clock high before
+         * the pass's first timed launch, so it runs cold. No-op when
+         * BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         scan_recursive(d_output, d_input, N_padded, block_size,
                        &timer, &acc_scan, &acc_add);
     };
 
-    // Warmup
-    for (int w = 0; w < num_warmup; ++w) {
-        run_scan_pass();
-    }
-
-    // Timed passes — each kernel type accumulated separately across all
-    // recursion levels, one record per kernel per pass.
+    // Timed pass — each kernel type accumulated separately across all
+    // recursion levels, one record per kernel.
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_scan_pass();
-        bench_emit_iter("scan_block_kernel",    i, &acc_scan, params);
-        bench_emit_iter("add_block_sums_kernel", i, &acc_add,  params);
-        total_gpu_ms += acc_scan.gpu_ms + acc_add.gpu_ms;
-        fprintf(stderr, "pass %d: scan gpu = %.3f ms, add gpu = %.3f ms\n",
-                i, acc_scan.gpu_ms, acc_add.gpu_ms);
-    }
+    run_scan_pass();
+    bench_emit_iter("scan_block_kernel",    0, &acc_scan, params);
+    bench_emit_iter("add_block_sums_kernel", 0, &acc_add,  params);
+    total_gpu_ms += acc_scan.gpu_ms + acc_add.gpu_ms;
+    fprintf(stderr, "scan gpu = %.3f ms, add gpu = %.3f ms\n",
+            acc_scan.gpu_ms, acc_add.gpu_ms);
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // ---------------------------------------------------------------------------
     // Verification

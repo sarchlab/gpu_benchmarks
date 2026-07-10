@@ -46,7 +46,7 @@ make PLATFORM=metal
 ```bash
 ./rodinia_gaussian                         # defaults: N=512
 ./rodinia_gaussian --size 256
-BENCH_PARAM_num_iters=5 ./rodinia_gaussian --size 1024
+BENCH_PARAM_iteration=5 ./rodinia_gaussian --size 1024
 ```
 
 ### Environment variables
@@ -56,8 +56,8 @@ BENCH_PARAM_num_iters=5 ./rodinia_gaussian --size 1024
 | `BENCH_PARAM_size` | 512 | Matrix dimension N |
 | `BENCH_PARAM_block_size` | 256 | Threads per block (echoed in records) |
 | `BENCH_PARAM_verify` | true | Verification mode (`true`, `false`, `skip`) |
-| `BENCH_PARAM_num_warmup` | 3 | Warmup elimination passes (not recorded) |
-| `BENCH_PARAM_num_iters` | 7 | Timed elimination passes, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup elimination passes (not recorded) |
+| `BENCH_PARAM_iteration` | 7 | Timed elimination passes, each recorded |
 
 ## Output
 

@@ -59,7 +59,7 @@ make clean
 |--------|-------------|---------|
 | `--n N` | Grid size (N×N) | 1024 |
 | `--tsteps T` | Number of time steps per pass | 50 |
-| `--trials K` | Legacy trial count (echoed in params only; the number of timed passes is `BENCH_PARAM_num_iters`) | 3 |
+| `--trials K` | Legacy trial count (echoed in params only; the number of timed passes is `BENCH_PARAM_iteration`) | 3 |
 
 Environment variables override argv:
 
@@ -69,8 +69,8 @@ Environment variables override argv:
 | `BENCH_PARAM_tsteps` | Time steps per pass | 50 |
 | `BENCH_PARAM_trials` | Legacy trial count (echoed in params) | 3 |
 | `BENCH_PARAM_block_size` | Echoed in params | 256 |
-| `BENCH_PARAM_num_warmup` | Warmup passes (untimed) | 3 |
-| `BENCH_PARAM_num_iters` | Timed passes, each recorded | 7 |
+| `BENCH_PARAM_warmup` | Warmup passes (untimed) | 3 |
+| `BENCH_PARAM_iteration` | Timed passes, each recorded | 7 |
 
 ### Examples
 

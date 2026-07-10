@@ -22,8 +22,6 @@
  *   BENCH_PARAM_buffer_size_mb
  *   BENCH_PARAM_transfer_type     (h2d, d2h, d2d, all)
  *   BENCH_PARAM_use_pinned_memory (true, false)
- *   BENCH_PARAM_num_warmup        (warmup copies per direction, default 3)
- *   BENCH_PARAM_num_iters         (timed copies per direction, each recorded, default 7)
  *
  * Output: one {"type":"kernel",...} JSON line per timed copy carrying the
  * GPU event time and host wall-clock time, then a summary whose
@@ -88,9 +86,6 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_use_pinned_memory");
     if (env_val) use_pinned_memory = env_val;
 
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     bool pinned = (strcmp(use_pinned_memory, "false") != 0);
     bool run_h2d = (strcmp(transfer_type, "all") == 0 || strcmp(transfer_type, "h2d") == 0);
     bool run_d2h = (strcmp(transfer_type, "all") == 0 || strcmp(transfer_type, "d2h") == 0);
@@ -107,7 +102,6 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Transfer size: %d MiB (%zu bytes)\n", buffer_mb, bytes);
     fprintf(stderr, "Transfer type: %s\n", transfer_type);
     fprintf(stderr, "Pinned memory: %s\n", use_pinned_memory);
-    fprintf(stderr, "Warmup / iters: %d / %d per direction\n\n", num_warmup, num_iters);
 
     /* Allocate host memory. */
     void *h_src = nullptr;
@@ -145,18 +139,15 @@ int main(int argc, char *argv[])
     double total_gpu_ms = 0.0;
     if (run_h2d) {
         total_gpu_ms += bench_run_memcpy("memcpy_h2d", d_src, h_src, bytes,
-                                         hipMemcpyHostToDevice,
-                                         num_warmup, num_iters, params);
+                                         hipMemcpyHostToDevice, params);
     }
     if (run_d2h) {
         total_gpu_ms += bench_run_memcpy("memcpy_d2h", h_dst, d_src, bytes,
-                                         hipMemcpyDeviceToHost,
-                                         num_warmup, num_iters, params);
+                                         hipMemcpyDeviceToHost, params);
     }
     if (run_d2d) {
         total_gpu_ms += bench_run_memcpy("memcpy_d2d", d_dst, d_src, bytes,
-                                         hipMemcpyDeviceToDevice,
-                                         num_warmup, num_iters, params);
+                                         hipMemcpyDeviceToDevice, params);
     }
 
     bench_emit_summary(total_gpu_ms);

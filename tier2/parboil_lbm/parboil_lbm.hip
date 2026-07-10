@@ -10,8 +10,6 @@
 // Environment variables:
 //   BENCH_PARAM_grid_dim, BENCH_PARAM_block_size, BENCH_PARAM_num_timesteps,
 //   BENCH_PARAM_tau
-//   BENCH_PARAM_num_warmup   (warmup simulation passes, default 3)
-//   BENCH_PARAM_num_iters    (timed simulation passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
 // lbm_collide_stream_kernel carrying the GPU event time and host time
@@ -185,9 +183,6 @@ int main(int argc, char** argv) {
     if (env_val) num_timesteps = atoi(env_val);
     env_val = getenv("BENCH_PARAM_tau");
     if (env_val) tau = (float)atof(env_val);
-    /* BENCH_PARAM_iterations is superseded by BENCH_PARAM_num_iters. */
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     float omega = 1.0f / tau;
     int Nx = grid_dim, Ny = grid_dim, Nz = grid_dim;
@@ -199,8 +194,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "LBM D3Q19  |  Grid: %dx%dx%d = %d  |  Timesteps: %d  |  "
-            "Tau: %.2f  |  Iterations: %d warmup + %d timed\n\n",
-            Nx, Ny, Nz, N, num_timesteps, tau, num_warmup, num_iters);
+            "Tau: %.2f\n\n",
+            Nx, Ny, Nz, N, num_timesteps, tau);
 
     // Initialize equilibrium distributions
     size_t f_bytes = (size_t)Q * N * sizeof(float);
@@ -244,6 +239,11 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_f_src, h_f.data(), f_bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemset(d_f_dst, 0, f_bytes));
 
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         for (int t = 0; t < num_timesteps; ++t) {
             bench_lap_add(&acc_lbm, bench_time_op(&timer, [&]() {
                 lbm_collide_stream_kernel<<<dim3(gridSize), dim3(block_size)>>>(
@@ -255,23 +255,17 @@ int main(int argc, char** argv) {
         }
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_lbm_pass();
-    }
+    run_lbm_pass();
 
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_lbm_pass();
-        bench_emit_iter("lbm_collide_stream_kernel", i, &acc_lbm, params);
-        total_gpu_ms += acc_lbm.gpu_ms;
-        fprintf(stderr, "pass %d: gpu = %.3f ms, host = %.3f ms\n",
-                i, acc_lbm.gpu_ms, acc_lbm.host_ms);
-    }
+    bench_emit_iter("lbm_collide_stream_kernel", 0, &acc_lbm, params);
+    total_gpu_ms += acc_lbm.gpu_ms;
+    fprintf(stderr, "gpu = %.3f ms, host = %.3f ms\n",
+            acc_lbm.gpu_ms, acc_lbm.host_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Verification
     {

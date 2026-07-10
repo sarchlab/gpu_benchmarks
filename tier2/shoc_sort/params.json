@@ -34,21 +34,13 @@
       ]
     },
     {
-      "name": "sort_block_size",
-      "description": "radixSortBlocks CTA size (compile-time fixed, SHOC SORT_BLOCK_SIZE)",
-      "type": "int",
-      "default": 128,
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
       "values": [
-        128
-      ]
-    },
-    {
-      "name": "scan_block_size",
-      "description": "findRadixOffsets/scan/reorderData CTA size (compile-time fixed, SHOC SCAN_BLOCK_SIZE)",
-      "type": "int",
-      "default": 256,
-      "values": [
-        256
+        "true",
+        "false"
       ]
     }
   ],

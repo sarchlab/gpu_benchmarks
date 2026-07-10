@@ -56,7 +56,7 @@ make clean
 ./polybench_bicg
 
 # Custom size and iteration counts
-BENCH_PARAM_num_iters=10 ./polybench_bicg --m 8192 --n 8192
+BENCH_PARAM_iteration=10 ./polybench_bicg --m 8192 --n 8192
 ```
 
 ### Environment variables
@@ -66,8 +66,8 @@ In addition:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BENCH_PARAM_num_warmup` | 3 | Warmup passes (not recorded) |
-| `BENCH_PARAM_num_iters`  | 7 | Timed passes, each recorded  |
+| `BENCH_PARAM_warmup` | 3 | Warmup passes (not recorded) |
+| `BENCH_PARAM_iteration`  | 7 | Timed passes, each recorded  |
 
 ## Output
 

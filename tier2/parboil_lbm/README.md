@@ -23,10 +23,10 @@ Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parbo
 | `BENCH_PARAM_block_size` | Threads per block | 128 |
 | `BENCH_PARAM_num_timesteps` | LBM timesteps per pass | 100 |
 | `BENCH_PARAM_tau` | BGK relaxation time | 0.7 |
-| `BENCH_PARAM_num_warmup` | Warmup passes (untimed) | 3 |
-| `BENCH_PARAM_num_iters` | Timed passes, each recorded | 7 |
+| `BENCH_PARAM_warmup` | Warmup passes (untimed) | 3 |
+| `BENCH_PARAM_iteration` | Timed passes, each recorded | 7 |
 
-`BENCH_PARAM_iterations` is superseded by `BENCH_PARAM_num_iters` and is ignored.
+`BENCH_PARAM_iterations` is superseded by `BENCH_PARAM_iteration` and is ignored.
 
 ## Files
 

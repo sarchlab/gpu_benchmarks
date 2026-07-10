@@ -13,8 +13,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_width, BENCH_PARAM_height, BENCH_PARAM_radius
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (convolution_row_kernel, convolution_col_kernel) carrying that
@@ -254,8 +252,6 @@ int main(int argc, char** argv) {
     if (env_val) height = atoi(env_val);
     env_val = getenv("BENCH_PARAM_radius");
     if (env_val) radius = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     if (radius > MAX_KERNEL_RADIUS) {
         fprintf(stderr, "Error: radius=%d exceeds max=%d\n", radius, MAX_KERNEL_RADIUS);
@@ -271,9 +267,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Image: %dx%d  |  Kernel radius: %d (%d-tap)  |  "
-                    "Iterations: %d warmup + %d timed\n\n",
-            width, height, radius, klen, num_warmup, num_iters);
+    fprintf(stderr, "Image: %dx%d  |  Kernel radius: %d (%d-tap)\n\n",
+            width, height, radius, klen);
 
     // Generate Gaussian-like kernel weights
     std::vector<float> h_kernel((size_t)klen);
@@ -338,6 +333,11 @@ int main(int argc, char** argv) {
         bench_lap_reset(&acc_row);
         bench_lap_reset(&acc_col);
 
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         bench_lap_add(&acc_row, bench_time_op(&timer, [&]() {
             convolution_row_kernel<<<rowGrid, rowBlock, rowSmem, 0>>>(
                 d_input, d_temp, width, height, radius);
@@ -349,24 +349,17 @@ int main(int argc, char** argv) {
         }));
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_conv_pass();
-    }
-
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_conv_pass();
-        bench_emit_iter("convolution_row_kernel", i, &acc_row, params);
-        bench_emit_iter("convolution_col_kernel", i, &acc_col, params);
-        total_gpu_ms += acc_row.gpu_ms + acc_col.gpu_ms;
-        fprintf(stderr, "pass %d: row gpu = %.3f ms, col gpu = %.3f ms\n",
-                i, acc_row.gpu_ms, acc_col.gpu_ms);
-    }
+    run_conv_pass();
+    bench_emit_iter("convolution_row_kernel", 0, &acc_row, params);
+    bench_emit_iter("convolution_col_kernel", 0, &acc_col, params);
+    total_gpu_ms += acc_row.gpu_ms + acc_col.gpu_ms;
+    fprintf(stderr, "row gpu = %.3f ms, col gpu = %.3f ms\n",
+            acc_row.gpu_ms, acc_col.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
     // Verification (for smaller images)

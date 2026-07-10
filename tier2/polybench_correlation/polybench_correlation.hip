@@ -8,8 +8,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (mean_kernel, stddev_kernel, normalize_kernel, correlation_kernel)
@@ -158,8 +156,6 @@ int main(int argc, char** argv) {
         }
         precision = "float";
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     int M = N;
 
@@ -216,6 +212,11 @@ int main(int argc, char** argv) {
 
         HIP_CHECK(hipMemcpy(d_data, h_data, data_bytes, hipMemcpyHostToDevice));
 
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         bench_lap_add(&acc_mean, bench_time_op(&timer, [&]() {
             mean_kernel<<<dim3(blocks_n), dim3(threads1d)>>>(d_data, d_mean, M, N);
         }));
@@ -230,29 +231,23 @@ int main(int argc, char** argv) {
         }));
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_pass();
-    }
+    run_pass();
 
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_pass();
-        bench_emit_iter("mean_kernel",        i, &acc_mean,   params);
-        bench_emit_iter("stddev_kernel",      i, &acc_stddev, params);
-        bench_emit_iter("normalize_kernel",   i, &acc_norm,   params);
-        bench_emit_iter("correlation_kernel", i, &acc_corr,   params);
-        total_gpu_ms += acc_mean.gpu_ms + acc_stddev.gpu_ms +
-                        acc_norm.gpu_ms + acc_corr.gpu_ms;
-        fprintf(stderr, "pass %d: mean=%.4f  stddev=%.4f  normalize=%.4f  "
-                "correlation=%.4f (gpu ms)\n",
-                i, acc_mean.gpu_ms, acc_stddev.gpu_ms,
-                acc_norm.gpu_ms, acc_corr.gpu_ms);
-    }
+    bench_emit_iter("mean_kernel",        0, &acc_mean,   params);
+    bench_emit_iter("stddev_kernel",      0, &acc_stddev, params);
+    bench_emit_iter("normalize_kernel",   0, &acc_norm,   params);
+    bench_emit_iter("correlation_kernel", 0, &acc_corr,   params);
+    total_gpu_ms += acc_mean.gpu_ms + acc_stddev.gpu_ms +
+                    acc_norm.gpu_ms + acc_corr.gpu_ms;
+    fprintf(stderr, "mean=%.4f  stddev=%.4f  normalize=%.4f  "
+            "correlation=%.4f (gpu ms)\n",
+            acc_mean.gpu_ms, acc_stddev.gpu_ms,
+            acc_norm.gpu_ms, acc_corr.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Cleanup
     HIP_CHECK(hipFree(d_data));

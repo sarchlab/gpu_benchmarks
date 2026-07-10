@@ -14,8 +14,6 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_matrix_size, BENCH_PARAM_inner_size, BENCH_PARAM_block_size,
 //   BENCH_PARAM_alpha, BENCH_PARAM_beta
-//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
-//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // carrying the GPU event time and host wall-clock time, then a summary whose
@@ -135,9 +133,6 @@ int main(int argc, char** argv) {
     if (env_val) alpha = (float)atof(env_val);
     env_val = getenv("BENCH_PARAM_beta");
     if (env_val) beta = (float)atof(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     size_t bytes_AB = (size_t)N * M * sizeof(float);
     size_t bytes_C  = (size_t)N * N * sizeof(float);
 
@@ -189,13 +184,12 @@ int main(int argc, char** argv) {
     // independent, so iterating without re-uploading C does not change the
     // measured time and keeps the cache state steady across iterations.
     double total_gpu_ms =
-        bench_run_loop("syr2k_kernel", num_warmup, num_iters, params, [&]() {
+        bench_run_once("syr2k_kernel", params, [&]() {
             syr2k_kernel<<<grid, block>>>(d_A, d_B, d_C, N, M, alpha, beta);
         });
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Cleanup
     HIP_CHECK(hipFree(d_A));

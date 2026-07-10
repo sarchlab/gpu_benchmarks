@@ -45,8 +45,8 @@ Environment variables override argv:
 | `BENCH_PARAM_size` | Number of input samples | 1048576 |
 | `BENCH_PARAM_num_taps` | Number of filter taps | 64 |
 | `BENCH_PARAM_block_size` | Threads per block | 256 |
-| `BENCH_PARAM_num_warmup` | Warmup launches (untimed) | 3 |
-| `BENCH_PARAM_num_iters` | Timed launches, each recorded | 7 |
+| `BENCH_PARAM_warmup` | Warmup launches (untimed) | 3 |
+| `BENCH_PARAM_iteration` | Timed launches, each recorded | 7 |
 
 ## Output
 

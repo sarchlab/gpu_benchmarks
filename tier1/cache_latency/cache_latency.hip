@@ -36,8 +36,6 @@
  *   BENCH_PARAM_measure_laps      (default 4 timed laps of steady-state hits)
  *   BENCH_PARAM_num_accesses      (overrides the timed-access count)
  *   BENCH_PARAM_rng_seed
- *   BENCH_PARAM_num_warmup        (untimed cold-fill launches, default 3)
- *   BENCH_PARAM_num_iters         (timed launches, each recorded, default 7)
  *
  * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
  * the GPU event time and host wall-clock time, then a summary whose
@@ -235,17 +233,12 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipMemcpy(d_arr, h_arr.data(), array_bytes,
                         hipMemcpyHostToDevice));
 
-    /* Untimed warm-up launches: the first makes the working set resident (so
-     * timed runs measure steady-state hits, not the cold fill) and loads the
-     * kernel code object; later ones are cheap steady-state laps. Capped at
-     * the largest cache, so the DRAM end pays only a partial fill it doesn't
-     * need anyway. Excluded from timing. */
-    const int warmup_launches = bench_num_warmup();
-    const int num_iters       = bench_num_iters();
-    for (int w = 0; w < warmup_launches; ++w) {
-        pointer_chase_kernel<<<dim3(1), dim3(1)>>>(d_arr, start_idx, num_warmup, d_result);
-        HIP_CHECK(hipDeviceSynchronize());
-    }
+    /* One untimed cold-fill lap: makes the working set resident (so the timed
+     * run measures steady-state hits, not the cold fill) and loads the kernel
+     * code object. It chases num_warmup accesses (capped at the largest cache,
+     * so the DRAM end pays only a partial fill). Excluded from timing. */
+    pointer_chase_kernel<<<dim3(1), dim3(1)>>>(d_arr, start_idx, num_warmup, d_result);
+    HIP_CHECK(hipDeviceSynchronize());
 
     char params[256];
     snprintf(params, sizeof(params),
@@ -256,19 +249,15 @@ int main(int argc, char *argv[])
              (unsigned long long)num_warmup, measure_laps,
              cacheline_bytes, rng_seed);
 
-    /* Warmup is done separately above (it chases num_warmup cold-fill accesses,
-     * a different count than the timed num_timed), so run the timed loop with
-     * num_warmup=0. Each timed launch chases num_timed accesses and is recorded
-     * individually; the working set stays resident so every iteration measures
-     * the same steady state. */
+    /* The cold-fill above already made the working set resident, so the single
+     * timed launch chases num_timed accesses at steady state. */
     double total_gpu_ms =
-        bench_run_loop("pointer_chase_kernel", 0, num_iters, params, [&]() {
+        bench_run_once("pointer_chase_kernel", params, [&]() {
             pointer_chase_kernel<<<dim3(1), dim3(1)>>>(d_arr, start_idx, num_timed, d_result);
         });
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     /* Cleanup. */
     HIP_CHECK(hipFree(d_arr));

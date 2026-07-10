@@ -26,8 +26,6 @@
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_threads_per_block
  *   BENCH_PARAM_shuffle_variant   ("all", "shfl_xor", "shfl_up", "shfl_down", "shfl")
- *   BENCH_PARAM_num_warmup        (warmup launches per variant, default 3)
- *   BENCH_PARAM_num_iters         (timed launches per variant, each recorded, default 7)
  *
  * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
  * the GPU event time and host wall-clock time, then a summary whose
@@ -126,15 +124,14 @@ typedef void (*KernelFunc)(int *, int);
 static double run_benchmark(const char *kernel_name,
                             KernelFunc kernel, int *d_out,
                             int ops_per_thread, int num_blocks,
-                            int threads_per_block,
-                            int num_warmup, int num_iters)
+                            int threads_per_block)
 {
     char params[160];
     snprintf(params, sizeof(params),
              "\"ops_per_thread\":%d,\"num_blocks\":%d,\"threads_per_block\":%d",
              ops_per_thread, num_blocks, threads_per_block);
 
-    return bench_run_loop(kernel_name, num_warmup, num_iters, params, [&]() {
+    return bench_run_once(kernel_name, params, [&]() {
         kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(d_out,
                                                               ops_per_thread);
     });
@@ -176,9 +173,6 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_shuffle_variant");
     if (env_val) shuffle_variant = env_val;
 
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     /* Print device information to stderr. */
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
@@ -192,8 +186,7 @@ int main(int argc, char *argv[])
             num_blocks * threads_per_block);
     fprintf(stderr, "Warp size       : %d\n", WARP_SIZE);
     fprintf(stderr, "Ops / thread    : %d\n", ops_per_thread);
-    fprintf(stderr, "Shuffle variant : %s\n", shuffle_variant);
-    fprintf(stderr, "Warmup / iters  : %d / %d\n\n", num_warmup, num_iters);
+    fprintf(stderr, "Shuffle variant : %s\n\n", shuffle_variant);
 
     /* Allocate a single int on the device to receive the checksum. */
     int *d_out = nullptr;
@@ -209,29 +202,25 @@ int main(int argc, char *argv[])
     if (run_xor) {
         total_gpu_ms += run_benchmark("shfl_xor_kernel",
                                       (KernelFunc)shfl_xor_kernel, d_out,
-                                      ops_per_thread, num_blocks, threads_per_block,
-                                      num_warmup, num_iters);
+                                      ops_per_thread, num_blocks, threads_per_block);
     }
 
     if (run_basic) {
         total_gpu_ms += run_benchmark("shfl_kernel",
                                       (KernelFunc)shfl_kernel, d_out,
-                                      ops_per_thread, num_blocks, threads_per_block,
-                                      num_warmup, num_iters);
+                                      ops_per_thread, num_blocks, threads_per_block);
     }
 
     if (run_up) {
         total_gpu_ms += run_benchmark("shfl_up_kernel",
                                       (KernelFunc)shfl_up_kernel, d_out,
-                                      ops_per_thread, num_blocks, threads_per_block,
-                                      num_warmup, num_iters);
+                                      ops_per_thread, num_blocks, threads_per_block);
     }
 
     if (run_down) {
         total_gpu_ms += run_benchmark("shfl_down_kernel",
                                       (KernelFunc)shfl_down_kernel, d_out,
-                                      ops_per_thread, num_blocks, threads_per_block,
-                                      num_warmup, num_iters);
+                                      ops_per_thread, num_blocks, threads_per_block);
     }
 
     bench_emit_summary(total_gpu_ms);

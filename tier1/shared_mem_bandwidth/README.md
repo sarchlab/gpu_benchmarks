@@ -107,8 +107,8 @@ per timed iteration of each selected pattern, plus a final summary:
 | `BENCH_PARAM_num_blocks` | 128 | Number of blocks / threadgroups |
 | `BENCH_PARAM_inner_iters` | 1000 | Inner-loop iterations per kernel launch |
 | `BENCH_PARAM_access_pattern` | both | Pattern(s) to run (`no_conflict`, `conflict`, `both`) |
-| `BENCH_PARAM_num_warmup` | 3 | Outer warmup kernel launches (not timed) |
-| `BENCH_PARAM_num_iters` | 7 | Outer timed kernel launches, each recorded individually |
+| `BENCH_PARAM_warmup` | 3 | Outer warmup kernel launches (not timed) |
+| `BENCH_PARAM_iteration` | 7 | Outer timed kernel launches, each recorded individually |
 | `SMEM_FLOATS` (compile-time) | 12288 | Shared memory array size in floats (48 KB) |
 
 ## Notes

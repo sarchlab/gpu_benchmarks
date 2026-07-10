@@ -21,7 +21,7 @@ out[i][j] = 0.5   * in[i][j]
 - **Interior only**: rows/columns 1 .. N-2; boundary cells remain 0
 - **Thread blocks**: 16×16
 - **Ping-pong buffers**: `in_buf` and `out_buf` swapped each iteration
-- **Passes**: `BENCH_PARAM_num_warmup` warmup passes (default 3), then `BENCH_PARAM_num_iters` timed passes (default 7), each recorded individually
+- **Passes**: `BENCH_PARAM_warmup` warmup passes (default 3), then `BENCH_PARAM_iteration` timed passes (default 7), each recorded individually
 
 ## Files
 
@@ -54,7 +54,7 @@ make clean
 ./shoc_stencil2d
 
 # Custom parameters
-BENCH_PARAM_num_iters=5 ./shoc_stencil2d --n 4096 --iterations 10
+BENCH_PARAM_iteration=5 ./shoc_stencil2d --n 4096 --iterations 10
 ```
 
 ### Options
@@ -66,8 +66,8 @@ BENCH_PARAM_num_iters=5 ./shoc_stencil2d --n 4096 --iterations 10
 | `--trials T`     | 3       | Legacy trial-count param (echoed in records) |
 
 Environment variables (`BENCH_PARAM_*`) override the flags. In addition,
-`BENCH_PARAM_num_warmup` (default 3) sets the warmup passes and
-`BENCH_PARAM_num_iters` (default 7) the timed passes.
+`BENCH_PARAM_warmup` (default 3) sets the warmup passes and
+`BENCH_PARAM_iteration` (default 7) the timed passes.
 
 ## Output Format
 

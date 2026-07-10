@@ -51,8 +51,8 @@ BENCH_PARAM_matrix_size=2048 BENCH_PARAM_inner_size=512 ./polybench_syr2k
 | `BENCH_PARAM_block_size` | 256 | Threads per block (echoed in params) |
 | `BENCH_PARAM_alpha` | 1.5 | Alpha scaling factor |
 | `BENCH_PARAM_beta` | 1.2 | Beta scaling factor |
-| `BENCH_PARAM_num_warmup` | 3 | Untimed warmup launches |
-| `BENCH_PARAM_num_iters` | 7 | Timed launches, each recorded individually |
+| `BENCH_PARAM_warmup` | 3 | Untimed warmup launches |
+| `BENCH_PARAM_iteration` | 7 | Timed launches, each recorded individually |
 
 ## Output
 

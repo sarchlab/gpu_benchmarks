@@ -14,8 +14,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (mm3_kernel1/2/3) carrying that kernel's GPU event time and host
@@ -122,9 +120,6 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Invalid precision '%s' (use half, float, double)\n", precision);
         return EXIT_FAILURE;
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     // All matrices are N×N
     const int NI = N, NJ = N, NK = N, NL = N, NM = N;
 
@@ -201,6 +196,11 @@ int main(int argc, char** argv) {
         bench_lap_reset(&acc_k2);
         bench_lap_reset(&acc_k3);
 
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         bench_lap_add(&acc_k1, bench_time_op(&timer, [&]() {
             mm3_kernel1<<<grid1, block>>>(d_A, d_B, d_E, NI, NK, NJ);
         }));
@@ -212,25 +212,19 @@ int main(int argc, char** argv) {
         }));
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_3mm_pass();
-    }
+    run_3mm_pass();
 
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_3mm_pass();
-        bench_emit_iter("mm3_kernel1", i, &acc_k1, params);
-        bench_emit_iter("mm3_kernel2", i, &acc_k2, params);
-        bench_emit_iter("mm3_kernel3", i, &acc_k3, params);
-        total_gpu_ms += acc_k1.gpu_ms + acc_k2.gpu_ms + acc_k3.gpu_ms;
-        fprintf(stderr, "pass %d: k1 gpu = %.3f ms, k2 gpu = %.3f ms, k3 gpu = %.3f ms\n",
-                i, acc_k1.gpu_ms, acc_k2.gpu_ms, acc_k3.gpu_ms);
-    }
+    bench_emit_iter("mm3_kernel1", 0, &acc_k1, params);
+    bench_emit_iter("mm3_kernel2", 0, &acc_k2, params);
+    bench_emit_iter("mm3_kernel3", 0, &acc_k3, params);
+    total_gpu_ms += acc_k1.gpu_ms + acc_k2.gpu_ms + acc_k3.gpu_ms;
+    fprintf(stderr, "k1 gpu = %.3f ms, k2 gpu = %.3f ms, k3 gpu = %.3f ms\n",
+            acc_k1.gpu_ms, acc_k2.gpu_ms, acc_k3.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Cleanup
     HIP_CHECK(hipFree(d_A));

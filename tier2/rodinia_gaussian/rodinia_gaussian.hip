@@ -17,8 +17,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_verify
-//   BENCH_PARAM_num_warmup   (warmup elimination passes, default 3)
-//   BENCH_PARAM_num_iters    (timed elimination passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (fan1, fan2) carrying that kernel's accumulated GPU event time
@@ -139,8 +137,6 @@ int main(int argc, char** argv)
             return 1;
         }
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     size_t bytes_a = (size_t)N * N * sizeof(float);
     size_t bytes_b = (size_t)N * sizeof(float);
@@ -211,6 +207,11 @@ int main(int argc, char** argv)
         HIP_CHECK(hipMemcpy(d_b, h_b, bytes_b, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemset(d_m, 0, bytes_a));
 
+        /* Cold-cache calibration: evict the LLC and hold the clock high before
+         * the pass's first timed launch, so it runs cold. No-op when
+         * BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         for (int t = 0; t < N - 1; ++t) {
             int remaining = N - t - 1;
             // fan1: compute multipliers
@@ -228,26 +229,19 @@ int main(int argc, char** argv)
         }
     };
 
-    // Warmup passes (records not emitted)
-    for (int w = 0; w < num_warmup; ++w) {
-        run_pass();
-    }
-
-    // Timed passes — one record per kernel per pass
+    // Timed pass — one record per kernel
+    run_pass();
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_pass();
-        bench_emit_iter("fan1", i, &acc_fan1, params);
-        bench_emit_iter("fan2", i, &acc_fan2, params);
-        total_gpu_ms += acc_fan1.gpu_ms + acc_fan2.gpu_ms;
-        fprintf(stderr, "pass %d: fan1 gpu = %.3f ms, fan2 gpu = %.3f ms\n",
-                i, acc_fan1.gpu_ms, acc_fan2.gpu_ms);
-    }
+    bench_emit_iter("fan1", 0, &acc_fan1, params);
+    bench_emit_iter("fan2", 0, &acc_fan2, params);
+    total_gpu_ms += acc_fan1.gpu_ms + acc_fan2.gpu_ms;
+    fprintf(stderr, "fan1 gpu = %.3f ms, fan2 gpu = %.3f ms\n",
+            acc_fan1.gpu_ms, acc_fan2.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms over 1 pass\n",
+            total_gpu_ms);
 
     // Copy final result from device
     HIP_CHECK(hipMemcpy(h_a, d_a, bytes_a, hipMemcpyDeviceToHost));

@@ -15,8 +15,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_verify
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (scan_block_kernel, add_block_sums_kernel) carrying that kernel's
@@ -228,8 +226,6 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Invalid verify '%s' (use true, false, skip)\n", verify);
         return EXIT_FAILURE;
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     int N     = size;
 
@@ -241,8 +237,7 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Scan size: %d  |  Iterations: %d warmup + %d timed\n\n",
-            N, num_warmup, num_iters);
+    fprintf(stderr, "Scan size: %d\n\n", N);
 
     // Host allocation + initialization
     unsigned int* h_input  = (unsigned int*)malloc(bytes);
@@ -274,27 +269,24 @@ int main(int argc, char** argv) {
         bench_lap_reset(&acc_block);
         bench_lap_reset(&acc_add);
         HIP_CHECK(hipMemcpy(d_data, h_input, bytes, hipMemcpyHostToDevice));
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
         scan_recursive(d_data, N, &timer, &acc_block, &acc_add);
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_scan_pass();
-    }
-
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_scan_pass();
-        bench_emit_iter("scan_block_kernel",     i, &acc_block, params);
-        bench_emit_iter("add_block_sums_kernel", i, &acc_add,   params);
-        total_gpu_ms += acc_block.gpu_ms + acc_add.gpu_ms;
-        fprintf(stderr, "pass %d: scan_block gpu = %.3f ms, add_block_sums gpu = %.3f ms\n",
-                i, acc_block.gpu_ms, acc_add.gpu_ms);
-    }
+    run_scan_pass();
+    bench_emit_iter("scan_block_kernel",     0, &acc_block, params);
+    bench_emit_iter("add_block_sums_kernel", 0, &acc_add,   params);
+    total_gpu_ms += acc_block.gpu_ms + acc_add.gpu_ms;
+    fprintf(stderr, "scan_block gpu = %.3f ms, add_block_sums gpu = %.3f ms\n",
+            acc_block.gpu_ms, acc_add.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
     // Verification

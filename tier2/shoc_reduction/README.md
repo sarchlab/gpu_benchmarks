@@ -55,8 +55,8 @@ Environment variables override argv:
 | `BENCH_PARAM_size` | `4194304` | Number of elements |
 | `BENCH_PARAM_block_size` | `256` | Thread-block size |
 | `BENCH_PARAM_precision` | `float` | One of `float`, `double`, `half` |
-| `BENCH_PARAM_num_warmup` | `3` | Warmup passes (untimed) |
-| `BENCH_PARAM_num_iters` | `7` | Timed passes, each recorded |
+| `BENCH_PARAM_warmup` | `3` | Warmup passes (untimed) |
+| `BENCH_PARAM_iteration` | `7` | Timed passes, each recorded |
 
 > Note: `--block_size` is ignored on Metal (threadgroup size is set automatically from the pipeline).
 

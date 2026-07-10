@@ -67,8 +67,8 @@ BENCH_PARAM_points=65536 ./rodinia_kmeans
 | `BENCH_PARAM_features` | 34 | Features per point (constant-memory limit: `clusters*features ≤ 1088`) |
 | `BENCH_PARAM_clusters` | 5 | Number of clusters (K) |
 | `BENCH_PARAM_max_iter` | 10 | K-means iterations per pass |
-| `BENCH_PARAM_num_warmup` | 3 | Warmup clustering passes (untimed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed clustering passes, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup clustering passes (untimed) |
+| `BENCH_PARAM_iteration` | 7 | Timed clustering passes, each recorded |
 
 ## Output
 

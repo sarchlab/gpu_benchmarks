@@ -22,8 +22,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_n, BENCH_PARAM_block_size, BENCH_PARAM_precision
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (mvt_kernel1, mvt_kernel2) carrying that kernel's GPU event time and
@@ -128,8 +126,6 @@ int main(int argc, char** argv) {
                 precision);
         return EXIT_FAILURE;
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     size_t bytes_A  = (size_t)n * n * sizeof(float);
     size_t bytes_v  = (size_t)n * sizeof(float);
@@ -195,6 +191,11 @@ int main(int argc, char** argv) {
         bench_lap_reset(&acc_k1);
         bench_lap_reset(&acc_k2);
 
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         bench_lap_add(&acc_k1, bench_time_op(&timer, [&]() {
             mvt_kernel1<<<grid, block_size>>>(d_A, d_y1, d_x1, n);
         }));
@@ -203,24 +204,19 @@ int main(int argc, char** argv) {
         }));
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_mvt_pass();
-    }
+    run_mvt_pass();
 
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_mvt_pass();
-        bench_emit_iter("mvt_kernel1", i, &acc_k1, params);
-        bench_emit_iter("mvt_kernel2", i, &acc_k2, params);
-        total_gpu_ms += acc_k1.gpu_ms + acc_k2.gpu_ms;
-        fprintf(stderr, "pass %d: mvt_kernel1 gpu = %.3f ms, mvt_kernel2 gpu = %.3f ms\n",
-                i, acc_k1.gpu_ms, acc_k2.gpu_ms);
-    }
+    bench_emit_iter("mvt_kernel1", 0, &acc_k1, params);
+    bench_emit_iter("mvt_kernel2", 0, &acc_k2, params);
+    total_gpu_ms += acc_k1.gpu_ms + acc_k2.gpu_ms;
+    fprintf(stderr, "mvt_kernel1 gpu = %.3f ms, mvt_kernel2 gpu = %.3f ms\n",
+            acc_k1.gpu_ms, acc_k2.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms over 1 pass\n",
+            total_gpu_ms);
 
     // Copy results back for correctness check
     HIP_CHECK(hipMemcpy(h_x1, d_x1, bytes_v, hipMemcpyDeviceToHost));

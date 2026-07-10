@@ -44,8 +44,8 @@ BENCH_PARAM_size=1048576 ./tango_blackscholes     # env vars override argv
 ```
 
 Environment variables: `BENCH_PARAM_size`, `BENCH_PARAM_block_size`,
-`BENCH_PARAM_precision`, plus `BENCH_PARAM_num_warmup` (warmup launches,
-default 3) and `BENCH_PARAM_num_iters` (timed launches, each recorded,
+`BENCH_PARAM_precision`, plus `BENCH_PARAM_warmup` (warmup launches,
+default 3) and `BENCH_PARAM_iteration` (timed launches, each recorded,
 default 7).
 
 ## Output

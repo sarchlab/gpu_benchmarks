@@ -15,8 +15,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_num_taps, BENCH_PARAM_block_size
-//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
-//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // carrying the GPU event time (time_ms) and host wall-clock time
@@ -134,8 +132,6 @@ int main(int argc, char** argv) {
     if (env_val) num_taps = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     int N     = size;
     int taps  = num_taps;
@@ -150,9 +146,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "FIR filter  |  Samples: %d  |  Taps: %d  |  "
-            "Iterations: %d warmup + %d timed\n\n",
-            N, taps, num_warmup, num_iters);
+    fprintf(stderr, "FIR filter  |  Samples: %d  |  Taps: %d\n\n",
+            N, taps);
 
     // Host allocation + initialization
     float* h_input  = (float*)malloc(input_bytes);
@@ -201,13 +196,12 @@ int main(int argc, char** argv) {
     // array every launch, so repeated launches perform identical work — no
     // per-iteration state reset is needed.
     double total_gpu_ms =
-        bench_run_loop("fir_filter_kernel", num_warmup, num_iters, params, [&]() {
+        bench_run_once("fir_filter_kernel", params, [&]() {
             fir_filter_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_input, d_output, d_coeff, N, taps);
         });
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
     // Verification (compare first 1024 samples with CPU reference)

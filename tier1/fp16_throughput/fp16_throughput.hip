@@ -32,8 +32,6 @@
  *   BENCH_PARAM_fmas_per_thread
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_threads_per_block
- *   BENCH_PARAM_num_warmup       (warmup launches, default 3)
- *   BENCH_PARAM_num_iters        (timed launches, each recorded, default 7)
  *
  * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
  * the GPU event time and host wall-clock time, then a summary whose
@@ -120,9 +118,6 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_threads_per_block");
     if (env_val) threads_per_block = atoi(env_val);
 
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     hipDeviceProp_t prop;
@@ -132,8 +127,7 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Grid            : %d blocks × %d threads = %d total threads\n",
            num_blocks, threads_per_block,
            num_blocks * threads_per_block);
-    fprintf(stderr, "FMAs / thread   : %d  (__hfma2, 4 FLOPs each)\n", fmas_per_thread);
-    fprintf(stderr, "Warmup / iters  : %d / %d\n\n", num_warmup, num_iters);
+    fprintf(stderr, "FMAs / thread   : %d  (__hfma2, 4 FLOPs each)\n\n", fmas_per_thread);
 
     __half2 *d_out = nullptr;
     HIP_CHECK(hipMalloc(&d_out, sizeof(__half2)));
@@ -143,16 +137,14 @@ int main(int argc, char *argv[])
              "\"fmas_per_thread\":%d,\"num_blocks\":%d,\"threads_per_block\":%d",
              fmas_per_thread, num_blocks, threads_per_block);
 
-    /* Warmup + timed iterations, each recorded individually. */
     double total_gpu_ms =
-        bench_run_loop("fp16_fma_kernel", num_warmup, num_iters, params, [&]() {
+        bench_run_once("fp16_fma_kernel", params, [&]() {
             fp16_fma_kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(
                 d_out, fmas_per_thread);
         });
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time  : %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time  : %.3f ms\n", total_gpu_ms);
 
     /* Clean up. */
     HIP_CHECK(hipFree(d_out));

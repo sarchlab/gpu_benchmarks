@@ -12,8 +12,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_key_length
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed pass
 // carrying the GPU event time (time_ms) and host wall-clock time
@@ -303,9 +301,6 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Invalid key_length '%s' (use 128, 192, 256)\n", key_length);
         return 1;
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     int N     = size;
 
     size_t data_bytes = (size_t)N * 16;
@@ -317,9 +312,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "AES-256 ECB  |  Blocks: %d  |  Data: %.2f MB  |  "
-            "Iterations: %d warmup + %d timed\n\n",
-            N, (double)data_bytes / (1024.0 * 1024.0), num_warmup, num_iters);
+    fprintf(stderr, "AES-256 ECB  |  Blocks: %d  |  Data: %.2f MB\n\n",
+            N, (double)data_bytes / (1024.0 * 1024.0));
 
     // Generate a fixed 256-bit key
     unsigned char key[32];
@@ -365,6 +359,10 @@ int main(int argc, char** argv) {
     // re-upload stays outside the timed bracket.
     auto run_pass = [&](bool timed) {
         HIP_CHECK(hipMemcpy(d_data, h_orig, data_bytes, hipMemcpyHostToDevice));
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
         if (timed) {
             lap = bench_time_op(&timer, [&]() {
                 aes256_encrypt_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_data, d_keys, N);
@@ -375,23 +373,16 @@ int main(int argc, char** argv) {
         }
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_pass(false);
-    }
-
+    run_pass(true);
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_pass(true);
-        bench_emit_iter("aes256_encrypt_kernel", i, &lap, params);
-        total_gpu_ms += lap.gpu_ms;
-        fprintf(stderr, "aes256_encrypt_kernel iter %d: gpu = %.3f ms, host = %.3f ms\n",
-                i, lap.gpu_ms, lap.host_ms);
-    }
+    bench_emit_iter("aes256_encrypt_kernel", 0, &lap, params);
+    total_gpu_ms += lap.gpu_ms;
+    fprintf(stderr, "aes256_encrypt_kernel: gpu = %.3f ms, host = %.3f ms\n",
+            lap.gpu_ms, lap.host_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
     // Verification (compare first 256 blocks with CPU reference)

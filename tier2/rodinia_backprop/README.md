@@ -32,8 +32,8 @@ JSON record is emitted per kernel per pass.
 |-----------|---------|-------|
 | `--input` / `BENCH_PARAM_input` | 65536 | input layer size; multiple of 16. Matches the original standard size. |
 | hidden | 16 | **fixed** by the `HEIGHT=WIDTH=16` tiling and `(hid+1)` weight stride — not a knob |
-| `BENCH_PARAM_num_warmup` | 3 | warmup epochs (untimed) |
-| `BENCH_PARAM_num_iters` | 7 | timed epochs, each recorded |
+| `BENCH_PARAM_warmup` | 3 | warmup epochs (untimed) |
+| `BENCH_PARAM_iteration` | 7 | timed epochs, each recorded |
 
 Host launch geometry is the original: `num_blocks = input/16`,
 `grid(1, num_blocks)`, `threads(16, 16)`. With the default input the weight
@@ -63,7 +63,7 @@ make clean
 
 ```bash
 ./rodinia_backprop [--input N]        # N must be a multiple of 16
-BENCH_PARAM_num_iters=10 ./rodinia_backprop
+BENCH_PARAM_iteration=10 ./rodinia_backprop
 ```
 
 ## Output

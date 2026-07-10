@@ -8,8 +8,6 @@
 //
 // Environment variables:
 //   BENCH_PARAM_num_rows, BENCH_PARAM_nnz_per_row, BENCH_PARAM_precision
-//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
-//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // carrying the GPU event time and host wall-clock time, then a summary whose
@@ -118,8 +116,6 @@ int main(int argc, char** argv)
                 precision);
         return EXIT_FAILURE;
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     int num_cols   = num_rows;
     int nnz        = num_rows * nnz_per_row;
@@ -186,7 +182,7 @@ int main(int argc, char** argv)
     // reads the matrix and x (never modified) and fully overwrites y, so
     // repeated launches perform identical work — no per-iteration reset.
     double total_gpu_ms =
-        bench_run_loop("spmv_csr_kernel", num_warmup, num_iters, params, [&]() {
+        bench_run_once("spmv_csr_kernel", params, [&]() {
             spmv_csr_kernel<<<grid_size, BLOCK_SIZE>>>(
                 d_row_ptr, d_col_idx, d_values, d_x, d_y, num_rows);
         });
@@ -212,8 +208,7 @@ int main(int argc, char** argv)
             check_n, pass ? "PASS" : "FAIL");
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Cleanup
     HIP_CHECK(hipFree(d_row_ptr));

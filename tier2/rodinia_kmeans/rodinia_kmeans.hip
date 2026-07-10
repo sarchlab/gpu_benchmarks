@@ -32,8 +32,6 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_points, BENCH_PARAM_features, BENCH_PARAM_clusters,
 //   BENCH_PARAM_max_iter
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (invert_mapping, kmeansPoint) carrying that kernel's accumulated GPU
@@ -160,8 +158,6 @@ int main(int argc, char** argv) {
     env_val = getenv("BENCH_PARAM_features"); if (env_val) nfeatures = atoi(env_val);
     env_val = getenv("BENCH_PARAM_clusters"); if (env_val) nclusters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_max_iter"); if (env_val) max_iter  = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_bench_iters = bench_num_iters();
 
     if (nclusters * nfeatures > ASSUMED_NR_CLUSTERS * 34) {
         fprintf(stderr, "clusters*features (%d) exceeds constant-memory capacity (%d)\n",
@@ -238,6 +234,11 @@ int main(int argc, char** argv) {
         bench_lap_reset(&acc_assign);
         memcpy(h_centers, h_centers_ini, centers_bytes);
 
+        /* Cold-cache calibration: evict the LLC and hold the clock high before
+         * the pass's first timed launch, so it runs cold. No-op when
+         * BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         bench_lap_add(&acc_invert, bench_time_op(&timer, [&]() {
             invert_mapping<<<num_blocks, num_threads>>>(feature_flipped_d, feature_d,
                                                         npoints, nfeatures);
@@ -279,22 +280,19 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipGetLastError());
     };
 
-    for (int w = 0; w < num_warmup; ++w) run_pass();
+    run_pass();
 
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_bench_iters; ++i) {
-        run_pass();
-        bench_emit_iter("invert_mapping", i, &acc_invert, params);
-        bench_emit_iter("kmeansPoint",    i, &acc_assign, params);
-        total_gpu_ms += acc_invert.gpu_ms + acc_assign.gpu_ms;
-        fprintf(stderr, "pass %d: invert_mapping gpu = %.3f ms, kmeansPoint gpu = %.3f ms\n",
-                i, acc_invert.gpu_ms, acc_assign.gpu_ms);
-    }
+    bench_emit_iter("invert_mapping", 0, &acc_invert, params);
+    bench_emit_iter("kmeansPoint",    0, &acc_assign, params);
+    total_gpu_ms += acc_invert.gpu_ms + acc_assign.gpu_ms;
+    fprintf(stderr, "invert_mapping gpu = %.3f ms, kmeansPoint gpu = %.3f ms\n",
+            acc_invert.gpu_ms, acc_assign.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes (%d k-means iters/pass)\n",
-            total_gpu_ms, num_bench_iters, max_iter);
+    fprintf(stderr, "Total GPU time: %.3f ms over 1 pass (%d k-means iters/pass)\n",
+            total_gpu_ms, max_iter);
 
     HIP_CHECK(hipFree(feature_flipped_d));
     HIP_CHECK(hipFree(feature_d));

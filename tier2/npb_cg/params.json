@@ -67,12 +67,13 @@
       ]
     },
     {
-      "name": "iterations",
-      "description": "Number of timed benchmark iterations",
-      "type": "int",
-      "default": 1,
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
       "values": [
-        1
+        "true",
+        "false"
       ]
     }
   ],

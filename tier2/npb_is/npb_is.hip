@@ -14,8 +14,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_verify
-//   BENCH_PARAM_num_warmup   (warmup sort passes, default 3)
-//   BENCH_PARAM_num_iters    (timed sort passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (histogram_kernel, prefix_sum_kernel, scatter_kernel) carrying that
@@ -194,18 +192,14 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Invalid verify '%s' (use true, false, skip)\n", verify);
         return 1;
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     // Print device info
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "IS keys: %d (2^%.0f)  |  Buckets: %d  |  "
-            "Iterations: %d warmup + %d timed\n\n",
-            N, log2((double)N), NUM_BUCKETS, num_warmup, num_iters);
+    fprintf(stderr, "IS keys: %d (2^%.0f)  |  Buckets: %d\n\n",
+            N, log2((double)N), NUM_BUCKETS);
 
     size_t keysBytes = (size_t)N * sizeof(int);
     size_t histBytes = NUM_BUCKETS * sizeof(unsigned int);
@@ -256,6 +250,11 @@ int main(int argc, char** argv) {
         // Clear histogram (untimed)
         HIP_CHECK(hipMemset(d_hist, 0, histBytes));
 
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         // Phase 1: histogram
         bench_lap_add(&acc_hist, bench_time_op(&timer, [&]() {
             histogram_kernel<<<dim3(gridKeys), dim3(blockSize)>>>(d_keys, N, d_hist);
@@ -277,26 +276,19 @@ int main(int argc, char** argv) {
         }));
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_is_pass();
-    }
-
+    run_is_pass();
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_is_pass();
-        bench_emit_iter("histogram_kernel",  i, &acc_hist,    params);
-        bench_emit_iter("prefix_sum_kernel", i, &acc_prefix,  params);
-        bench_emit_iter("scatter_kernel",    i, &acc_scatter, params);
-        total_gpu_ms += acc_hist.gpu_ms + acc_prefix.gpu_ms + acc_scatter.gpu_ms;
-        fprintf(stderr, "pass %d: histogram gpu = %.3f ms, prefix_sum gpu = %.3f ms, "
-                "scatter gpu = %.3f ms\n",
-                i, acc_hist.gpu_ms, acc_prefix.gpu_ms, acc_scatter.gpu_ms);
-    }
+    bench_emit_iter("histogram_kernel",  0, &acc_hist,    params);
+    bench_emit_iter("prefix_sum_kernel", 0, &acc_prefix,  params);
+    bench_emit_iter("scatter_kernel",    0, &acc_scatter, params);
+    total_gpu_ms += acc_hist.gpu_ms + acc_prefix.gpu_ms + acc_scatter.gpu_ms;
+    fprintf(stderr, "histogram gpu = %.3f ms, prefix_sum gpu = %.3f ms, "
+            "scatter gpu = %.3f ms\n",
+            acc_hist.gpu_ms, acc_prefix.gpu_ms, acc_scatter.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
     // Verification: check sorted output is bucket-ordered

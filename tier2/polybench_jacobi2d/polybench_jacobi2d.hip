@@ -16,12 +16,9 @@
 //   --n N        Grid size N×N           (default: 1024)
 //   --tsteps T   Number of time steps    (default: 50)
 //   --trials K   Legacy trial count (echoed in params; the measured pass
-//                count is BENCH_PARAM_num_iters)
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_n, BENCH_PARAM_tsteps, BENCH_PARAM_trials, BENCH_PARAM_block_size
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass (one pass = TSTEPS kernel launches), one
 // {"type":"kernel",...} JSON line carrying the pass's accumulated GPU event
@@ -104,8 +101,6 @@ int main(int argc, char** argv) {
     if (env_val) trials = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size_param = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     size_t bytes = (size_t)N * N * sizeof(float);
 
@@ -115,8 +110,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Grid: %d×%d  |  TSTEPS: %d  |  %d warmup + %d timed passes\n\n",
-            N, N, TSTEPS, num_warmup, num_iters);
+    fprintf(stderr, "Grid: %d×%d  |  TSTEPS: %d  |  single timed pass\n\n",
+            N, N, TSTEPS);
 
     // Host allocations
     std::vector<float> h_A((size_t)N * N, 0.0f);
@@ -162,6 +157,11 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_A, h_A.data(), bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemset(d_B, 0, bytes));
 
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         float *src = d_A, *dst = d_B;
         for (int t = 0; t < TSTEPS; ++t) {
             bench_lap_add(&acc_jacobi, bench_time_op(&timer, [&]() {
@@ -171,23 +171,18 @@ int main(int argc, char** argv) {
         }
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_jacobi_pass();
-    }
+    run_jacobi_pass();
 
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_jacobi_pass();
-        bench_emit_iter("jacobi2d_kernel", i, &acc_jacobi, params);
-        total_gpu_ms += acc_jacobi.gpu_ms;
-        fprintf(stderr, "pass %d: gpu = %.3f ms (%d steps)\n",
-                i, acc_jacobi.gpu_ms, TSTEPS);
-    }
+    bench_emit_iter("jacobi2d_kernel", 0, &acc_jacobi, params);
+    total_gpu_ms += acc_jacobi.gpu_ms;
+    fprintf(stderr, "gpu = %.3f ms (%d steps)\n",
+            acc_jacobi.gpu_ms, TSTEPS);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms over 1 pass\n",
+            total_gpu_ms);
 
     // Correctness check: run CPU for TSTEPS on small 64×64 grid
     {

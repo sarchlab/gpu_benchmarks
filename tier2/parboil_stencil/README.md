@@ -50,8 +50,8 @@ make PLATFORM=metal
 | `BENCH_PARAM_grid_dim` | 64 | Grid dimension N (N×N×N) |
 | `BENCH_PARAM_num_timesteps` | 10 | Stencil time-steps per pass |
 | `BENCH_PARAM_block_size` | 256 | Threads per block (recorded in params) |
-| `BENCH_PARAM_num_warmup` | 3 | Warmup passes (untimed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup passes (untimed) |
+| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded |
 
 ## Output
 

@@ -46,8 +46,8 @@ make PLATFORM=metal
 | `BENCH_PARAM_avg_degree` | 32 | Average degree per vertex |
 | `BENCH_PARAM_block_size` | 256 | Threads per block |
 | `BENCH_PARAM_verify` | true | CPU verification (true, false, skip) |
-| `BENCH_PARAM_num_warmup` | 3 | Warmup launches (untimed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed launches, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup launches (untimed) |
+| `BENCH_PARAM_iteration` | 7 | Timed launches, each recorded |
 
 ## Output
 

@@ -56,8 +56,8 @@ make PLATFORM=rocm
 |----------|---------|-------------|
 | `BENCH_PARAM_m` | 28 | Class exponent M (24 S, 25 W, 28 A, 30 B, 32 C) |
 | `BENCH_PARAM_block_size` | 256 | Threads per block |
-| `BENCH_PARAM_num_warmup` | 3 | Warmup passes (untimed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed passes, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup passes (untimed) |
+| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded |
 
 ## Timing model
 

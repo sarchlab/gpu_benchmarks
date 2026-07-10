@@ -15,8 +15,6 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_options, BENCH_PARAM_steps,
 //   BENCH_PARAM_precision (float|double|half)
-//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
-//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // carrying the GPU event time and host wall-clock time, then a summary whose
@@ -193,9 +191,6 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Invalid precision '%s' (use float, double, half)\n", precision);
         return EXIT_FAILURE;
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     // Shared memory must hold (numSteps+1) floats; clamp to reasonable limit
     if (numSteps > 4096) {
         fprintf(stderr, "Warning: clamping steps to 4096 (shared memory limit)\n");
@@ -211,8 +206,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Options: %d  |  Steps: %d  |  Iterations: %d warmup + %d timed\n\n",
-            numOptions, numSteps, num_warmup, num_iters);
+    fprintf(stderr, "Options: %d  |  Steps: %d\n\n",
+            numOptions, numSteps);
 
     // Host allocation + initialization
     OptionData* h_options = (OptionData*)malloc(optBytes);
@@ -249,14 +244,13 @@ int main(int argc, char** argv) {
     // reads only the immutable option data and fully overwrites d_prices on
     // each launch, so no state reset is needed between iterations.
     double total_gpu_ms =
-        bench_run_loop("binomial_kernel", num_warmup, num_iters, params, [&]() {
+        bench_run_once("binomial_kernel", params, [&]() {
             binomial_kernel<<<dim3(gridSize), dim3(blockSize), sharedBytes, 0>>>(
                 d_options, d_prices, numSteps);
         });
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
     // Verification

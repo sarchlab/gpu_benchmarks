@@ -24,8 +24,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_n_ffts, BENCH_PARAM_precision
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
 // FFT512_device and one for IFFT512_device, each carrying its GPU event time,
@@ -359,7 +357,7 @@ void IFFT512_device( T2 *work )
 // ===========================================================================
 
 template <class T2, class T>
-static int runFFT(int n_ffts, const char* precision, int num_warmup, int num_iters)
+static int runFFT(int n_ffts, const char* precision)
 {
     const int fft_size = 512;
     size_t n_cmplx = (size_t)n_ffts * fft_size;
@@ -409,6 +407,11 @@ static int runFFT(int n_ffts, const char* precision, int num_warmup, int num_ite
 
         HIP_CHECK(hipMemcpy(work, source, bytes, hipMemcpyHostToDevice));
 
+        /* Cold-cache calibration: evict the LLC and hold the clock high before
+         * the pass's first timed launch, so it runs cold. No-op when
+         * BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         bench_lap_add(&acc_fwd, bench_time_op(&timer, [&]() {
             FFT512_device<T2,T><<<grid, block>>>(work);
         }));
@@ -418,21 +421,17 @@ static int runFFT(int n_ffts, const char* precision, int num_warmup, int num_ite
         HIP_CHECK(hipGetLastError());
     };
 
-    for (int w = 0; w < num_warmup; ++w) run_pass();
-
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_pass();
-        bench_emit_iter("FFT512_device",  i, &acc_fwd, params);
-        bench_emit_iter("IFFT512_device", i, &acc_inv, params);
-        total_gpu_ms += acc_fwd.gpu_ms + acc_inv.gpu_ms;
-        fprintf(stderr, "pass %d: FFT512_device=%.3f ms, IFFT512_device=%.3f ms\n",
-                i, acc_fwd.gpu_ms, acc_inv.gpu_ms);
-    }
+    run_pass();
+    bench_emit_iter("FFT512_device",  0, &acc_fwd, params);
+    bench_emit_iter("IFFT512_device", 0, &acc_inv, params);
+    total_gpu_ms += acc_fwd.gpu_ms + acc_inv.gpu_ms;
+    fprintf(stderr, "FFT512_device=%.3f ms, IFFT512_device=%.3f ms\n",
+            acc_fwd.gpu_ms, acc_inv.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n", total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Round-trip verification: forward then inverse (with the built-in /512
     // normalization) must recover the original samples.
@@ -477,10 +476,7 @@ int main(int argc, char** argv) {
         fprintf(stderr, "n_ffts must be >= 1\n");
         return EXIT_FAILURE;
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     if (strcmp(precision, "double") == 0)
-        return runFFT<double2, double>(n_ffts, "double", num_warmup, num_iters);
-    return runFFT<float2, float>(n_ffts, "float", num_warmup, num_iters);
+        return runFFT<double2, double>(n_ffts, "double");
+    return runFFT<float2, float>(n_ffts, "float");
 }

@@ -21,8 +21,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_tmax, BENCH_PARAM_block_size
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (fdtd_update_ex, fdtd_update_ey, fdtd_update_hz) carrying that
@@ -122,8 +120,6 @@ int main(int argc, char** argv) {
     if (env_val) TMAX = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     int NX = N, NY = N;
     size_t grid_bytes = (size_t)NX * NY * sizeof(float);
@@ -134,8 +130,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Grid: %d×%d  |  TMAX: %d  |  Passes: %d warmup + %d timed\n\n",
-            NX, NY, TMAX, num_warmup, num_iters);
+    fprintf(stderr, "Grid: %d×%d  |  TMAX: %d\n\n",
+            NX, NY, TMAX);
 
     // Host allocations and initialization
     float* h_ex = (float*)malloc(grid_bytes);
@@ -181,6 +177,11 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_ey, h_ey, grid_bytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_hz, h_hz, grid_bytes, hipMemcpyHostToDevice));
 
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         for (int t = 0; t < TMAX; ++t) {
             bench_lap_add(&acc_ex, bench_time_op(&timer, [&]() {
                 fdtd_update_ex<<<grid2d, block>>>(d_ex, d_hz, NX, NY);
@@ -194,25 +195,20 @@ int main(int argc, char** argv) {
         }
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_fdtd_pass();
-    }
+    run_fdtd_pass();
 
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_fdtd_pass();
-        bench_emit_iter("fdtd_update_ex", i, &acc_ex, params);
-        bench_emit_iter("fdtd_update_ey", i, &acc_ey, params);
-        bench_emit_iter("fdtd_update_hz", i, &acc_hz, params);
-        total_gpu_ms += acc_ex.gpu_ms + acc_ey.gpu_ms + acc_hz.gpu_ms;
-        fprintf(stderr, "pass %d: ex=%.3f ey=%.3f hz=%.3f ms\n",
-                i, acc_ex.gpu_ms, acc_ey.gpu_ms, acc_hz.gpu_ms);
-    }
+    bench_emit_iter("fdtd_update_ex", 0, &acc_ex, params);
+    bench_emit_iter("fdtd_update_ey", 0, &acc_ey, params);
+    bench_emit_iter("fdtd_update_hz", 0, &acc_hz, params);
+    total_gpu_ms += acc_ex.gpu_ms + acc_ey.gpu_ms + acc_hz.gpu_ms;
+    fprintf(stderr, "ex=%.3f ey=%.3f hz=%.3f ms\n",
+            acc_ex.gpu_ms, acc_ey.gpu_ms, acc_hz.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes (%d steps/pass)\n",
-            total_gpu_ms, num_iters, TMAX);
+    fprintf(stderr, "Total GPU time: %.3f ms (%d steps/pass)\n",
+            total_gpu_ms, TMAX);
 
     HIP_CHECK(hipFree(d_ex));
     HIP_CHECK(hipFree(d_ey));

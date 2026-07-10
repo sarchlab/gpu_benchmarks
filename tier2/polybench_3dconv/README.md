@@ -18,8 +18,8 @@ Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/project
 | `BENCH_PARAM_size` | Volume dimension N (N×N×N) | 128 |
 | `BENCH_PARAM_block_size` | Threads per block dimension (block_size³ block) | 8 |
 | `BENCH_PARAM_filter_size` | Filter dimension (filter_size³ kernel) | 3 |
-| `BENCH_PARAM_num_warmup` | Warmup launches (untimed) | 3 |
-| `BENCH_PARAM_num_iters` | Timed launches, each recorded | 7 |
+| `BENCH_PARAM_warmup` | Warmup launches (untimed) | 3 |
+| `BENCH_PARAM_iteration` | Timed launches, each recorded | 7 |
 
 ## Files
 

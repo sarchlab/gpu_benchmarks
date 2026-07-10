@@ -31,8 +31,6 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_m           (class exponent M, default 28 = Class A)
 //   BENCH_PARAM_block_size  (threads per block, default 256)
-//   BENCH_PARAM_num_warmup  (warmup passes, default 3)
-//   BENCH_PARAM_num_iters   (timed passes, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed pass carrying
 // the GPU event time and host wall-clock time of the single gpu_kernel launch,
@@ -255,8 +253,6 @@ int main(int argc, char** argv) {
     const char* env_val;
     env_val = getenv("BENCH_PARAM_m");          if (env_val) m = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size"); if (env_val) block_size = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     if (m <= MK) {
         fprintf(stderr, "M must be > %d (M-MK = number-of-groups exponent must be >= 1)\n", MK);
@@ -282,8 +278,8 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "NAS EP Class %s  |  M=%d  |  N = 2^%d numbers  |  NN = %lld threads\n",
             class_of(m), m, m + 1, nn);
-    fprintf(stderr, "Grid: %d blocks x %d threads  |  %d warmup + %d timed passes\n\n",
-            blocks_per_grid, threads_per_block, num_warmup, num_iters);
+    fprintf(stderr, "Grid: %d blocks x %d threads\n\n",
+            blocks_per_grid, threads_per_block);
 
     // Device accumulators (per-block partial sums).
     size_t size_q  = (size_t)blocks_per_grid * NQ * sizeof(double);
@@ -314,6 +310,10 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemset(q_device,  0, size_q));
         HIP_CHECK(hipMemset(sx_device, 0, size_sx));
         HIP_CHECK(hipMemset(sy_device, 0, size_sy));
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
         *lap_out = bench_time_op(&timer, [&]() {
             gpu_kernel<<<dim3(blocks_per_grid), dim3(threads_per_block)>>>(
                 q_device, sx_device, sy_device, an, (int)nn);
@@ -322,22 +322,16 @@ int main(int argc, char** argv) {
     };
 
     bench_lap_t lap;
-    for (int w = 0; w < num_warmup; ++w) {
-        run_launch(&lap);
-    }
-
+    run_launch(&lap);
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_launch(&lap);
-        bench_emit_iter("gpu_kernel", i, &lap, params);
-        total_gpu_ms += lap.gpu_ms;
-        fprintf(stderr, "gpu_kernel pass %d: gpu = %.3f ms, host = %.3f ms\n",
-                i, lap.gpu_ms, lap.host_ms);
-    }
+    bench_emit_iter("gpu_kernel", 0, &lap, params);
+    total_gpu_ms += lap.gpu_ms;
+    fprintf(stderr, "gpu_kernel: gpu = %.3f ms, host = %.3f ms\n",
+            lap.gpu_ms, lap.host_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n", total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
     // Host-side final reduction + NAS verification (untimed).

@@ -69,8 +69,8 @@ Parameters (env vars override `--flags`):
 | `BENCH_PARAM_num_rows` | 16384 | Matrix rows (and columns) |
 | `BENCH_PARAM_nnz_per_row` | 32 | Non-zeros per row |
 | `BENCH_PARAM_precision` | `float` | `float` \| `double` \| `half` (descriptor) |
-| `BENCH_PARAM_num_warmup` | 3 | Warmup launches (untimed) |
-| `BENCH_PARAM_num_iters` | 7 | Timed launches, each recorded |
+| `BENCH_PARAM_warmup` | 3 | Warmup launches (untimed) |
+| `BENCH_PARAM_iteration` | 7 | Timed launches, each recorded |
 
 ## Output Format
 

@@ -22,8 +22,8 @@ Derived from the [CUDA N-Body sample](https://developer.nvidia.com/gpugems/gpuge
 | `BENCH_PARAM_timesteps` | Simulation timesteps per pass | 10 |
 | `BENCH_PARAM_iterations` | Legacy count, echoed into records only | 5 |
 | `BENCH_PARAM_block_size` | Threads per block | 256 |
-| `BENCH_PARAM_num_warmup` | Warmup passes (untimed) | 3 |
-| `BENCH_PARAM_num_iters` | Timed passes, each recorded | 7 |
+| `BENCH_PARAM_warmup` | Warmup passes (untimed) | 3 |
+| `BENCH_PARAM_iteration` | Timed passes, each recorded | 7 |
 
 ## Files
 

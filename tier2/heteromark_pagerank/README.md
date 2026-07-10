@@ -21,8 +21,8 @@ Derived from the [HeteroMark benchmark suite](https://github.com/NUCAR-DEV/Heter
 | `BENCH_PARAM_vertices` | Number of vertices | 65536 |
 | `BENCH_PARAM_pr_iterations` | PageRank iterations per pass | 20 |
 | `BENCH_PARAM_damping_factor` | Damping factor d | 0.85 |
-| `BENCH_PARAM_num_warmup` | Warmup passes (untimed) | 3 |
-| `BENCH_PARAM_num_iters` | Timed passes, each recorded | 7 |
+| `BENCH_PARAM_warmup` | Warmup passes (untimed) | 3 |
+| `BENCH_PARAM_iteration` | Timed passes, each recorded | 7 |
 
 ## Files
 

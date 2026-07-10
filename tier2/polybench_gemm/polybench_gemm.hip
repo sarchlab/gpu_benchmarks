@@ -14,8 +14,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
-//   BENCH_PARAM_num_warmup   (warmup launches, default 3)
-//   BENCH_PARAM_num_iters    (timed launches, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // carrying the GPU event time and host wall-clock time, then a summary whose
@@ -98,9 +96,6 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     const float alpha = 1.5f;
     const float beta  = 1.2f;
 
@@ -151,13 +146,12 @@ int main(int argc, char** argv) {
     // independent, so iterating without re-uploading C does not change the
     // measured time and keeps the cache state steady across iterations.
     double total_gpu_ms =
-        bench_run_loop("polybench_gemm_kernel", num_warmup, num_iters, params, [&]() {
+        bench_run_once("polybench_gemm_kernel", params, [&]() {
             polybench_gemm_kernel<<<grid, block>>>(d_A, d_B, d_C, N, alpha, beta);
         });
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Cleanup
     HIP_CHECK(hipFree(d_A));

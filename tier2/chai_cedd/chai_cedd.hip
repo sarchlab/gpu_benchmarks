@@ -14,8 +14,6 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_width, BENCH_PARAM_height,
 //   BENCH_PARAM_threshold_low, BENCH_PARAM_threshold_high
-//   BENCH_PARAM_num_warmup   (warmup pipeline passes, default 3)
-//   BENCH_PARAM_num_iters    (timed pipeline passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // pipeline kernel carrying that kernel's GPU event time and host wall-clock
@@ -386,8 +384,6 @@ int main(int argc, char** argv) {
     if (env_val) threshold_low = atoi(env_val);
     env_val = getenv("BENCH_PARAM_threshold_high");
     if (env_val) threshold_high = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     int W = width;
     int H = height;
@@ -399,8 +395,7 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Canny Edge Detection  |  Image: %dx%d  |  "
-            "Passes: %d warmup + %d timed\n\n", W, H, num_warmup, num_iters);
+    fprintf(stderr, "Canny Edge Detection  |  Image: %dx%d\n\n", W, H);
 
     // Generate synthetic grayscale image
     std::vector<float> h_input(npix);
@@ -452,6 +447,11 @@ int main(int argc, char** argv) {
         bench_lap_reset(&acc_nms);
         bench_lap_reset(&acc_hyst);
 
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         bench_lap_add(&acc_gauss, bench_time_op(&timer, [&]() {
             gaussian_blur_kernel<<<gridDim, blockDim>>>(d_input, d_blurred, W, H);
         }));
@@ -469,29 +469,22 @@ int main(int argc, char** argv) {
         }));
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_cedd_pass();
-    }
-
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_cedd_pass();
-        bench_emit_iter("gaussian_blur_kernel",       i, &acc_gauss,  params);
-        bench_emit_iter("sobel_kernel",               i, &acc_sobel,  params);
-        bench_emit_iter("magnitude_direction_kernel", i, &acc_magdir, params);
-        bench_emit_iter("nms_kernel",                 i, &acc_nms,    params);
-        bench_emit_iter("hysteresis_kernel",          i, &acc_hyst,   params);
-        total_gpu_ms += acc_gauss.gpu_ms + acc_sobel.gpu_ms + acc_magdir.gpu_ms +
-                        acc_nms.gpu_ms + acc_hyst.gpu_ms;
-        fprintf(stderr, "pass %d: gauss=%.3f sobel=%.3f magdir=%.3f nms=%.3f hyst=%.3f ms\n",
-                i, acc_gauss.gpu_ms, acc_sobel.gpu_ms, acc_magdir.gpu_ms,
-                acc_nms.gpu_ms, acc_hyst.gpu_ms);
-    }
+    run_cedd_pass();
+    bench_emit_iter("gaussian_blur_kernel",       0, &acc_gauss,  params);
+    bench_emit_iter("sobel_kernel",               0, &acc_sobel,  params);
+    bench_emit_iter("magnitude_direction_kernel", 0, &acc_magdir, params);
+    bench_emit_iter("nms_kernel",                 0, &acc_nms,    params);
+    bench_emit_iter("hysteresis_kernel",          0, &acc_hyst,   params);
+    total_gpu_ms += acc_gauss.gpu_ms + acc_sobel.gpu_ms + acc_magdir.gpu_ms +
+                    acc_nms.gpu_ms + acc_hyst.gpu_ms;
+    fprintf(stderr, "gauss=%.3f sobel=%.3f magdir=%.3f nms=%.3f hyst=%.3f ms\n",
+            acc_gauss.gpu_ms, acc_sobel.gpu_ms, acc_magdir.gpu_ms,
+            acc_nms.gpu_ms, acc_hyst.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
     // Verification: compare a small sub-region with CPU reference

@@ -22,6 +22,75 @@ This suite contains **130 benchmarks across five tiers** of increasing complexit
 
 ---
 
+## Measurement Methodology
+
+The Tier 1 and Tier 2 benchmarks measure **cold-cache kernel execution time at a boosted GPU clock** — a well-defined, reproducible hardware state, free of the two artifacts that dominate naive GPU timing: an idle GPU's *lowered clock* (making a launch look artificially slow) and a re-run kernel's *cache-resident data* (making memory-bound kernels look artificially fast).
+
+The rules split cleanly by implementation language: everything that matters when writing the **C/C++/HIP/CUDA benchmark code** is a *benchmark rule*; everything that matters when writing the **Go runner (`gpubench`)** is a *harness rule*. A benchmark binary is a complete, correct measurement on its own; the harness only decides which binaries to run, with which parameters, how many times, and where the output goes.
+
+### Benchmark rules (C/C++/HIP/CUDA)
+
+**Sourcing and code structure:**
+
+1. **Use the original, unmodified benchmark.** Tier 2 kernels are taken from their upstream suites (Rodinia, SHOC, PolyBench, Parboil, …) with kernel code kept faithful to the original. Modifications are limited to what portability or correctness demands (e.g. fixing an out-of-bounds read that faults on AMD), never to change the algorithm being measured.
+
+2. **HIP and CUDA share one source.** Each benchmark is a single `.hip` file that compiles under both `hipcc` (AMD) and `nvcc` (NVIDIA) via `common/hip_cuda_compat.h`. There are no per-vendor copies that could diverge or acquire vendor-specific overhead.
+
+3. **Minimize common code; keep it header-only.** The shared infrastructure is three headers (`common/hip_cuda_compat.h`, `common/bench_timing.h`, `common/bench_warmup.h`) — nothing to build or link separately, so every benchmark compiles standalone with one compiler invocation.
+
+**Measurement:**
+
+4. **One measurement per execution.** A benchmark binary executes its operation **exactly once** and times it — no in-program warmup or iteration loop. The single run is the **full algorithm**: an iterative benchmark still runs its complete algorithm (BFS its whole traversal, k-means its whole `max_iter` refinement, a stencil all its timesteps) — "once" means the algorithm is not *repeated*, not that it is truncated.
+
+5. **Cold cache, warm clock.** Immediately before the timed operation, the benchmark runs a single **vector-add warmer** — a grid-stride read-modify-write kernel over a scratch buffer **larger than the last-level cache** (768 MB, above the MI300X 256 MB Infinity/MALL cache and far above any NVIDIA L2):
+
+   - Its sustained ALU + memory traffic **boosts the clock** up from idle.
+   - One pass over the >LLC buffer **evicts the benchmark's working set** from the last-level cache; because the warmer touches *different data with a different kernel*, it never warms the benchmark's own buffers.
+
+   The timed operation therefore starts cold-cache at a boosted clock. (There is no vendor cache-flush API — NVIDIA exposes only `cudaCtxResetPersistingL2Cache` and AMD flushes at dispatch coherence boundaries — so the over-sized-buffer eviction is the portable idiom.) The warmer is controlled by one measurement parameter, read by the benchmark from its environment:
+
+   | Parameter | Env var | Default | Meaning |
+   |-----------|---------|---------|---------|
+   | `vector_add_warmup` | `BENCH_PARAM_vector_add_warmup` | `true` | When on, the vector-add warmer boosts the clock and evicts the LLC just before the timed run. Set `false` to time the operation as-is (warm cache, whatever clock state the GPU is in). |
+
+6. **The timed bracket contains only the operation under test.** Host-side setup, `hipMalloc`, initial Host→Device uploads, and result verification all happen outside the timed region. For most benchmarks that means **we only care about kernel time** — the bracket contains kernel launches and nothing else. The only exception is a few Tier 1 benchmarks whose subject *is* the transfer (`memory_bandwidth`, `pcie_bandwidth`): there the bracket times the memory-copy operations, because copy time/bandwidth is what they measure.
+
+7. **GPU event timing, raw output.** Time is measured with **GPU events** (`hipEvent`/`cudaEvent`) bracketing exactly the enqueued operation — no host wall-clock timing is needed. Benchmarks never compute GFLOPS, GB/s, or latency — they emit the raw time plus the work-descriptor parameters as JSON lines on stdout, and all derived metrics are computed downstream.
+
+8. **Per-kernel records; their sum is the benchmark's execution time.** Each kernel's time is measured and recorded individually (accumulated across that kernel's launches within the run), one record per kernel. The sum of all per-kernel times is emitted as `summary.total_time_ms` — the benchmark's execution time. Data reuse *between* kernels within the run (kernel B reading kernel A's output) is left intact — it is part of the algorithm being measured; only the state *entering* the run is cold.
+
+9. **Deterministic, equivalent runs.** Benchmarks that mutate their inputs re-initialize device state before the timed run, so the measured work is identical on every execution.
+
+10. **Every declared parameter drives execution.** A parameter in `params.json` is read by the benchmark and changes what runs; parameters that would merely be echoed into records are not declared.
+
+### Parameter sweeping rules
+
+Each benchmark declares its parameters in `params.json`; the sweep is structured around one scaling axis plus a small set of configuration knobs:
+
+1. **Exactly one scaling parameter per benchmark.** It is the single axis that controls *how much* work the benchmark does (matrix dimension, array bytes, node count, …). It is chosen so performance is a predictable function of it (linear, polynomial, or exponential) — sweeping it traces the benchmark's performance curve.
+
+2. **Scaling values span the interesting range densely.** 20–30 ordered values (at least 10), from sizes small enough to be cache-resident / under-saturate the device up to sizes that far exceed the last-level cache / fully saturate it — so the sweep crosses the hardware's capacity boundaries rather than sampling one regime. Both aligned (power-of-two) and non-aligned sizes are worth including. No device-specific ceiling is assumed (a size that saturates one GPU may not saturate another); the practical upper bound is the harness timeout per run.
+
+3. **Non-scaling parameters change *how* the work is done, not how much.** Block size, mode, precision, algorithm variant — each with 3–5 values and a required default. By default the harness sweeps their cartesian product; `--sweep-non-scaling=false` pins them to defaults.
+
+4. **Every swept value must matter and must work.** Each value changes execution (no placeholder values whose runs would be identical), and every combination respects the benchmark's intrinsic constraints so it runs correctly — a value list that silently produces broken or duplicate runs is a bug in `params.json`.
+
+5. **Measurement controls are not sweep parameters.** `vector_add_warmup` is fixed per run (see harness rules), never crossed into the sweep.
+
+### Harness rules (Go, `gpubench`)
+
+1. **Orchestrate, never alter.** The harness selects parameter configurations, launches benchmark processes with `BENCH_PARAM_*` environment variables, and stores their stdout — it contains no measurement logic and never post-processes a time.
+
+2. **Repetition = process re-execution.** Because each benchmark execution is one complete, independent measurement, `gpubench run --reps N` simply runs the binary N times from scratch (fresh `hipMalloc`, fresh context, fresh clock state) — every sample is fully independent, capturing process- and allocation-level variance. Take the **minimum** GPU time across reps for the least-perturbed sample; use higher rep counts only when characterizing run-to-run variance itself.
+
+3. **Measurement controls are fixed, not swept.** `vector_add_warmup` is a measurement control, not a workload parameter, so it is excluded from the non-scaling cartesian sweep — it is fixed for a whole run to its default unless overridden globally: `gpubench run --vector-add-warmup true|false`. The value used is recorded per run in the database.
+
+4. **Store raw, derive downstream.** Every run's parameters, per-kernel times, and summary land in SQLite exactly as emitted; GFLOPS/GB/s/latency are computed later by analysis scripts, never at collection time.
+
+5. **Traces capture only the real kernels.** During NVBit trace collection the harness forces `vector_add_warmup=false` so a trace contains exactly the kernel(s) under test and never the warmer.
+
+---
+
 ## 5-Tier Structure
 
 | Tier | Name | Description |
@@ -452,6 +521,12 @@ go build -o gpubench ./cmd/gpubench
 
 # Use only default non-scaling parameter values
 ./gpubench run --sweep-non-scaling=false
+
+# Override the cold-cache warmer globally (all tier1/tier2 benchmarks)
+./gpubench run --vector-add-warmup false           # warm-cache mode (no warmer)
+
+# Repeat each benchmark process N times (fresh process each rep)
+./gpubench run --reps 5
 ```
 
 ### Makefile Shortcuts

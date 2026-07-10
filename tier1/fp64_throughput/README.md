@@ -111,8 +111,8 @@ Parameters can also be set via environment variables
 
 | Env var | Default | Description |
 |---|---|---|
-| `BENCH_PARAM_num_warmup` | `3` | Warm-up kernel launches (not timed) |
-| `BENCH_PARAM_num_iters` | `7` | Timed kernel launches, each recorded individually |
+| `BENCH_PARAM_warmup` | `3` | Warm-up kernel launches (not timed) |
+| `BENCH_PARAM_iteration` | `7` | Timed kernel launches, each recorded individually |
 
 ---
 

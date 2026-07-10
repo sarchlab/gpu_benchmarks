@@ -23,8 +23,6 @@
  *   BENCH_PARAM_block_size
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_access_pattern   ("no_conflict", "conflict", or "both")
- *   BENCH_PARAM_num_warmup       (warmup launches per pattern, default 3)
- *   BENCH_PARAM_num_iters        (timed launches per pattern, each recorded, default 7)
  *
  * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
  * the GPU event time and host wall-clock time, then a summary whose
@@ -133,8 +131,7 @@ typedef void (*KernelFn)(float *, int);
 static double run_benchmark(const char *kernel_name,
                             KernelFn kernel, float *d_sink,
                             int block_size, int num_blocks, int inner_iters,
-                            const char *access_pattern,
-                            int num_warmup, int num_iters)
+                            const char *access_pattern)
 {
     char params[192];
     snprintf(params, sizeof(params),
@@ -142,7 +139,7 @@ static double run_benchmark(const char *kernel_name,
              "\"access_pattern\":\"%s\"",
              inner_iters, block_size, num_blocks, access_pattern);
 
-    return bench_run_loop(kernel_name, num_warmup, num_iters, params, [&]() {
+    return bench_run_once(kernel_name, params, [&]() {
         kernel<<<dim3(num_blocks), dim3(block_size)>>>(d_sink, inner_iters);
     });
 }
@@ -175,9 +172,6 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_access_pattern");
     if (env_val) access_pattern = env_val;
 
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     /* Print device info to stderr. */
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
@@ -190,8 +184,7 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Block size    : %d threads\n", block_size);
     fprintf(stderr, "Grid size     : %d blocks\n", num_blocks);
     fprintf(stderr, "Inner iters   : %d\n", inner_iters);
-    fprintf(stderr, "Access pattern: %s\n", access_pattern);
-    fprintf(stderr, "Warmup / iters: %d / %d\n\n", num_warmup, num_iters);
+    fprintf(stderr, "Access pattern: %s\n\n", access_pattern);
 
     /* Allocate device sink buffer. */
     float *d_sink = nullptr;
@@ -209,8 +202,7 @@ int main(int argc, char *argv[])
         total_gpu_ms += run_benchmark("smem_bw_no_conflict",
                                       smem_bw_no_conflict, d_sink,
                                       block_size, num_blocks, inner_iters,
-                                      access_pattern,
-                                      num_warmup, num_iters);
+                                      access_pattern);
     }
 
     /* --- Conflict --- */
@@ -218,8 +210,7 @@ int main(int argc, char *argv[])
         total_gpu_ms += run_benchmark("smem_bw_conflict",
                                       smem_bw_conflict, d_sink,
                                       block_size, num_blocks, inner_iters,
-                                      access_pattern,
-                                      num_warmup, num_iters);
+                                      access_pattern);
     }
 
     bench_emit_summary(total_gpu_ms);

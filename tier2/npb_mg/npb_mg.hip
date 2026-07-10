@@ -7,8 +7,6 @@
 // Environment variables:
 //   BENCH_PARAM_grid_size, BENCH_PARAM_block_size,
 //   BENCH_PARAM_num_vcycles, BENCH_PARAM_num_smooth_steps
-//   BENCH_PARAM_num_warmup   (warmup MG passes, default 3)
-//   BENCH_PARAM_num_iters    (timed MG passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass (one pass = num_vcycles V-cycles from a
 // zeroed solution), one {"type":"kernel",...} JSON line per kernel
@@ -236,9 +234,6 @@ int main(int argc, char** argv) {
     if (env_val) num_vcycles = atoi(env_val);
     env_val = getenv("BENCH_PARAM_num_smooth_steps");
     if (env_val) num_smooth = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], "--size") == 0) N = atoi(argv[i+1]);
     }
@@ -252,8 +247,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "NPB MG  |  Grid: %d x %d x %d  |  V-cycles: %d  |  "
-            "Smooth steps: %d  |  %d warmup + %d timed passes\n\n",
-            N, N, N, num_vcycles, num_smooth, num_warmup, num_iters);
+            "Smooth steps: %d\n\n",
+            N, N, N, num_vcycles, num_smooth);
 
     std::vector<int> levels;
     { int sz = N; while (sz >= 4) { levels.push_back(sz); sz /= 2; } }
@@ -399,30 +394,26 @@ int main(int argc, char** argv) {
         }
         for (int lv = 0; lv < num_levels; ++lv)
             HIP_CHECK(hipMemset(d_u[lv], 0, level_bytes[lv]));
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
         for (int v = 0; v < num_vcycles; ++v) run_vcycle(timed);
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_mg_pass(false);
-        HIP_CHECK(hipDeviceSynchronize());
-    }
-
+    run_mg_pass(true);
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_mg_pass(true);
-        bench_emit_iter("smooth_kernel",   i, &acc_smooth,   params);
-        bench_emit_iter("restrict_kernel", i, &acc_restrict, params);
-        bench_emit_iter("prolong_kernel",  i, &acc_prolong,  params);
-        total_gpu_ms += acc_smooth.gpu_ms + acc_restrict.gpu_ms + acc_prolong.gpu_ms;
-        fprintf(stderr, "pass %d: smooth gpu = %.3f ms, restrict gpu = %.3f ms, "
-                "prolong gpu = %.3f ms\n",
-                i, acc_smooth.gpu_ms, acc_restrict.gpu_ms, acc_prolong.gpu_ms);
-    }
+    bench_emit_iter("smooth_kernel",   0, &acc_smooth,   params);
+    bench_emit_iter("restrict_kernel", 0, &acc_restrict, params);
+    bench_emit_iter("prolong_kernel",  0, &acc_prolong,  params);
+    total_gpu_ms += acc_smooth.gpu_ms + acc_restrict.gpu_ms + acc_prolong.gpu_ms;
+    fprintf(stderr, "smooth gpu = %.3f ms, restrict gpu = %.3f ms, "
+            "prolong gpu = %.3f ms\n",
+            acc_smooth.gpu_ms, acc_restrict.gpu_ms, acc_prolong.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Verification
     {

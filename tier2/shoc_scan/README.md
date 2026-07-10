@@ -69,8 +69,8 @@ make PLATFORM=cuda
 | `--precision P` | `float` | Precision label (half, float, double) |
 
 Environment variables `BENCH_PARAM_array_size`, `BENCH_PARAM_block_size`, and
-`BENCH_PARAM_precision` override the flags. `BENCH_PARAM_num_warmup` (default
-3) sets the untimed warmup passes and `BENCH_PARAM_num_iters` (default 7) the
+`BENCH_PARAM_precision` override the flags. `BENCH_PARAM_warmup` (default
+3) sets the untimed warmup passes and `BENCH_PARAM_iteration` (default 7) the
 timed passes, each recorded.
 
 > Note: `--block_size` is ignored on Metal (thread-group size is set automatically).

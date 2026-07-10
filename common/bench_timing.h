@@ -1,27 +1,33 @@
 /**
  * bench_timing.h
  *
- * Shared measurement harness for tier1 microbenchmarks.
+ * Shared measurement harness for tier1/tier2 benchmarks.
  *
  * Contract (single-source with hip_cuda_compat.h):
- *   - Warm up `bench_num_warmup()` times (default 3), each launch synced.
- *   - Loop `bench_num_iters()` times (default 7); every iteration is timed
- *     and emitted individually — no averaging, no min-keeping.
- *   - Each iteration records BOTH host wall-clock (chrono around
+ *   - Each process runs the operation under test EXACTLY ONCE and times it.
+ *     Repetition across fresh processes is the harness's job (gpubench --reps);
+ *     there is no in-program warmup or iteration loop.
+ *   - When BENCH_PARAM_vector_add_warmup is on (default), the vector-add warmer
+ *     runs once immediately before the timed run to boost the GPU clock and
+ *     evict the last-level cache, so the operation is measured cold-cache at a
+ *     boosted clock (matching a cold-cache kernel simulator). With it off, the
+ *     operation is timed as-is.
+ *   - The single timed run records BOTH host wall-clock (chrono around
  *     launch + sync) and device time (hipEvent pair around the launch).
- *   - The timed bracket contains ONLY the operation under test. Setup
- *     copies, allocation, and verification happen outside it.
+ *   - The timed bracket contains ONLY the operation under test. Setup copies,
+ *     allocation, and verification happen outside it.
  *   - Benchmarks emit raw times and work-descriptor params only; derived
  *     metrics (GFLOPS, GB/s, latency) are computed downstream from the DB.
  *
  * Output protocol (JSON lines on stdout):
- *   {"type":"kernel","name":<op>,"iter":<i>,"time_ms":<gpu event ms>,
- *    "host_time_ms":<chrono ms>,"params":{...}}      one line per iteration
+ *   {"type":"kernel","name":<op>,"iter":0,"time_ms":<gpu event ms>,
+ *    "host_time_ms":<chrono ms>,"params":{...}}      one line per kernel
  *   {"type":"summary","total_time_ms":<sum of all gpu event ms>}
  *
- * Overridable via environment:
- *   BENCH_PARAM_num_warmup   (n, default 3)
- *   BENCH_PARAM_num_iters    (m, default 7)
+ * One measurement-control parameter (uniform across all benchmarks):
+ *   BENCH_PARAM_vector_add_warmup  (cold-cache clock warmer on/off, default on)
+ *
+ * See the Methodology section of README.md for what this measures and why.
  */
 
 #ifndef BENCH_TIMING_H
@@ -32,30 +38,9 @@
 #include <cstdlib>
 
 #include "hip_cuda_compat.h"
+#include "bench_warmup.h"
 
-#define BENCH_DEFAULT_NUM_WARMUP 3
-#define BENCH_DEFAULT_NUM_ITERS  7
-
-static inline int bench_env_int(const char *name, int fallback, int min_val)
-{
-    const char *v = getenv(name);
-    if (!v || !*v) return fallback;
-    int n = atoi(v);
-    return n >= min_val ? n : fallback;
-}
-
-/* Warmup may legitimately be 0 (e.g. trace collection); iters must be >= 1. */
-static inline int bench_num_warmup(void)
-{
-    return bench_env_int("BENCH_PARAM_num_warmup", BENCH_DEFAULT_NUM_WARMUP, 0);
-}
-
-static inline int bench_num_iters(void)
-{
-    return bench_env_int("BENCH_PARAM_num_iters", BENCH_DEFAULT_NUM_ITERS, 1);
-}
-
-/* One iteration's measurement. */
+/* One run's measurement. */
 typedef struct {
     double gpu_ms;   /* hipEvent elapsed time around the operation   */
     double host_ms;  /* chrono around operation + full completion    */
@@ -141,50 +126,52 @@ static inline void bench_emit_summary(double total_gpu_ms)
 }
 
 /**
- * bench_run_loop — the measurement contract in one place.
+ * bench_run_once — measure a single-kernel benchmark: one timed run.
  *
- * Warm up `num_warmup` times (each launch synced), then run `num_iters`
- * recorded iterations. `launch` is a callable that enqueues exactly the
- * operation under test on the null stream (a kernel launch or an async
- * copy) and nothing else. Emits one JSON record per iteration plus a
- * per-iteration stderr line, and returns the sum of the recorded GPU
- * event times (ms) for the caller to accumulate into the summary.
+ * With BENCH_PARAM_vector_add_warmup on (default), the vector-add warmer runs
+ * once first to boost the GPU clock and evict the last-level cache, so the
+ * timed launch runs cold-cache at a boosted clock (matching a cold-cache kernel
+ * simulator). With it off, the launch is timed as-is. Repetition across
+ * processes is the harness's job (gpubench --reps); this runs `launch` exactly
+ * once.
+ *
+ * `launch` enqueues exactly the operation under test on the null stream.
+ * Emits one kernel record and returns its GPU event time (ms).
  */
 template <typename LaunchFn>
-static inline double bench_run_loop(const char *name, int num_warmup,
-                                    int num_iters, const char *params,
+static inline double bench_run_once(const char *name, const char *params,
                                     LaunchFn launch)
 {
-    for (int w = 0; w < num_warmup; ++w) {
-        launch();
-        BENCH_TIMING_CHECK(hipDeviceSynchronize());
-    }
+    if (bench_vector_add_warmup()) bench_warmer_run();  /* boost clock + cold cache */
 
     bench_timer_t timer;
     bench_timer_create(&timer);
-
-    double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        bench_lap_begin(&timer, 0);
-        launch();
-        bench_lap_t lap = bench_lap_end(&timer, 0);
-
-        bench_emit_iter(name, i, &lap, params);
-        total_gpu_ms += lap.gpu_ms;
-        fprintf(stderr, "%s iter %d: gpu = %.3f ms, host = %.3f ms\n",
-                name, i, lap.gpu_ms, lap.host_ms);
-    }
-
+    bench_lap_begin(&timer, 0);
+    launch();
+    bench_lap_t lap = bench_lap_end(&timer, 0);
     bench_timer_destroy(&timer);
-    return total_gpu_ms;
+
+    bench_emit_iter(name, 0, &lap, params);
+    fprintf(stderr, "%s: gpu = %.3f ms, host = %.3f ms\n",
+            name, lap.gpu_ms, lap.host_ms);
+    return lap.gpu_ms;
+}
+
+/* Multi-kernel / iterative benchmarks drive their own kernel launches with
+ * bench_time_op. Call this once at the start of the (single) timed run, after
+ * per-pass data (re)initialization and before the first timed launch, so the
+ * run is cold-cache at a boosted clock. No-op when vector-add warmup is off. */
+static inline void bench_pass_warm(void)
+{
+    if (bench_vector_add_warmup()) bench_warmer_run();
 }
 
 /**
- * Multi-kernel workloads (tier2): run the whole workload num_iters times;
- * within each pass, bracket every kernel launch with bench_time_op and
- * accumulate into that kernel's per-pass bench_lap_t via bench_lap_add,
- * then emit one record per kernel per pass with bench_emit_iter. The
- * summary stays the sum of every emitted record's gpu time.
+ * Multi-kernel workloads (tier2): run the whole workload once; bracket every
+ * kernel launch with bench_time_op and accumulate into that kernel's
+ * bench_lap_t via bench_lap_add, then emit one record per kernel with
+ * bench_emit_iter (iter 0). The summary is the sum of every emitted record's
+ * gpu time.
  */
 template <typename LaunchFn>
 static inline bench_lap_t bench_time_op(bench_timer_t *t, LaunchFn op)
@@ -210,10 +197,9 @@ static inline void bench_lap_add(bench_lap_t *acc, bench_lap_t lap)
  *  (memory_bandwidth, pcie_bandwidth unidirectional tests). */
 static inline double bench_run_memcpy(const char *name, void *dst,
                                       const void *src, size_t bytes,
-                                      hipMemcpyKind kind, int num_warmup,
-                                      int num_iters, const char *params)
+                                      hipMemcpyKind kind, const char *params)
 {
-    return bench_run_loop(name, num_warmup, num_iters, params, [&]() {
+    return bench_run_once(name, params, [&]() {
         BENCH_TIMING_CHECK(hipMemcpyAsync(dst, src, bytes, kind, 0));
     });
 }

@@ -22,8 +22,6 @@
  * Environment variables (override argv):
  *   BENCH_PARAM_matrix_dim
  *   BENCH_PARAM_precision          ("fp16", "tf32", or "all")
- *   BENCH_PARAM_num_warmup         (warmup launches, default 3)
- *   BENCH_PARAM_num_iters          (timed launches, each recorded, default 7)
  *
  * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
  * the GPU event time and host wall-clock time, then a summary whose
@@ -199,14 +197,12 @@ __global__ void wmma_tf32_gemm(const float *A, const float *B, float *C,
 // ---------------------------------------------------------------------------
 
 /**
- * Warm up, then run `num_iters` recorded launches of one precision.
- * Emits one JSON record per iteration; returns the sum of the recorded
- * iterations' GPU event times (ms). TOPS is derived downstream as
- * 2*matrix_dim^3 / time.
+ * Warm up, then run one recorded launch of one precision.
+ * Emits one JSON record; returns the launch's GPU event time (ms). TOPS is
+ * derived downstream as 2*matrix_dim^3 / time.
  */
 template <typename LaunchFn>
 static double benchmark_kernel(const char *kernel_name, const char *precision_str,
-                               int num_warmup, int num_iters,
                                int matrix_dim,
                                LaunchFn launch_fn)
 {
@@ -215,8 +211,7 @@ static double benchmark_kernel(const char *kernel_name, const char *precision_st
              "\"matrix_dim\":%d,\"precision\":\"%s\"",
              matrix_dim, precision_str);
 
-    return bench_run_loop(kernel_name, num_warmup, num_iters, params,
-                          launch_fn);
+    return bench_run_once(kernel_name, params, launch_fn);
 }
 
 // ---------------------------------------------------------------------------
@@ -248,9 +243,6 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_precision");
     if (env_val) precision = env_val;
 
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     int M = dim, N = dim, K = dim;
 
     /* Print device info to stderr. */
@@ -262,8 +254,7 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Device           : %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Matrix (M×N×K)   : %d × %d × %d\n", M, N, K);
     fprintf(stderr, "WMMA tile        : %d × %d × %d\n", WMMA_M, WMMA_N, WMMA_K);
-    fprintf(stderr, "Precision        : %s\n", precision);
-    fprintf(stderr, "Warmup / iters   : %d / %d\n\n", num_warmup, num_iters);
+    fprintf(stderr, "Precision        : %s\n\n", precision);
 
     double total_gpu_ms = 0.0;
 
@@ -289,8 +280,7 @@ int main(int argc, char *argv[])
         dim3 grid(M / WMMA_M, N / WMMA_N);
         dim3 block(WARP_SIZE);
 
-        total_gpu_ms += benchmark_kernel("wmma_fp16_gemm", "fp16",
-                                         num_warmup, num_iters, dim,
+        total_gpu_ms += benchmark_kernel("wmma_fp16_gemm", "fp16", dim,
                                          [&]() {
             wmma_fp16_gemm<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
         });
@@ -321,8 +311,7 @@ int main(int argc, char *argv[])
             dim3 grid(M / WMMA_M, N / WMMA_N);
             dim3 block(WARP_SIZE);
 
-            total_gpu_ms += benchmark_kernel("wmma_tf32_gemm", "tf32",
-                                             num_warmup, num_iters, dim,
+            total_gpu_ms += benchmark_kernel("wmma_tf32_gemm", "tf32", dim,
                                              [&]() {
                 wmma_tf32_gemm<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
             });

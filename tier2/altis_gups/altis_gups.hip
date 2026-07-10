@@ -9,8 +9,6 @@
 // Environment variables:
 //   BENCH_PARAM_table_size, BENCH_PARAM_block_size, BENCH_PARAM_num_updates,
 //   BENCH_PARAM_num_threads
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed pass carrying
 // the GPU event time and host wall-clock time, then a summary whose
@@ -96,8 +94,6 @@ int main(int argc, char** argv) {
     if (env_val) num_updates = atoi(env_val);
     env_val = getenv("BENCH_PARAM_num_threads");
     if (env_val) num_threads = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     int gridSize   = (num_threads + block_size - 1) / block_size;
     int actual_threads = gridSize * block_size;
@@ -111,11 +107,9 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "GUPS benchmark  |  Table size: %d (%.2f MB)  |  "
-            "Updates/thread: %d  |  Threads: %d  |  Total updates: %lld  |  "
-            "Iterations: %d warmup + %d timed\n\n",
+            "Updates/thread: %d  |  Threads: %d  |  Total updates: %lld\n\n",
             table_size, (double)table_size * 8.0 / 1e6,
-            num_updates, actual_threads, total_updates,
-            num_warmup, num_iters);
+            num_updates, actual_threads, total_updates);
 
     // -----------------------------------------------------------------------
     // Allocate table on device
@@ -151,29 +145,26 @@ int main(int argc, char** argv) {
 
     auto run_pass = [&]() {
         reset_table();
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
         lap = bench_time_op(&timer, [&]() {
             gups_kernel<<<dim3(gridSize), dim3(block_size)>>>(
                 d_table, table_size, num_updates, seed_base);
         });
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_pass();
-    }
-
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_pass();
-        bench_emit_iter("gups_kernel", i, &lap, params);
-        total_gpu_ms += lap.gpu_ms;
-        fprintf(stderr, "gups_kernel iter %d: gpu = %.3f ms, host = %.3f ms\n",
-                i, lap.gpu_ms, lap.host_ms);
-    }
+    run_pass();
+    bench_emit_iter("gups_kernel", 0, &lap, params);
+    total_gpu_ms += lap.gpu_ms;
+    fprintf(stderr, "gups_kernel: gpu = %.3f ms, host = %.3f ms\n",
+            lap.gpu_ms, lap.host_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -----------------------------------------------------------------------
     // Verification

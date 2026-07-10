@@ -15,8 +15,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_verify
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (lud_diagonal, lud_perimeter, lud_internal) carrying that kernel's
@@ -217,8 +215,6 @@ int main(int argc, char **argv)
                 verify_mode);
         return EXIT_FAILURE;
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
     if (N % BSIZE != 0) {
         fprintf(stderr, "Error: N=%d must be divisible by BSIZE=%d\n", N, BSIZE);
         return 1;
@@ -270,6 +266,11 @@ int main(int argc, char **argv)
 
         HIP_CHECK(hipMemcpy(d_a, h_a, bytes, hipMemcpyHostToDevice));
 
+        /* Cold-cache calibration: evict the LLC and hold the clock high before
+         * the pass's first timed launch, so it runs cold. No-op when
+         * BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
+
         for (int k = 0; k < num_blocks; k++) {
             bench_lap_add(&acc_diagonal, bench_time_op(&timer, [&]() {
                 lud_diagonal<<<dim3(1), block>>>(d_a, N, k);
@@ -287,10 +288,6 @@ int main(int argc, char **argv)
         }
     };
 
-    // Warmup
-    for (int w = 0; w < num_warmup; ++w) {
-        run_lud_pass();
-    }
     // Correctness verification (one extra pass)
     run_lud_pass();
     HIP_CHECK(hipMemcpy(h_lu, d_a, bytes, hipMemcpyDeviceToHost));
@@ -299,22 +296,19 @@ int main(int argc, char **argv)
 
     // Timed passes — one record per kernel per pass.
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; i++) {
-        run_lud_pass();
-        bench_emit_iter("lud_diagonal",  i, &acc_diagonal,  params);
-        bench_emit_iter("lud_perimeter", i, &acc_perimeter, params);
-        bench_emit_iter("lud_internal",  i, &acc_internal,  params);
-        total_gpu_ms += acc_diagonal.gpu_ms + acc_perimeter.gpu_ms
-                      + acc_internal.gpu_ms;
-        fprintf(stderr, "pass %d: diagonal gpu = %.3f ms, perimeter gpu = %.3f ms, "
-                        "internal gpu = %.3f ms\n",
-                i, acc_diagonal.gpu_ms, acc_perimeter.gpu_ms, acc_internal.gpu_ms);
-    }
+    run_lud_pass();
+    bench_emit_iter("lud_diagonal",  0, &acc_diagonal,  params);
+    bench_emit_iter("lud_perimeter", 0, &acc_perimeter, params);
+    bench_emit_iter("lud_internal",  0, &acc_internal,  params);
+    total_gpu_ms += acc_diagonal.gpu_ms + acc_perimeter.gpu_ms
+                  + acc_internal.gpu_ms;
+    fprintf(stderr, "diagonal gpu = %.3f ms, perimeter gpu = %.3f ms, "
+                    "internal gpu = %.3f ms\n",
+            acc_diagonal.gpu_ms, acc_perimeter.gpu_ms, acc_internal.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Cleanup
     HIP_CHECK(hipFree(d_a));

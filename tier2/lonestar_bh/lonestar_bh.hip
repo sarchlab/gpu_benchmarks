@@ -14,9 +14,7 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_bodies, BENCH_PARAM_timesteps, BENCH_PARAM_theta,
-//   BENCH_PARAM_iterations (echoed in params; pass count is num_iters)
-//   BENCH_PARAM_num_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_num_iters    (timed passes, each recorded, default 7)
+//   BENCH_PARAM_iterations (echoed in params)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (bh_force_kernel, integrate_kernel) carrying that kernel's
@@ -357,13 +355,11 @@ int main(int argc, char** argv) {
     // Defaults from params.json
     int bodies      = 32768;
     int timesteps_p = 10;
-    int iterations  = 5;
     double theta_p  = 0.5;
 
     // Command-line fallback
     bodies      = parseIntParam(argc, argv, "--bodies", bodies);
     timesteps_p = parseIntParam(argc, argv, "--timesteps", timesteps_p);
-    iterations  = parseIntParam(argc, argv, "--iterations", iterations);
     theta_p     = (double)parseFloatParam(argc, argv, "--theta", (float)theta_p);
 
     // Environment variable overrides
@@ -372,13 +368,8 @@ int main(int argc, char** argv) {
     if (env_val) bodies = atoi(env_val);
     env_val = getenv("BENCH_PARAM_timesteps");
     if (env_val) timesteps_p = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_theta");
     if (env_val) theta_p = atof(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     int N         = bodies;
     int timesteps = timesteps_p;
     float theta   = (float)theta_p;
@@ -406,8 +397,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Barnes-Hut N-body  |  Bodies: %d  |  Theta: %.2f  |  "
-            "Timesteps: %d  |  Iterations: %d warmup + %d timed\n\n",
-            N, theta, timesteps, num_warmup, num_iters);
+            "Timesteps: %d\n\n",
+            N, theta, timesteps);
 
     // Allocate device arrays for bodies
     float *d_px, *d_py, *d_vx, *d_vy, *d_mass, *d_ax, *d_ay;
@@ -430,8 +421,8 @@ int main(int argc, char** argv) {
 
     char params[192];
     snprintf(params, sizeof(params),
-             "\"bodies\":%d,\"timesteps\":%d,\"theta\":%.6f,\"iterations\":%d",
-             bodies, timesteps_p, theta_p, iterations);
+             "\"bodies\":%d,\"timesteps\":%d,\"theta\":%.6f",
+             bodies, timesteps_p, theta_p);
 
     // Per-kernel accumulators: each pass runs one full simulation (timesteps
     // steps, each launching both kernels once); the accumulated GPU/host time
@@ -450,6 +441,11 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_vx, vx.data(), N * sizeof(float), hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_vy, vy.data(), N * sizeof(float), hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_mass, h_mass.data(), N * sizeof(float), hipMemcpyHostToDevice));
+
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
 
         for (int t = 0; t < timesteps; ++t) {
             // Copy positions back to CPU for tree build
@@ -486,24 +482,17 @@ int main(int argc, char** argv) {
         run_simulation(tpx, tpy, tvx, tvy);
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_pass();
-    }
-
+    run_pass();
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_pass();
-        bench_emit_iter("bh_force_kernel",  i, &acc_force,     params);
-        bench_emit_iter("integrate_kernel", i, &acc_integrate, params);
-        total_gpu_ms += acc_force.gpu_ms + acc_integrate.gpu_ms;
-        fprintf(stderr, "pass %d: bh_force gpu = %.3f ms, integrate gpu = %.3f ms\n",
-                i, acc_force.gpu_ms, acc_integrate.gpu_ms);
-    }
+    bench_emit_iter("bh_force_kernel",  0, &acc_force,     params);
+    bench_emit_iter("integrate_kernel", 0, &acc_integrate, params);
+    total_gpu_ms += acc_force.gpu_ms + acc_integrate.gpu_ms;
+    fprintf(stderr, "bh_force gpu = %.3f ms, integrate gpu = %.3f ms\n",
+            acc_force.gpu_ms, acc_integrate.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
     // Verification: compare BH forces vs direct O(N^2) on small subset

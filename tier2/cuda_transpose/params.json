@@ -48,8 +48,6 @@
       "type": "int",
       "default": 32,
       "values": [
-        8,
-        16,
         32
       ]
     }

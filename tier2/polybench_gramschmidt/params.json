@@ -35,12 +35,9 @@
       "name": "n",
       "description": "Number of columns of matrix A",
       "type": "int",
-      "default": 512,
+      "default": 64,
       "values": [
-        128,
-        256,
-        512,
-        1024
+        64
       ]
     },
     {

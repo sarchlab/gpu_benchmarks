@@ -53,13 +53,29 @@ The rules split cleanly by implementation language: everything that matters when
    |-----------|---------|---------|---------|
    | `vector_add_warmup` | `BENCH_PARAM_vector_add_warmup` | `true` | When on, the vector-add warmer boosts the clock and evicts the LLC just before the timed run. Set `false` to time the operation as-is (warm cache, whatever clock state the GPU is in). |
 
-6. **The timed bracket contains only the operation under test.** Host-side setup, `hipMalloc`, initial Host→Device uploads, and result verification all happen outside the timed region.
+6. **The timed bracket contains only the operation under test.** Host-side setup, `hipMalloc`, initial Host→Device uploads, and result verification all happen outside the timed region. For most benchmarks that means **we only care about kernel time** — the bracket contains kernel launches and nothing else. The only exception is a few Tier 1 benchmarks whose subject *is* the transfer (`memory_bandwidth`, `pcie_bandwidth`): there the bracket times the memory-copy operations, because copy time/bandwidth is what they measure.
 
-7. **Dual timing, raw output.** The timed run records both the **GPU event time** (`hipEvent`/`cudaEvent`) and the **host wall-clock time** of the same launch, so scheduling/launch overhead is visible but separable. Benchmarks never compute GFLOPS, GB/s, or latency — they emit raw time(s) plus the work-descriptor parameters as JSON lines on stdout, and all derived metrics are computed downstream. A multi-kernel benchmark emits **one record per kernel** (accumulated across that kernel's launches within the run), and `summary.total_time_ms` is their sum; data reuse *between* kernels within the run (kernel B reading kernel A's output) is left intact — it is part of the algorithm being measured; only the state *entering* the run is cold.
+7. **GPU event timing, raw output.** Time is measured with **GPU events** (`hipEvent`/`cudaEvent`) bracketing exactly the enqueued operation — no host wall-clock timing is needed. Benchmarks never compute GFLOPS, GB/s, or latency — they emit the raw time plus the work-descriptor parameters as JSON lines on stdout, and all derived metrics are computed downstream.
 
-8. **Deterministic, equivalent runs.** Benchmarks that mutate their inputs re-initialize device state before the timed run, so the measured work is identical on every execution.
+8. **Per-kernel records; their sum is the benchmark's execution time.** Each kernel's time is measured and recorded individually (accumulated across that kernel's launches within the run), one record per kernel. The sum of all per-kernel times is emitted as `summary.total_time_ms` — the benchmark's execution time. Data reuse *between* kernels within the run (kernel B reading kernel A's output) is left intact — it is part of the algorithm being measured; only the state *entering* the run is cold.
 
-9. **Every declared parameter drives execution.** A parameter in `params.json` is read by the benchmark and changes what runs; parameters that would merely be echoed into records are not declared.
+9. **Deterministic, equivalent runs.** Benchmarks that mutate their inputs re-initialize device state before the timed run, so the measured work is identical on every execution.
+
+10. **Every declared parameter drives execution.** A parameter in `params.json` is read by the benchmark and changes what runs; parameters that would merely be echoed into records are not declared.
+
+### Parameter sweeping rules
+
+Each benchmark declares its parameters in `params.json`; the sweep is structured around one scaling axis plus a small set of configuration knobs:
+
+1. **Exactly one scaling parameter per benchmark.** It is the single axis that controls *how much* work the benchmark does (matrix dimension, array bytes, node count, …). It is chosen so performance is a predictable function of it (linear, polynomial, or exponential) — sweeping it traces the benchmark's performance curve.
+
+2. **Scaling values span the interesting range densely.** 20–30 ordered values (at least 10), from sizes small enough to be cache-resident / under-saturate the device up to sizes that far exceed the last-level cache / fully saturate it — so the sweep crosses the hardware's capacity boundaries rather than sampling one regime. Both aligned (power-of-two) and non-aligned sizes are worth including. No device-specific ceiling is assumed (a size that saturates one GPU may not saturate another); the practical upper bound is the harness timeout per run.
+
+3. **Non-scaling parameters change *how* the work is done, not how much.** Block size, mode, precision, algorithm variant — each with 3–5 values and a required default. By default the harness sweeps their cartesian product; `--sweep-non-scaling=false` pins them to defaults.
+
+4. **Every swept value must matter and must work.** Each value changes execution (no placeholder values whose runs would be identical), and every combination respects the benchmark's intrinsic constraints so it runs correctly — a value list that silently produces broken or duplicate runs is a bug in `params.json`.
+
+5. **Measurement controls are not sweep parameters.** `vector_add_warmup` is fixed per run (see harness rules), never crossed into the sweep.
 
 ### Harness rules (Go, `gpubench`)
 

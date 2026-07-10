@@ -56,11 +56,12 @@ The scaling parameter is the single parameter that controls the "size" of the be
 | `type` | string | **yes** | One of: `"int"`, `"float"`, `"string"`, `"enum"` |
 | `values` | array | **yes** | Ordered list of values to sweep. Should contain 20–30 values for scaling params |
 
-For **Tier 1 and Tier 2 non-ML benchmarks**, scaling arrays should prioritize practical coverage over stress-test extremes:
-
-- Include at least **3 non-power-of-two values** to avoid only alignment-friendly datapoints
-- Keep upper bounds within a **practical single-run target (~15s)** for non-ML workloads
-- For Tier 1 per-thread-op throughput microbenchmarks (`atomic_operations`, `warp_shuffle`, `fp16_throughput`, `fp32_throughput`, `fp64_throughput`, `int32_throughput`), cap scaling max at **65536**
+For **Tier 1 and Tier 2 non-ML benchmarks**, choose scaling values that give good
+coverage of the workload's behavior. There is no restriction on alignment or
+magnitude — aligned (power-of-two) and non-aligned sizes are both worth sampling,
+and the useful upper bound is workload- and device-dependent (a size that saturates
+one GPU may not saturate another), so pick ranges that expose the behavior you care
+about. Keep individual runs within the harness timeout.
 
 ### Non-Scaling Parameter Object
 
@@ -264,5 +265,3 @@ A valid `params.json` must satisfy:
 6. All `kernels` entries are unique strings
 7. Parameter names are valid identifiers (`[a-z][a-z0-9_]*`)
 8. No duplicate parameter names across scaling + non-scaling params
-9. Tier 1 and Tier 2 benchmarks must include at least 3 non-power-of-two values in `scaling_param.values`
-10. Tier 1 per-thread-op throughput benchmarks (`atomic_operations`, `warp_shuffle`, `fp16_throughput`, `fp32_throughput`, `fp64_throughput`, `int32_throughput`) must use max scaling value `<= 65536`

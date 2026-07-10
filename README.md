@@ -16,46 +16,54 @@ The suite is designed to cover the widest possible diversity of GPU compute and 
 
 ---
 
-## Measurement Methodology
-
-The Tier 1 and Tier 2 benchmarks are timed to produce data suitable for **calibrating a cold-cache GPU kernel simulator** (e.g. MGPUSim / BBSim). The principles below explain *what* every benchmark measures and *why* it measures it that way. They are enforced by a shared harness (`common/bench_timing.h` + `common/bench_warmup.h`) so all C++ benchmarks behave identically.
-
-### Principles
-
-1. **One run per process.** Each `gpubench run` process executes the benchmark's operation **exactly once** and times it — there is no in-program warmup or iteration loop. An iterative benchmark still runs its full algorithm (BFS its whole traversal, k-means its whole `max_iter` loop); "once" means that full algorithm is not *repeated* within the process. Repetition, when wanted, comes from re-executing the process (`gpubench run --reps N`), which also captures allocation- and context-level variance that an in-program loop cannot.
-
-2. **Measure the kernel, nothing else.** Each benchmark records only the operation under test using GPU events (`hipEvent`/`cudaEvent`). Host-side setup, `hipMalloc`, and the initial Host→Device upload are excluded. The timed run records both the **GPU event time** and the **host wall-clock time**, so scheduling/launch overhead is visible but separable.
-
-3. **Record raw time; derive later.** The harness never computes GFLOPS, GB/s, latency, etc. It emits the raw time(s) plus the work-descriptor parameters; all derived metrics are computed downstream. This keeps the on-device measurement free of modeling assumptions. For a multi-kernel benchmark, one record is emitted per kernel and `summary.total_time_ms` is their sum.
-
-4. **Cold cache, warm clock.** A cold-cache kernel simulator starts each kernel with an empty L2 / last-level cache but assumes the GPU is already at its boosted clock. Real hardware does the opposite by default: an idle GPU *drops* its clock (making a launch look artificially slow), while re-running a kernel *warms* its data into cache (making memory-bound kernels look artificially fast). To match the simulator we decouple the two with a single **vector-add warmer** run immediately before the timed operation:
-
-   - **Boost the clock** — the warmer is a grid-stride read-modify-write kernel; its sustained ALU + memory traffic pulls the clock up from idle.
-   - **Keep the kernel's data cold** — the warmer streams a scratch buffer **larger than the last-level cache** (768 MB, above the MI300X 256 MB Infinity/MALL cache and far above any NVIDIA L2), so one pass evicts the benchmark's working set from the LLC. Because it touches *different data with a different kernel*, it never warms the benchmark's own buffers.
-
-   The net effect: the timed operation runs **cold-cache at a boosted clock**, the regime the simulator models. (There is no vendor cache-flush API — NVIDIA exposes only `cudaCtxResetPersistingL2Cache` and AMD flushes at dispatch coherence boundaries — so the over-sized-buffer eviction is the portable idiom.) For a multi-kernel benchmark the warmer runs once before the first kernel; reuse *within* the run (kernel B reading kernel A's output) is left intact because the simulator models that intra-pass reuse too.
-
-   Iterative benchmarks re-initialize their device state before the timed run, so the single run is deterministic and equivalent across repetitions.
-
-### The measurement parameter
-
-Every Tier 1 / Tier 2 benchmark exposes one measurement-control parameter (in addition to its own workload parameters):
-
-| Parameter | Env var | Default | Meaning |
-|-----------|---------|---------|---------|
-| `vector_add_warmup` | `BENCH_PARAM_vector_add_warmup` | `true` | Cold-cache calibration mode. When on, the vector-add warmer boosts the clock and evicts the LLC just before the timed run. Set `false` for warm-cache / warm-clock-as-is measurement. |
-
-It is a measurement control, not a workload parameter, so it is **not** part of the non-scaling sweep — it is fixed for a whole run to its default unless overridden globally: `gpubench run --vector-add-warmup true|false`. The value used is injected into every benchmark and recorded per run in the database. (During NVBit trace collection the harness forces `vector_add_warmup=false` so a trace captures exactly the real kernel(s) and never the warmer.)
-
-### Repetition: `--reps`
-
-`gpubench run --reps N` re-executes each benchmark *process* N times from scratch (fresh `hipMalloc`, fresh context), capturing process- and allocation-level variance. Because the simulator's kernel model is deterministic, `--reps 1` is sufficient for calibration; increase it only to characterize run-to-run variance. Take the **minimum** GPU time across reps for the least-perturbed sample.
-
----
-
 ## Overview
 
 This suite contains **130 benchmarks across five tiers** of increasing complexity and scope, allowing researchers and engineers to evaluate GPU hardware and software stacks at every level — from raw memory bandwidth to end-to-end ML training throughput.
+
+---
+
+## Measurement Methodology
+
+The Tier 1 and Tier 2 benchmarks measure **cold-cache kernel execution time at a boosted GPU clock** — a well-defined, reproducible hardware state, free of the two artifacts that dominate naive GPU timing: an idle GPU's *lowered clock* (making a launch look artificially slow) and a re-run kernel's *cache-resident data* (making memory-bound kernels look artificially fast). The methodology is split between the **harness** (the shared timing code and the `gpubench` runner, which enforce *how* things are measured) and the **benchmarks** (which guarantee *what* is measured).
+
+### Harness principles
+
+The shared harness (`common/bench_timing.h` + `common/bench_warmup.h`) and the `gpubench` runner enforce these uniformly across all C++ benchmarks:
+
+1. **One run per process.** Each `gpubench run` process executes the benchmark's operation **exactly once** and times it — there is no in-program warmup or iteration loop. Repetition, when wanted, comes from re-executing the process (`gpubench run --reps N`), so every sample is fully independent (fresh `hipMalloc`, fresh context, fresh clock state).
+
+2. **Cold cache, warm clock.** Immediately before the timed operation, the harness runs a single **vector-add warmer** — a grid-stride read-modify-write kernel over a scratch buffer **larger than the last-level cache** (768 MB, above the MI300X 256 MB Infinity/MALL cache and far above any NVIDIA L2):
+
+   - Its sustained ALU + memory traffic **boosts the clock** up from idle.
+   - One pass over the >LLC buffer **evicts the benchmark's working set** from the last-level cache; because the warmer touches *different data with a different kernel*, it never warms the benchmark's own buffers.
+
+   The timed operation therefore starts cold-cache at a boosted clock. (There is no vendor cache-flush API — NVIDIA exposes only `cudaCtxResetPersistingL2Cache` and AMD flushes at dispatch coherence boundaries — so the over-sized-buffer eviction is the portable idiom.)
+
+3. **Dual timing, raw output.** The timed run records both the **GPU event time** (`hipEvent`/`cudaEvent`) and the **host wall-clock time** of the same launch, so scheduling/launch overhead is visible but separable. The harness never computes GFLOPS, GB/s, or latency — it emits raw time(s) plus the work-descriptor parameters, and all derived metrics are computed downstream from the database.
+
+4. **One measurement parameter.** Every Tier 1 / Tier 2 benchmark exposes a single measurement control (in addition to its workload parameters):
+
+   | Parameter | Env var | Default | Meaning |
+   |-----------|---------|---------|---------|
+   | `vector_add_warmup` | `BENCH_PARAM_vector_add_warmup` | `true` | When on, the vector-add warmer boosts the clock and evicts the LLC just before the timed run. Set `false` to time the operation as-is (warm cache, whatever clock state the GPU is in). |
+
+   It is a measurement control, not a workload parameter, so it is **not** part of the non-scaling sweep — it is fixed for a whole run to its default unless overridden globally: `gpubench run --vector-add-warmup true|false`. The value used is recorded per run in the database. (During NVBit trace collection the harness forces `vector_add_warmup=false` so a trace captures exactly the real kernel(s) and never the warmer.)
+
+5. **Repetition via `--reps`.** `gpubench run --reps N` re-executes each benchmark process N times from scratch, capturing process- and allocation-level variance. Take the **minimum** GPU time across reps for the least-perturbed sample; use higher rep counts only when characterizing run-to-run variance itself.
+
+### Benchmark principles
+
+Each benchmark, in turn, guarantees:
+
+1. **The timed bracket contains only the operation under test.** Host-side setup, `hipMalloc`, initial Host→Device uploads, and result verification all happen outside the timed region.
+
+2. **The single run is the full algorithm.** An iterative benchmark still runs its complete algorithm (BFS its whole traversal, k-means its whole `max_iter` refinement, a stencil all its timesteps) — "one run" means the algorithm is not *repeated*, not that it is truncated.
+
+3. **Deterministic, equivalent runs.** Benchmarks that mutate their inputs re-initialize device state before the timed run, so the measured work is identical on every execution and across `--reps`.
+
+4. **One record per kernel.** A multi-kernel benchmark emits one timing record per kernel (accumulated across the kernel's launches within the run), and `summary.total_time_ms` is their sum. Data reuse *between* kernels within the run (kernel B reading kernel A's output) is left intact — it is part of the algorithm being measured; only the state *entering* the run is cold.
+
+5. **Every declared parameter drives execution.** A parameter in `params.json` is read by the benchmark and changes what runs; parameters that would merely be echoed into records are not declared.
 
 ---
 

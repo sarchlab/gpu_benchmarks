@@ -43,8 +43,7 @@
       "default": "fp16",
       "values": [
         "fp16",
-        "tf32",
-        "bf16"
+        "tf32"
       ]
     }
   ],

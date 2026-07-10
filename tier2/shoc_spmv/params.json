@@ -55,9 +55,7 @@
       "type": "enum",
       "default": "float",
       "values": [
-        "float",
-        "double",
-        "half"
+        "float"
       ]
     }
   ],

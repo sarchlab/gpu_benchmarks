@@ -49,6 +49,8 @@ Every Tier 1 / Tier 2 benchmark exposes the same three parameters (in addition t
 
 `iteration` is deliberately named to avoid collision with benchmarks that have their own workload iteration counts (`iterations`, `num_iterations`, `timesteps`, `tsteps`, …).
 
+These three are measurement controls, not workload parameters, so they are **not** part of the non-scaling sweep — each is fixed for a whole run to its default (above) unless overridden globally on the harness: `gpubench run --iteration M --warmup N --vector-add-warmup true|false`. The value used is injected into every benchmark and recorded per run in the database. (During NVBit trace collection the harness forces `warmup=0`, `iteration=1`, and `vector_add_warmup=false` so a trace captures exactly one launch of the real kernel and never the warmer.)
+
 ### In-program iterations vs. `--reps`
 
 These are different axes and are *not* interchangeable:
@@ -496,6 +498,10 @@ go build -o gpubench ./cmd/gpubench
 
 # Use only default non-scaling parameter values
 ./gpubench run --sweep-non-scaling=false
+
+# Override the measurement parameters globally (all tier1/tier2 benchmarks)
+./gpubench run --iteration 10 --warmup 5           # 5 untimed, 10 timed iterations
+./gpubench run --vector-add-warmup false           # warm-cache mode (no warmer)
 ```
 
 ### Makefile Shortcuts

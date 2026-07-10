@@ -118,6 +118,9 @@ func main() {
 			sweepNS, _ := cmd.Flags().GetBool("sweep-non-scaling")
 			timeout, _ := cmd.Flags().GetString("timeout")
 			scalingValues, _ := cmd.Flags().GetString("scaling-values")
+			vectorAddWarmup, _ := cmd.Flags().GetString("vector-add-warmup")
+			warmup, _ := cmd.Flags().GetString("warmup")
+			iteration, _ := cmd.Flags().GetString("iteration")
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
 			continueOnError, _ := cmd.Flags().GetBool("continue-on-error")
 			verbose, _ := cmd.Flags().GetBool("verbose")
@@ -139,6 +142,9 @@ func main() {
 				sweepNonScaling: sweepNS,
 				timeout:         timeout,
 				scalingValues:   scalingValues,
+				vectorAddWarmup: vectorAddWarmup,
+				warmup:          warmup,
+				iteration:       iteration,
 				dryRun:          dryRun,
 				continueOnError: continueOnError,
 				verbose:         verbose,
@@ -162,6 +168,9 @@ func main() {
 	runCmd.Flags().Bool("sweep-non-scaling", true, "Sweep non-scaling params (use --sweep-non-scaling=false for defaults only)")
 	runCmd.Flags().String("timeout", "", "Timeout secs (default: 60)")
 	runCmd.Flags().String("scaling-values", "", "Override values (csv)")
+	runCmd.Flags().String("vector-add-warmup", "", "Override cold-cache warmer for all benchmarks: true/false (default: per-benchmark, true)")
+	runCmd.Flags().String("warmup", "", "Override untimed warmup passes for all benchmarks (default: per-benchmark, 3)")
+	runCmd.Flags().String("iteration", "", "Override timed iterations for all benchmarks (default: per-benchmark, 7)")
 	runCmd.Flags().Bool("dry-run", false, "Dry run")
 	runCmd.Flags().Bool("continue-on-error", false, "Continue on error")
 	runCmd.Flags().Bool("verbose", false, "Verbose output")

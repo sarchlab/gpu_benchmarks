@@ -141,66 +141,87 @@ type configPair struct {
 }
 
 // generateConfigs generates (scaling_value, non_scaling_dict) tuples.
-func generateConfigs(params *BenchmarkParams, sweepNS bool, scalingOverride []interface{}) []configPair {
+// measurementParams are the harness-level timing controls shared by every
+// tier1/tier2 benchmark. They are never part of the non-scaling cartesian
+// sweep: each is fixed per run session to the CLI override (if given) or the
+// benchmark's declared default, and folded into every config so it is injected
+// via env and recorded in the DB. See buildEnv / the --warmup, --iteration and
+// --vector-add-warmup flags.
+var measurementParams = map[string]bool{
+	"vector_add_warmup": true,
+	"warmup":            true,
+	"iteration":         true,
+}
+
+// generateConfigs expands a benchmark into (scaling value × non-scaling combo)
+// run configs. overrides holds CLI-provided values for the measurement params
+// (keys without the BENCH_PARAM_ prefix); nil/empty means use each param's
+// declared default.
+func generateConfigs(params *BenchmarkParams, sweepNS bool, scalingOverride []interface{}, overrides map[string]string) []configPair {
 	svList := params.ScalingParam.Values
 	if scalingOverride != nil {
 		svList = scalingOverride
 	}
 
-	nspList := params.NonScalingParams
-	if len(nspList) == 0 {
-		var configs []configPair
-		for _, sv := range svList {
-			configs = append(configs, configPair{
-				ScalingValue: sv,
-				NSDict:       map[string]interface{}{},
-			})
+	// Split declared non-scaling params: measurement controls are fixed
+	// (override-or-default, never swept); the rest sweep as before.
+	var sweepable []NonScalingParam
+	fixed := make(map[string]interface{})
+	for _, p := range params.NonScalingParams {
+		if measurementParams[p.Name] {
+			if ov, ok := overrides[p.Name]; ok {
+				fixed[p.Name] = ov
+			} else {
+				fixed[p.Name] = p.Default
+			}
+		} else {
+			sweepable = append(sweepable, p)
 		}
-		return configs
 	}
 
-	if sweepNS {
-		// Cartesian product of non-scaling param values
-		names := make([]string, len(nspList))
-		valLists := make([][]interface{}, len(nspList))
-		for i, p := range nspList {
+	// Build the sweepable-param dicts (cartesian under sweepNS, else defaults).
+	var nsDicts []map[string]interface{}
+	switch {
+	case len(sweepable) == 0:
+		nsDicts = []map[string]interface{}{{}}
+	case sweepNS:
+		names := make([]string, len(sweepable))
+		valLists := make([][]interface{}, len(sweepable))
+		for i, p := range sweepable {
 			names[i] = p.Name
 			valLists[i] = p.Values
 		}
-
-		var configs []configPair
-		for _, sv := range svList {
-			combos := cartesianProduct(valLists)
-			for _, combo := range combos {
-				nsDict := make(map[string]interface{})
-				for i, name := range names {
-					nsDict[name] = combo[i]
-				}
-				configs = append(configs, configPair{
-					ScalingValue: sv,
-					NSDict:       nsDict,
-				})
+		for _, combo := range cartesianProduct(valLists) {
+			d := make(map[string]interface{})
+			for i, name := range names {
+				d[name] = combo[i]
 			}
+			nsDicts = append(nsDicts, d)
 		}
-		return configs
+	default:
+		d := make(map[string]interface{})
+		for _, p := range sweepable {
+			d[p.Name] = p.Default
+		}
+		nsDicts = []map[string]interface{}{d}
 	}
 
-	// Default mode: use default values for non-scaling params
-	defaults := make(map[string]interface{})
-	for _, p := range nspList {
-		defaults[p.Name] = p.Default
-	}
-
+	// Cross svList × nsDicts, folding the fixed measurement params into each.
 	var configs []configPair
 	for _, sv := range svList {
-		nsDict := make(map[string]interface{})
-		for k, v := range defaults {
-			nsDict[k] = v
+		for _, d := range nsDicts {
+			nsDict := make(map[string]interface{}, len(d)+len(fixed))
+			for k, v := range d {
+				nsDict[k] = v
+			}
+			for k, v := range fixed {
+				nsDict[k] = v
+			}
+			configs = append(configs, configPair{
+				ScalingValue: sv,
+				NSDict:       nsDict,
+			})
 		}
-		configs = append(configs, configPair{
-			ScalingValue: sv,
-			NSDict:       nsDict,
-		})
 	}
 	return configs
 }

@@ -631,6 +631,9 @@ type runArgs struct {
 	sweepNonScaling bool
 	timeout         string
 	scalingValues   string
+	vectorAddWarmup string // "" = benchmark default; else "true"/"false"
+	warmup          string // "" = benchmark default; else non-negative int
+	iteration       string // "" = benchmark default; else positive int
 	dryRun          bool
 	continueOnError bool
 	verbose         bool
@@ -682,6 +685,36 @@ func cmdRun(args runArgs) int {
 		}
 	}
 
+	// Measurement-param overrides (apply globally to every tier1/tier2 benchmark
+	// that declares them; benchmarks without the param are unaffected).
+	measurementOverrides := map[string]string{}
+	if args.vectorAddWarmup != "" {
+		v := strings.ToLower(strings.TrimSpace(args.vectorAddWarmup))
+		switch v {
+		case "true", "false":
+			measurementOverrides["vector_add_warmup"] = v
+		default:
+			eprintf("Invalid --vector-add-warmup %q (want true/false)\n", args.vectorAddWarmup)
+			return ExitUsage
+		}
+	}
+	if args.warmup != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(args.warmup)); err != nil || n < 0 {
+			eprintf("Invalid --warmup %q (want a non-negative integer)\n", args.warmup)
+			return ExitUsage
+		} else {
+			measurementOverrides["warmup"] = strconv.Itoa(n)
+		}
+	}
+	if args.iteration != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(args.iteration)); err != nil || n < 1 {
+			eprintf("Invalid --iteration %q (want a positive integer)\n", args.iteration)
+			return ExitUsage
+		} else {
+			measurementOverrides["iteration"] = strconv.Itoa(n)
+		}
+	}
+
 	benchmarks := discoverBenchmarks(repoRoot, tier, args.suite, args.benchmark)
 	if len(benchmarks) == 0 {
 		eprint("No benchmarks found matching filters.")
@@ -691,7 +724,7 @@ func cmdRun(args runArgs) int {
 	// Count total runs
 	totalRuns := 0
 	for _, b := range benchmarks {
-		configs := generateConfigs(b, args.sweepNonScaling, scalingOverride)
+		configs := generateConfigs(b, args.sweepNonScaling, scalingOverride, measurementOverrides)
 		totalRuns += len(configs) * reps
 	}
 
@@ -708,7 +741,7 @@ func cmdRun(args runArgs) int {
 		eprint("--- DRY RUN (no execution) ---\n")
 		for idx, b := range benchmarks {
 			spName := b.ScalingParam.Name
-			configs := generateConfigs(b, args.sweepNonScaling, scalingOverride)
+			configs := generateConfigs(b, args.sweepNonScaling, scalingOverride, measurementOverrides)
 			cmd := getBenchCommand(b, plat)
 			eprintf("[%3d/%d] tier%d/%s (%s)\n",
 				idx+1, len(benchmarks), b.Tier, b.Benchmark, getLanguage(b))
@@ -804,7 +837,7 @@ func cmdRun(args runArgs) int {
 				break
 			}
 			spName := b.ScalingParam.Name
-			configs := generateConfigs(b, args.sweepNonScaling, scalingOverride)
+			configs := generateConfigs(b, args.sweepNonScaling, scalingOverride, measurementOverrides)
 
 			// Filter configs to only those with successful DB runs
 			if dbConfigs != nil {
@@ -904,8 +937,11 @@ func cmdRun(args runArgs) int {
 						// timing harness's warmup + repeated iterations: nvbit
 						// slows every launch, and duplicate launches multiply
 						// trace size and timeout risk without adding coverage.
+						// vector_add_warmup is forced off so the warmer kernel
+						// never appears in the trace.
 						"BENCH_PARAM_warmup=0",
 						"BENCH_PARAM_iteration=1",
+						"BENCH_PARAM_vector_add_warmup=false",
 					)
 					if args.traceSample != "" {
 						env = append(env, fmt.Sprintf("PTRACE_SAMPLE=%s", args.traceSample))
@@ -1047,7 +1083,7 @@ func cmdRun(args runArgs) int {
 			break
 		}
 		spName := b.ScalingParam.Name
-		configs := generateConfigs(b, args.sweepNonScaling, scalingOverride)
+		configs := generateConfigs(b, args.sweepNonScaling, scalingOverride, measurementOverrides)
 		eprintf("[%3d/%d] tier%d/%s\n", idx+1, len(benchmarks), b.Tier, b.Benchmark)
 		eprintf("  Scaling: %s (%d configs x %d reps = %d runs)\n",
 			spName, len(configs), reps, len(configs)*reps)
@@ -1272,6 +1308,12 @@ func traceConfigDir(
 	if len(nsDict) > 0 {
 		keys := make([]string, 0, len(nsDict))
 		for k := range nsDict {
+			// Measurement params are fixed per session and forced during trace
+			// collection; excluding them keeps dir names workload-only so
+			// --resume-trace still matches previously collected traces.
+			if measurementParams[k] {
+				continue
+			}
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)

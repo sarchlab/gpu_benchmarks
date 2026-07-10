@@ -7,8 +7,6 @@
 // Environment variables:
 //   BENCH_PARAM_matrix_size, BENCH_PARAM_block_size,
 //   BENCH_PARAM_max_cg_iterations, BENCH_PARAM_nonzeros_per_row
-//   BENCH_PARAM_warmup   (warmup CG solves, default 3)
-//   BENCH_PARAM_iteration    (timed CG solves, each recorded, default 7)
 //
 // Output (stdout): per timed CG solve, one {"type":"kernel",...} JSON line per
 // kernel (spmv_kernel, dot_product_kernel, axpy_kernel, scale_kernel) carrying
@@ -153,9 +151,6 @@ int main(int argc, char** argv) {
     if (env_val) max_cg_iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_nonzeros_per_row");
     if (env_val) nonzeros_per_row = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], "--size") == 0) N = atoi(argv[i+1]);
     }
@@ -166,8 +161,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "NPB CG  |  Matrix: %d x %d  |  NNZ/row: %d  |  "
-            "CG iters: %d  |  Solves: %d warmup + %d timed\n\n",
-            N, N, nonzeros_per_row, max_cg_iters, num_warmup, num_iters);
+            "CG iters: %d\n\n",
+            N, N, nonzeros_per_row, max_cg_iters);
 
     // Generate synthetic sparse matrix in CSR format
     int nnz_per_row = nonzeros_per_row;
@@ -306,30 +301,22 @@ int main(int argc, char** argv) {
         }
     };
 
-    // Warmup
-    for (int w = 0; w < num_warmup; ++w) {
-        run_cg();
-    }
-
-    // Timed solves — one record per kernel per solve
+    // Timed solve — one record per kernel
+    run_cg();
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_cg();
-        bench_emit_iter("spmv_kernel",        i, &acc_spmv,  params);
-        bench_emit_iter("dot_product_kernel", i, &acc_dot,   params);
-        bench_emit_iter("axpy_kernel",        i, &acc_axpy,  params);
-        bench_emit_iter("scale_kernel",       i, &acc_scale, params);
-        total_gpu_ms += acc_spmv.gpu_ms + acc_dot.gpu_ms +
-                        acc_axpy.gpu_ms + acc_scale.gpu_ms;
-        fprintf(stderr, "solve %d: spmv gpu = %.3f ms, dot gpu = %.3f ms, "
-                "axpy gpu = %.3f ms, scale gpu = %.3f ms\n",
-                i, acc_spmv.gpu_ms, acc_dot.gpu_ms,
-                acc_axpy.gpu_ms, acc_scale.gpu_ms);
-    }
+    bench_emit_iter("spmv_kernel",        0, &acc_spmv,  params);
+    bench_emit_iter("dot_product_kernel", 0, &acc_dot,   params);
+    bench_emit_iter("axpy_kernel",        0, &acc_axpy,  params);
+    bench_emit_iter("scale_kernel",       0, &acc_scale, params);
+    total_gpu_ms += acc_spmv.gpu_ms + acc_dot.gpu_ms +
+                    acc_axpy.gpu_ms + acc_scale.gpu_ms;
+    fprintf(stderr, "solve: spmv gpu = %.3f ms, dot gpu = %.3f ms, "
+            "axpy gpu = %.3f ms, scale gpu = %.3f ms\n",
+            acc_spmv.gpu_ms, acc_dot.gpu_ms,
+            acc_axpy.gpu_ms, acc_scale.gpu_ms);
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d solves\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Verification (run_cg reuses the timer, so destroy it afterwards)
     {

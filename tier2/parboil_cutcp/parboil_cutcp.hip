@@ -22,8 +22,6 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_num_atoms, BENCH_PARAM_lattice_dim,
 //   BENCH_PARAM_grid_spacing, BENCH_PARAM_cutoff_radius
-//   BENCH_PARAM_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
 // cuda_cutoff_potential_lattice6overlap carrying the accumulated GPU event time
@@ -282,8 +280,6 @@ int main(int argc, char** argv) {
     env_val = getenv("BENCH_PARAM_lattice_dim");   if (env_val) lattice_dim = atoi(env_val);
     env_val = getenv("BENCH_PARAM_grid_spacing");  if (env_val) grid_spacing = (float)atof(env_val);
     env_val = getenv("BENCH_PARAM_cutoff_radius"); if (env_val) cutoff = (float)atof(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     const int   nx = lattice_dim, ny = lattice_dim, nz = lattice_dim;
     const float h  = grid_spacing;
@@ -451,21 +447,17 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipGetLastError());
     };
 
-    for (int w = 0; w < num_warmup; ++w) run_pass();
-
+    run_pass();
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_pass();
-        bench_emit_iter("cuda_cutoff_potential_lattice6overlap", i, &acc, params);
-        total_gpu_ms += acc.gpu_ms;
-        fprintf(stderr, "pass %d: cuda_cutoff_potential_lattice6overlap gpu = %.3f ms, host = %.3f ms\n",
-                i, acc.gpu_ms, acc.host_ms);
-    }
+    bench_emit_iter("cuda_cutoff_potential_lattice6overlap", 0, &acc, params);
+    total_gpu_ms += acc.gpu_ms;
+    fprintf(stderr, "cuda_cutoff_potential_lattice6overlap gpu = %.3f ms, host = %.3f ms\n",
+            acc.gpu_ms, acc.host_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes (%d launches/pass)\n",
-            total_gpu_ms, num_iters, zRegionDim);
+    fprintf(stderr, "Total GPU time: %.3f ms (%d launches/pass)\n",
+            total_gpu_ms, zRegionDim);
 
     // ---- copy regions back + transpose into lattice (verbatim, untimed) ----
     HIP_CHECK(hipMemcpy(regionZeroAddr, regionZeroCuda, lnall * sizeof(ener_t),

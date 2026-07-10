@@ -5,8 +5,6 @@
 // Parameters are read from BENCH_PARAM_* environment variables,
 // with command-line --flags as fallback:
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
-//   BENCH_PARAM_warmup   (warmup launches, default 3)
-//   BENCH_PARAM_iteration    (timed launches, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // carrying the GPU event time (time_ms) and host wall-clock time
@@ -131,8 +129,6 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Invalid precision '%s' (use float, double, half)\n", precision);
         return 1;
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     int M = size, N = size, K = size;
     float alpha = 1.0f, beta = 0.0f;
@@ -186,13 +182,12 @@ int main(int argc, char** argv) {
     // the kernel fully overwrites C each launch (the beta*C term is zero),
     // so repeated launches perform identical work — no reset needed.
     double total_gpu_ms =
-        bench_run_loop("gemm_kernel", num_warmup, num_iters, params, [&]() {
+        bench_run_once("gemm_kernel", params, [&]() {
             gemm_kernel<<<grid, block>>>(d_A, d_B, d_C, M, N, K, alpha, beta);
         });
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Verify correctness (only for small sizes)
     if (size <= 512) {

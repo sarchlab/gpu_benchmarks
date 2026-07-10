@@ -13,8 +13,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_tile_dim
-//   BENCH_PARAM_warmup   (warmup launches per variant, default 3)
-//   BENCH_PARAM_iteration    (timed launches per variant, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // of each variant (transpose_naive, transpose_optimized) carrying the GPU
@@ -147,8 +145,6 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_tile_dim");
     if (env_val) tile_dim = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     size_t num_elems = (size_t)N * N;
     size_t bytes     = num_elems * sizeof(float);
@@ -159,8 +155,7 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Matrix size: %d×%d  |  Warmup: %d  |  Timed: %d\n\n",
-            N, N, num_warmup, num_iters);
+    fprintf(stderr, "Matrix size: %d×%d\n\n", N, N);
 
     // Host allocations
     float* h_idata = (float*)malloc(bytes);
@@ -196,7 +191,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemset(d_odata, 0, bytes));
 
     double total_gpu_ms =
-        bench_run_loop("transpose_naive", num_warmup, num_iters, params, [&]() {
+        bench_run_once("transpose_naive", params, [&]() {
             transpose_naive<<<grid, block>>>(d_idata, d_odata, N, N);
         });
 
@@ -223,7 +218,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemset(d_odata, 0, bytes));
 
     total_gpu_ms +=
-        bench_run_loop("transpose_optimized", num_warmup, num_iters, params, [&]() {
+        bench_run_once("transpose_optimized", params, [&]() {
             transpose_optimized<<<grid, block>>>(d_idata, d_odata, N, N);
         });
 
@@ -247,8 +242,7 @@ int main(int argc, char** argv) {
     // Summary: sum of every recorded iteration's GPU event time
     // -----------------------------------------------------------------------
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations per variant\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -----------------------------------------------------------------------
     // Cleanup

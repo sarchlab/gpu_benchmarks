@@ -15,8 +15,6 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_bodies, BENCH_PARAM_timesteps, BENCH_PARAM_iterations,
 //   BENCH_PARAM_block_size
-//   BENCH_PARAM_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
 // nbody_kernel carrying the accumulated GPU event time of all timesteps in
@@ -174,12 +172,10 @@ int main(int argc, char** argv) {
     // Default values from params.json
     int N          = 16384;
     int timesteps  = 10;
-    int iters      = 5;
     int block_size = 256;
 
     // Command-line args as fallback
     N          = parseIntParam(argc, argv, "--bodies", N);
-    iters      = parseIntParam(argc, argv, "--iterations", iters);
     timesteps  = parseIntParam(argc, argv, "--timesteps", timesteps);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
 
@@ -189,14 +185,8 @@ int main(int argc, char** argv) {
     if (env_val) N = atoi(env_val);
     env_val = getenv("BENCH_PARAM_timesteps");
     if (env_val) timesteps = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    // `iters` is a legacy params.json key echoed into the records; the
-    // measured pass count is controlled by BENCH_PARAM_iteration below.
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     // Print device info
     int device_id = 0;
@@ -204,8 +194,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Bodies: %d  |  Timesteps: %d  |  Iterations: %d warmup + %d timed\n\n",
-            N, timesteps, num_warmup, num_iters);
+    fprintf(stderr, "Bodies: %d  |  Timesteps: %d\n\n",
+            N, timesteps);
 
     size_t bytes = (size_t)N * sizeof(float4);
 
@@ -234,8 +224,8 @@ int main(int argc, char** argv) {
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"bodies\":%d,\"timesteps\":%d,\"iterations\":%d,\"block_size\":%d",
-             N, timesteps, iters, block_size);
+             "\"bodies\":%d,\"timesteps\":%d,\"block_size\":%d",
+             N, timesteps, block_size);
 
     bench_timer_t timer;
     bench_timer_create(&timer);
@@ -263,23 +253,16 @@ int main(int argc, char** argv) {
         }
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_nbody_pass();
-    }
-
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_nbody_pass();
-        bench_emit_iter("nbody_kernel", i, &acc_nbody, params);
-        total_gpu_ms += acc_nbody.gpu_ms;
-        fprintf(stderr, "pass %d: nbody_kernel gpu = %.3f ms, host = %.3f ms\n",
-                i, acc_nbody.gpu_ms, acc_nbody.host_ms);
-    }
+    run_nbody_pass();
+    bench_emit_iter("nbody_kernel", 0, &acc_nbody, params);
+    total_gpu_ms += acc_nbody.gpu_ms;
+    fprintf(stderr, "nbody_kernel gpu = %.3f ms, host = %.3f ms\n",
+            acc_nbody.gpu_ms, acc_nbody.host_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
     // Verification: run 1 timestep on CPU with small subset, compare

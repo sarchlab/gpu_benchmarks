@@ -141,16 +141,13 @@ type configPair struct {
 }
 
 // generateConfigs generates (scaling_value, non_scaling_dict) tuples.
-// measurementParams are the harness-level timing controls shared by every
+// measurementParams are the harness-level measurement controls shared by every
 // tier1/tier2 benchmark. They are never part of the non-scaling cartesian
 // sweep: each is fixed per run session to the CLI override (if given) or the
 // benchmark's declared default, and folded into every config so it is injected
-// via env and recorded in the DB. See buildEnv / the --warmup, --iteration and
-// --vector-add-warmup flags.
+// via env and recorded in the DB. See buildEnv / the --vector-add-warmup flag.
 var measurementParams = map[string]bool{
 	"vector_add_warmup": true,
-	"warmup":            true,
-	"iteration":         true,
 }
 
 // generateConfigs expands a benchmark into (scaling value × non-scaling combo)

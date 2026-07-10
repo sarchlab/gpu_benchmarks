@@ -25,8 +25,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_m, BENCH_PARAM_n, BENCH_PARAM_passes, BENCH_PARAM_block_size
-//   BENCH_PARAM_warmup   (warmup iterations, default 3)
-//   BENCH_PARAM_iteration    (timed iterations, each recorded, default 7)
 //
 // Output (stdout): per timed iteration, one {"type":"kernel",...} JSON line
 // per kernel (gram_norm, gram_norm_finish, gram_normalize, gram_project)
@@ -162,8 +160,6 @@ int main(int argc, char** argv)
     if (env_val) passes = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size_param = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     size_t bytes_A = (size_t)M * N * sizeof(float);
     size_t bytes_Q = (size_t)M * N * sizeof(float);
@@ -265,25 +261,20 @@ int main(int argc, char** argv)
         }
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_iter();
-    }
+    run_iter();
 
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_iter();
-        bench_emit_iter("gram_norm",        i, &acc_norm,        params);
-        bench_emit_iter("gram_norm_finish", i, &acc_norm_finish, params);
-        bench_emit_iter("gram_normalize",   i, &acc_normalize,   params);
-        bench_emit_iter("gram_project",     i, &acc_project,     params);
-        total_gpu_ms += acc_norm.gpu_ms + acc_norm_finish.gpu_ms +
-                        acc_normalize.gpu_ms + acc_project.gpu_ms;
-        fprintf(stderr,
-                "iter %d: norm gpu = %.3f ms, finish gpu = %.3f ms, "
-                "normalize gpu = %.3f ms, project gpu = %.3f ms\n",
-                i, acc_norm.gpu_ms, acc_norm_finish.gpu_ms,
-                acc_normalize.gpu_ms, acc_project.gpu_ms);
-    }
+    bench_emit_iter("gram_norm",        0, &acc_norm,        params);
+    bench_emit_iter("gram_norm_finish", 0, &acc_norm_finish, params);
+    bench_emit_iter("gram_normalize",   0, &acc_normalize,   params);
+    bench_emit_iter("gram_project",     0, &acc_project,     params);
+    total_gpu_ms += acc_norm.gpu_ms + acc_norm_finish.gpu_ms +
+                    acc_normalize.gpu_ms + acc_project.gpu_ms;
+    fprintf(stderr,
+            "norm gpu = %.3f ms, finish gpu = %.3f ms, "
+            "normalize gpu = %.3f ms, project gpu = %.3f ms\n",
+            acc_norm.gpu_ms, acc_norm_finish.gpu_ms,
+            acc_normalize.gpu_ms, acc_project.gpu_ms);
 
     bench_timer_destroy(&timer);
 
@@ -296,8 +287,7 @@ int main(int argc, char** argv)
             (N < 8 ? N : 8), orth_ok ? "PASS" : "FAIL");
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Cleanup
     HIP_CHECK(hipFree(d_A));

@@ -30,8 +30,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_num_rows, BENCH_PARAM_avg_nnz_per_row, BENCH_PARAM_block_size
-//   BENCH_PARAM_warmup   (warmup launches, default 3)
-//   BENCH_PARAM_iteration    (timed launches, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // carrying the GPU event time and host wall-clock time, then a summary whose
@@ -322,9 +320,6 @@ int main(int argc, char** argv)
     env_val = getenv("BENCH_PARAM_num_rows");        if (env_val) num_rows = atoi(env_val);
     env_val = getenv("BENCH_PARAM_avg_nnz_per_row"); if (env_val) avg_nnz = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");      if (env_val) block_size = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     const int pad = WARP_SIZE;  // warp size, must match kernel
 
     // ---- Build the matrix and convert to JDS (host, untimed) ----
@@ -400,14 +395,13 @@ int main(int argc, char** argv)
     // and fully overwrites dst_vector (one write per real row), so repeated
     // launches do identical work — no per-pass reset needed.
     double total_gpu_ms =
-        bench_run_loop("spmv_jds", num_warmup, num_iters, params, [&]() {
+        bench_run_once("spmv_jds", params, [&]() {
             spmv_jds<<<grid, block>>>(d_Ax, d_data, d_indices, d_perm,
                                       d_x, d_nzcnt, dim);
         });
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // ---- Verification against CPU reference (from the original COO) ----
     HIP_CHECK(hipMemcpy(h_y, d_Ax, (size_t)dim * sizeof(float), hipMemcpyDeviceToHost));

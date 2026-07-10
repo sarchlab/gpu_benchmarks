@@ -15,8 +15,6 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_vertices, BENCH_PARAM_degree, BENCH_PARAM_iterations,
 //   BENCH_PARAM_block_size
-//   BENCH_PARAM_warmup   (warmup SSSP passes, default 3)
-//   BENCH_PARAM_iteration    (timed SSSP passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
 // bellman_ford_kernel carrying the accumulated GPU event time (time_ms) and
@@ -213,13 +211,11 @@ int main(int argc, char** argv) {
     // Defaults from params.json
     int vertices   = 65536;
     int degree     = 16;
-    int iterations = 5;
     int block_size = 256;
 
     // Command-line fallback
     vertices   = parseIntParam(argc, argv, "--vertices", vertices);
     degree     = parseIntParam(argc, argv, "--degree", degree);
-    iterations = parseIntParam(argc, argv, "--iterations", iterations);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
 
     // Environment variable overrides
@@ -228,13 +224,8 @@ int main(int argc, char** argv) {
     if (env_val) vertices = atoi(env_val);
     env_val = getenv("BENCH_PARAM_degree");
     if (env_val) degree = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     int N       = vertices;
     int avg_deg = degree;
     int source  = 0;
@@ -250,8 +241,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "SSSP (Bellman-Ford)  |  Vertices: %d  |  Edges: %d  |  "
-            "Passes: %d warmup + %d timed\n\n", N, num_edges, num_warmup, num_iters);
+    fprintf(stderr, "SSSP (Bellman-Ford)  |  Vertices: %d  |  Edges: %d\n\n",
+            N, num_edges);
 
     // Allocate device memory
     int *d_row_offsets, *d_col_indices, *d_weights, *d_dist, *d_changed;
@@ -268,42 +259,28 @@ int main(int argc, char** argv) {
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"vertices\":%d,\"degree\":%d,\"iterations\":%d,\"block_size\":%d",
-             vertices, degree, iterations, block_size);
+             "\"vertices\":%d,\"degree\":%d,\"block_size\":%d",
+             vertices, degree, block_size);
 
     bench_timer_t timer;
     bench_timer_create(&timer);
     bench_lap_t acc;
 
     // -------------------------------------------------------------------
-    // Warmup passes (records not emitted)
-    // -------------------------------------------------------------------
-    int bf_iters = 0;
-    for (int w = 0; w < num_warmup; ++w) {
-        bf_iters = run_sssp_gpu(N, num_edges, d_row_offsets, d_col_indices,
-                                d_weights, d_dist, d_changed, source, block_size,
-                                &timer, &acc);
-    }
-    fprintf(stderr, "Bellman-Ford converged in %d iterations\n", bf_iters);
-
-    // -------------------------------------------------------------------
-    // Timed passes — one record per pass with the accumulated kernel time
+    // Timed pass — one record with the accumulated kernel time
     // -------------------------------------------------------------------
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        int pass_iters = run_sssp_gpu(N, num_edges, d_row_offsets, d_col_indices,
-                                      d_weights, d_dist, d_changed, source, block_size,
-                                      &timer, &acc);
-        bench_emit_iter("bellman_ford_kernel", i, &acc, params);
-        total_gpu_ms += acc.gpu_ms;
-        fprintf(stderr, "pass %d: gpu = %.3f ms, host = %.3f ms (%d BF iterations)\n",
-                i, acc.gpu_ms, acc.host_ms, pass_iters);
-    }
+    int pass_iters = run_sssp_gpu(N, num_edges, d_row_offsets, d_col_indices,
+                                  d_weights, d_dist, d_changed, source, block_size,
+                                  &timer, &acc);
+    bench_emit_iter("bellman_ford_kernel", 0, &acc, params);
+    total_gpu_ms += acc.gpu_ms;
+    fprintf(stderr, "gpu = %.3f ms, host = %.3f ms (%d BF iterations)\n",
+            acc.gpu_ms, acc.host_ms, pass_iters);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
     // Verification (compare GPU result with CPU reference)

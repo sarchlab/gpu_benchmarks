@@ -27,8 +27,6 @@
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_threads_per_block
  *   BENCH_PARAM_atomic_op   ("atomicAdd", "atomicCAS", "atomicMin")
- *   BENCH_PARAM_warmup  (warmup launches, default 3)
- *   BENCH_PARAM_iteration   (timed launches, each recorded, default 7)
  *
  * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
  * the GPU event time and host wall-clock time, then a summary whose
@@ -98,8 +96,7 @@ typedef void (*KernelFunc)(unsigned int *, int);
 static double run_benchmark(const char *kernel_name,
                             KernelFunc kernel, unsigned int *d_counter,
                             int ops_per_thread, int num_blocks,
-                            int threads_per_block, const char *atomic_op,
-                            int num_warmup, int num_iters)
+                            int threads_per_block, const char *atomic_op)
 {
     /* Reset counter once, outside the timed region. Counter accumulation
      * across warmup/timed iterations does not affect timing, so no per-loop
@@ -114,7 +111,7 @@ static double run_benchmark(const char *kernel_name,
              "\"threads_per_block\":%d,\"atomic_op\":\"%s\"",
              ops_per_thread, num_blocks, threads_per_block, atomic_op);
 
-    return bench_run_loop(kernel_name, num_warmup, num_iters, params, [&]() {
+    return bench_run_once(kernel_name, params, [&]() {
         kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(d_counter,
                                                               ops_per_thread);
     });
@@ -162,9 +159,6 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     /* Print device information to stderr. */
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
@@ -177,8 +171,7 @@ int main(int argc, char *argv[])
             num_blocks, threads_per_block,
             num_blocks * threads_per_block);
     fprintf(stderr, "Ops / thread    : %d\n", ops_per_thread);
-    fprintf(stderr, "Atomic op       : %s\n", atomic_op);
-    fprintf(stderr, "Warmup / iters  : %d / %d\n\n", num_warmup, num_iters);
+    fprintf(stderr, "Atomic op       : %s\n\n", atomic_op);
 
     /* Allocate a single unsigned int on the device as the shared counter. */
     unsigned int *d_counter = nullptr;
@@ -194,29 +187,25 @@ int main(int argc, char *argv[])
         total_gpu_ms += run_benchmark("atomicAdd_kernel",
                                       (KernelFunc)atomicAdd_kernel, d_counter,
                                       ops_per_thread, num_blocks,
-                                      threads_per_block, atomic_op,
-                                      num_warmup, num_iters);
+                                      threads_per_block, atomic_op);
     }
 
     if (run_cas) {
         total_gpu_ms += run_benchmark("atomicCAS_kernel",
                                       (KernelFunc)atomicCAS_kernel, d_counter,
                                       ops_per_thread, num_blocks,
-                                      threads_per_block, atomic_op,
-                                      num_warmup, num_iters);
+                                      threads_per_block, atomic_op);
     }
 
     if (run_min) {
         total_gpu_ms += run_benchmark("atomicMin_kernel",
                                       (KernelFunc)atomicMin_kernel, d_counter,
                                       ops_per_thread, num_blocks,
-                                      threads_per_block, atomic_op,
-                                      num_warmup, num_iters);
+                                      threads_per_block, atomic_op);
     }
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time  : %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time  : %.3f ms\n", total_gpu_ms);
 
     /* Clean up. */
     HIP_CHECK(hipFree(d_counter));

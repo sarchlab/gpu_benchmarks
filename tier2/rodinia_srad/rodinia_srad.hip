@@ -31,8 +31,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_image_size, BENCH_PARAM_num_iterations, BENCH_PARAM_lambda
-//   BENCH_PARAM_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (srad_cuda_1, srad_cuda_2) carrying that kernel's accumulated GPU
@@ -338,8 +336,6 @@ int main(int argc, char** argv) {
     env_val = getenv("BENCH_PARAM_image_size");     if (env_val) image_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_num_iterations"); if (env_val) niter = atoi(env_val);
     env_val = getenv("BENCH_PARAM_lambda");         if (env_val) lambda = (float)atof(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_bench_iters = bench_num_iters();
 
     // The original kernels index by exact BLOCK_SIZE tiles; rows/cols must be
     // multiples of 16 (upstream enforces the same constraint).
@@ -444,22 +440,18 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipGetLastError());
     };
 
-    for (int w = 0; w < num_warmup; ++w) run_pass();
-
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_bench_iters; ++i) {
-        run_pass();
-        bench_emit_iter("srad_cuda_1", i, &acc_srad1, params);
-        bench_emit_iter("srad_cuda_2", i, &acc_srad2, params);
-        total_gpu_ms += acc_srad1.gpu_ms + acc_srad2.gpu_ms;
-        fprintf(stderr, "pass %d: srad_cuda_1 gpu = %.3f ms, srad_cuda_2 gpu = %.3f ms\n",
-                i, acc_srad1.gpu_ms, acc_srad2.gpu_ms);
-    }
+    run_pass();
+    bench_emit_iter("srad_cuda_1", 0, &acc_srad1, params);
+    bench_emit_iter("srad_cuda_2", 0, &acc_srad2, params);
+    total_gpu_ms += acc_srad1.gpu_ms + acc_srad2.gpu_ms;
+    fprintf(stderr, "srad_cuda_1 gpu = %.3f ms, srad_cuda_2 gpu = %.3f ms\n",
+            acc_srad1.gpu_ms, acc_srad2.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes (%d SRAD iters/pass)\n",
-            total_gpu_ms, num_bench_iters, niter);
+    fprintf(stderr, "Total GPU time: %.3f ms (%d SRAD iters/pass)\n",
+            total_gpu_ms, niter);
 
     HIP_CHECK(hipFree(J_cuda));
     HIP_CHECK(hipFree(C_cuda));

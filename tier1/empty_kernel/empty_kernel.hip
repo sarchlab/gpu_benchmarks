@@ -21,8 +21,6 @@
  * Environment variables (override argv):
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_block_size
- *   BENCH_PARAM_warmup   (warmup launches, default 3)
- *   BENCH_PARAM_iteration    (timed launches, each recorded, default 7)
  *
  * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
  * the GPU event time and host wall-clock time, then a summary whose
@@ -59,9 +57,6 @@ int main(int argc, char *argv[])
     else if (argc >= 3) block_size = atoi(argv[2]);
     if (block_size <= 0 || block_size > 1024) { fprintf(stderr, "Invalid block_size\n"); return EXIT_FAILURE; }
 
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     hipDeviceProp_t prop;
@@ -70,21 +65,18 @@ int main(int argc, char *argv[])
     fprintf(stderr, "=== empty_kernel launch-overhead microbenchmark ===\n");
     fprintf(stderr, "Device : %s (id=%d, %d CUs)\n", prop.name, device_id, prop.multiProcessorCount);
     fprintf(stderr, "Grid   : %d blocks x %d threads\n", num_blocks, block_size);
-    fprintf(stderr, "Iters  : %d (+%d warmup)\n", num_iters, num_warmup);
 
     char params[96];
     snprintf(params, sizeof(params), "\"num_blocks\":%d,\"block_size\":%d",
              num_blocks, block_size);
 
-    /* Warmup + timed iterations, each recorded individually. */
     double total_gpu_ms =
-        bench_run_loop("empty_kernel", num_warmup, num_iters, params, [&]() {
+        bench_run_once("empty_kernel", params, [&]() {
             empty_kernel<<<dim3(num_blocks), dim3(block_size)>>>();
         });
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d launches\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     fprintf(stderr, "\nDone.\n");
     return EXIT_SUCCESS;

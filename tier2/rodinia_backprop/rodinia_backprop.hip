@@ -28,8 +28,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_input
-//   BENCH_PARAM_warmup   (warmup epochs, default 3)
-//   BENCH_PARAM_iteration    (timed epochs, each recorded, default 7)
 //
 // Output (stdout): per timed epoch, one {"type":"kernel",...} JSON line for each
 // of the two kernels carrying that kernel's GPU event time and host time, then a
@@ -176,9 +174,6 @@ int main(int argc, char** argv) {
     }
     const int hidden_n = 16;  // fixed by HEIGHT/WIDTH tiling (see header)
 
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     int in  = input_n;
     int hid = hidden_n;
     int num_blocks = in / 16;
@@ -190,8 +185,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Network: %d -> %d -> 1  |  num_blocks: %d  |  %d warmup + %d timed epochs\n\n",
-            in, hid, num_blocks, num_warmup, num_iters);
+    fprintf(stderr, "Network: %d -> %d -> 1  |  num_blocks: %d  |  single timed epoch\n\n",
+            in, hid, num_blocks);
 
     // Host buffers (original one-dimensionalized layouts).
     size_t sz_w    = (size_t)(in + 1) * (hid + 1) * sizeof(float);
@@ -275,24 +270,19 @@ int main(int argc, char** argv) {
         }));
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_epoch();
-    }
+    run_epoch();
 
     double total_gpu_ms = 0.0;
-    for (int it = 0; it < num_iters; ++it) {
-        run_epoch();
-        bench_emit_iter("bpnn_layerforward_CUDA",   it, &acc_fwd, params);
-        bench_emit_iter("bpnn_adjust_weights_cuda", it, &acc_adj, params);
-        double epoch_gpu_ms = acc_fwd.gpu_ms + acc_adj.gpu_ms;
-        total_gpu_ms += epoch_gpu_ms;
-        fprintf(stderr, "epoch %d: forward = %.3f ms, adjust = %.3f ms\n",
-                it, acc_fwd.gpu_ms, acc_adj.gpu_ms);
-    }
+    bench_emit_iter("bpnn_layerforward_CUDA",   0, &acc_fwd, params);
+    bench_emit_iter("bpnn_adjust_weights_cuda", 0, &acc_adj, params);
+    double epoch_gpu_ms = acc_fwd.gpu_ms + acc_adj.gpu_ms;
+    total_gpu_ms += epoch_gpu_ms;
+    fprintf(stderr, "forward = %.3f ms, adjust = %.3f ms\n",
+            acc_fwd.gpu_ms, acc_adj.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d epochs\n", total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms over 1 epoch\n", total_gpu_ms);
 
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_output_hidden));

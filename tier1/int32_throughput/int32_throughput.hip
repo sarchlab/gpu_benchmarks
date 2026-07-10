@@ -25,8 +25,6 @@
  *   BENCH_PARAM_mads_per_thread
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_threads_per_block
- *   BENCH_PARAM_warmup       (warmup launches, default 3)
- *   BENCH_PARAM_iteration        (timed launches, each recorded, default 7)
  *
  * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
  * the GPU event time and host wall-clock time, then a summary whose
@@ -112,9 +110,6 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_threads_per_block");
     if (env_val) threads_per_block = atoi(env_val);
 
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     hipDeviceProp_t prop;
@@ -125,8 +120,7 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Grid            : %d blocks × %d threads = %d total threads\n",
            num_blocks, threads_per_block,
            num_blocks * threads_per_block);
-    fprintf(stderr, "MADs / thread   : %d\n", mads_per_thread);
-    fprintf(stderr, "Warmup / iters  : %d / %d\n\n", num_warmup, num_iters);
+    fprintf(stderr, "MADs / thread   : %d\n\n", mads_per_thread);
 
     int *d_out = nullptr;
     HIP_CHECK(hipMalloc(&d_out, sizeof(int)));
@@ -136,16 +130,14 @@ int main(int argc, char *argv[])
              "\"mads_per_thread\":%d,\"num_blocks\":%d,\"threads_per_block\":%d",
              mads_per_thread, num_blocks, threads_per_block);
 
-    /* Warmup + timed iterations, each recorded individually. */
     double total_gpu_ms =
-        bench_run_loop("int32_mad_kernel", num_warmup, num_iters, params, [&]() {
+        bench_run_once("int32_mad_kernel", params, [&]() {
             int32_mad_kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(
                 d_out, mads_per_thread);
         });
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time  : %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time  : %.3f ms\n", total_gpu_ms);
 
     /* Clean up. */
     HIP_CHECK(hipFree(d_out));

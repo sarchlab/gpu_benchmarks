@@ -16,8 +16,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_num_nodes, BENCH_PARAM_edges_per_node, BENCH_PARAM_block_size
-//   BENCH_PARAM_warmup   (warmup BFS passes, default 3)
-//   BENCH_PARAM_iteration    (timed BFS passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (bfs_kernel, bfs_update) carrying that kernel's accumulated GPU
@@ -128,8 +126,6 @@ int main(int argc, char** argv) {
     if (env_val) edges_per_node = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     // Generate random graph
     int* h_row_offsets = nullptr;
@@ -230,24 +226,19 @@ int main(int argc, char** argv) {
         }
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_bfs_pass();
-    }
+    run_bfs_pass();
 
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_bfs_pass();
-        bench_emit_iter("bfs_kernel", i, &acc_kernel, params);
-        bench_emit_iter("bfs_update", i, &acc_update, params);
-        total_gpu_ms += acc_kernel.gpu_ms + acc_update.gpu_ms;
-        fprintf(stderr, "pass %d: bfs_kernel gpu = %.3f ms, bfs_update gpu = %.3f ms\n",
-                i, acc_kernel.gpu_ms, acc_update.gpu_ms);
-    }
+    bench_emit_iter("bfs_kernel", 0, &acc_kernel, params);
+    bench_emit_iter("bfs_update", 0, &acc_update, params);
+    total_gpu_ms += acc_kernel.gpu_ms + acc_update.gpu_ms;
+    fprintf(stderr, "bfs_kernel gpu = %.3f ms, bfs_update gpu = %.3f ms\n",
+            acc_kernel.gpu_ms, acc_update.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms over 1 pass\n",
+            total_gpu_ms);
 
     // Cleanup
     HIP_CHECK(hipFree(d_row_offsets));

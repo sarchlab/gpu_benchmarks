@@ -29,8 +29,6 @@
  *   BENCH_PARAM_buffer_size_mb
  *   BENCH_PARAM_flops_per_byte
  *   BENCH_PARAM_threads_per_block
- *   BENCH_PARAM_warmup       (warmup launches, default 3)
- *   BENCH_PARAM_iteration        (timed launches, each recorded, default 7)
  *
  * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
  * the GPU event time and host wall-clock time, then a summary whose
@@ -161,7 +159,6 @@ __global__ void mixbench_kernel(float *data, int num_elements, int num_fmas)
  */
 static double benchmark_ratio(float *d_data, int num_elements, double ratio,
                               int threads_per_block,
-                              int num_warmup, int num_iters,
                               const char *params)
 {
     /* Compute FMA count for this ratio.
@@ -171,12 +168,9 @@ static double benchmark_ratio(float *d_data, int num_elements, double ratio,
 
     int num_blocks = (num_elements + threads_per_block - 1) / threads_per_block;
 
-    /* Warmup + timed iterations, each recorded individually. The kernel
-     * rewrites its own input in place; FMA timing is value-independent
-     * (operands stay near 1.0, no denormals), so iterating without
-     * re-uploading does not change the measured time and keeps the cache
-     * state steady across iterations. */
-    return bench_run_loop("mixbench_kernel", num_warmup, num_iters, params,
+    /* Single timed run. The kernel rewrites its own input in place; FMA timing
+     * is value-independent (operands stay near 1.0, no denormals). */
+    return bench_run_once("mixbench_kernel", params,
                           [&]() {
                               mixbench_kernel<<<dim3(num_blocks),
                                                 dim3(threads_per_block)>>>(
@@ -217,8 +211,6 @@ int main(int argc, char *argv[])
     if (env_val) threads_per_block = atoi(env_val);
 
 
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     size_t bytes = static_cast<size_t>(buffer_mb) * 1024ULL * 1024ULL;
     int num_elements = (int)(bytes / sizeof(float));
@@ -233,8 +225,7 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Array size      : %d MiB (%d elements, %zu bytes)\n",
            buffer_mb, num_elements, bytes);
     fprintf(stderr, "Flops/byte      : %.1f\n", flops_per_byte);
-    fprintf(stderr, "Threads/block   : %d\n", threads_per_block);
-    fprintf(stderr, "Warmup / iters  : %d / %d\n\n", num_warmup, num_iters);
+    fprintf(stderr, "Threads/block   : %d\n\n", threads_per_block);
 
     /* Allocate and initialize host data. */
     float *h_data = (float *)malloc(bytes);
@@ -259,12 +250,10 @@ int main(int argc, char *argv[])
              buffer_mb, flops_per_byte, threads_per_block);
 
     double total_gpu_ms = benchmark_ratio(d_data, num_elements, flops_per_byte,
-                                          threads_per_block,
-                                          num_warmup, num_iters, params);
+                                          threads_per_block, params);
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     /* Clean up. */
     GPU_CHECK(gpuFree(d_data));

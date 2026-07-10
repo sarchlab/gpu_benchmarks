@@ -48,15 +48,6 @@
       ]
     },
     {
-      "name": "iterations",
-      "description": "Timed benchmark iterations",
-      "type": "int",
-      "default": 1,
-      "values": [
-        1
-      ]
-    },
-    {
       "name": "block_size",
       "description": "Number of threads per block",
       "type": "int",
@@ -73,24 +64,6 @@
       "values": [
         "true",
         "false"
-      ]
-    },
-    {
-      "name": "warmup",
-      "description": "Number of untimed warmup passes before timing (boosts the clock; with vector_add_warmup on these run the warmer instead of the real kernel).",
-      "type": "int",
-      "default": 3,
-      "values": [
-        3
-      ]
-    },
-    {
-      "name": "iteration",
-      "description": "Number of timed iterations, each recorded individually; the summary total is their sum. Take the min downstream for the least-perturbed sample.",
-      "type": "int",
-      "default": 7,
-      "values": [
-        7
       ]
     }
   ],

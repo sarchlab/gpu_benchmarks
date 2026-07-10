@@ -26,8 +26,6 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_n, BENCH_PARAM_iterations, BENCH_PARAM_trials,
 //   BENCH_PARAM_block_size
-//   BENCH_PARAM_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
 // stencil2d_kernel carrying the accumulated GPU event time (time_ms) and
@@ -193,8 +191,6 @@ int main(int argc, char** argv)
     if (env_val) trials = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     // Print device info
     int device_id = 0;
@@ -202,9 +198,8 @@ int main(int argc, char** argv)
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Grid: %d×%d  |  Stencil steps/pass: %d  |  "
-            "Passes: %d warmup + %d timed\n\n",
-            N, N, iters, num_warmup, num_iters);
+    fprintf(stderr, "Grid: %d×%d  |  Stencil steps/pass: %d\n\n",
+            N, N, iters);
 
     // Correctness check on 64×64 grid
     bool ok = correctness_check();
@@ -264,25 +259,17 @@ int main(int argc, char** argv)
         }
     };
 
-    // Warmup passes (records not emitted)
-    for (int w = 0; w < num_warmup; ++w) {
-        run_pass();
-    }
-
-    // Timed passes — one record per pass with the accumulated kernel time
+    // Timed pass — one record with the accumulated kernel time
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_pass();
-        bench_emit_iter("stencil2d_kernel", i, &acc, params);
-        total_gpu_ms += acc.gpu_ms;
-        fprintf(stderr, "pass %d: gpu = %.3f ms, host = %.3f ms (%d stencil steps)\n",
-                i, acc.gpu_ms, acc.host_ms, iters);
-    }
+    run_pass();
+    bench_emit_iter("stencil2d_kernel", 0, &acc, params);
+    total_gpu_ms += acc.gpu_ms;
+    fprintf(stderr, "gpu = %.3f ms, host = %.3f ms (%d stencil steps)\n",
+            acc.gpu_ms, acc.host_ms, iters);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Cleanup
     HIP_CHECK(hipFree(d_buf0));

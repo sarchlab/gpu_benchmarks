@@ -10,8 +10,6 @@
 // Environment variables:
 //   BENCH_PARAM_num_vertices, BENCH_PARAM_avg_degree,
 //   BENCH_PARAM_max_iterations, BENCH_PARAM_block_size, BENCH_PARAM_iterations
-//   BENCH_PARAM_warmup   (warmup CC passes, default 3)
-//   BENCH_PARAM_iteration    (timed CC passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
 // cc_propagate_kernel carrying the accumulated GPU event time (time_ms) and
@@ -199,7 +197,6 @@ int main(int argc, char** argv) {
     int avg_degree     = 16;
     int max_iterations = 100;
     int block_size     = 256;
-    int iterations     = 5;
 
     // Environment variable overrides
     const char* env_val;
@@ -211,10 +208,6 @@ int main(int argc, char** argv) {
     if (env_val) max_iterations = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_iterations");
-    if (env_val) iterations = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     int N = num_vertices;
 
@@ -231,9 +224,8 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Connected Components (label propagation)  |  "
             "Vertices: %d  |  Edges: %d  |  Avg degree: %d  |  "
-            "Max iterations: %d  |  "
-            "Benchmark passes: %d warmup + %d timed\n\n",
-            N, num_edges, avg_degree, max_iterations, num_warmup, num_iters);
+            "Max iterations: %d\n\n",
+            N, num_edges, avg_degree, max_iterations);
 
     // Allocate device memory
     int *d_row_offsets, *d_col_indices, *d_labels, *d_changed;
@@ -248,39 +240,27 @@ int main(int argc, char** argv) {
     char params[192];
     snprintf(params, sizeof(params),
              "\"num_vertices\":%d,\"avg_degree\":%d,\"max_iterations\":%d,"
-             "\"block_size\":%d,\"iterations\":%d",
-             num_vertices, avg_degree, max_iterations, block_size, iterations);
+             "\"block_size\":%d",
+             num_vertices, avg_degree, max_iterations, block_size);
 
     bench_timer_t timer;
     bench_timer_create(&timer);
     bench_lap_t acc;
 
     // -------------------------------------------------------------------
-    // Warmup passes (records not emitted)
-    // -------------------------------------------------------------------
-    for (int w = 0; w < num_warmup; ++w) {
-        run_cc_gpu(N, max_iterations, block_size,
-                   d_row_offsets, d_col_indices, d_labels, d_changed,
-                   &timer, &acc);
-    }
-
-    // -------------------------------------------------------------------
-    // Timed passes — one record per pass with the accumulated kernel time
+    // Timed pass — one record with the accumulated kernel time
     // -------------------------------------------------------------------
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        int cc_iters = run_cc_gpu(N, max_iterations, block_size,
-                                  d_row_offsets, d_col_indices, d_labels, d_changed,
-                                  &timer, &acc);
-        bench_emit_iter("cc_propagate_kernel", i, &acc, params);
-        total_gpu_ms += acc.gpu_ms;
-        fprintf(stderr, "pass %d: gpu = %.3f ms, host = %.3f ms (%d CC iterations)\n",
-                i, acc.gpu_ms, acc.host_ms, cc_iters);
-    }
+    int cc_iters = run_cc_gpu(N, max_iterations, block_size,
+                              d_row_offsets, d_col_indices, d_labels, d_changed,
+                              &timer, &acc);
+    bench_emit_iter("cc_propagate_kernel", 0, &acc, params);
+    total_gpu_ms += acc.gpu_ms;
+    fprintf(stderr, "gpu = %.3f ms, host = %.3f ms (%d CC iterations)\n",
+            acc.gpu_ms, acc.host_ms, cc_iters);
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
     // Verification

@@ -15,8 +15,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_vertices, BENCH_PARAM_degree, BENCH_PARAM_pr_iterations
-//   BENCH_PARAM_warmup   (warmup PageRank passes, default 3)
-//   BENCH_PARAM_iteration    (timed PageRank passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
 // pagerank_kernel carrying the accumulated GPU event time of all PR
@@ -190,8 +188,6 @@ int main(int argc, char** argv) {
     if (env_val) degree = atoi(env_val);
     env_val = getenv("BENCH_PARAM_pr_iterations");
     if (env_val) pr_iterations = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     int N         = vertices;
     int avg_deg   = degree;
@@ -210,9 +206,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "PageRank (pull-based)  |  Vertices: %d  |  Edges: %d  |  "
-            "PR iterations: %d  |  Damping: %.2f  |  "
-            "Passes: %d warmup + %d timed\n\n",
-            N, num_edges, pr_iters, damping, num_warmup, num_iters);
+            "PR iterations: %d  |  Damping: %.2f\n\n",
+            N, num_edges, pr_iters, damping);
 
     // Allocate device memory
     int *d_col_offsets, *d_row_indices, *d_out_degree;
@@ -274,23 +269,16 @@ int main(int argc, char** argv) {
         }
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_pr_pass();
-    }
-
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_pr_pass();
-        bench_emit_iter("pagerank_kernel", i, &acc_pr, params);
-        total_gpu_ms += acc_pr.gpu_ms;
-        fprintf(stderr, "pass %d: pagerank_kernel gpu = %.3f ms, host = %.3f ms\n",
-                i, acc_pr.gpu_ms, acc_pr.host_ms);
-    }
+    run_pr_pass();
+    bench_emit_iter("pagerank_kernel", 0, &acc_pr, params);
+    total_gpu_ms += acc_pr.gpu_ms;
+    fprintf(stderr, "pagerank_kernel gpu = %.3f ms, host = %.3f ms\n",
+            acc_pr.gpu_ms, acc_pr.host_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
     // Verification (compare GPU result with CPU reference)

@@ -9,8 +9,6 @@
 // Environment variables:
 //   BENCH_PARAM_size, BENCH_PARAM_block_size,
 //   BENCH_PARAM_precision (one of: float, double, half)
-//   BENCH_PARAM_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass (one pass = the full multi-level
 // reduction), one {"type":"kernel","name":"reduce_kernel",...} JSON line
@@ -184,9 +182,6 @@ int main(int argc, char** argv)
                 "(got \"%s\")\n", precision);
         return 1;
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     int N     = size;
     size_t bytesIn = (size_t)N * sizeof(float);
 
@@ -198,8 +193,7 @@ int main(int argc, char** argv)
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Array size: %d floats (%.1f MiB)\n",
             N, (double)bytesIn / (1024.0 * 1024.0));
-    fprintf(stderr, "Block size: %d  |  %d warmup + %d timed passes\n\n",
-            block_size, num_warmup, num_iters);
+    fprintf(stderr, "Block size: %d\n\n", block_size);
 
     // Host allocation
     float* h_input = (float*)malloc(bytesIn);
@@ -241,34 +235,24 @@ int main(int argc, char** argv)
     bench_timer_create(&timer);
     bench_lap_t acc_reduce;
 
-    // Warmup
-    for (int w = 0; w < num_warmup; ++w) {
-        gpu_reduce(d_input, d_partial, d_temp, d_result, N, block_size,
-                   nullptr, nullptr);
-        HIP_CHECK(hipDeviceSynchronize());
-    }
-
-    // Timed passes, each recorded individually
+    // Timed pass, recorded once
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        bench_lap_reset(&acc_reduce);
-        /* Cold-cache calibration: evict the LLC and hold the clock high before
-         * the pass's first timed launch, so it runs cold. No-op when
-         * BENCH_PARAM_vector_add_warmup is disabled. */
-        bench_pass_warm();
+    bench_lap_reset(&acc_reduce);
+    /* Cold-cache calibration: evict the LLC and hold the clock high before
+     * the pass's first timed launch, so it runs cold. No-op when
+     * BENCH_PARAM_vector_add_warmup is disabled. */
+    bench_pass_warm();
 
-        gpu_reduce(d_input, d_partial, d_temp, d_result, N, block_size,
-                   &timer, &acc_reduce);
-        bench_emit_iter("reduce_kernel", i, &acc_reduce, params);
-        total_gpu_ms += acc_reduce.gpu_ms;
-        fprintf(stderr, "pass %d: gpu = %.3f ms, host = %.3f ms\n",
-                i, acc_reduce.gpu_ms, acc_reduce.host_ms);
-    }
+    gpu_reduce(d_input, d_partial, d_temp, d_result, N, block_size,
+               &timer, &acc_reduce);
+    bench_emit_iter("reduce_kernel", 0, &acc_reduce, params);
+    total_gpu_ms += acc_reduce.gpu_ms;
+    fprintf(stderr, "gpu = %.3f ms, host = %.3f ms\n",
+            acc_reduce.gpu_ms, acc_reduce.host_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Verify
     float gpu_result = 0.0f;

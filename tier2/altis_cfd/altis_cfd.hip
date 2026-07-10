@@ -13,8 +13,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
-//   BENCH_PARAM_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (compute_flux_kernel, rk_update_kernel) carrying that kernel's
@@ -330,18 +328,14 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Invalid precision '%s' (use half, float, double)\n", precision);
         return EXIT_FAILURE;
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     // Print device info
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "CFD Euler solver  |  Cells: %d  |  Neighbors: %d  |  "
-            "Iterations: %d warmup + %d timed\n\n",
-            N, NUM_NEIGHBORS, num_warmup, num_iters);
+    fprintf(stderr, "CFD Euler solver  |  Cells: %d  |  Neighbors: %d\n\n",
+            N, NUM_NEIGHBORS);
 
     // -----------------------------------------------------------------------
     // Generate synthetic mesh data
@@ -498,24 +492,17 @@ int main(int argc, char** argv) {
         }
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_cfd_pass();
-    }
-
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_cfd_pass();
-        bench_emit_iter("compute_flux_kernel", i, &acc_flux, params);
-        bench_emit_iter("rk_update_kernel",    i, &acc_rk,   params);
-        total_gpu_ms += acc_flux.gpu_ms + acc_rk.gpu_ms;
-        fprintf(stderr, "pass %d: compute_flux gpu = %.3f ms, rk_update gpu = %.3f ms\n",
-                i, acc_flux.gpu_ms, acc_rk.gpu_ms);
-    }
+    run_cfd_pass();
+    bench_emit_iter("compute_flux_kernel", 0, &acc_flux, params);
+    bench_emit_iter("rk_update_kernel",    0, &acc_rk,   params);
+    total_gpu_ms += acc_flux.gpu_ms + acc_rk.gpu_ms;
+    fprintf(stderr, "compute_flux gpu = %.3f ms, rk_update gpu = %.3f ms\n",
+            acc_flux.gpu_ms, acc_rk.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -----------------------------------------------------------------------
     // Verification: compare GPU flux for first 256 cells with CPU reference

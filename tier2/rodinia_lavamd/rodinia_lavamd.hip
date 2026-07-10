@@ -25,8 +25,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_boxes1d
-//   BENCH_PARAM_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed pass for
 // kernel_gpu_cuda carrying the GPU event time (time_ms) and host wall-clock
@@ -242,8 +240,6 @@ int main(int argc, char** argv) {
     int boxes1d = parseIntParam(argc, argv, "--boxes1d", 10);
     const char* env_val = getenv("BENCH_PARAM_boxes1d");
     if (env_val) boxes1d = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     par_str par_cpu;
     dim_str dim_cpu;
@@ -362,20 +358,17 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipGetLastError());
     };
 
-    for (int w = 0; w < num_warmup; ++w) run_pass();
+    run_pass();
 
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_pass();
-        bench_emit_iter("kernel_gpu_cuda", i, &acc, params);
-        total_gpu_ms += acc.gpu_ms;
-        fprintf(stderr, "pass %d: kernel_gpu_cuda gpu = %.3f ms, host = %.3f ms\n",
-                i, acc.gpu_ms, acc.host_ms);
-    }
+    bench_emit_iter("kernel_gpu_cuda", 0, &acc, params);
+    total_gpu_ms += acc.gpu_ms;
+    fprintf(stderr, "kernel_gpu_cuda gpu = %.3f ms, host = %.3f ms\n",
+            acc.gpu_ms, acc.host_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n", total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms over 1 pass\n", total_gpu_ms);
 
     HIP_CHECK(hipFree(d_box_gpu));
     HIP_CHECK(hipFree(d_rv_gpu));

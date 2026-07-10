@@ -15,8 +15,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_width, BENCH_PARAM_height, BENCH_PARAM_spheres
-//   BENCH_PARAM_warmup   (warmup launches, default 3)
-//   BENCH_PARAM_iteration    (timed launches, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // carrying the GPU event time and host wall-clock time, then a summary whose
@@ -300,9 +298,6 @@ int main(int argc, char** argv) {
     if (env_val) H = atoi(env_val);
     env_val = getenv("BENCH_PARAM_spheres");
     if (env_val) nSph = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     int total_pixels = W * H;
     size_t image_bytes  = (size_t)total_pixels * 4;
     size_t sphere_bytes = (size_t)nSph * sizeof(Sphere);
@@ -313,9 +308,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Ray Tracing  |  Image: %dx%d  |  Spheres: %d  |  "
-            "Iterations: %d warmup + %d timed\n\n", W, H, nSph,
-            num_warmup, num_iters);
+    fprintf(stderr, "Ray Tracing  |  Image: %dx%d  |  Spheres: %d\n\n",
+            W, H, nSph);
 
     // Generate random spheres (deterministic seed)
     std::vector<Sphere> h_spheres(nSph);
@@ -359,13 +353,12 @@ int main(int argc, char** argv) {
     // reads the sphere list and overwrites the output image from scratch, so
     // repeated launches perform identical work — no state reset needed.
     double total_gpu_ms =
-        bench_run_loop("raytrace_kernel", num_warmup, num_iters, params, [&]() {
+        bench_run_once("raytrace_kernel", params, [&]() {
             raytrace_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_image, d_spheres, W, H, nSph);
         });
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
     // Verification (compare a subset of pixels against CPU reference)

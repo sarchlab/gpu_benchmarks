@@ -13,8 +13,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
-//   BENCH_PARAM_warmup   (warmup launches, default 3)
-//   BENCH_PARAM_iteration    (timed launches, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // carrying the GPU event time (time_ms) and host wall-clock time
@@ -197,9 +195,6 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Invalid precision '%s' (use float, double, half)\n", precision);
         return 1;
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     int N     = size;
 
     const float r = 0.02f;  // risk-free rate
@@ -212,8 +207,7 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Options: %d  |  Iterations: %d warmup + %d timed\n\n",
-            N, num_warmup, num_iters);
+    fprintf(stderr, "Options: %d\n\n", N);
 
     // Host allocation + initialization
     float* h_S     = (float*)malloc(bytes);
@@ -259,14 +253,13 @@ int main(int argc, char** argv) {
     // every launch, so repeated launches perform identical work — no reset
     // needed.
     double total_gpu_ms =
-        bench_run_loop("blackscholes_kernel", num_warmup, num_iters, params, [&]() {
+        bench_run_once("blackscholes_kernel", params, [&]() {
             blackscholes_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
                 d_S, d_K, d_T, d_sigma, r, d_call, d_put, N);
         });
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
     // Verification

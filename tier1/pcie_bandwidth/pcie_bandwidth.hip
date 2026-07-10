@@ -24,8 +24,6 @@
  *   BENCH_PARAM_buffer_size_mb
  *   BENCH_PARAM_transfer_type     (h2d, d2h, bidir, all)
  *   BENCH_PARAM_use_pinned_memory (true, false)
- *   BENCH_PARAM_warmup        (warmup copies per test, default 3)
- *   BENCH_PARAM_iteration         (timed copies per test, each recorded, default 7)
  *
  * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
  * the GPU event time and host wall-clock time, then a summary whose
@@ -65,15 +63,14 @@ static const int DEFAULT_BUFFER_MB = 256;
  *  the timed bracket. */
 static double benchmark_bidir(const void *h_src, void *h_dst,
                               const void *d_src, void *d_dst,
-                              size_t bytes, int num_warmup, int num_iters,
-                              const char *params)
+                              size_t bytes, const char *params)
 {
     hipStream_t stream_h2d, stream_d2h;
     HIP_CHECK(hipStreamCreate(&stream_h2d));
     HIP_CHECK(hipStreamCreate(&stream_d2h));
 
     double total_gpu_ms =
-        bench_run_loop("memcpy_bidir", num_warmup, num_iters, params, [&]() {
+        bench_run_once("memcpy_bidir", params, [&]() {
             HIP_CHECK(hipMemcpyAsync(d_dst, h_src, bytes,
                                      hipMemcpyHostToDevice, stream_h2d));
             HIP_CHECK(hipMemcpyAsync(h_dst, d_src, bytes,
@@ -123,9 +120,6 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_use_pinned_memory");
     if (env_val) use_pinned_memory = env_val;
 
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     bool pinned    = (strcmp(use_pinned_memory, "false") != 0);
     bool run_h2d   = (strcmp(transfer_type, "all") == 0 || strcmp(transfer_type, "h2d") == 0);
     bool run_d2h   = (strcmp(transfer_type, "all") == 0 || strcmp(transfer_type, "d2h") == 0);
@@ -142,7 +136,6 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Transfer size   : %d MiB (%zu bytes)\n", buffer_mb, bytes);
     fprintf(stderr, "Transfer type   : %s\n", transfer_type);
     fprintf(stderr, "Pinned memory   : %s\n", use_pinned_memory);
-    fprintf(stderr, "Warmup / iters  : %d / %d per test\n\n", num_warmup, num_iters);
 
     /* Allocate host memory. */
     void *h_src = nullptr;
@@ -179,17 +172,15 @@ int main(int argc, char *argv[])
     double total_gpu_ms = 0.0;
     if (run_h2d) {
         total_gpu_ms += bench_run_memcpy("memcpy_h2d", d_dst, h_src, bytes,
-                                         hipMemcpyHostToDevice,
-                                         num_warmup, num_iters, params);
+                                         hipMemcpyHostToDevice, params);
     }
     if (run_d2h) {
         total_gpu_ms += bench_run_memcpy("memcpy_d2h", h_dst, d_src, bytes,
-                                         hipMemcpyDeviceToHost,
-                                         num_warmup, num_iters, params);
+                                         hipMemcpyDeviceToHost, params);
     }
     if (run_bidir) {
         total_gpu_ms += benchmark_bidir(h_src, h_dst, d_src, d_dst, bytes,
-                                        num_warmup, num_iters, params);
+                                        params);
     }
 
     bench_emit_summary(total_gpu_ms);

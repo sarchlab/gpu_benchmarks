@@ -8,8 +8,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_filter_size
-//   BENCH_PARAM_warmup   (warmup launches, default 3)
-//   BENCH_PARAM_iteration    (timed launches, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // carrying the GPU event time and host wall-clock time, then a summary whose
@@ -91,9 +89,6 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_filter_size");
     if (env_val) filter_size = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     size_t vol_elems   = (size_t)N * N * N;
     size_t vol_bytes   = vol_elems * sizeof(float);
     size_t filt_elems  = (size_t)filter_size * filter_size * filter_size;
@@ -148,14 +143,13 @@ int main(int argc, char** argv) {
     // rewrites d_output as a pure function of the constant input volume and
     // filter, so repeated launches do identical work — no reset needed.
     double total_gpu_ms =
-        bench_run_loop("conv3d_kernel", num_warmup, num_iters, params, [&]() {
+        bench_run_once("conv3d_kernel", params, [&]() {
             conv3d_kernel<<<grid, block>>>(d_input, d_filter, d_output, N,
                                            filter_size);
         });
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Cleanup
     HIP_CHECK(hipFree(d_input));

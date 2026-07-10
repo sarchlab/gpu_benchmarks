@@ -19,8 +19,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_nx, BENCH_PARAM_ny, BENCH_PARAM_block_size
-//   BENCH_PARAM_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (atax_kernel1, atax_kernel2) carrying that kernel's GPU event time
@@ -117,8 +115,6 @@ int main(int argc, char** argv) {
     if (env_val) ny = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     size_t bytes_A   = (size_t)nx * ny * sizeof(float);
     size_t bytes_x   = (size_t)ny * sizeof(float);
@@ -188,19 +184,14 @@ int main(int argc, char** argv) {
         }));
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_atax_pass();
-    }
+    run_atax_pass();
 
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_atax_pass();
-        bench_emit_iter("atax_kernel1", i, &acc_k1, params);
-        bench_emit_iter("atax_kernel2", i, &acc_k2, params);
-        total_gpu_ms += acc_k1.gpu_ms + acc_k2.gpu_ms;
-        fprintf(stderr, "pass %d: k1 gpu = %.3f ms, k2 gpu = %.3f ms\n",
-                i, acc_k1.gpu_ms, acc_k2.gpu_ms);
-    }
+    bench_emit_iter("atax_kernel1", 0, &acc_k1, params);
+    bench_emit_iter("atax_kernel2", 0, &acc_k2, params);
+    total_gpu_ms += acc_k1.gpu_ms + acc_k2.gpu_ms;
+    fprintf(stderr, "k1 gpu = %.3f ms, k2 gpu = %.3f ms\n",
+            acc_k1.gpu_ms, acc_k2.gpu_ms);
 
     bench_timer_destroy(&timer);
 
@@ -224,8 +215,7 @@ int main(int argc, char** argv) {
             check_n, pass ? "PASS" : "FAIL");
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Cleanup
     HIP_CHECK(hipFree(d_A));

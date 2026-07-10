@@ -29,8 +29,6 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_img_width, BENCH_PARAM_img_height,
 //   BENCH_PARAM_histo_width, BENCH_PARAM_histo_height
-//   BENCH_PARAM_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for EACH
 // of the four kernels carrying that kernel's accumulated GPU event time, then a
@@ -453,8 +451,6 @@ int main(int argc, char** argv)
     env_val = getenv("BENCH_PARAM_img_height");   if (env_val) img_height = atoi(env_val);
     env_val = getenv("BENCH_PARAM_histo_width");  if (env_val) histo_width = atoi(env_val);
     env_val = getenv("BENCH_PARAM_histo_height"); if (env_val) histo_height = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     const unsigned int num_bins = (unsigned int)histo_width * histo_height;
 
@@ -589,23 +585,19 @@ int main(int argc, char** argv)
         HIP_CHECK(hipGetLastError());
     };
 
-    for (int w = 0; w < num_warmup; ++w) run_pass();
-
+    run_pass();
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_pass();
-        bench_emit_iter("histo_prescan_kernel",       i, &acc_pre,  params);
-        bench_emit_iter("histo_intermediates_kernel", i, &acc_int,  params);
-        bench_emit_iter("histo_main_kernel",          i, &acc_main, params);
-        bench_emit_iter("histo_final_kernel",         i, &acc_fin,  params);
-        total_gpu_ms += acc_pre.gpu_ms + acc_int.gpu_ms + acc_main.gpu_ms + acc_fin.gpu_ms;
-        fprintf(stderr, "pass %d: prescan=%.3f inter=%.3f main=%.3f final=%.3f ms\n",
-                i, acc_pre.gpu_ms, acc_int.gpu_ms, acc_main.gpu_ms, acc_fin.gpu_ms);
-    }
+    bench_emit_iter("histo_prescan_kernel",       0, &acc_pre,  params);
+    bench_emit_iter("histo_intermediates_kernel", 0, &acc_int,  params);
+    bench_emit_iter("histo_main_kernel",          0, &acc_main, params);
+    bench_emit_iter("histo_final_kernel",         0, &acc_fin,  params);
+    total_gpu_ms += acc_pre.gpu_ms + acc_int.gpu_ms + acc_main.gpu_ms + acc_fin.gpu_ms;
+    fprintf(stderr, "prescan=%.3f inter=%.3f main=%.3f final=%.3f ms\n",
+            acc_pre.gpu_ms, acc_int.gpu_ms, acc_main.gpu_ms, acc_fin.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n", total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // ---- Verification: final_histo[value] = min(count(value), 255) ----
     HIP_CHECK(hipMemcpy(histo, final_histo, (size_t)num_bins * sizeof(unsigned char), hipMemcpyDeviceToHost));

@@ -12,8 +12,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_num_bins, BENCH_PARAM_block_size
-//   BENCH_PARAM_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed pass
 // carrying the GPU event time (time_ms) and host wall-clock time
@@ -128,8 +126,6 @@ int main(int argc, char** argv) {
     if (env_val) num_bins = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     int N     = size;
 
@@ -142,10 +138,8 @@ int main(int argc, char** argv) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Histogram  |  N: %d (%.2f MB)  |  Bins: %d  |  "
-            "Iterations: %d warmup + %d timed\n\n",
-            N, (double)data_bytes / (1024.0 * 1024.0), num_bins, num_warmup,
-            num_iters);
+    fprintf(stderr, "Histogram  |  N: %d (%.2f MB)  |  Bins: %d\n\n",
+            N, (double)data_bytes / (1024.0 * 1024.0), num_bins);
 
     // Generate random input data (deterministic seed)
     unsigned char* h_data = (unsigned char*)malloc(data_bytes);
@@ -201,23 +195,16 @@ int main(int argc, char** argv) {
         }
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_pass(false);
-    }
-
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_pass(true);
-        bench_emit_iter("histogram_kernel", i, &lap, params);
-        total_gpu_ms += lap.gpu_ms;
-        fprintf(stderr, "histogram_kernel iter %d: gpu = %.3f ms, host = %.3f ms\n",
-                i, lap.gpu_ms, lap.host_ms);
-    }
+    run_pass(true);
+    bench_emit_iter("histogram_kernel", 0, &lap, params);
+    total_gpu_ms += lap.gpu_ms;
+    fprintf(stderr, "histogram_kernel: gpu = %.3f ms, host = %.3f ms\n",
+            lap.gpu_ms, lap.host_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d iterations\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
     // Verification (compare GPU histogram against CPU reference)

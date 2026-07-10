@@ -16,8 +16,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_sequence_length, BENCH_PARAM_block_size, BENCH_PARAM_penalty
-//   BENCH_PARAM_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (nw_kernel1, nw_kernel2) carrying that kernel's accumulated GPU
@@ -250,8 +248,6 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_penalty");
     if (env_val) penalty = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
     // Round sequence length up to a multiple of block_size
     int num_blocks = (seq_len + block_size - 1) / block_size;
@@ -347,24 +343,17 @@ int main(int argc, char** argv) {
         }
     };
 
-    for (int w = 0; w < num_warmup; ++w) {
-        run_nw_pass();
-    }
-
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_nw_pass();
-        bench_emit_iter("nw_kernel1", i, &acc_k1, params);
-        bench_emit_iter("nw_kernel2", i, &acc_k2, params);
-        total_gpu_ms += acc_k1.gpu_ms + acc_k2.gpu_ms;
-        fprintf(stderr, "pass %d: nw_kernel1 gpu = %.3f ms, nw_kernel2 gpu = %.3f ms\n",
-                i, acc_k1.gpu_ms, acc_k2.gpu_ms);
-    }
+    run_nw_pass();
+    bench_emit_iter("nw_kernel1", 0, &acc_k1, params);
+    bench_emit_iter("nw_kernel2", 0, &acc_k2, params);
+    total_gpu_ms += acc_k1.gpu_ms + acc_k2.gpu_ms;
+    fprintf(stderr, "nw_kernel1 gpu = %.3f ms, nw_kernel2 gpu = %.3f ms\n",
+            acc_k1.gpu_ms, acc_k2.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     HIP_CHECK(hipFree(d_seq));
     HIP_CHECK(hipFree(d_matrix));

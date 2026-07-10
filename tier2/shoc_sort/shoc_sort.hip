@@ -19,8 +19,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_precision
-//   BENCH_PARAM_warmup   (warmup passes, default 3)
-//   BENCH_PARAM_iteration    (timed passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // distinct kernel (radixSortBlocks, findRadixOffsets, scan, vectorAddUniform4,
@@ -581,9 +579,6 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Invalid precision '%s' (use uint, int, float)\n", precision);
         return EXIT_FAILURE;
     }
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
-
     // The SHOC pipeline requires the element count to be a multiple of 1024
     // (4 * SCAN_BLOCK_SIZE) so every kernel's grid geometry divides evenly.
     if (size % 1024 != 0) {
@@ -692,25 +687,21 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipGetLastError());
     };
 
-    for (int w = 0; w < num_warmup; ++w) run_pass();
-
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_pass();
-        bench_emit_iter("radixSortBlocks",   i, &acc_radix,   params);
-        bench_emit_iter("findRadixOffsets",  i, &acc_find,    params);
-        bench_emit_iter("scan",              i, &acc_scan,    params);
-        bench_emit_iter("vectorAddUniform4", i, &acc_vadd,    params);
-        bench_emit_iter("reorderData",       i, &acc_reorder, params);
-        double pass_ms = acc_radix.gpu_ms + acc_find.gpu_ms + acc_scan.gpu_ms +
-                         acc_vadd.gpu_ms + acc_reorder.gpu_ms;
-        total_gpu_ms += pass_ms;
-        fprintf(stderr,
-                "pass %d: radixSortBlocks=%.3f findRadixOffsets=%.3f scan=%.3f "
-                "vectorAddUniform4=%.3f reorderData=%.3f (total %.3f ms)\n",
-                i, acc_radix.gpu_ms, acc_find.gpu_ms, acc_scan.gpu_ms,
-                acc_vadd.gpu_ms, acc_reorder.gpu_ms, pass_ms);
-    }
+    run_pass();
+    bench_emit_iter("radixSortBlocks",   0, &acc_radix,   params);
+    bench_emit_iter("findRadixOffsets",  0, &acc_find,    params);
+    bench_emit_iter("scan",              0, &acc_scan,    params);
+    bench_emit_iter("vectorAddUniform4", 0, &acc_vadd,    params);
+    bench_emit_iter("reorderData",       0, &acc_reorder, params);
+    double pass_ms = acc_radix.gpu_ms + acc_find.gpu_ms + acc_scan.gpu_ms +
+                     acc_vadd.gpu_ms + acc_reorder.gpu_ms;
+    total_gpu_ms += pass_ms;
+    fprintf(stderr,
+            "radixSortBlocks=%.3f findRadixOffsets=%.3f scan=%.3f "
+            "vectorAddUniform4=%.3f reorderData=%.3f (total %.3f ms)\n",
+            acc_radix.gpu_ms, acc_find.gpu_ms, acc_scan.gpu_ms,
+            acc_vadd.gpu_ms, acc_reorder.gpu_ms, pass_ms);
 
     bench_timer_destroy(&timer);
 
@@ -719,7 +710,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Correctness: %s\n", verifySort(hKeys, size) ? "PASS" : "FAIL");
 
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n", total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     for (uint i = 0; i < numLevelsAllocated; ++i) HIP_CHECK(hipFree(scanBlockSums[i]));
     free(scanBlockSums);

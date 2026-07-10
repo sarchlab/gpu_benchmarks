@@ -632,8 +632,6 @@ type runArgs struct {
 	timeout         string
 	scalingValues   string
 	vectorAddWarmup string // "" = benchmark default; else "true"/"false"
-	warmup          string // "" = benchmark default; else non-negative int
-	iteration       string // "" = benchmark default; else positive int
 	dryRun          bool
 	continueOnError bool
 	verbose         bool
@@ -685,8 +683,8 @@ func cmdRun(args runArgs) int {
 		}
 	}
 
-	// Measurement-param overrides (apply globally to every tier1/tier2 benchmark
-	// that declares them; benchmarks without the param are unaffected).
+	// Measurement-param override (applies globally to every tier1/tier2 benchmark
+	// that declares it; benchmarks without the param are unaffected).
 	measurementOverrides := map[string]string{}
 	if args.vectorAddWarmup != "" {
 		v := strings.ToLower(strings.TrimSpace(args.vectorAddWarmup))
@@ -696,22 +694,6 @@ func cmdRun(args runArgs) int {
 		default:
 			eprintf("Invalid --vector-add-warmup %q (want true/false)\n", args.vectorAddWarmup)
 			return ExitUsage
-		}
-	}
-	if args.warmup != "" {
-		if n, err := strconv.Atoi(strings.TrimSpace(args.warmup)); err != nil || n < 0 {
-			eprintf("Invalid --warmup %q (want a non-negative integer)\n", args.warmup)
-			return ExitUsage
-		} else {
-			measurementOverrides["warmup"] = strconv.Itoa(n)
-		}
-	}
-	if args.iteration != "" {
-		if n, err := strconv.Atoi(strings.TrimSpace(args.iteration)); err != nil || n < 1 {
-			eprintf("Invalid --iteration %q (want a positive integer)\n", args.iteration)
-			return ExitUsage
-		} else {
-			measurementOverrides["iteration"] = strconv.Itoa(n)
 		}
 	}
 
@@ -933,14 +915,10 @@ func cmdRun(args runArgs) int {
 						fmt.Sprintf("LD_PRELOAD=%s", args.collectTrace),
 						"USER_DEFINED_FOLDERS=1",
 						fmt.Sprintf("TRACES_FOLDER=%s", cfgTraceDir),
-						// Trace collection wants one launch per kernel, not the
-						// timing harness's warmup + repeated iterations: nvbit
-						// slows every launch, and duplicate launches multiply
-						// trace size and timeout risk without adding coverage.
-						// vector_add_warmup is forced off so the warmer kernel
-						// never appears in the trace.
-						"BENCH_PARAM_warmup=0",
-						"BENCH_PARAM_iteration=1",
+						// Trace collection wants exactly the real kernel(s) and
+						// nothing else: vector_add_warmup is forced off so the
+						// warmer kernel never appears in the trace. (Benchmarks
+						// already run their operation once per process.)
 						"BENCH_PARAM_vector_add_warmup=false",
 					)
 					if args.traceSample != "" {

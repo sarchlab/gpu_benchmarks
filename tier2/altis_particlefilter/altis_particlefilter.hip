@@ -16,8 +16,6 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_num_particles_ratio, BENCH_PARAM_seed
-//   BENCH_PARAM_warmup   (warmup filter passes, default 3)
-//   BENCH_PARAM_iteration    (timed filter passes, each recorded, default 7)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (update_particles_kernel, compute_weights_kernel, prefix_sum_kernel,
@@ -376,8 +374,6 @@ int main(int argc, char** argv) {
     }
     env_val = getenv("BENCH_PARAM_seed");
     if (env_val) seed_param = atoi(env_val);
-    const int num_warmup = bench_num_warmup();
-    const int num_iters  = bench_num_iters();
 
 
     // Print device info
@@ -387,8 +383,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Particle Filter  |  Particles: %d  |  Grid: %dx%d  |  "
-            "Steps/pass: %d  |  Passes: %d warmup + %d timed\n\n",
-            N, GRID_SIZE, GRID_SIZE, TIME_STEPS, num_warmup, num_iters);
+            "Steps/pass: %d\n\n",
+            N, GRID_SIZE, GRID_SIZE, TIME_STEPS);
 
     size_t float_bytes = (size_t)N * sizeof(float);
     size_t uint_bytes  = (size_t)N * sizeof(unsigned int);
@@ -539,34 +535,26 @@ int main(int argc, char** argv) {
         }
     };
 
-    // Warmup passes (records not emitted)
-    for (int w = 0; w < num_warmup; ++w) {
-        run_pass();
-    }
-
-    // Timed passes — one record per kernel per pass
+    // Timed pass — one record per kernel
     double total_gpu_ms = 0.0;
-    for (int i = 0; i < num_iters; ++i) {
-        run_pass();
-        bench_emit_iter("update_particles_kernel", i, &acc_update,   params);
-        bench_emit_iter("compute_weights_kernel",  i, &acc_weights,  params);
-        bench_emit_iter("prefix_sum_kernel",       i, &acc_prefix,   params);
-        bench_emit_iter("add_block_sums_kernel",   i, &acc_addblock, params);
-        bench_emit_iter("resample_kernel",         i, &acc_resample, params);
-        total_gpu_ms += acc_update.gpu_ms + acc_weights.gpu_ms +
-                        acc_prefix.gpu_ms + acc_addblock.gpu_ms +
-                        acc_resample.gpu_ms;
-        fprintf(stderr,
-                "pass %d: update=%.3f weights=%.3f prefix=%.3f addblock=%.3f "
-                "resample=%.3f ms (gpu)\n",
-                i, acc_update.gpu_ms, acc_weights.gpu_ms, acc_prefix.gpu_ms,
-                acc_addblock.gpu_ms, acc_resample.gpu_ms);
-    }
+    run_pass();
+    bench_emit_iter("update_particles_kernel", 0, &acc_update,   params);
+    bench_emit_iter("compute_weights_kernel",  0, &acc_weights,  params);
+    bench_emit_iter("prefix_sum_kernel",       0, &acc_prefix,   params);
+    bench_emit_iter("add_block_sums_kernel",   0, &acc_addblock, params);
+    bench_emit_iter("resample_kernel",         0, &acc_resample, params);
+    total_gpu_ms += acc_update.gpu_ms + acc_weights.gpu_ms +
+                    acc_prefix.gpu_ms + acc_addblock.gpu_ms +
+                    acc_resample.gpu_ms;
+    fprintf(stderr,
+            "update=%.3f weights=%.3f prefix=%.3f addblock=%.3f "
+            "resample=%.3f ms (gpu)\n",
+            acc_update.gpu_ms, acc_weights.gpu_ms, acc_prefix.gpu_ms,
+            acc_addblock.gpu_ms, acc_resample.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over %d passes\n",
-            total_gpu_ms, num_iters);
+    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -----------------------------------------------------------------------
     // Verification: run CPU reference and compare mean positions

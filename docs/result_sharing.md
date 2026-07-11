@@ -77,7 +77,7 @@ The exported JSON follows this structure:
 | `platform.gpu_model` | string | GPU model name |
 | `platform.gpu_vram_gb` | number \| null | GPU VRAM in GiB |
 | `platform.driver_version` | string \| null | GPU driver version |
-| `platform.platform_type` | string | One of `cuda`, `rocm`, `metal` |
+| `platform.platform_type` | string | One of `cuda`, `rocm` |
 | `sessions[].id` | number | Session ID from the database |
 | `sessions[].started_at` | string | Session start timestamp |
 | `sessions[].finished_at` | string \| null | Session end timestamp |

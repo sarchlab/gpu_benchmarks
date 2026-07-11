@@ -3,7 +3,7 @@
 Faithful port of the Parboil **histo** benchmark: the four device kernels are the
 original (`parboil/benchmarks/histo/src/cuda/`), the host driver reproduces the
 original `main.cu` geometry. Only the host driver is restructured for the
-per-iteration timing harness and JSON output.
+single-run timing harness and JSON output.
 
 ## Algorithm (4-kernel privatized pipeline — the faithful part)
 
@@ -19,9 +19,9 @@ Builds a `histo_width × histo_height` 2D histogram with **8-bit saturating** bi
 4. `histo_final_kernel` — **saturating merge** of the `BLOCK_X` sub-histograms and
    the global/overflow buffers into the final 8-bit histogram.
 
-One recorded **pass** runs all four kernels; each kernel is emitted as its own
-per-iteration record. Per-pass state (`ranges`, sub-histogram, global/overflow
-buffers) is re-initialised untimed at the start of each pass.
+The single run executes all four kernels once; each kernel is emitted as its
+own record. Mutable state (`ranges`, sub-histogram, global/overflow buffers)
+is initialised untimed before the run.
 
 ## Default problem size
 
@@ -32,33 +32,37 @@ coherent real image data), keeping the prescan-derived active range well inside
 the valid block count. `img_height` should be a multiple of 16 (`UNROLL`), and
 `img_width` is kept equal to `histo_width` (as in the reference dataset).
 
+## Measurement
+
+The 4-kernel pipeline runs **exactly once** per process execution (see the root
+README "Measurement Methodology"). With `BENCH_PARAM_vector_add_warmup`
+(default `true`), a vector-add warmer boosts the GPU clock and evicts the
+last-level cache immediately before the timed run. Repetition =
+`gpubench run --reps N`.
+
 ## Parameters
 
-| Env var | Description | Default |
+| Env var (or `--flag`) | Description | Default |
 |---------|-------------|---------|
 | `BENCH_PARAM_img_width` | Input width (= histo_width) | 256 |
 | `BENCH_PARAM_img_height` | Input height (multiple of 16) | 4096 |
 | `BENCH_PARAM_histo_width` | Histogram width | 256 |
 | `BENCH_PARAM_histo_height` | Histogram height | 8192 |
-| `BENCH_PARAM_warmup` | Warmup passes (untimed) | 3 |
-| `BENCH_PARAM_iteration` | Timed passes, each recorded | 7 |
+| `BENCH_PARAM_vector_add_warmup` | Cold-cache clock warmer on/off | true |
 
 ## Build / Run
 
 ```bash
-make               # auto-detect platform (cuda / rocm / metal)
+make               # auto-detect platform (cuda / rocm)
 ./parboil_histogram
 BENCH_PARAM_img_height=8192 ./parboil_histogram
 ```
 
 ## Output
 
-**stdout** — per timed pass, one `kernel` record for **each** of the four kernels
-carrying that kernel's GPU event time, then a `summary` whose `total_time_ms` is
-the sum of all recorded GPU event times. **stderr** — device info, per-pass
-timing, PASS/FAIL. Verification: `final_histo[value] == min(count(value), 255)`
-over all bins.
-
-> **Metal note:** `parboil_histogram.metal` / `parboil_histogram_metal.mm` still
-> contain the earlier naive 256-bin atomic implementation and were not updated by
-> this faithful port (HIP/CUDA only).
+**stdout** — one `kernel` record (`iter:0`) for **each** of the four kernels
+carrying that kernel's GPU event time within the single run, then a `summary`
+whose `total_time_ms` is the sum of all recorded GPU event times.
+**stderr** — device info, per-kernel timing, PASS/FAIL. Verification:
+`final_histo[value] == min(count(value), 255)` over all bins; on FAIL the
+process exits non-zero.

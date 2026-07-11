@@ -166,6 +166,7 @@ int main(int argc, char** argv) {
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
+    bool verify_ok = true;
     // -----------------------------------------------------------------------
     // Verification
     // -----------------------------------------------------------------------
@@ -193,12 +194,13 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (errors > 0)
+        if (errors > 0) {
             fprintf(stderr, "FAIL: %d mismatches in first %d entries\n", errors, verify_n);
-        else
+            verify_ok = false;
+        } else
             fprintf(stderr, "PASS\n");
     }
 
     HIP_CHECK(hipFree(d_table));
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

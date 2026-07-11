@@ -6,13 +6,12 @@
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_alpha,
-//   BENCH_PARAM_beta, BENCH_PARAM_precision (one of: half, float, double)
+//   BENCH_PARAM_size, BENCH_PARAM_alpha, BENCH_PARAM_beta
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
-// kernel launch (mm_kernel_1, mm_kernel_2) carrying its GPU event time
+// Output (stdout): the 2MM pass runs exactly once; one {"type":"kernel",...}
+// JSON line per kernel (mm_kernel_1, mm_kernel_2) carrying its GPU event time
 // (time_ms) and host wall-clock time (host_time_ms), then a summary whose
-// total_time_ms is the SUM of all recorded GPU event times. GFLOPS
+// total_time_ms is the SUM of the two GPU event times. GFLOPS
 // (4*N^3 / time) is derived downstream from time_ms and params.
 
 #include "../../common/bench_timing.h"
@@ -99,10 +98,8 @@ int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     int N          = 1024;
-    int block_size = 256;
     float alpha    = 1.5f;
     float beta     = 1.2f;
-    const char* precision = "float";
 
     N          = parseIntParam(argc, argv, "--size", N);
     alpha      = parseFloatParam(argc, argv, "--alpha", alpha);
@@ -111,24 +108,10 @@ int main(int argc, char** argv) {
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_alpha");
     if (env_val) alpha = (float)atof(env_val);
     env_val = getenv("BENCH_PARAM_beta");
     if (env_val) beta = (float)atof(env_val);
-    env_val = getenv("BENCH_PARAM_precision");
-    if (env_val) {
-        // Validate against the known set — emit canonical literals only.
-        if (strcmp(env_val, "half") == 0)        precision = "half";
-        else if (strcmp(env_val, "float") == 0)  precision = "float";
-        else if (strcmp(env_val, "double") == 0) precision = "double";
-        else {
-            fprintf(stderr, "Error: BENCH_PARAM_precision must be one of "
-                    "half, float, double (got \"%s\")\n", env_val);
-            return 1;
-        }
-    }
     size_t bytes = (size_t)N * N * sizeof(float);
 
     // Print device info
@@ -174,9 +157,8 @@ int main(int argc, char** argv) {
 
     char params[192];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d,\"alpha\":%.2f,\"beta\":%.2f,"
-             "\"precision\":\"%s\"",
-             N, block_size, alpha, beta, precision);
+             "\"size\":%d,\"alpha\":%.2f,\"beta\":%.2f",
+             N, alpha, beta);
 
     // Per-kernel accumulators: one launch of each mm_kernel per pass.
     bench_timer_t timer;

@@ -14,7 +14,7 @@ Reports tokens/sec.
 
 - Python 3.8+
 - PyTorch 2.x
-- CUDA GPU (NVIDIA) or ROCm GPU (AMD) or Apple Silicon (Metal/MPS)
+- CUDA GPU (NVIDIA) or ROCm GPU (AMD)
 
 ## Build & Run
 
@@ -26,11 +26,6 @@ make run PLATFORM=cuda
 ### ROCm (AMD)
 ```
 make run PLATFORM=rocm
-```
-
-### Metal (Apple)
-```
-make run PLATFORM=metal
 ```
 
 ## Output Format

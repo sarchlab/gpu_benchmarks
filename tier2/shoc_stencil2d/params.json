@@ -43,15 +43,6 @@
       ]
     },
     {
-      "name": "trials",
-      "description": "Number of timed trials for averaging",
-      "type": "int",
-      "default": 1,
-      "values": [
-        1
-      ]
-    },
-    {
       "name": "block_size",
       "description": "Thread-block dimension for stencil kernel (block_size x block_size threads)",
       "type": "int",

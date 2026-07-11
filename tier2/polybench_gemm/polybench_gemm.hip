@@ -13,11 +13,11 @@
 //   --size N         Matrix dimension N (N×N)  (default: 1024)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_size
 //
-// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
-// carrying the GPU event time and host wall-clock time, then a summary whose
-// total_time_ms is the SUM of all iterations' GPU event times. GFLOPS
+// Output (stdout): one {"type":"kernel",...} JSON line for the single timed
+// launch, carrying the GPU event time and host wall-clock time, then a
+// summary whose total_time_ms equals that GPU event time. GFLOPS
 // (2*N^3 / time) is derived downstream from time_ms and params.
 
 #include "../../common/bench_timing.h"
@@ -86,16 +86,9 @@ int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     int N     = parseIntParam(argc, argv, "--size", 1024);
-    int block_size = parseIntParam(argc, argv, "--block_size", 256);
-    const char* precision = "float";
-
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_precision");
-    if (env_val) precision = env_val;
     const float alpha = 1.5f;
     const float beta  = 1.2f;
 
@@ -138,13 +131,12 @@ int main(int argc, char** argv) {
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
-             N, block_size, precision);
+             "\"size\":%d", N);
 
-    // Warmup + timed iterations, each recorded individually. The kernel
-    // rewrites C in place (beta*C term); float FMA timing is value-
-    // independent, so iterating without re-uploading C does not change the
-    // measured time and keeps the cache state steady across iterations.
+    // Single timed launch (optionally preceded by the vector-add warmer).
+    // The kernel rewrites C in place (beta*C term), but it runs only once
+    // per process on the freshly uploaded C, so every execution performs
+    // identical work.
     double total_gpu_ms =
         bench_run_once("polybench_gemm_kernel", params, [&]() {
             polybench_gemm_kernel<<<grid, block>>>(d_A, d_B, d_C, N, alpha, beta);

@@ -12,13 +12,12 @@
 //   --size N         Number of options (default: 4194304 = 4M)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_size, BENCH_PARAM_block_size
 //
-// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
-// carrying the GPU event time (time_ms) and host wall-clock time
-// (host_time_ms), then a summary whose total_time_ms is the SUM of all
-// iterations' GPU event times. Options/sec is derived downstream from
-// time_ms and params.
+// Output (stdout): one {"type":"kernel",...} JSON line for the single timed
+// launch carrying the GPU event time (time_ms) and host wall-clock time
+// (host_time_ms), then a summary whose total_time_ms equals that record's
+// GPU event time. Options/sec is derived downstream from time_ms and params.
 // Output (stderr): human-readable results
 
 #include "../../common/bench_timing.h"
@@ -157,28 +156,16 @@ static float randRange(unsigned& seed, float lo, float hi) {
 // Main
 // ---------------------------------------------------------------------------
 
-static const char* parseStrParam(int argc, char** argv, const char* name,
-                                 const char* defaultVal) {
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], name) == 0) {
-            return argv[i + 1];
-        }
-    }
-    return defaultVal;
-}
-
 int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     // Defaults from params.json
     int size       = 4194304;
     int block_size = 256;
-    const char* precision = "float";
 
     // Command-line fallback
     size       = parseIntParam(argc, argv, "--size", size);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
-    precision  = parseStrParam(argc, argv, "--precision", precision);
 
     // Environment variable overrides
     const char* env_val;
@@ -186,15 +173,6 @@ int main(int argc, char** argv) {
     if (env_val) size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_precision");
-    if (env_val) precision = env_val;
-    // Validate string params against their known sets so the values echoed
-    // into the JSON records are always canonical literals.
-    if (strcmp(precision, "float") != 0 && strcmp(precision, "double") != 0 &&
-        strcmp(precision, "half") != 0) {
-        fprintf(stderr, "Invalid precision '%s' (use float, double, half)\n", precision);
-        return 1;
-    }
     int N     = size;
 
     const float r = 0.02f;  // risk-free rate
@@ -245,13 +223,13 @@ int main(int argc, char** argv) {
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
-             size, block_size, precision);
+             "\"size\":%d,\"block_size\":%d",
+             size, block_size);
 
-    // Warmup + timed iterations, each recorded individually. Inputs (S, K,
-    // T, sigma) are read-only and outputs (call, put) are fully overwritten
-    // every launch, so repeated launches perform identical work — no reset
-    // needed.
+    // Single timed launch (bench_run_once: optional cold-cache warmer, then
+    // one bracketed launch). Inputs (S, K, T, sigma) are read-only and
+    // outputs (call, put) are fully overwritten, so every execution performs
+    // identical work — no reset needed.
     double total_gpu_ms =
         bench_run_once("blackscholes_kernel", params, [&]() {
             blackscholes_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
@@ -308,5 +286,5 @@ int main(int argc, char** argv) {
     free(h_call);
     free(h_put);
 
-    return 0;
+    return (errors > 0) ? EXIT_FAILURE : EXIT_SUCCESS;
 }

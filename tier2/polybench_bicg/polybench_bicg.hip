@@ -24,11 +24,11 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_m, BENCH_PARAM_n, BENCH_PARAM_block_size
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
-// kernel (bicg_kernel1, bicg_kernel2) carrying that kernel's GPU event time
-// (time_ms) and host time (host_time_ms), then a summary whose total_time_ms
-// is the SUM of all recorded GPU event times. Bandwidth (GB/s) is derived
-// downstream from time_ms and params.
+// Output (stdout): the BiCG pass runs exactly once; one {"type":"kernel",...}
+// JSON line per kernel (bicg_kernel1, bicg_kernel2) carrying that kernel's
+// GPU event time (time_ms) and host time (host_time_ms), then a summary whose
+// total_time_ms is the SUM of the two GPU event times. Bandwidth (GB/s) is
+// derived downstream from time_ms and params.
 // Output (stderr): device info, timing details
 
 #include "../../common/bench_timing.h"
@@ -175,10 +175,10 @@ int main(int argc, char** argv) {
     bench_timer_create(&timer);
     bench_lap_t acc_k1, acc_k2;
 
-    // One full BiCG pass: both matrix-vector products, each timed separately.
-    // No per-pass reset is needed: inputs A/r/p are read-only and the outputs
-    // s/q are fully overwritten every pass, so repeated passes do identical
-    // work.
+    // One full BiCG pass (run exactly once): both matrix-vector products,
+    // each timed separately. No reset is needed: inputs A/r/p are read-only
+    // and the outputs s/q are fully overwritten, so every execution does
+    // identical work.
     auto run_pass = [&]() {
         bench_lap_reset(&acc_k1);
         bench_lap_reset(&acc_k2);
@@ -254,5 +254,5 @@ int main(int argc, char** argv) {
     free(h_s);
     free(h_q);
 
-    return 0;
+    return pass ? EXIT_SUCCESS : EXIT_FAILURE;
 }

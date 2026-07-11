@@ -12,13 +12,13 @@
 //   --size N         Matrix dimension N (NxN)  (default: 1024)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_size
 //
-// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
-// carrying the GPU event time (time_ms) and host wall-clock time
-// (host_time_ms), then a summary whose total_time_ms is the SUM of all
-// iterations' GPU event times. GFLOPS (2*N^3 / time) is derived downstream
-// from time_ms and params.
+// Output (stdout): one {"type":"kernel",...} JSON line for the single timed
+// sgemm_kernel launch carrying the GPU event time (time_ms) and host
+// wall-clock time (host_time_ms), then a summary whose total_time_ms is the
+// sum of all recorded GPU event times. GFLOPS (2*N^3 / time) is derived
+// downstream from time_ms and params.
 
 #include "../../common/bench_timing.h"
 #include <cstdio>
@@ -111,32 +111,14 @@ int main(int argc, char** argv)
 
     // Default values from params.json
     int N     = 1024;
-    int block_size = 256;
-    const char* precision = "float";
 
     // Command-line args as fallback
     N     = parseIntParam(argc, argv, "--size", N);
-    block_size = parseIntParam(argc, argv, "--block_size", block_size);
 
     // Env vars override
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_precision");
-    if (env_val) {
-        // Validate against the known enum set so the emitted params string is
-        // always a canonical literal, never raw env text.
-        if      (strcmp(env_val, "float")  == 0) precision = "float";
-        else if (strcmp(env_val, "double") == 0) precision = "double";
-        else if (strcmp(env_val, "half")   == 0) precision = "half";
-        else {
-            fprintf(stderr, "Invalid BENCH_PARAM_precision (expected float, "
-                            "double or half)\n");
-            return 1;
-        }
-    }
     float alpha = 1.5f;
     float beta  = 1.2f;
 
@@ -182,13 +164,12 @@ int main(int argc, char** argv)
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
-             N, block_size, precision);
+             "\"size\":%d",
+             N);
 
-    // Warmup + timed iterations, each recorded individually. The kernel
-    // rewrites C in place (beta*C term); float FMA timing is value-
-    // independent, so iterating without re-uploading C does not change the
-    // measured time and keeps the launch loop free of setup copies.
+    // Single timed launch (bench_run_once): the kernel rewrites C in place
+    // (beta*C term), but it runs exactly once per process, so no reset is
+    // needed before the measurement.
     double total_gpu_ms =
         bench_run_once("sgemm_kernel", params, [&]() {
             sgemm_kernel<<<grid, block>>>(d_A, d_B, d_C, N, alpha, beta);
@@ -198,9 +179,10 @@ int main(int argc, char** argv)
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Correctness check (only for small N to keep runtime short)
+    bool verify_ok = true;
     if (N <= 256) {
-        // The benchmark loop applied the in-place update repeatedly; redo a
-        // single application from the pristine C for verification.
+        // The timed launch updated C in place; redo a single application
+        // from the pristine C for verification.
         HIP_CHECK(hipMemcpy(d_C, h_C, bytes, hipMemcpyHostToDevice));
         sgemm_kernel<<<grid, block>>>(d_A, d_B, d_C, N, alpha, beta);
         HIP_CHECK(hipDeviceSynchronize());
@@ -218,10 +200,12 @@ int main(int argc, char** argv)
                 errors++;
             }
         }
-        if (errors > 0)
+        if (errors > 0) {
             fprintf(stderr, "FAIL: %d errors\n", errors);
-        else
+            verify_ok = false;
+        } else {
             fprintf(stderr, "PASS\n");
+        }
     } else {
         fprintf(stderr, "Skipping verification for large size\n");
     }
@@ -234,5 +218,5 @@ int main(int argc, char** argv)
     free(h_C);
     free(h_ref);
 
-    return 0;
+    return verify_ok ? 0 : 1;
 }

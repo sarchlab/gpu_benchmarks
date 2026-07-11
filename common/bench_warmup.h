@@ -10,10 +10,14 @@
  * DIFFERENT kernel and DIFFERENT data than the benchmark under test:
  *
  *   - It streams a read-modify-write over a scratch buffer larger than the
- *     last-level cache, so running it (1) keeps the GPU clock boosted (sustained
- *     ALU + memory work) and (2) evicts the benchmark's working set from the
- *     L2/LLC. The benchmark kernel that runs immediately afterwards therefore
- *     starts cold-cache but at a boosted clock.
+ *     last-level cache, repeated until ~BENCH_WARMER_TARGET_MS of sustained
+ *     ALU + memory load has run. One pass is only ~0.5-5 ms — far below the
+ *     tens of milliseconds GPU DVFS needs to ramp from idle — so the passes
+ *     are repeated (mostly inside a single launch via the kernel's rep count)
+ *     until the clock has had time to boost. The final pass over the >LLC
+ *     buffer evicts the benchmark's working set from the L2/LLC, so the
+ *     benchmark kernel that runs immediately afterwards starts cold-cache but
+ *     at a boosted clock.
  *   - Because it never touches the benchmark's buffers, it does not warm the
  *     benchmark's data (unlike running the real kernel as a warmup would).
  *
@@ -22,12 +26,14 @@
  *
  * The benchmark's own instruction cache / TLB are not primed by this (different
  * kernel), so the first timed launch pays a one-time I-cache miss the simulator
- * does not model — taking the min over the timed iterations discards it.
+ * does not model. Every harness repetition is a fresh process and pays it
+ * again; it is negligible at kernel timescales.
  */
 
 #ifndef BENCH_WARMUP_H
 #define BENCH_WARMUP_H
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 
@@ -47,6 +53,11 @@
 
 /* Scratch bytes: > MI300X 256 MB last-level cache, with headroom. */
 #define BENCH_WARMER_BYTES (768ull * 1024 * 1024)
+
+/* Sustained-load target: long enough for DVFS to ramp the clock from idle
+ * (tens of ms on every vendor). One warmer pass is ~0.5 ms (MI300X) to ~5 ms
+ * (consumer cards), so bench_warmer_run repeats it up to this budget. */
+#define BENCH_WARMER_TARGET_MS 100.0
 
 /* Grid-stride read-modify-write: reads and writes every element (evicts the
  * LLC by touching > cache bytes) and does FP work (holds the clock high). The
@@ -76,20 +87,46 @@ static inline void bench_warmer_init(void)
                                  bench_warmer_n * sizeof(float)));
 }
 
-/* Run the warmer once (untimed, synced). One pass over the >LLC buffer evicts
- * the last-level cache; call it before each timed launch to make that launch
- * cold-cache, and repeatedly at startup to boost the clock from idle. */
+/* Run the warmer (untimed, synced): repeat the >LLC read-modify-write pass
+ * until ~BENCH_WARMER_TARGET_MS of sustained load has executed, so the GPU
+ * clock ramps up from idle. The first launch runs a single pass to measure
+ * the per-pass time; the remaining budget then runs as one launch with the
+ * rep count folded into the kernel (back-to-back passes with no launch gaps
+ * — the steadiest load for DVFS). The final pass leaves the benchmark's
+ * working set evicted from the last-level cache: boosted clock, cold cache. */
 static inline void bench_warmer_run(void)
 {
     bench_warmer_init();
-    bench_warmer_kernel<<<dim3(4096), dim3(256)>>>(bench_warmer_buf,
-                                                   bench_warmer_n, 1);
-    BENCH_WARMUP_CHECK(hipGetLastError());
-    BENCH_WARMUP_CHECK(hipDeviceSynchronize());
+
+    std::chrono::steady_clock::time_point t0 =
+        std::chrono::steady_clock::now();
+    double elapsed_ms = 0.0;
+    double pass_ms    = 0.0;
+    do {
+        int reps = 1;
+        if (pass_ms > 0.0) {
+            reps = (int)((BENCH_WARMER_TARGET_MS - elapsed_ms) / pass_ms) + 1;
+            if (reps < 1) reps = 1;
+            if (reps > 1024) reps = 1024; /* hard cap: bounded even if timing misbehaves */
+        }
+        std::chrono::steady_clock::time_point p0 =
+            std::chrono::steady_clock::now();
+        bench_warmer_kernel<<<dim3(4096), dim3(256)>>>(bench_warmer_buf,
+                                                       bench_warmer_n, reps);
+        BENCH_WARMUP_CHECK(hipGetLastError());
+        BENCH_WARMUP_CHECK(hipDeviceSynchronize());
+        std::chrono::steady_clock::time_point now =
+            std::chrono::steady_clock::now();
+        pass_ms = std::chrono::duration<double, std::milli>(now - p0).count() /
+                  reps;
+        elapsed_ms =
+            std::chrono::duration<double, std::milli>(now - t0).count();
+    } while (elapsed_ms < BENCH_WARMER_TARGET_MS);
 }
 
 /* BENCH_PARAM_vector_add_warmup — default ON (cold-cache calibration mode).
- * Set to 0/false/no to fall back to warming with the real kernel (warm-cache). */
+ * Set to 0/false/no to skip the warmer and time the operation as-is
+ * (warm cache, whatever clock state the GPU is in). */
 static inline int bench_vector_add_warmup(void)
 {
     const char *v = getenv("BENCH_PARAM_vector_add_warmup");

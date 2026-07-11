@@ -55,8 +55,8 @@ Options:
   --tier T          Compile only this tier
   --suite S         Compile only this suite
   --benchmark B     Compile only this benchmark
-  --platform P      Force platform: cuda, rocm, metal (default: auto-detect)
-  --jobs J          Parallel compilation jobs (default: number of CPU cores)
+  --platform P      Force platform: cuda, rocm (default: auto-detect)
+  --jobs J          Parallel make jobs per benchmark (default: serial)
   --verbose         Show full compiler output
 
 Examples:
@@ -70,7 +70,6 @@ Examples:
 
 1. Discover benchmarks matching filters
 2. For each C++ benchmark (language != "python"):
-   - Run `make -C <dir> PLATFORM=<platform> clean` (if `--clean` flag)
    - Run `make -C <dir> PLATFORM=<platform>`
 3. Report pass/fail summary
 4. Exit 0 if all pass, exit 1 if any fail
@@ -95,7 +94,7 @@ Options:
   --platform P          Force platform (default: auto-detect)
   --sweep-non-scaling   Sweep non-scaling params too (default: true;
                         use --sweep-non-scaling=false for defaults only)
-  --timeout SECS        Per-benchmark timeout in seconds (default: 300)
+  --timeout SECS        Per-benchmark timeout in seconds (default: 60)
   --scaling-values V    Override scaling param values (comma-separated)
   --dry-run             Show what would be run without executing
   --continue-on-error   Continue even if a benchmark fails
@@ -192,10 +191,7 @@ The CLI auto-detects the platform using the following logic:
 
 ```go
 func detectPlatform() string {
-    if runtime.GOOS == "darwin" {
-        return "metal"
-    }
-    if _, err := os.Stat("/opt/rocm"); err == nil {
+    if _, err := os.Stat("/opt/rocm/bin/hipcc"); err == nil {
         return "rocm"
     }
     return "cuda"
@@ -206,13 +202,13 @@ func detectPlatform() string {
 
 The CLI gathers platform info from system commands:
 
-| Info | CUDA | ROCm | Metal |
-|------|------|------|-------|
-| GPU model | `nvidia-smi --query-gpu=name --format=csv,noheader` | `rocm-smi --showproductname` | `system_profiler SPDisplaysDataType` |
-| GPU VRAM | `nvidia-smi --query-gpu=memory.total --format=csv,noheader` | `rocm-smi --showmeminfo vram` | `system_profiler SPDisplaysDataType` |
-| Driver | `nvidia-smi --query-gpu=driver_version --format=csv,noheader` | `cat /opt/rocm/.info/version` | `system_profiler SPDisplaysDataType` |
-| Runtime | `nvcc --version` | `hipcc --version` | macOS version |
-| Compiler | `nvcc --version` | `hipcc --version` | `clang++ --version` |
+| Info | CUDA | ROCm |
+|------|------|------|
+| GPU model | `nvidia-smi --query-gpu=name --format=csv,noheader` | `rocm-smi --showproductname` |
+| GPU VRAM | `nvidia-smi --query-gpu=memory.total --format=csv,noheader` | `rocm-smi --showmeminfo vram` |
+| Driver | `nvidia-smi --query-gpu=driver_version --format=csv,noheader` | `cat /opt/rocm/.info/version` |
+| Runtime | `nvcc --version` | `hipcc --version` |
+| Compiler | `nvcc --version` | `hipcc --version` |
 | OS | `uname -srm` | `uname -srm` | `uname -srm` |
 | CPU | `/proc/cpuinfo` or `lscpu` | `/proc/cpuinfo` or `lscpu` | `sysctl -n machdep.cpu.brand_string` |
 | RAM | `/proc/meminfo` | `/proc/meminfo` | `sysctl -n hw.memsize` |
@@ -257,7 +253,6 @@ BENCH_PARAM_matrix_size=1024 BENCH_PARAM_block_size=64 \
     python3 bench.py
 ```
 
-For Metal platform, use `bench_mps.py` if it exists, otherwise `bench.py`.
 
 ### Execution Wrapper
 
@@ -296,7 +291,7 @@ Total runs: **20 × 7 = 140**
 
 Total runs: **20 × 4 × 3 × 7 = 1,680**
 
-**Warning:** Full sweeps can be very large. The CLI should print the total run count before starting and prompt for confirmation if it exceeds 10,000 (unless `--yes` is passed).
+**Warning:** Full sweeps can be very large. Use `--dry-run` to preview the execution plan and total run count before starting.
 
 ### Partial Override
 
@@ -374,7 +369,7 @@ A `gpubench.toml` or similar file could override defaults:
 ```toml
 [defaults]
 reps = 7
-timeout = 300
+timeout = 60
 db = "results.db"
 platform = "auto"
 

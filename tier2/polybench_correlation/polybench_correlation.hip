@@ -7,13 +7,14 @@
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_size, BENCH_PARAM_block_size
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
-// kernel (mean_kernel, stddev_kernel, normalize_kernel, correlation_kernel)
-// carrying that kernel's GPU event time and host time within the pass, then
-// a summary whose total_time_ms is the SUM of all recorded GPU event times.
-// Derived metrics are computed downstream from time_ms and params.
+// Output (stdout): the correlation pass runs exactly once; one
+// {"type":"kernel",...} JSON line per kernel (mean_kernel, stddev_kernel,
+// normalize_kernel, correlation_kernel) carrying that kernel's GPU event time
+// and host time, then a summary whose total_time_ms is the SUM of the four
+// GPU event times. Derived metrics are computed downstream from time_ms and
+// params.
 // Output (stderr): device info, timing details
 
 #include "../../common/bench_timing.h"
@@ -138,24 +139,12 @@ int main(int argc, char** argv) {
 
     int N          = parseIntParam(argc, argv, "--size", 1024);
     int block_size = parseIntParam(argc, argv, "--block_size", 256);
-    const char* precision = "float";
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_precision");
-    if (env_val) {
-        // Validate against the supported set; params must carry canonical
-        // literals, never raw env text.
-        if (strcmp(env_val, "float") != 0) {
-            fprintf(stderr, "Unsupported BENCH_PARAM_precision '%s' (supported: float)\n",
-                    env_val);
-            return EXIT_FAILURE;
-        }
-        precision = "float";
-    }
 
     int M = N;
 
@@ -194,16 +183,16 @@ int main(int argc, char** argv) {
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
-             N, block_size, precision);
+             "\"size\":%d,\"block_size\":%d",
+             N, block_size);
 
     bench_timer_t timer;
     bench_timer_create(&timer);
     bench_lap_t acc_mean, acc_stddev, acc_norm, acc_corr;
 
-    // One full correlation pass. normalize_kernel mutates d_data in place, so
-    // the pristine input is re-uploaded at the start of every pass (untimed),
-    // exactly as the pre-conversion code did.
+    // One full correlation pass (run exactly once). normalize_kernel mutates
+    // d_data in place, so the pristine input is re-uploaded at the start of
+    // the pass (untimed), keeping every execution identical.
     auto run_pass = [&]() {
         bench_lap_reset(&acc_mean);
         bench_lap_reset(&acc_stddev);

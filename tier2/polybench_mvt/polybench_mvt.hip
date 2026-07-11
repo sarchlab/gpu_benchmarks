@@ -21,14 +21,14 @@
 //   --n N            Matrix dimension (default: 4096)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_n, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_n
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
-// kernel (mvt_kernel1, mvt_kernel2) carrying that kernel's GPU event time and
-// host wall-clock time, then a summary whose total_time_ms is the SUM of all
-// recorded GPU event times. Memory bandwidth (GB/s) is derived downstream
-// from time_ms and params.
-// Output (stderr): device info, per-pass timing
+// Output (stdout): the MVT pass runs exactly once; one {"type":"kernel",...}
+// JSON line per kernel (mvt_kernel1, mvt_kernel2) carrying that kernel's GPU
+// event time and host wall-clock time, then a summary whose total_time_ms is
+// the SUM of the two GPU event times. Memory bandwidth (GB/s) is derived
+// downstream from time_ms and params.
+// Output (stderr): device info, timing, correctness check
 
 #include "../../common/bench_timing.h"
 #include <cstdio>
@@ -108,24 +108,9 @@ int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     int n     = parseIntParam(argc, argv, "--n", 4096);
-    int block_size_param = parseIntParam(argc, argv, "--block_size", 256);
-    const char* precision = "float";
-
     const char* env_val;
     env_val = getenv("BENCH_PARAM_n");
     if (env_val) n = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size_param = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_precision");
-    if (env_val) precision = env_val;
-    // Validate string params against their known sets so the values echoed
-    // into the JSON records are always canonical literals.
-    if (strcmp(precision, "half") != 0 && strcmp(precision, "float") != 0 &&
-        strcmp(precision, "double") != 0) {
-        fprintf(stderr, "Invalid precision '%s' (use half, float, double)\n",
-                precision);
-        return EXIT_FAILURE;
-    }
 
     size_t bytes_A  = (size_t)n * n * sizeof(float);
     size_t bytes_v  = (size_t)n * sizeof(float);
@@ -177,16 +162,16 @@ int main(int argc, char** argv) {
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"n\":%d,\"block_size\":%d,\"precision\":\"%s\"",
-             n, block_size_param, precision);
+             "\"n\":%d", n);
 
     bench_timer_t timer;
     bench_timer_create(&timer);
     bench_lap_t acc_k1, acc_k2;
 
-    // One full MVT pass: both kernels, each timed separately. The kernels
-    // rewrite x1/x2 as pure functions of the constant A/y1/y2 inputs, so
-    // repeated passes do identical work — no per-pass reset needed.
+    // One full MVT pass (run exactly once): both kernels, each timed
+    // separately. The kernels rewrite x1/x2 as pure functions of the
+    // constant A/y1/y2 inputs, so every execution does identical work — no
+    // reset needed.
     auto run_mvt_pass = [&]() {
         bench_lap_reset(&acc_k1);
         bench_lap_reset(&acc_k2);
@@ -257,5 +242,5 @@ int main(int argc, char** argv) {
     free(h_x1);
     free(h_x2);
 
-    return 0;
+    return pass ? EXIT_SUCCESS : EXIT_FAILURE;
 }

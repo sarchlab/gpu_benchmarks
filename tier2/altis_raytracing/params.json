@@ -5,7 +5,7 @@
   "description": "Simple ray tracing: casts rays through an image plane, intersects with N spheres, shades nearest hit with Phong lighting. Each thread handles one pixel.",
   "scaling_param": {
     "name": "width",
-    "description": "Image width in pixels (also sets height for square image)",
+    "description": "Image width in pixels (height is set independently via the height parameter)",
     "type": "int",
     "values": [
       64,

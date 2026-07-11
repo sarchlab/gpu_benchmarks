@@ -349,9 +349,9 @@ int main(int argc, char** argv) {
     snprintf(params, sizeof(params),
              "\"width\":%d,\"height\":%d,\"spheres\":%d", W, H, nSph);
 
-    // Warmup + timed iterations, each recorded individually. The kernel only
+    // Single timed launch (repetition is the harness's job). The kernel only
     // reads the sphere list and overwrites the output image from scratch, so
-    // repeated launches perform identical work — no state reset needed.
+    // repeated executions perform identical work — no state reset needed.
     double total_gpu_ms =
         bench_run_once("raytrace_kernel", params, [&]() {
             raytrace_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_image, d_spheres, W, H, nSph);
@@ -360,6 +360,7 @@ int main(int argc, char** argv) {
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
+    bool verify_ok = true;
     // -------------------------------------------------------------------
     // Verification (compare a subset of pixels against CPU reference)
     // -------------------------------------------------------------------
@@ -395,15 +396,16 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (errors > 0)
+        if (errors > 0) {
             fprintf(stderr, "FAIL: %d channel errors in %d verified pixels\n",
                     errors, verify_count);
-        else
+            verify_ok = false;
+        } else
             fprintf(stderr, "PASS\n");
     }
 
     HIP_CHECK(hipFree(d_image));
     HIP_CHECK(hipFree(d_spheres));
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

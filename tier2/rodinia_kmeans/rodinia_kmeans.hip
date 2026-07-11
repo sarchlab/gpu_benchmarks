@@ -19,7 +19,7 @@
 // Centroid sums are done on the CPU each iteration (the upstream default:
 // CPU_CENTER_REDUCE / CPU_DELTA_REDUCE; the GPU reduction paths are compiled
 // out upstream and are omitted here). The driver is restructured for the
-// per-iteration timing harness and JSON output.
+// single-pass timing harness and JSON output.
 //
 // Usage:
 //   ./rodinia_kmeans [--points N] [--features D] [--clusters K] [--max_iter M]
@@ -27,13 +27,13 @@
 //   --points N     Number of data points   (default: 100000)
 //   --features D   Features per point       (default: 34)
 //   --clusters K   Number of clusters       (default: 5)
-//   --max_iter M   K-means iterations/pass  (default: 10)
+//   --max_iter M   K-means iterations  (default: 10)
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_points, BENCH_PARAM_features, BENCH_PARAM_clusters,
 //   BENCH_PARAM_max_iter
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// Output (stdout): one {"type":"kernel",...} JSON line per
 // kernel (invert_mapping, kmeansPoint) carrying that kernel's accumulated GPU
 // event time (time_ms) and host time (host_time_ms), then a summary whose
 // total_time_ms is the SUM of all recorded GPU event times.

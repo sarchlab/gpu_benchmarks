@@ -4,7 +4,7 @@
 
 This benchmark implements CSR (Compressed Sparse Row) Sparse Matrix-Vector Multiplication (SpMV): **y = A × x**, derived from the SHOC (Scalable HeterOgeneous Computing) benchmark suite.
 
-A synthetic sparse matrix is generated with exactly `NNZ_PER_ROW = 32` non-zeros per row and `NUM_ROWS = 16384` rows, giving a total of `NNZ = 524288` non-zero elements. The row-per-thread CSR SpMV kernel assigns one GPU thread to each output row.
+A synthetic sparse matrix is generated with exactly `nnz_per_row` non-zeros per row (default 32) and `num_rows` rows (default 16384). The row-per-thread CSR SpMV kernel assigns one GPU thread to each output row.
 
 ## Algorithm
 
@@ -26,31 +26,38 @@ if row < NUM_ROWS:
 ```
 
 **Matrix Generation:**
-- `row_ptr[i] = i * NNZ_PER_ROW` (exactly 32 non-zeros per row)
+- `row_ptr[i] = i * NNZ_PER_ROW` (exactly `nnz_per_row` non-zeros per row)
 - `col_idx[k]` = random column index in `[0, NUM_ROWS)`
 - `values[k]` = random float in `[0, 1)`
 - `x[i]` = random float in `[0, 1)`
+
+## Measurement protocol
+
+The SpMV kernel is launched and timed **exactly once** per execution — there is
+no in-program warmup or iteration loop. When `BENCH_PARAM_vector_add_warmup` is
+`true` (default), the vector-add warmer runs immediately before the timed
+launch: ~100 ms of sustained load ramps the GPU clock while its final pass
+evicts the last-level cache, so the kernel is measured cold-cache at a boosted
+clock. Repetition is the harness's job: `gpubench run --reps N` re-executes the
+binary in fresh processes.
 
 ## Files
 
 | File | Description |
 |------|-------------|
 | `shoc_spmv.hip` | HIP/CUDA implementation (compiles with `hipcc` or `nvcc -x cu`) |
-| `shoc_spmv.metal` | Metal compute shader (standalone reference) |
-| `shoc_spmv_metal.mm` | Apple Metal host with embedded shader (self-contained) |
-| `Makefile` | Build system supporting CUDA, ROCm, and Metal |
+| `Makefile` | Build system supporting CUDA and ROCm |
 | `README.md` | This file |
 
 ## Build Instructions
 
 ```bash
-# Auto-detect platform (Darwin→metal, /opt/rocm→rocm, else→cuda)
+# Auto-detect platform (/opt/rocm→rocm, else→cuda)
 make
 
 # Explicit platform selection
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 
 # Clean
 make clean
@@ -68,9 +75,7 @@ Parameters (env vars override `--flags`):
 |---------|---------|-------------|
 | `BENCH_PARAM_num_rows` | 16384 | Matrix rows (and columns) |
 | `BENCH_PARAM_nnz_per_row` | 32 | Non-zeros per row |
-| `BENCH_PARAM_precision` | `float` | `float` \| `double` \| `half` (descriptor) |
-| `BENCH_PARAM_warmup` | 3 | Warmup launches (untimed) |
-| `BENCH_PARAM_iteration` | 7 | Timed launches, each recorded |
+| `BENCH_PARAM_vector_add_warmup` | true | Clock-boost + LLC-evict warmer before the timed run |
 
 ## Output Format
 
@@ -79,20 +84,17 @@ Parameters (env vars override `--flags`):
 Device: <device_name>
 Rows: 16384  |  NNZ_per_row: 32  |  Total NNZ: 524288
 
-spmv_csr_kernel iter 0: gpu = X.XXX ms, host = X.XXX ms
-...
+spmv_csr_kernel: gpu = X.XXX ms, host = X.XXX ms
 Correctness check (first 32 elements): PASS
 
-Total GPU time: X.XXX ms over 7 iterations
+Total GPU time: X.XXX ms
 ```
 
-**stdout** — JSON lines: one `kernel` record per timed iteration, then a
-`summary` whose `total_time_ms` is the sum of all iterations' GPU event
-times:
+**stdout** — JSON lines: one `kernel` record for the single timed launch, then
+a `summary` whose `total_time_ms` equals that record's GPU event time:
 ```
-{"type":"kernel","name":"spmv_csr_kernel","iter":0,"time_ms":0.234500,"host_time_ms":0.289000,"params":{"num_rows":16384,"nnz_per_row":32,"precision":"float"}}
-...
-{"type":"summary","total_time_ms":1.641500}
+{"type":"kernel","name":"spmv_csr_kernel","iter":0,"time_ms":0.234500,"host_time_ms":0.289000,"params":{"num_rows":16384,"nnz_per_row":32}}
+{"type":"summary","total_time_ms":0.234500}
 ```
 
 ## Performance Metrics
@@ -124,9 +126,11 @@ GFLOPS = 2 * NNZ / time_s / 1e9
 
 ## Correctness Verification
 
-After the timed iterations, the GPU output `y` is compared against a CPU reference SpMV for the first 32 elements. A relative error threshold of `1e-4` is applied:
+After the timed run (measurements already emitted), the GPU output `y` is compared against a CPU reference SpMV for the first 32 elements. A relative error threshold of `1e-4` is applied:
 ```
 rel_err = |gpu - cpu| / (|cpu| + 1e-6)  < 1e-4
 ```
 
-The benchmark exits with code `0` on PASS and `1` on FAIL.
+The benchmark exits with code `0` on PASS and non-zero on FAIL, so the harness
+marks the run as failed without losing the measurements. There is no
+verification on/off parameter.

@@ -9,7 +9,6 @@ measuring throughput in tokens/sec.
 - Python 3.8+
 - vLLM (`pip install vllm`)
 - CUDA GPU (NVIDIA) or ROCm GPU (AMD)
-- **Not supported on Apple MPS**
 
 ## Build & Run
 
@@ -22,12 +21,6 @@ make run PLATFORM=cuda
 ```
 make run PLATFORM=rocm
 ```
-
-### Metal (Apple)
-```
-make run PLATFORM=metal
-```
-(Will print skip message — vLLM does not support MPS)
 
 ## Output Format
 

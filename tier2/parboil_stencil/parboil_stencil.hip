@@ -19,7 +19,7 @@
 //   --num_timesteps T   Stencil time-steps per pass      (default: 10)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_grid_dim, BENCH_PARAM_num_timesteps, BENCH_PARAM_block_size
+//   BENCH_PARAM_grid_dim, BENCH_PARAM_num_timesteps
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line
 // carrying the stencil kernel's accumulated GPU event time and host
@@ -82,12 +82,10 @@ int main(int argc, char** argv) {
     // Default values from params.json
     int grid_dim      = 64;
     int num_timesteps = 10;
-    int block_size    = 256;
 
     // Command-line args as fallback
     grid_dim      = parseIntParam(argc, argv, "--grid_dim",      grid_dim);
     num_timesteps = parseIntParam(argc, argv, "--num_timesteps", num_timesteps);
-    block_size    = parseIntParam(argc, argv, "--block_size",    block_size);
 
     // Env vars override
     const char* env_val;
@@ -95,8 +93,6 @@ int main(int argc, char** argv) {
     if (env_val) grid_dim = atoi(env_val);
     env_val = getenv("BENCH_PARAM_num_timesteps");
     if (env_val) num_timesteps = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size = atoi(env_val);
 
     int nx = grid_dim;
     int ny = grid_dim;
@@ -135,8 +131,8 @@ int main(int argc, char** argv) {
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"grid_dim\":%d,\"num_timesteps\":%d,\"block_size\":%d",
-             grid_dim, num_timesteps, block_size);
+             "\"grid_dim\":%d,\"num_timesteps\":%d",
+             grid_dim, num_timesteps);
 
     // Per-pass accumulator: each pass launches the stencil num_timesteps
     // times (ping-pong); the accumulated GPU/host time becomes that pass's

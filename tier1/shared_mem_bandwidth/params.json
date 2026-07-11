@@ -36,7 +36,7 @@
     },
     {
       "name": "num_blocks",
-      "description": "Number of thread blocks in the grid",
+      "description": "Number of thread blocks (default 1 = single-SM/CU measurement; device peak is derived as per-SM value × SM count)",
       "type": "int",
       "default": 1,
       "values": [

@@ -1,27 +1,24 @@
-# Makefile for tier3/cudnn_conv — Forward 2D Convolution via cuDNN / MIOpen / MPS
+# Makefile for tier3/cudnn_conv — Forward 2D Convolution via cuDNN / MIOpen
 #
 # Supported platforms:
 #   PLATFORM=cuda   — NVIDIA CUDA + cuDNN (default on Linux without ROCm)
 #   PLATFORM=rocm   — AMD ROCm/HIP + MIOpen (default when /opt/rocm exists)
-#   PLATFORM=metal  — Apple Metal + MPS  (default on Darwin)
 #
 # Usage:
 #   make                   # auto-detect platform
 #   make PLATFORM=cuda
 #   make PLATFORM=rocm
-#   make PLATFORM=metal
 #   make clean
 
 # ---------------------------------------------------------------------------
 # Auto-detect platform
 # ---------------------------------------------------------------------------
-ifndef PLATFORM
-  ifeq ($(shell uname -s),Darwin)
-    PLATFORM := metal
-  else ifneq ($(wildcard /opt/rocm),)
-    PLATFORM := rocm
+PLATFORM ?= auto
+ifeq ($(PLATFORM),auto)
+  ifneq ($(wildcard /opt/rocm),)
+    override PLATFORM := rocm
   else
-    PLATFORM := cuda
+    override PLATFORM := cuda
   endif
 endif
 
@@ -34,7 +31,7 @@ LDFLAGS :=
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := cudnn_conv.cu
-  CUDA_ARCH ?= sm_90
+  CUDA_ARCH ?= native
   CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
 
   UNAME_M := $(shell uname -m)
@@ -103,17 +100,8 @@ else ifeq ($(PLATFORM),rocm)
   CFLAGS := -O3 -std=c++14 -DUSE_MIOPEN
   LIBS   := -lMIOpen
 
-else ifeq ($(PLATFORM),metal)
-  CC     := clang++
-  SRC    := cudnn_conv_metal.mm
-  CFLAGS := -O2 -std=c++17 -fobjc-arc \
-             -framework Metal \
-             -framework MetalPerformanceShaders \
-             -framework Foundation
-  LIBS   :=
-
 else
-  $(error Unknown PLATFORM=$(PLATFORM). Use cuda, rocm, or metal.)
+  $(error Unknown PLATFORM=$(PLATFORM). Use cuda or rocm.)
 endif
 
 # ---------------------------------------------------------------------------

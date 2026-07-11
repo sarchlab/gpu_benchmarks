@@ -14,9 +14,9 @@
 //   ./rodinia_lud [--size N]
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_verify
+//   BENCH_PARAM_size, BENCH_PARAM_verify
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// Output (stdout): one {"type":"kernel",...} JSON line per
 // kernel (lud_diagonal, lud_perimeter, lud_internal) carrying that kernel's
 // accumulated GPU event time across all block steps in the pass plus the
 // host wall-clock time, then a summary whose total_time_ms is the SUM of
@@ -191,8 +191,6 @@ int main(int argc, char **argv)
 
     // Defaults
     int N     = 512;
-    int block_size_param = 256;
-    const char* verify_mode = "true";
 
     // Command-line fallback
     for (int i = 1; i < argc - 1; i++) {
@@ -203,17 +201,15 @@ int main(int argc, char **argv)
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size_param = atoi(env_val);
+
+    // Debug knob (not a sweep parameter): CPU verification runs by default;
+    // "false"/"0"/"skip" skip it.
+    bool do_verify = true;
     env_val = getenv("BENCH_PARAM_verify");
-    if (env_val) verify_mode = env_val;
-    // Validate string params against their known sets so the values echoed
-    // into the JSON records are always canonical literals.
-    if (strcmp(verify_mode, "true") != 0 && strcmp(verify_mode, "false") != 0 &&
-        strcmp(verify_mode, "skip") != 0) {
-        fprintf(stderr, "Invalid verify '%s' (use true, false, skip)\n",
-                verify_mode);
-        return EXIT_FAILURE;
+    if (env_val && (strcmp(env_val, "false") == 0 ||
+                    strcmp(env_val, "0")     == 0 ||
+                    strcmp(env_val, "skip")  == 0)) {
+        do_verify = false;
     }
     if (N % BSIZE != 0) {
         fprintf(stderr, "Error: N=%d must be divisible by BSIZE=%d\n", N, BSIZE);
@@ -248,8 +244,8 @@ int main(int argc, char **argv)
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"",
-             N, block_size_param, verify_mode);
+             "\"size\":%d",
+             N);
 
     bench_timer_t timer;
     bench_timer_create(&timer);
@@ -288,11 +284,14 @@ int main(int argc, char **argv)
         }
     };
 
-    // Correctness verification (one extra pass)
-    run_lud_pass();
-    HIP_CHECK(hipMemcpy(h_lu, d_a, bytes, hipMemcpyDeviceToHost));
-
-    verify(h_lu, h_a_orig, N);
+    // Correctness verification (one extra pass; skipped when
+    // BENCH_PARAM_verify=false — debug knob, not a sweep parameter)
+    bool verify_ok = true;
+    if (do_verify) {
+        run_lud_pass();
+        HIP_CHECK(hipMemcpy(h_lu, d_a, bytes, hipMemcpyDeviceToHost));
+        verify_ok = verify(h_lu, h_a_orig, N);
+    }
 
     // Timed passes — one record per kernel per pass.
     double total_gpu_ms = 0.0;
@@ -316,5 +315,5 @@ int main(int argc, char **argv)
     free(h_a_orig);
     free(h_lu);
 
-    return 0;
+    return verify_ok ? 0 : 1;
 }

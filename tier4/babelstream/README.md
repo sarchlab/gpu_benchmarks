@@ -1,22 +1,20 @@
 # BabelStream Benchmark
 
 C++ STREAM benchmark implementing copy/scale/add/triad/dot kernels on
-N = 32×1024×1024 float32 elements. Supports CUDA (NVIDIA), HIP (AMD ROCm),
-and Metal (Apple). Reports memory bandwidth in GB/s for each kernel.
+N = 32×1024×1024 float32 elements. Supports CUDA (NVIDIA) and HIP (AMD ROCm).
+Reports memory bandwidth in GB/s for each kernel.
 
 ## Files
 
 | File | Description |
 |------|-------------|
 | `babelstream.hip` | CUDA/HIP implementation |
-| `babelstream_metal.mm` | Apple Metal implementation |
 | `Makefile` | Auto-detecting build system |
 
 ## Requirements
 
 - CUDA: NVIDIA GPU + CUDA toolkit
 - ROCm/HIP: AMD GPU + ROCm toolkit
-- Metal: Apple Silicon or AMD Mac + Xcode Command Line Tools
 
 ## Build & Run
 
@@ -29,12 +27,6 @@ make PLATFORM=cuda
 ### ROCm (AMD)
 ```
 make PLATFORM=rocm
-./babelstream
-```
-
-### Metal (Apple)
-```
-make PLATFORM=metal
 ./babelstream
 ```
 

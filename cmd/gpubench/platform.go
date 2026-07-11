@@ -32,12 +32,10 @@ var (
 	platformOnce  sync.Once
 )
 
-// detectPlatform returns "metal", "rocm", or "cuda".
+// detectPlatform returns "rocm" or "cuda". The hipcc check matches the
+// Makefiles' detection, so build and run agree on the platform.
 func detectPlatform() string {
-	if runtime.GOOS == "darwin" {
-		return "metal"
-	}
-	if info, err := os.Stat("/opt/rocm"); err == nil && info.IsDir() {
+	if _, err := os.Stat("/opt/rocm/bin/hipcc"); err == nil {
 		return "rocm"
 	}
 	return "cuda"
@@ -171,45 +169,6 @@ func collectPlatformInfo(platformType string) *PlatformInfo {
 				info.RuntimeVersion = strPtr(hipcc)
 				info.Compiler = strPtr(hipcc)
 			}
-
-		case "metal":
-			sp := runCmd("system_profiler SPDisplaysDataType 2>/dev/null")
-			if sp != "" {
-				for _, line := range strings.Split(sp, "\n") {
-					ls := strings.TrimSpace(line)
-					if strings.HasPrefix(ls, "Chipset Model:") {
-						parts := strings.SplitN(ls, ":", 2)
-						if len(parts) == 2 {
-							info.GPUModel = strings.TrimSpace(parts[1])
-						}
-					} else if strings.Contains(ls, "VRAM") && strings.Contains(ls, ":") {
-						parts := strings.SplitN(ls, ":", 2)
-						if len(parts) == 2 {
-							fields := strings.Fields(strings.TrimSpace(parts[1]))
-							if len(fields) > 0 {
-								if v, err := strconv.ParseFloat(fields[0], 64); err == nil {
-									info.GPUVramGB = floatPtr(v)
-								}
-							}
-						}
-					} else if strings.Contains(ls, "Metal") && strings.Contains(ls, ":") {
-						parts := strings.SplitN(ls, ":", 2)
-						if len(parts) == 2 {
-							info.DriverVersion = strPtr(strings.TrimSpace(parts[1]))
-						}
-					}
-				}
-			}
-			if info.GPUModel == "Unknown GPU" && info.CPUModel != nil {
-				info.GPUModel = *info.CPUModel
-			}
-			macVer := runCmd("sw_vers -productVersion 2>/dev/null")
-			if macVer != "" {
-				s := "macOS " + macVer
-				info.RuntimeVersion = &s
-			}
-			clang := runCmd("clang++ --version 2>/dev/null | head -1")
-			info.Compiler = strPtr(clang)
 		}
 
 		platformCache = info

@@ -9,7 +9,7 @@
 // are the original — each launch advances `pyramid_height` time steps for a
 // block loaded once into shared memory, with a halo (border) so neighbouring
 // blocks stay consistent. Only the host driver is restructured for the
-// per-iteration timing harness and JSON output.
+// single-pass timing harness and JSON output.
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
@@ -23,7 +23,7 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_grid_size, BENCH_PARAM_total_iterations, BENCH_PARAM_pyramid_height
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
+// Output (stdout): one {"type":"kernel",...} JSON line for
 // calculate_temp carrying the accumulated GPU event time of all pyramidal
 // launches within the pass plus host wall-clock time, then a summary whose
 // total_time_ms is the SUM of all recorded GPU event times.

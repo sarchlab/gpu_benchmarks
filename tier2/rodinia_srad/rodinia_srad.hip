@@ -5,7 +5,7 @@
 // rodinia/cuda/srad/srad_v2/srad_kernel.cu, including their shared-memory
 // neighborhood tiling (temp[][], north/south/east/west shared tiles) and the
 // compile-time BLOCK_SIZE 16 thread block. Only the host driver is
-// restructured for the per-iteration timing harness and JSON output.
+// restructured for the single-pass timing harness and JSON output.
 //
 // Speckle-Reducing Anisotropic Diffusion iteratively smooths a 2D float
 // image. Each SRAD iteration runs two kernel launches:
@@ -26,16 +26,16 @@
 //   ./rodinia_srad [--image_size N] [--num_iterations K] [--lambda L]
 //
 //   --image_size N      Image dimension (N×N, multiple of 16)  (default: 512)
-//   --num_iterations K  SRAD iterations per pass               (default: 100)
+//   --num_iterations K  SRAD iterations                        (default: 100)
 //   --lambda L          Diffusion step size (0,1)              (default: 0.5)
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_image_size, BENCH_PARAM_num_iterations, BENCH_PARAM_lambda
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// Output (stdout): one {"type":"kernel",...} JSON line per
 // kernel (srad_cuda_1, srad_cuda_2) carrying that kernel's accumulated GPU
 // event time (time_ms) and host time (host_time_ms) across the K SRAD
-// iterations within the pass, then a summary whose total_time_ms is the SUM
+// iterations of the run, then a summary whose total_time_ms is the SUM
 // of all recorded GPU event times.
 // Output (stderr): human-readable results
 

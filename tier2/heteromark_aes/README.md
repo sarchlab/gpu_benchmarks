@@ -1,6 +1,6 @@
 # tier2/heteromark_aes — AES-256 ECB Encryption (HeteroMark)
 
-Benchmarks AES-256 encryption in ECB mode on the GPU. Each thread encrypts one 16-byte block through 14 rounds. Emits raw per-iteration kernel times; throughput (GB/s) is derived downstream.
+Benchmarks AES-256 encryption in ECB mode on the GPU. Each thread encrypts one 16-byte block through 14 rounds. Emits the raw kernel time of a single launch; throughput (GB/s) is derived downstream.
 
 Derived from the [HeteroMark benchmark suite](https://github.com/NUCAR-DEV/Hetero-Mark) AES workload.
 
@@ -16,14 +16,29 @@ Derived from the [HeteroMark benchmark suite](https://github.com/NUCAR-DEV/Heter
 - Each GPU thread processes one independent block (embarrassingly parallel)
 - GB/s = N × 16 / time\_sec / 10⁹ (derived downstream from the emitted times and params)
 
+## Measurement
+
+The encryption kernel launches **exactly once** per process execution (see the
+root README "Measurement Methodology"). With `BENCH_PARAM_vector_add_warmup`
+(default `true`), a vector-add warmer boosts the GPU clock and evicts the
+last-level cache immediately before the timed launch (the plaintext upload is
+untimed). Repetition = `gpubench run --reps N`. The workload is fixed AES-256
+(14 rounds).
+
+## Parameters
+
+| Env var (or `--flag`) | Description | Default |
+|---------|-------------|---------|
+| `BENCH_PARAM_size` / `--size` | Number of 16-byte blocks to encrypt | 1048576 |
+| `BENCH_PARAM_block_size` / `--block_size` | Threads per block | 256 |
+| `BENCH_PARAM_vector_add_warmup` | Cold-cache clock warmer on/off | true |
+
 ## Files
 
 | File | Description |
 |------|-------------|
 | `heteromark_aes.hip` | HIP source — AES-256 ECB kernel, key expansion, verification |
-| `heteromark_aes.metal` | Metal compute shader — AES-256 ECB kernel |
-| `heteromark_aes_metal.mm` | ObjC++ Metal host code |
-| `Makefile` | Auto-detecting build (Darwin→metal, ROCm→rocm, else→cuda) |
+| `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
 
 ## Build
 
@@ -31,7 +46,6 @@ Derived from the [HeteroMark benchmark suite](https://github.com/NUCAR-DEV/Heter
 make               # auto-detect platform
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 ```
 
 ## Run
@@ -42,21 +56,14 @@ make PLATFORM=metal
 BENCH_PARAM_size=65536 ./heteromark_aes       # env vars override argv
 ```
 
-Environment variables: `BENCH_PARAM_size`, `BENCH_PARAM_block_size`,
-`BENCH_PARAM_key_length`, plus `BENCH_PARAM_warmup` (warmup passes,
-default 3) and `BENCH_PARAM_iteration` (timed passes, each recorded,
-default 7).
-
 ## Output
 
-**stdout** — JSON lines, one kernel record per timed pass with the GPU event
+**stdout** — JSON lines: one `kernel` record (`iter:0`) with the GPU event
 time (`time_ms`) and host wall-clock time (`host_time_ms`), then a summary
-whose `total_time_ms` is the sum of all recorded GPU event times (the
-per-pass plaintext re-upload is untimed):
+whose `total_time_ms` is the sum of all recorded GPU event times:
 ```
-{"type":"kernel","name":"aes256_encrypt_kernel","iter":0,"time_ms":8.543200,"host_time_ms":8.601000,"params":{"size":1048576,"block_size":256,"key_length":"256"}}
-...
-{"type":"summary","total_time_ms":59.802400}
+{"type":"kernel","name":"aes256_encrypt_kernel","iter":0,"time_ms":8.543200,"host_time_ms":8.601000,"params":{"size":1048576,"block_size":256}}
+{"type":"summary","total_time_ms":8.543200}
 ```
 
 Derived metrics such as GB/s are computed downstream from `time_ms` and the
@@ -65,20 +72,18 @@ params.
 **stderr** — human-readable results:
 ```
 Device: AMD Radeon RX 7900 XTX (id=0)
-AES-256 ECB  |  Blocks: 1048576  |  Data: 16.00 MB  |  Iterations: 3 warmup + 7 timed
+AES-256 ECB  |  Blocks: 1048576  |  Data: 16.00 MB
 
-aes256_encrypt_kernel iter 0: gpu = 8.543 ms, host = 8.601 ms
-...
-Total GPU time: 59.802 ms over 7 iterations
+aes256_encrypt_kernel: gpu = 8.543 ms, host = 8.601 ms
+Total GPU time: 8.543 ms
 PASS
 ```
 
 ## Verification
 
 - First 256 blocks are compared byte-by-byte against a CPU reference implementation
-- Reports PASS/FAIL with mismatch details
+- Reports PASS/FAIL with mismatch details; on FAIL the process exits non-zero
 
 ## Platform Notes
 
 - **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `heteromark_aes.hip`; S-box in `__constant__` memory
-- **Metal**: compiled with `clang++` from `heteromark_aes_metal.mm`; the Metal shader (`heteromark_aes.metal`) is loaded and compiled at runtime from the same directory as the binary; S-box in `constant` address space

@@ -30,20 +30,17 @@ where:
 | File | Description |
 |------|-------------|
 | `polybench_bicg.hip` | HIP/CUDA implementation (NVIDIA + AMD) |
-| `polybench_bicg.metal` | Metal compute shaders (Apple GPU) |
-| `polybench_bicg_metal.mm` | Metal host code (Objective-C++) |
 | `Makefile` | Build system with platform auto-detection |
 
 ## Build
 
 ```bash
-# Auto-detect platform (Darwin→metal, /opt/rocm→rocm, else→cuda)
+# Auto-detect platform (/opt/rocm→rocm, else→cuda)
 make
 
 # Explicit platform
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 
 # Clean
 make clean
@@ -55,9 +52,12 @@ make clean
 # Default: M=N=4096
 ./polybench_bicg
 
-# Custom size and iteration counts
-BENCH_PARAM_iteration=10 ./polybench_bicg --m 8192 --n 8192
+# Custom size
+./polybench_bicg --m 8192 --n 8192
 ```
+
+The BiCG pass runs exactly once per execution; repetition is the harness's
+job (`gpubench run --reps N`).
 
 ### Environment variables
 
@@ -66,31 +66,29 @@ In addition:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BENCH_PARAM_warmup` | 3 | Warmup passes (not recorded) |
-| `BENCH_PARAM_iteration`  | 7 | Timed passes, each recorded  |
+| `BENCH_PARAM_vector_add_warmup` | true | Vector-add warmer (clock boost + LLC eviction) before the timed pass |
 
 ## Output
 
 **stderr** — device info, correctness check, timing details:
 ```
-Device: Apple M2 Pro
+Device: NVIDIA GeForce RTX 4090 (id=0)
 Matrix size: 4096×4096
 
+bicg_kernel1 gpu = 0.161 ms, bicg_kernel2 gpu = 0.159 ms
 Correctness check (first 8 s, 8 q elements): PASS
 
-pass 0: bicg_kernel1 gpu = 0.161 ms, bicg_kernel2 gpu = 0.159 ms
-...
-Total GPU time: 2.241 ms over 7 passes
+Total GPU time: 0.320 ms
 ```
 
-**stdout** — JSON lines: per timed pass, one `kernel` record per kernel with
+**stdout** — JSON lines: one `kernel` record per kernel with
 its GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`),
-then a summary whose `total_time_ms` is the sum of all recorded GPU event
+then a summary whose `total_time_ms` is the sum of the two GPU event
 times:
 ```json
 {"type":"kernel","name":"bicg_kernel1","iter":0,"time_ms":0.161,"host_time_ms":0.180,"params":{"m":4096,"n":4096,"block_size":256}}
 {"type":"kernel","name":"bicg_kernel2","iter":0,"time_ms":0.159,"host_time_ms":0.175,"params":{"m":4096,"n":4096,"block_size":256}}
-{"type":"summary","total_time_ms":2.241}
+{"type":"summary","total_time_ms":0.320}
 ```
 
 ## Performance Metric (derived downstream)
@@ -106,7 +104,7 @@ Matrix A is read once by each kernel, totalling 2 reads.
 
 ## Correctness Verification
 
-GPU results for `s` and `q` are compared against a CPU reference. The first 8 elements of each output vector are checked. Maximum relative error threshold: **1e-4**.
+GPU results for `s` and `q` are compared against a CPU reference. The first 8 elements of each output vector are checked. Maximum relative error threshold: **1e-4**. On mismatch the check prints `FAIL` and the process exits with a non-zero status.
 
 ## References
 

@@ -6,8 +6,8 @@ Benchmark for General Matrix-Vector Multiplication (GEMV): **y = A · x**
 - **x**: N-element input vector
 - **y**: M-element output vector
 
-Wraps cuBLAS `cublasSgemv` (NVIDIA), rocBLAS `rocblas_sgemv` (AMD),
-and a custom Metal compute shader (Apple), all using the same FP32 GEMV operation.
+Wraps cuBLAS `cublasSgemv` (NVIDIA) and rocBLAS `rocblas_sgemv` (AMD),
+both using the same FP32 GEMV operation.
 
 ---
 
@@ -16,8 +16,7 @@ and a custom Metal compute shader (Apple), all using the same FP32 GEMV operatio
 | File | Description |
 |------|-------------|
 | `cublas_gemv.hip` | HIP/CUDA source; selects cuBLAS or rocBLAS at compile time via `USE_CUBLAS` / `USE_ROCBLAS` |
-| `cublas_gemv_metal.mm` | ObjC++ host with embedded Metal shader for GEMV (one thread per output row) |
-| `Makefile` | Auto-detects Darwin→metal, `/opt/rocm`→rocm, else→cuda |
+| `Makefile` | Auto-detects `/opt/rocm`→rocm, else→cuda |
 | `README.md` | This file |
 
 ---
@@ -39,12 +38,6 @@ make PLATFORM=cuda
 ```bash
 make PLATFORM=rocm
 # Requires: hipcc, ROCm, rocBLAS
-```
-
-### Apple Metal
-```bash
-make PLATFORM=metal
-# Requires: Xcode command-line tools on macOS
 ```
 
 ---

@@ -80,6 +80,7 @@
   "kernels": [
     "spmv_kernel",
     "dot_product_kernel",
-    "axpy_kernel"
+    "axpy_kernel",
+    "scale_kernel"
   ]
 }

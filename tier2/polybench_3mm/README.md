@@ -8,13 +8,13 @@ F = C * D
 G = E * F
 ```
 
-All matrices are square N×N single-precision floats (default N=256). Emits per-iteration kernel times; GFLOPS is derived downstream.
+All matrices are square N×N single-precision floats (default N=256). The 3mm pass runs exactly once per execution and emits one time record per kernel; GFLOPS is derived downstream.
 
 Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) 3mm workload.
 
 ## Algorithm
 
-- Three sequential GPU kernel launches per iteration
+- Three sequential GPU kernel launches per execution
 - Each kernel: one thread per output element, simple dot-product inner loop (no tiling)
 - Default size: N=256 (all matrices 256×256)
 - GFLOPS = (2·N³ + 2·N³ + 2·N³) / time\_sec / 1e9 = 6·N³ / time\_sec / 1e9 (derived downstream from the emitted times and params)
@@ -24,9 +24,7 @@ Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/project
 | File | Description |
 |------|-------------|
 | `polybench_3mm.hip` | HIP source — three matrix-multiply kernels + self-contained utilities |
-| `polybench_3mm.metal` | Metal compute shaders — three kernels (mm3\_kernel1/2/3) |
-| `polybench_3mm_metal.mm` | ObjC++ Metal host code |
-| `Makefile` | Auto-detecting build (Darwin→metal, ROCm→rocm, else→cuda) |
+| `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
 
 ## Build
 
@@ -34,7 +32,6 @@ Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/project
 make               # auto-detect platform
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 ```
 
 ## Run
@@ -42,7 +39,7 @@ make PLATFORM=metal
 ```bash
 ./polybench_3mm                       # defaults: 256×256
 ./polybench_3mm --size 512
-BENCH_PARAM_iteration=10 ./polybench_3mm
+BENCH_PARAM_size=512 ./polybench_3mm
 ```
 
 Environment variables (override argv):
@@ -50,33 +47,30 @@ Environment variables (override argv):
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BENCH_PARAM_size` | 256 | Matrix dimension N |
-| `BENCH_PARAM_block_size` | 256 | Threads per block (echoed in params) |
-| `BENCH_PARAM_precision` | float | Floating-point precision (half/float/double) |
-| `BENCH_PARAM_warmup` | 3 | Untimed warmup passes |
-| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded individually |
+| `BENCH_PARAM_vector_add_warmup` | true | Vector-add warmer (clock boost + LLC eviction) before the timed pass |
+
+The 3mm pass runs exactly once per execution; repetition is the harness's job (`gpubench run --reps N`).
 
 ## Output
 
-**stdout** — JSON lines: per timed pass, one `{"type":"kernel",...}` record per
+**stdout** — JSON lines: one `{"type":"kernel",...}` record per
 kernel (`mm3_kernel1`, `mm3_kernel2`, `mm3_kernel3`) with that kernel's GPU
 event time (`time_ms`) and host wall-clock time (`host_time_ms`), followed by
-a `{"type":"summary","total_time_ms":...}` line whose value is the sum of all
-recorded GPU event times. Derived metrics (GFLOPS) are computed downstream.
+a `{"type":"summary","total_time_ms":...}` line whose value is the sum of the
+three GPU event times. Derived metrics (GFLOPS) are computed downstream.
 
 **stderr** — human-readable results:
 ```
 Device: AMD Radeon RX 7900 XTX (id=0)
 Matrix size: 256×256 (all)
 
-pass 0: k1 gpu = 0.712 ms, k2 gpu = 0.708 ms, k3 gpu = 0.705 ms
-...
-Total GPU time: 14.876 ms over 7 passes
+k1 gpu = 0.712 ms, k2 gpu = 0.708 ms, k3 gpu = 0.705 ms
+Total GPU time: 2.125 ms
 ```
 
 ## Platform Notes
 
 - **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `polybench_3mm.hip`
-- **Metal**: compiled with `clang++` from `polybench_3mm_metal.mm`; the Metal shader (`polybench_3mm.metal`) is loaded and compiled at runtime from the same directory as the binary
 
 ## Matrix Dimensions
 

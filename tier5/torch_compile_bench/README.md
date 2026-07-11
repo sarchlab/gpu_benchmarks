@@ -36,5 +36,3 @@ Speedup ratio printed to stderr.
 ## Platform Support
 
 - **CUDA/ROCm**: Full support (bench.py)
-- **MPS (Apple Silicon)**: `torch.compile` may not be supported on the MPS backend.
-  If compilation fails, only the eager variant is reported with a note to stderr.

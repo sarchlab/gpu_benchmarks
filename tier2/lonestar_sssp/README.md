@@ -18,14 +18,14 @@ This is inspired by the Lonestar GPU benchmark suite's SSSP implementation.
 |-------------|---------|--------------------------------|
 | `--vertices` | 65536   | Number of graph vertices       |
 | `--degree`   | 16      | Average edges per vertex       |
-| `--iterations`| 5      | Legacy iteration-count param (echoed in records) |
+| `--block_size` | 256   | Threads per block              |
 
-Environment variables (`BENCH_PARAM_*`) override the flags. In addition:
+Environment variables (`BENCH_PARAM_vertices`, `BENCH_PARAM_degree`,
+`BENCH_PARAM_block_size`) override the flags. In addition:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BENCH_PARAM_warmup` | 3 | Warmup SSSP passes (not recorded) |
-| `BENCH_PARAM_iteration`  | 7 | Timed SSSP passes, each recorded  |
+| `BENCH_PARAM_vector_add_warmup` | true | Cold-cache calibration: boost the clock and evict the LLC before the timed run; set `false` to time as-is |
 
 ## Build & Run
 
@@ -35,7 +35,6 @@ make
 ./lonestar_sssp
 
 # Explicit platform
-make PLATFORM=metal
 make PLATFORM=cuda
 make PLATFORM=rocm
 
@@ -45,24 +44,22 @@ make PLATFORM=rocm
 
 ## Output Format
 
-**JSON lines to stdout:** one `kernel` record per timed pass with the
-accumulated GPU event time (`time_ms`) and host time (`host_time_ms`) of all
-Bellman-Ford iterations in that pass, then a summary whose `total_time_ms`
-is the sum of all recorded GPU event times:
+**JSON lines to stdout:** the single timed run (Bellman-Ford until
+convergence) emits one `kernel` record with the accumulated GPU event time
+(`time_ms`) and host time (`host_time_ms`) of all Bellman-Ford iterations,
+then a summary whose `total_time_ms` equals the recorded GPU event time:
 ```json
-{"type":"kernel","name":"bellman_ford_kernel","iter":0,"time_ms":12.345,"host_time_ms":13.101,"params":{"vertices":65536,"degree":16,"iterations":5,"block_size":256}}
-{"type":"summary","total_time_ms":86.42}
+{"type":"kernel","name":"bellman_ford_kernel","iter":0,"time_ms":12.345,"host_time_ms":13.101,"params":{"vertices":65536,"degree":16,"block_size":256}}
+{"type":"summary","total_time_ms":12.345}
 ```
 
 **Human-readable to stderr:**
 ```
-Device: Apple M1
-SSSP (Bellman-Ford)  |  Vertices: 65536  |  Edges: 1048576  |  Passes: 3 warmup + 7 timed
+Device: AMD Radeon RX 7900 XTX (id=0)
+SSSP (Bellman-Ford)  |  Vertices: 65536  |  Edges: 1048576
 
-Bellman-Ford converged in 8 iterations
-pass 0: gpu = 12.345 ms, host = 13.101 ms (8 BF iterations)
-...
-Total GPU time: 86.420 ms over 7 passes
+gpu = 12.345 ms, host = 13.101 ms (8 BF iterations)
+Total GPU time: 12.345 ms
 PASS
 ```
 
@@ -75,4 +72,4 @@ Computed downstream from `time_ms` and params — not reported by the binary.
 ## Verification
 
 Compares GPU shortest-path distances against a sequential CPU Bellman-Ford
-reference for the first 1024 vertices. Reports PASS/FAIL.
+reference for the first 1024 vertices. Reports PASS/FAIL; on FAIL the binary exits with a non-zero status.

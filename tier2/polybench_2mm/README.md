@@ -4,9 +4,9 @@ Benchmarks two consecutive dense matrix multiplications:
 - **D = α·A·B + β·D**
 - **E = α·C·D + β·E**
 
-for square N×N single-precision matrices. Emits per-pass GPU/host kernel times; compute throughput (GFLOPS) is derived downstream.
+for square N×N single-precision matrices. The 2MM pass runs exactly once per execution and emits one GPU/host time record per kernel; compute throughput (GFLOPS) is derived downstream.
 
-Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) 2MM workload.
+Modeled on the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) 2MM workload; the kernels are a generic tiled shared-memory GEMM reimplementation, not the upstream naive kernels.
 
 ## Algorithm
 
@@ -20,9 +20,7 @@ Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/project
 | File | Description |
 |------|-------------|
 | `polybench_2mm.hip` | HIP source — tiled 2MM kernel with HIP/CUDA compat |
-| `polybench_2mm.metal` | Metal compute shader — tiled MM using threadgroup memory |
-| `polybench_2mm_metal.mm` | ObjC++ Metal host code |
-| `Makefile` | Auto-detecting build (Darwin→metal, ROCm→rocm, else→cuda) |
+| `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
 | `params.json` | Parameter specification |
 
 ## Build
@@ -31,7 +29,6 @@ Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/project
 make               # auto-detect platform
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 ```
 
 ## Run
@@ -47,23 +44,22 @@ Environment variables override argv:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `BENCH_PARAM_size` | Matrix dimension N | 1024 |
-| `BENCH_PARAM_block_size` | Threads per block | 256 |
 | `BENCH_PARAM_alpha` | Scaling factor alpha | 1.5 |
 | `BENCH_PARAM_beta` | Scaling factor beta | 1.2 |
-| `BENCH_PARAM_precision` | One of `half`, `float`, `double` | `float` |
-| `BENCH_PARAM_warmup` | Warmup passes (untimed) | 3 |
-| `BENCH_PARAM_iteration` | Timed passes, each recorded | 7 |
+| `BENCH_PARAM_vector_add_warmup` | Vector-add warmer (clock boost + LLC eviction) before the timed pass | true |
+
+The 2MM pass runs exactly once per execution; repetition is the harness's job (`gpubench run --reps N`).
 
 ## Output
 
-**stdout** — JSON-lines: per timed pass, one `{"type":"kernel",...}` record per kernel launch (`mm_kernel_1`, `mm_kernel_2`) carrying its GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`), then a summary whose `total_time_ms` is the sum of all recorded GPU event times:
+**stdout** — JSON-lines: one `{"type":"kernel",...}` record per kernel (`mm_kernel_1`, `mm_kernel_2`) carrying its GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`), then a summary whose `total_time_ms` is the sum of the two GPU event times:
 ```json
 {"type":"kernel","name":"mm_kernel_1","iter":0,"time_ms":1.234,"host_time_ms":1.301,"params":{"size":1024,...}}
 {"type":"kernel","name":"mm_kernel_2","iter":0,"time_ms":1.234,"host_time_ms":1.298,"params":{"size":1024,...}}
-{"type":"summary","total_time_ms":17.276}
+{"type":"summary","total_time_ms":2.468}
 ```
 
-Derived metrics such as GFLOPS (4·N³ / time) are computed downstream from `time_ms` and params. The pristine D and E matrices are re-uploaded before each pass (untimed) since the kernels rewrite them in place.
+Derived metrics such as GFLOPS (4·N³ / time) are computed downstream from `time_ms` and params. The pristine D and E matrices are re-uploaded at the start of the run (untimed) since the kernels rewrite them in place.
 
 **stderr** — human-readable device info and timing details.
 

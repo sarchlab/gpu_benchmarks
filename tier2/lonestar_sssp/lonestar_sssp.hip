@@ -6,21 +6,20 @@
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
 // Usage:
-//   ./lonestar_sssp [--vertices N] [--degree D] [--iterations I]
+//   ./lonestar_sssp [--vertices N] [--degree D] [--block_size B]
 //
 //   --vertices N     Number of vertices (default: 65536)
 //   --degree D       Average degree per vertex (default: 16)
-//   --iterations I   Legacy iteration-count param (echoed in records)
+//   --block_size B   Threads per block (default: 256)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_vertices, BENCH_PARAM_degree, BENCH_PARAM_iterations,
-//   BENCH_PARAM_block_size
+//   BENCH_PARAM_vertices, BENCH_PARAM_degree, BENCH_PARAM_block_size
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
-// bellman_ford_kernel carrying the accumulated GPU event time (time_ms) and
-// host time (host_time_ms) of all Bellman-Ford iterations within the pass,
-// then a summary whose total_time_ms is the SUM of all recorded GPU event
-// times. Medges/sec is derived downstream from time_ms and params.
+// Output (stdout): for the single timed run, one {"type":"kernel",...} JSON
+// line for bellman_ford_kernel carrying the accumulated GPU event time
+// (time_ms) and host time (host_time_ms) of all Bellman-Ford iterations
+// until convergence, then a summary whose total_time_ms is the SUM of all
+// recorded GPU event times. Medges/sec is derived downstream from time_ms and params.
 // Output (stderr): human-readable results
 
 #include "../../common/bench_timing.h"
@@ -282,6 +281,7 @@ int main(int argc, char** argv) {
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
+    bool verify_ok = true;
     // -------------------------------------------------------------------
     // Verification (compare GPU result with CPU reference)
     // -------------------------------------------------------------------
@@ -303,10 +303,11 @@ int main(int argc, char** argv) {
                 errors++;
             }
         }
-        if (errors > 0)
+        if (errors > 0) {
             fprintf(stderr, "FAIL: %d mismatches in first %d vertices\n",
                     errors, verify_n);
-        else
+            verify_ok = false;
+        } else
             fprintf(stderr, "PASS\n");
     }
 
@@ -316,5 +317,5 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipFree(d_dist));
     HIP_CHECK(hipFree(d_changed));
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

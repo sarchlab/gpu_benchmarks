@@ -20,16 +20,24 @@ where `d = 0.85` is the damping factor.
 | Parameter          | Default | Description                    |
 |-------------------|---------|--------------------------------|
 | `--vertices`       | 131072  | Number of graph vertices       |
-| `--degree`         | 16      | Average edges per vertex       |
-| `--pr-iterations`  | 20      | PageRank iterations per pass   |
+| `--degree`         | 16      | Average out-degree per vertex  |
+| `--pr-iterations`  | 5       | PageRank iterations per run    |
 
 Environment variables (`BENCH_PARAM_vertices`, `BENCH_PARAM_degree`,
 `BENCH_PARAM_pr_iterations`) override the command-line flags. In addition:
 
 | Env var | Default | Description |
 |---------|---------|-------------|
-| `BENCH_PARAM_warmup` | 3 | Warmup PageRank passes (untimed) |
-| `BENCH_PARAM_iteration`  | 7 | Timed PageRank passes, each recorded |
+| `BENCH_PARAM_vector_add_warmup` | true | Cold-cache calibration: boost the clock and evict the LLC before the timed run; set `false` to time as-is |
+
+**Generator note:** the graph is generated deterministically (fixed seed 42).
+Each vertex draws about `degree` outgoing endpoints uniformly at random —
+**self-loops and duplicate edges are permitted** and kept, so `degree` is the
+real per-vertex out-degree used for rank division. Minimum out-degree is 1,
+so there are no dangling nodes and the ranks form a probability distribution
+(mass-consistent). The PageRank run executes exactly once per execution;
+repetition across fresh processes is the harness's job
+(`gpubench run --reps N`).
 
 ## Build & Run
 
@@ -39,7 +47,6 @@ make
 ./graph_pr
 
 # Explicit platform
-make PLATFORM=metal
 make PLATFORM=cuda
 make PLATFORM=rocm
 
@@ -49,24 +56,22 @@ make PLATFORM=rocm
 
 ## Output Format
 
-**JSON lines to stdout** — one `kernel` record per timed pass carrying the
-accumulated GPU event time (`time_ms`) and host wall-clock time
-(`host_time_ms`) of all PageRank iterations in that pass, then a `summary`
-whose `total_time_ms` is the sum of all recorded GPU event times:
+**JSON lines to stdout** — the single timed run emits one `kernel` record
+carrying the accumulated GPU event time (`time_ms`) and host wall-clock time
+(`host_time_ms`) of all PageRank iterations, then a `summary` whose
+`total_time_ms` equals the recorded GPU event time:
 ```
-{"type":"kernel","name":"pagerank_kernel","iter":0,"time_ms":45.123400,"host_time_ms":46.010000,"params":{"vertices":131072,"degree":16,"pr_iterations":20}}
-...
-{"type":"summary","total_time_ms":315.863800}
+{"type":"kernel","name":"pagerank_kernel","iter":0,"time_ms":45.123400,"host_time_ms":46.010000,"params":{"vertices":131072,"degree":16,"pr_iterations":5}}
+{"type":"summary","total_time_ms":45.123400}
 ```
 
 **Human-readable to stderr:**
 ```
-Device: Apple M1
-PageRank (pull-based)  |  Vertices: 131072  |  Edges: 2097152  |  PR iterations: 20  |  Damping: 0.85  |  Passes: 3 warmup + 7 timed
+Device: AMD Radeon RX 7900 XTX (id=0)
+PageRank (pull-based)  |  Vertices: 131072  |  Edges: 2097152  |  PR iterations: 5  |  Damping: 0.85
 
-pass 0: pagerank_kernel gpu = 45.123 ms, host = 46.010 ms
-...
-Total GPU time: 315.864 ms over 7 passes
+pagerank_kernel gpu = 45.123 ms, host = 46.010 ms
+Total GPU time: 45.123 ms
 PASS
 ```
 
@@ -80,5 +85,10 @@ reports raw times only.
 ## Verification
 
 Compares GPU PageRank values against a sequential CPU reference implementation
-for the first 1024 vertices. Reports PASS if all values match within 1e-4
-absolute tolerance.
+for the first 1024 vertices using a scale-aware tolerance: a vertex fails if
+`|gpu - cpu| > 1e-7 + 1e-2 * max(|cpu|, 1/N)` (ranks have magnitude ~1/N, so
+an absolute tolerance would be vacuous at large N). Additionally checks mass
+conservation: the total GPU rank must satisfy `|sum - 1.0| <= 1e-3` (the
+generator guarantees min out-degree 1, so ranks form a probability
+distribution). Reports PASS if both checks hold; a FAIL makes the benchmark
+exit non-zero (after all JSON output is emitted).

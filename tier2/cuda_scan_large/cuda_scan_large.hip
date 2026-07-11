@@ -14,7 +14,9 @@
 //   --size N         Number of elements (default: 16777216 = 16M)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_verify
+//   BENCH_PARAM_size
+//   BENCH_PARAM_verify=false|0|skip skips CPU verification (debug knob, not a
+//   declared parameter; it is not echoed into records)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (scan_block_kernel, add_block_sums_kernel) carrying that kernel's
@@ -188,44 +190,27 @@ static void prefix_sum_cpu(const unsigned int* input, unsigned int* output, int 
 // Main
 // ---------------------------------------------------------------------------
 
-static const char* parseStrParam(int argc, char** argv, const char* name,
-                                 const char* defaultVal) {
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], name) == 0) {
-            return argv[i + 1];
-        }
-    }
-    return defaultVal;
-}
-
 int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     // Defaults from params.json
-    int size       = 16777216;
-    int block_size = 256;
-    const char* verify = "true";
+    int size = 16777216;
 
     // Command-line fallback
-    size       = parseIntParam(argc, argv, "--size", size);
-    block_size = parseIntParam(argc, argv, "--block_size", block_size);
-    verify     = parseStrParam(argc, argv, "--verify", verify);
+    size = parseIntParam(argc, argv, "--size", size);
 
     // Environment variable overrides
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_verify");
-    if (env_val) verify = env_val;
-    // Validate string params so the values echoed into the JSON records are
-    // always canonical literals (never raw env text).
-    if (strcmp(verify, "true") != 0 && strcmp(verify, "false") != 0 &&
-        strcmp(verify, "skip") != 0) {
-        fprintf(stderr, "Invalid verify '%s' (use true, false, skip)\n", verify);
-        return EXIT_FAILURE;
-    }
+
+    // Debug knob (not a declared parameter): BENCH_PARAM_verify=false|0|skip
+    // skips the CPU verification pass; default runs it.
+    const char* verify_env = getenv("BENCH_PARAM_verify");
+    bool run_verify = !(verify_env &&
+                        (strcmp(verify_env, "false") == 0 ||
+                         strcmp(verify_env, "0") == 0 ||
+                         strcmp(verify_env, "skip") == 0));
 
     int N     = size;
 
@@ -251,9 +236,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMalloc(&d_data, bytes));
 
     char params[160];
-    snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"",
-             size, block_size, verify);
+    snprintf(params, sizeof(params), "\"size\":%d", size);
 
     // Per-kernel accumulators: each pass runs one full hierarchical scan; the
     // accumulated GPU/host time across all recursion levels within one pass
@@ -289,9 +272,10 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
-    // Verification
+    // Verification (skipped when BENCH_PARAM_verify=false|0|skip)
     // -------------------------------------------------------------------
-    {
+    bool verify_ok = true;
+    if (run_verify) {
         HIP_CHECK(hipMemcpy(h_output, d_data, bytes, hipMemcpyDeviceToHost));
 
         // CPU reference
@@ -309,10 +293,12 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (errors > 0)
+        if (errors > 0) {
             fprintf(stderr, "FAIL: %d errors out of %d\n", errors, N);
-        else
+            verify_ok = false;
+        } else {
             fprintf(stderr, "PASS\n");
+        }
 
         free(h_ref);
     }
@@ -321,5 +307,5 @@ int main(int argc, char** argv) {
     free(h_input);
     free(h_output);
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

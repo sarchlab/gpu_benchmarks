@@ -11,14 +11,14 @@
 //
 //   --vertices N       Number of vertices (default: 131072)
 //   --degree D         Average degree per vertex (default: 16)
-//   --pr-iterations P  PageRank iterations per run (default: 20)
+//   --pr-iterations P  PageRank iterations per run (default: 5)
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_vertices, BENCH_PARAM_degree, BENCH_PARAM_pr_iterations
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
-// pagerank_kernel carrying the accumulated GPU event time of all PR
-// iterations within the pass plus host wall-clock time, then a summary whose
+// Output (stdout): for the single timed run, one {"type":"kernel",...} JSON
+// line for pagerank_kernel carrying the accumulated GPU event time of all PR
+// iterations within the run plus host wall-clock time, then a summary whose
 // total_time_ms is the SUM of all recorded GPU event times. GTEPS is derived
 // downstream from time_ms and params.
 // Output (stderr): human-readable results
@@ -173,7 +173,7 @@ int main(int argc, char** argv) {
     // Defaults from params.json
     int vertices      = 131072;
     int degree        = 16;
-    int pr_iterations = 20;
+    int pr_iterations = 5;   // default from params.json
 
     // Command-line fallback
     vertices      = parseIntParam(argc, argv, "--vertices", vertices);
@@ -280,6 +280,7 @@ int main(int argc, char** argv) {
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
+    bool verify_ok = true;
     // -------------------------------------------------------------------
     // Verification (compare GPU result with CPU reference)
     // -------------------------------------------------------------------
@@ -293,10 +294,17 @@ int main(int argc, char** argv) {
         int verify_n = (N < 1024) ? N : 1024;
         int errors = 0;
         float max_err = 0.0f;
+        // Ranks have magnitude ~1/N, so an absolute tolerance would be
+        // vacuous at large N. Use a scale-aware per-element check with a
+        // 1e-2 relative term (covers float accumulation-order differences
+        // between the CPU and GPU gathers over high-degree vertices).
+        const float rank_floor = 1.0f / (float)N;
         for (int i = 0; i < verify_n; ++i) {
             float err = fabsf(h_gpu_rank[i] - h_cpu_rank[i]);
             if (err > max_err) max_err = err;
-            if (err > 1e-4f) {
+            float scale = fabsf(h_cpu_rank[i]);
+            if (scale < rank_floor) scale = rank_floor;
+            if (err > 1e-7f + 1e-2f * scale) {
                 if (errors < 10) {
                     fprintf(stderr, "Mismatch at vertex %d: GPU=%.6f CPU=%.6f (err=%.6f)\n",
                             i, h_gpu_rank[i], h_cpu_rank[i], err);
@@ -305,10 +313,23 @@ int main(int argc, char** argv) {
             }
         }
         fprintf(stderr, "Max error (first %d vertices): %.6e\n", verify_n, max_err);
-        if (errors > 0)
-            fprintf(stderr, "FAIL: %d mismatches in first %d vertices\n",
-                    errors, verify_n);
-        else
+
+        // Mass conservation: the generator guarantees min out-degree 1 (no
+        // dangling nodes), so the ranks form a probability distribution and
+        // must sum to 1.
+        double rank_sum = 0.0;
+        for (int i = 0; i < N; ++i) rank_sum += h_gpu_rank[i];
+        bool mass_ok = fabs(rank_sum - 1.0) <= 1e-3;
+        if (!mass_ok)
+            fprintf(stderr, "Mass conservation violated: sum(rank) = %.6f\n",
+                    rank_sum);
+
+        if (errors > 0 || !mass_ok) {
+            fprintf(stderr, "FAIL: %d mismatches in first %d vertices%s\n",
+                    errors, verify_n,
+                    mass_ok ? "" : ", rank mass not conserved");
+            verify_ok = false;
+        } else
             fprintf(stderr, "PASS\n");
     }
 
@@ -318,5 +339,5 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipFree(d_rank_a));
     HIP_CHECK(hipFree(d_rank_b));
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

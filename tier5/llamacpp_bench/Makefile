@@ -1,10 +1,9 @@
-ifndef PLATFORM
-  ifeq ($(shell uname -s),Darwin)
-    PLATFORM := metal
-  else ifneq ($(wildcard /opt/rocm),)
-    PLATFORM := rocm
+PLATFORM ?= auto
+ifeq ($(PLATFORM),auto)
+  ifneq ($(wildcard /opt/rocm),)
+    override PLATFORM := rocm
   else
-    PLATFORM := cuda
+    override PLATFORM := cuda
   endif
 endif
 
@@ -17,11 +16,7 @@ MODEL_URL := https://huggingface.co/QuantFactory/SmolLM2-135M-GGUF/resolve/main/
 all: run
 
 run:
-ifeq ($(PLATFORM),metal)
-	python3 bench_mps.py
-else
 	python3 bench.py
-endif
 
 setup:
 	@echo "=== Cloning llama.cpp ==="

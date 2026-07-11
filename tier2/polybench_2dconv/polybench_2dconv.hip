@@ -1,7 +1,9 @@
 // polybench_2dconv.hip — PolyBench 2D Convolution benchmark (HIP, self-contained)
 //
 // Applies a fixed 3×3 kernel to an NI×NJ matrix A, producing output B.
-// PolyBench standard kernel (c coefficients are fixed):
+// Same 9-tap structure as PolyBench/GPU 2DCONV, but with a fixed coefficient
+// set that differs from upstream's values (canonical PolyBench/GPU uses a
+// signed c11..c33 set):
 //
 //   c = {{0.8, 0.2, 0.3},
 //        {0.2, 0.7, 0.4},
@@ -20,13 +22,12 @@
 //   --size N        Matrix dimension N×N   (default: 2048)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_size
 //
-// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
-// carrying the GPU event time (time_ms) and host wall-clock time
-// (host_time_ms), then a summary whose total_time_ms is the SUM of all
-// iterations' GPU event times. GFLOPS is derived downstream from time_ms
-// and params.
+// Output (stdout): one {"type":"kernel",...} JSON line for the single timed
+// launch, carrying the GPU event time (time_ms) and host wall-clock time
+// (host_time_ms), then a summary whose total_time_ms equals that GPU event
+// time. GFLOPS is derived downstream from time_ms and params.
 
 #include "../../common/bench_timing.h"
 #include <cstdio>
@@ -59,7 +60,7 @@ __global__ void convolution2D_kernel(const float* __restrict__ A,
     if (i < 1 || i >= NI - 1 || j < 1 || j >= NJ - 1)
         return;
 
-    // PolyBench fixed coefficients
+    // Fixed coefficients (differ from upstream PolyBench/GPU's signed set)
     const float c00 = 0.8f, c01 = 0.2f, c02 = 0.3f;
     const float c10 = 0.2f, c11 = 0.7f, c12 = 0.4f;
     const float c20 = 0.1f, c21 = 0.2f, c22 = 0.5f;
@@ -83,23 +84,10 @@ int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     int N     = parseIntParam(argc, argv, "--size", 2048);
-    int block_size = 256;
-    const char* precision = "float";
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_precision");
-    if (env_val) precision = env_val;
-    // Validate string params against their known sets so the values echoed
-    // into the JSON records are always canonical literals.
-    if (strcmp(precision, "half") != 0 && strcmp(precision, "float") != 0 &&
-        strcmp(precision, "double") != 0) {
-        fprintf(stderr, "Invalid precision '%s' (use half, float, double)\n", precision);
-        return 1;
-    }
     int NI = N, NJ = N;
     size_t matSize = (size_t)NI * NJ * sizeof(float);
 
@@ -131,13 +119,11 @@ int main(int argc, char** argv) {
     dim3 grid((NJ + block.x - 1) / block.x, (NI + block.y - 1) / block.y);
 
     char params[160];
-    snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
-             N, block_size, precision);
+    snprintf(params, sizeof(params), "\"size\":%d", N);
 
-    // Warmup + timed iterations, each recorded individually. Input A is
-    // read-only and output B is fully overwritten every launch, so repeated
-    // launches perform identical work — no per-iteration reset needed.
+    // Single timed launch (optionally preceded by the vector-add warmer).
+    // Input A is read-only and output B is fully overwritten, so every
+    // process execution performs identical work — no reset needed.
     double total_gpu_ms =
         bench_run_once("convolution2D_kernel", params, [&]() {
             convolution2D_kernel<<<grid, block>>>(d_A, d_B, NI, NJ);

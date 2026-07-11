@@ -31,9 +31,9 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_num_rows, BENCH_PARAM_avg_nnz_per_row, BENCH_PARAM_block_size
 //
-// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
-// carrying the GPU event time and host wall-clock time, then a summary whose
-// total_time_ms is the SUM of all iterations' GPU event times.
+// Output (stdout): one {"type":"kernel",...} JSON line for the single timed
+// spmv_jds launch carrying the GPU event time and host wall-clock time, then
+// a summary whose total_time_ms is the sum of all recorded GPU event times.
 // Output (stderr): human-readable results + verification PASS/FAIL
 
 #include "../../common/bench_timing.h"
@@ -307,7 +307,7 @@ int main(int argc, char** argv)
     // of thousands of rows). Constant-memory tables cap rows/32 and JDS columns
     // at 5000, so num_rows <= 160000 and column depth < 5000.
     int num_rows   = 131072;
-    int avg_nnz    = 128;
+    int avg_nnz    = 80;   // matches params.json default
     int block_size = 0;    // 0 => use compute_active_thread (original geometry)
     int seed       = 42;
 

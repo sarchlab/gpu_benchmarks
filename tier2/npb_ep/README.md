@@ -1,6 +1,6 @@
 # tier2/npb_ep — Embarrassingly Parallel (NAS EP)
 
-Faithful port of the [NAS Parallel Benchmarks](https://www.nas.nasa.gov/software/npb.html) **EP** kernel, taken from [NPB-GPU (GMAP)](https://github.com/GMAP/NPB-GPU). The device kernel (`gpu_kernel`) and its random-number generators (`randlc_device`, `vranlc_device`) are the **original upstream source**; only the host driver is restructured for the per-iteration timing harness and JSON output.
+Faithful port of the [NAS Parallel Benchmarks](https://www.nas.nasa.gov/software/npb.html) **EP** kernel, taken from [NPB-GPU (GMAP)](https://github.com/GMAP/NPB-GPU). The device kernel (`gpu_kernel`) and its random-number generators (`randlc_device`, `vranlc_device`) are the **original upstream source**; only the host driver is restructured for the single-run timing harness and JSON output.
 
 EP generates 2^(M+1) pseudorandom numbers, forms Gaussian deviate pairs, and tallies them into 10 concentric square annuli. It is purely compute-bound with negligible memory traffic — the canonical "embarrassingly parallel" workload.
 
@@ -31,9 +31,8 @@ The class exponent **M** sets the size. Default **M=28 (Class A)** — 2^29 numb
 | File | Description |
 |------|-------------|
 | `npb_ep.hip` | HIP/CUDA source — original NPB-GPU EP kernel + timing harness |
-| `npb_ep.metal` | Metal compute shader — EP kernel |
-| `npb_ep_metal.mm` | ObjC++ Metal host code |
-| `Makefile` | Auto-detecting build (Darwin→metal, ROCm→rocm, else→cuda) |
+| `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
+| `params.json` | Parameter specification |
 
 ## Build
 
@@ -56,19 +55,17 @@ make PLATFORM=rocm
 |----------|---------|-------------|
 | `BENCH_PARAM_m` | 28 | Class exponent M (24 S, 25 W, 28 A, 30 B, 32 C) |
 | `BENCH_PARAM_block_size` | 256 | Threads per block |
-| `BENCH_PARAM_warmup` | 3 | Warmup passes (untimed) |
-| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded |
+| `BENCH_PARAM_vector_add_warmup` | true | Cold-cache calibration: boost the clock and evict the LLC before the timed launch; set `false` to time as-is |
 
 ## Timing model
 
-EP is embarrassingly parallel: **one recorded pass = one `gpu_kernel` launch** (the per-block partial reduction is inside the kernel). Each timed pass emits one `gpu_kernel` record. The RNG seeds are derived from fixed constants inside the kernel, so every launch performs identical work — no input reset is needed. The per-block output accumulators are written via `atomicAdd`, so they are zeroed (untimed, **outside** the timed bracket) before each launch to keep the final NAS verification meaningful.
+EP is embarrassingly parallel: the benchmark times **one `gpu_kernel` launch per execution** (the per-block partial reduction is inside the kernel); repetition across fresh processes is the harness's job (`gpubench run --reps N`). The RNG seeds are derived from fixed constants inside the kernel, so every launch performs identical work — no input reset is needed. The per-block output accumulators are written via `atomicAdd`, so they are zeroed (untimed, **outside** the timed bracket) before the launch to keep the final NAS verification meaningful.
 
 ## Output
 
-**stdout** — JSON lines: one `{"type":"kernel",...}` record per timed pass with `time_ms` (GPU event time of the single `gpu_kernel` launch) and `host_time_ms`, then a summary whose `total_time_ms` is the sum of all passes' GPU event times:
+**stdout** — JSON lines: one `{"type":"kernel",...}` record with `time_ms` (GPU event time of the single `gpu_kernel` launch) and `host_time_ms`, then a summary whose `total_time_ms` equals that launch's GPU event time:
 ```
 {"type":"kernel","name":"gpu_kernel","iter":0,"time_ms":...,"host_time_ms":...,"params":{"class":"A","m":28,"block_size":256}}
-...
 {"type":"summary","total_time_ms":...}
 ```
 
@@ -76,9 +73,8 @@ EP is embarrassingly parallel: **one recorded pass = one `gpu_kernel` launch** (
 
 ## Verification
 
-After the timed loop the host sums the per-block partials into `q[10]`, `Sx`, `Sy` and compares `Sx`/`Sy` against the NAS reference sums for the class (relative error ≤ 1e-8), exactly as in upstream NPB-GPU.
+After the timed launch the host sums the per-block partials into `q[10]`, `Sx`, `Sy` and compares `Sx`/`Sy` against the NAS reference sums for the class (relative error ≤ 1e-8), exactly as in upstream NPB-GPU. If a reference exists for the class and verification fails, the binary exits with a non-zero status.
 
 ## Platform Notes
 
 - **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `npb_ep.hip` via `common/hip_cuda_compat.h`. Uses double precision (NAS spec); double `atomicAdd` requires sm_60+ (any modern NVIDIA GPU) or any GCN/CDNA GPU.
-- **Metal**: the Metal path (`npb_ep_metal.mm` / `npb_ep.metal`) is a separate implementation and was not updated to the faithful NAS algorithm in this change.

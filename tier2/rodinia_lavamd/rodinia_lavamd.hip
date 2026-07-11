@@ -6,10 +6,10 @@
 // home box and each neighbor box's particles into SHARED MEMORY
 // (rA_shared[100], rB_shared[100], qB_shared[100]) before the all-pairs
 // interaction, and the modified-Lennard-Jones / Gaussian potential
-// (vij = exp(-a2*r2), fs = 2*a2*vij). The particle/box data structures
+// (vij = exp(-a2*r2), fs = 2*vij). The particle/box data structures
 // (FOUR_VECTOR, box_str, par_str, dim_str, NUMBER_PAR_PER_BOX=100) and the
 // host geometry (one block per home box, NUMBER_THREADS threads) are the
-// original. Only the driver is restructured for the per-iteration timing
+// original. Only the driver is restructured for the single-pass timing
 // harness and JSON output.
 //
 // Space is a boxes1d^3 grid of boxes; each box holds NUMBER_PAR_PER_BOX
@@ -26,7 +26,7 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_boxes1d
 //
-// Output (stdout): one {"type":"kernel",...} JSON line per timed pass for
+// Output (stdout): one {"type":"kernel",...} JSON line for
 // kernel_gpu_cuda carrying the GPU event time (time_ms) and host wall-clock
 // time (host_time_ms), then a summary whose total_time_ms is the SUM of all
 // passes' GPU event times.

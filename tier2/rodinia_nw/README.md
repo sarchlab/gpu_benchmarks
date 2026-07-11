@@ -12,7 +12,7 @@ and threadgroup/shared-memory tiling, based on the Rodinia NW benchmark.
 - Two GPU kernel passes process the block-dependency graph's upper-left and
   lower-right triangles respectively; within each block a shared-memory
   anti-diagonal sweep fills a `block_size × block_size` tile.
-- Emits per-iteration kernel times; **GCUPS** (giga cell-updates per second)
+- Emits per-kernel times; **GCUPS** (giga cell-updates per second)
   and effective **GB/s** are derived downstream.
 
 ## Files
@@ -20,21 +20,18 @@ and threadgroup/shared-memory tiling, based on the Rodinia NW benchmark.
 | File | Description |
 |------|-------------|
 | `rodinia_nw.hip` | HIP/CUDA source (self-contained, no external headers) |
-| `rodinia_nw.metal` | Metal compute shader (two kernels) |
-| `rodinia_nw_metal.mm` | ObjC++ Metal host |
 | `Makefile` | Platform auto-detection + build rules |
 | `README.md` | This file |
 
 ## Build
 
 ```bash
-# Auto-detect (Darwin → metal, /opt/rocm present → rocm, else → cuda)
+# Auto-detect (/opt/rocm present → rocm, else → cuda)
 make
 
 # Explicit platform
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 ```
 
 ## Run
@@ -52,19 +49,21 @@ Environment variables (override argv):
 | `BENCH_PARAM_sequence_length` | 2048 | Sequence length N |
 | `BENCH_PARAM_block_size` | 16 | Threads per block / tile edge |
 | `BENCH_PARAM_penalty` | 2 | Gap penalty |
-| `BENCH_PARAM_warmup` | 3 | Untimed warmup passes |
-| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded individually |
+| `BENCH_PARAM_vector_add_warmup` | `true` | Cold-cache calibration before the timed fill |
+
+The DP-matrix fill runs **exactly once**; repetition is the harness's job
+(`gpubench run --reps N`).
 
 ## Output
 
-**stdout** — JSON lines: per timed pass, one `{"type":"kernel",...}` record per
-kernel (`nw_kernel1`, `nw_kernel2`) with that pass's accumulated GPU event time
+**stdout** — JSON lines: one `{"type":"kernel",...}` record per
+kernel (`nw_kernel1`, `nw_kernel2`) with its accumulated GPU event time
 (`time_ms`, summed over the wavefront diagonals) and host wall-clock time
 (`host_time_ms`), followed by a `{"type":"summary","total_time_ms":...}` line
 whose value is the sum of all recorded GPU event times. Derived metrics
 (GCUPS, GB/s) are computed downstream from `time_ms` and the params.
 
-Standard error shows per-pass timing lines.
+Standard error shows per-kernel timing lines.
 
 ## Platforms
 
@@ -72,4 +71,3 @@ Standard error shows per-pass timing lines.
 |----------|----------|-------------|
 | CUDA     | `nvcc`   | `rodinia_nw.hip` (compiled as CUDA via `-x cu`) |
 | ROCm     | `hipcc`  | `rodinia_nw.hip` |
-| Metal    | `clang++`| `rodinia_nw_metal.mm` + `rodinia_nw.metal` |

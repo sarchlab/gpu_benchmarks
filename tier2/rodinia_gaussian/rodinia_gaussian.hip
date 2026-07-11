@@ -16,9 +16,9 @@
 //   --size N         Matrix dimension N (N×N)  (default: 512)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_verify
+//   BENCH_PARAM_size, BENCH_PARAM_verify
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// Output (stdout): one {"type":"kernel",...} JSON line per
 // kernel (fan1, fan2) carrying that kernel's accumulated GPU event time
 // (time_ms) and host time (host_time_ms) across all N-1 pivot steps within
 // the pass, then a summary whose total_time_ms is the SUM of all recorded
@@ -112,8 +112,6 @@ int main(int argc, char** argv)
 
     // Defaults
     int N     = 512;
-    int block_size_param = 256;
-    const char* verify = "true";
 
     // Command-line fallback
     N     = parseIntParam(argc, argv, "--size", N);
@@ -122,20 +120,15 @@ int main(int argc, char** argv)
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size_param = atoi(env_val);
+
+    // Debug knob (not a sweep parameter): CPU verification runs by default;
+    // "false"/"0"/"skip" skip it.
+    bool do_verify = true;
     env_val = getenv("BENCH_PARAM_verify");
-    if (env_val) {
-        // Validate against the known enum set so the emitted params string is
-        // always a canonical literal, never raw env text.
-        if      (strcmp(env_val, "true")  == 0) verify = "true";
-        else if (strcmp(env_val, "false") == 0) verify = "false";
-        else if (strcmp(env_val, "skip")  == 0) verify = "skip";
-        else {
-            fprintf(stderr, "Invalid BENCH_PARAM_verify (expected true, false "
-                            "or skip)\n");
-            return 1;
-        }
+    if (env_val && (strcmp(env_val, "false") == 0 ||
+                    strcmp(env_val, "0")     == 0 ||
+                    strcmp(env_val, "skip")  == 0)) {
+        do_verify = false;
     }
 
     size_t bytes_a = (size_t)N * N * sizeof(float);
@@ -186,8 +179,8 @@ int main(int argc, char** argv)
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"",
-             N, block_size_param, verify);
+             "\"size\":%d",
+             N);
 
     // Per-kernel accumulators: each elimination pass launches fan1 and fan2
     // once per pivot step; the accumulated GPU/host time of all N-1 steps
@@ -243,27 +236,31 @@ int main(int argc, char** argv)
     fprintf(stderr, "Total GPU time: %.3f ms over 1 pass\n",
             total_gpu_ms);
 
-    // Copy final result from device
-    HIP_CHECK(hipMemcpy(h_a, d_a, bytes_a, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(h_b, d_b, bytes_b, hipMemcpyDeviceToHost));
+    // CPU verification (debug knob; skipped when BENCH_PARAM_verify=false)
+    bool pass = true;
+    if (do_verify) {
+        // Copy final result from device
+        HIP_CHECK(hipMemcpy(h_a, d_a, bytes_a, hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(h_b, d_b, bytes_b, hipMemcpyDeviceToHost));
 
-    // CPU back-substitution on the factored system
-    backSubstitution(h_a, h_b, h_x, N);
+        // CPU back-substitution on the factored system
+        backSubstitution(h_a, h_b, h_x, N);
 
-    // Correctness check: compute ||A_orig * x - b_orig|| / ||b_orig||
-    double norm_res = 0.0, norm_b = 0.0;
-    for (int i = 0; i < N; ++i) {
-        double res = -(double)h_b_orig[i];
-        for (int j = 0; j < N; ++j) {
-            res += (double)h_a_orig[i * N + j] * (double)h_x[j];
+        // Correctness check: compute ||A_orig * x - b_orig|| / ||b_orig||
+        double norm_res = 0.0, norm_b = 0.0;
+        for (int i = 0; i < N; ++i) {
+            double res = -(double)h_b_orig[i];
+            for (int j = 0; j < N; ++j) {
+                res += (double)h_a_orig[i * N + j] * (double)h_x[j];
+            }
+            norm_res += res * res;
+            norm_b   += (double)h_b_orig[i] * (double)h_b_orig[i];
         }
-        norm_res += res * res;
-        norm_b   += (double)h_b_orig[i] * (double)h_b_orig[i];
+        double rel_err = sqrt(norm_res / (norm_b + 1e-30));
+        pass = (rel_err < 1e-4);
+        fprintf(stderr, "Verification: rel_err = %.2e — %s\n\n",
+                rel_err, pass ? "PASS" : "FAIL");
     }
-    double rel_err = sqrt(norm_res / (norm_b + 1e-30));
-    bool pass = (rel_err < 1e-4);
-    fprintf(stderr, "Verification: rel_err = %.2e — %s\n\n",
-            rel_err, pass ? "PASS" : "FAIL");
 
     // Cleanup
     HIP_CHECK(hipFree(d_a));

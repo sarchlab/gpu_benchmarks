@@ -8,7 +8,6 @@ Benchmarks **Sparse Matrix-Vector Multiplication (SpMV)** in CSR (Compressed Spa
 |----------|---------------|--------------------------------------------|
 | NVIDIA   | cuSPARSE      | `cusparseSpMV` — modern generic API (CUDA 11+) |
 | AMD      | rocSPARSE     | `rocsparse_scsrmv` — CSR SpMV              |
-| Apple    | Custom kernel | Metal has no cuSPARSE equivalent; uses same custom CSR SpMV compute shader as `tier2/shoc_spmv` |
 
 ## Algorithm
 
@@ -39,14 +38,12 @@ CSR representation:
 | File                      | Description                                    |
 |---------------------------|------------------------------------------------|
 | `cusparse_spmv.hip`       | CUDA (cuSPARSE) and ROCm (rocSPARSE) source    |
-| `cusparse_spmv_metal.mm`  | Apple Metal host with embedded compute shader  |
 | `Makefile`                | Auto-detects platform; builds the binary       |
 | `README.md`               | This file                                      |
 
 ## Building
 
 The `Makefile` auto-detects the platform:
-- **Darwin** → Metal
 - **Linux with `/opt/rocm`** → ROCm/rocSPARSE
 - **Otherwise** → CUDA/cuSPARSE
 
@@ -54,7 +51,6 @@ The `Makefile` auto-detects the platform:
 make                  # auto-detect
 make PLATFORM=cuda    # NVIDIA CUDA
 make PLATFORM=rocm    # AMD ROCm
-make PLATFORM=metal   # Apple Metal
 make clean
 ```
 
@@ -66,13 +62,6 @@ nvcc -O3 -std=c++14 -x cu -DUSE_CUSPARSE cusparse_spmv.hip -lcusparse -o cuspars
 ### ROCm manual build
 ```bash
 hipcc -O3 -std=c++14 -DUSE_ROCSPARSE cusparse_spmv.hip -lrocsparse -o cusparse_spmv
-```
-
-### Metal manual build
-```bash
-clang++ -O2 -std=c++17 -fobjc-arc \
-    -framework Metal -framework Foundation \
-    cusparse_spmv_metal.mm -o cusparse_spmv
 ```
 
 ## Running
@@ -118,6 +107,5 @@ After timing, the GPU result is compared against a CPU SpMV reference on the fir
 
 ## Notes
 
-- **Metal platform**: Metal does not provide a cuSPARSE-equivalent library for sparse operations. This benchmark uses a custom CSR SpMV Metal compute shader (identical to the kernel in `tier2/shoc_spmv`) so that meaningful performance data can still be collected on Apple hardware.
 - **cuSPARSE API version**: This benchmark uses the modern generic SpMV API (`cusparseSpMV` / `cusparseCreateCsr`) introduced in CUDA 11. It is **not** compatible with CUDA 10 or earlier.
 - **rocSPARSE API**: Uses `rocsparse_scsrmv` (the CSR-format SpMV routine). Available in all ROCm releases.

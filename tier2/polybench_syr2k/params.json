@@ -49,15 +49,6 @@
       ]
     },
     {
-      "name": "block_size",
-      "description": "Number of threads per block (logical; kernel uses 16x16 tiles)",
-      "type": "int",
-      "default": 256,
-      "values": [
-        256
-      ]
-    },
-    {
       "name": "alpha",
       "description": "Scaling factor for A*B^T + B*A^T terms",
       "type": "float",

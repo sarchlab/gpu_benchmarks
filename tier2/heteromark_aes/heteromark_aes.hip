@@ -11,7 +11,7 @@
 //   --size N         Number of 16-byte blocks (default: 1048576)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_key_length
+//   BENCH_PARAM_size, BENCH_PARAM_block_size
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed pass
 // carrying the GPU event time (time_ms) and host wall-clock time
@@ -263,28 +263,16 @@ static void aes256_encrypt_cpu(unsigned char* block,
 // Main
 // ---------------------------------------------------------------------------
 
-static const char* parseStrParam(int argc, char** argv, const char* name,
-                                 const char* defaultVal) {
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], name) == 0) {
-            return argv[i + 1];
-        }
-    }
-    return defaultVal;
-}
-
 int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     // Defaults from params.json
     int size       = 1048576;
     int block_size = 256;
-    const char* key_length = "256";
 
     // Command-line fallback
     size       = parseIntParam(argc, argv, "--size", size);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
-    key_length = parseStrParam(argc, argv, "--key_length", key_length);
 
     // Environment variable overrides
     const char* env_val;
@@ -292,15 +280,6 @@ int main(int argc, char** argv) {
     if (env_val) size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_key_length");
-    if (env_val) key_length = env_val;
-    // Validate string params against their known sets so the values echoed
-    // into the JSON records are always canonical literals.
-    if (strcmp(key_length, "128") != 0 && strcmp(key_length, "192") != 0 &&
-        strcmp(key_length, "256") != 0) {
-        fprintf(stderr, "Invalid key_length '%s' (use 128, 192, 256)\n", key_length);
-        return 1;
-    }
     int N     = size;
 
     size_t data_bytes = (size_t)N * 16;
@@ -346,8 +325,8 @@ int main(int argc, char** argv) {
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d,\"key_length\":\"%s\"",
-             size, block_size, key_length);
+             "\"size\":%d,\"block_size\":%d",
+             size, block_size);
 
     bench_timer_t timer;
     bench_timer_create(&timer);
@@ -387,6 +366,7 @@ int main(int argc, char** argv) {
     // -------------------------------------------------------------------
     // Verification (compare first 256 blocks with CPU reference)
     // -------------------------------------------------------------------
+    bool verify_ok = true;
     {
         int verify_n = (N < 256) ? N : 256;
         HIP_CHECK(hipMemcpy(h_data, d_data, data_bytes, hipMemcpyDeviceToHost));
@@ -411,11 +391,13 @@ int main(int argc, char** argv) {
                 }
             }
         }
-        if (errors > 0)
+        if (errors > 0) {
             fprintf(stderr, "FAIL: %d byte errors in first %d blocks\n",
                     errors, verify_n);
-        else
+            verify_ok = false;
+        } else {
             fprintf(stderr, "PASS\n");
+        }
 
         free(h_ref);
     }
@@ -425,5 +407,5 @@ int main(int argc, char** argv) {
     free(h_data);
     free(h_orig);
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -8,25 +8,32 @@ The **Stream Triad** benchmark measures effective GPU memory bandwidth by execut
 a[i] = b[i] + scalar * c[i]
 ```
 
-This pattern reads two arrays (`b`, `c`) and writes one (`a`), for a total of **3 × N × 4 bytes** of memory traffic per iteration.  It is derived from the [SHOC benchmark suite](https://github.com/vetter/shoc).
+This pattern reads two arrays (`b`, `c`) and writes one (`a`), for a total of **3 × N × 4 bytes** of memory traffic.  It is derived from the [SHOC benchmark suite](https://github.com/vetter/shoc).
+
+## Measurement protocol
+
+The triad kernel is launched and timed **exactly once** per execution — there
+is no in-program warmup or iteration loop. When `BENCH_PARAM_vector_add_warmup`
+is `true` (default), the vector-add warmer runs immediately before the timed
+launch: ~100 ms of sustained load ramps the GPU clock while its final pass
+evicts the last-level cache, so the kernel is measured cold-cache at a boosted
+clock. Repetition is the harness's job: `gpubench run --reps N` re-executes the
+binary in fresh processes.
 
 ## Files
 
 | File | Description |
 |------|-------------|
 | `shoc_triad.hip` | Self-contained HIP kernel + host (NVIDIA/AMD) |
-| `shoc_triad.metal` | Metal compute shader (Apple) |
-| `shoc_triad_metal.mm` | Objective-C++ Metal host (Apple) |
-| `Makefile` | Auto-detects platform; supports `cuda`, `rocm`, `metal` |
+| `Makefile` | Auto-detects platform; supports `cuda`, `rocm` |
 
 ## Building
 
 ```bash
-# Auto-detect (Darwin → metal, /opt/rocm present → rocm, else → cuda)
+# Auto-detect (/opt/rocm present → rocm, else → cuda)
 make
 
 # Explicit platform
-make PLATFORM=metal
 make PLATFORM=rocm
 make PLATFORM=cuda
 ```
@@ -34,7 +41,6 @@ make PLATFORM=cuda
 **Requirements:**
 - **CUDA**: `nvcc` (CUDA toolkit ≥ 10)
 - **ROCm/HIP**: `hipcc` (ROCm ≥ 4.0)
-- **Metal**: macOS 12+, Xcode Command Line Tools
 
 ## Running
 
@@ -45,40 +51,44 @@ make PLATFORM=cuda
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--array_size N` | `4194304` | Number of `float` elements (4 M ≈ 16 MiB per array) |
-| `--block_size B` | `256` | GPU thread-block size (HIP/CUDA only) |
+| `--block_size B` | `256` | GPU thread-block size |
 
-Environment variables `BENCH_PARAM_array_size`, `BENCH_PARAM_block_size`, and
-`BENCH_PARAM_precision` override the flags. In addition:
+Environment variables override the flags:
 
 | Env var | Default | Description |
 |---------|---------|-------------|
-| `BENCH_PARAM_warmup` | 3 | Warmup launches (untimed) |
-| `BENCH_PARAM_iteration` | 7 | Timed launches, each recorded |
-
-> Note: `--block_size` is ignored on Metal (thread-group size is set automatically).
+| `BENCH_PARAM_array_size` | 4194304 | Number of elements |
+| `BENCH_PARAM_block_size` | 256 | Thread-block size |
+| `BENCH_PARAM_vector_add_warmup` | true | Clock-boost + LLC-evict warmer before the timed run |
 
 ## Output
 
-**stdout** — JSON lines, one `kernel` record per timed iteration carrying the
-GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`), then a
-`summary` whose `total_time_ms` is the sum of all iterations' GPU event times:
+**stdout** — JSON lines: one `kernel` record for the single timed launch
+carrying the GPU event time (`time_ms`) and host wall-clock time
+(`host_time_ms`), then a `summary` whose `total_time_ms` equals that record's
+GPU event time:
 ```
-{"type":"kernel","name":"triad_kernel","iter":0,"time_ms":0.314200,"host_time_ms":0.330000,"params":{"array_size":4194304,"block_size":256,"precision":"float"}}
-...
-{"type":"summary","total_time_ms":2.199400}
+{"type":"kernel","name":"triad_kernel","iter":0,"time_ms":0.314200,"host_time_ms":0.330000,"params":{"array_size":4194304,"block_size":256}}
+{"type":"summary","total_time_ms":0.314200}
 ```
 
 **stderr** — human-readable summary:
 ```
-Device: Apple M4 Pro
+Device: NVIDIA GeForce RTX 4090 (id=0)
 Array size: 4194304 floats (16.0 MiB)
 Block size: 256
 
-triad_kernel iter 0: gpu = 0.314 ms, host = 0.330 ms
-...
-Total GPU time: 2.199 ms over 7 iterations
+triad_kernel: gpu = 0.314 ms, host = 0.330 ms
+Total GPU time: 0.314 ms
 PASS
 ```
+
+## Verification
+
+After the timed run (measurements already emitted), the GPU result `a` is
+compared element-wise against a CPU reference. On FAIL the process exits
+non-zero, so the harness marks the run as failed without losing the
+measurements. There is no verification on/off parameter.
 
 ## Bandwidth Formula
 
@@ -88,13 +98,3 @@ Bandwidth (GB/s) = 3 × N × sizeof(float) / time_seconds / 1e9
 
 The factor of 3 accounts for two reads (`b`, `c`) and one write (`a`).
 Derived downstream from the emitted `time_ms` and params.
-
-## Example Results
-
-| Platform | Array Size | Avg (ms) | Bandwidth |
-|----------|-----------|----------|-----------|
-| Apple M4 Pro (Metal) | 4 M floats | ~0.31 | ~153 GB/s |
-| NVIDIA RTX 4090 (CUDA) | 4 M floats | ~0.08 | ~600 GB/s |
-| AMD RX 7900 XTX (ROCm) | 4 M floats | ~0.11 | ~450 GB/s |
-
-*(Results are indicative and vary by system configuration.)*

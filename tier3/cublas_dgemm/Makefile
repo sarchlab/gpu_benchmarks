@@ -3,25 +3,22 @@
 # Supported platforms:
 #   PLATFORM=cuda   — NVIDIA CUDA  (default on Linux without ROCm)
 #   PLATFORM=rocm   — AMD ROCm/HIP (default when /opt/rocm exists)
-#   PLATFORM=metal  — Apple (uses Accelerate cblas_dgemm, CPU-only; Metal has no FP64)
 #
 # Usage:
 #   make                   # auto-detect platform
 #   make PLATFORM=cuda
 #   make PLATFORM=rocm
-#   make PLATFORM=metal
 #   make clean
 
 # ---------------------------------------------------------------------------
 # Auto-detect platform
 # ---------------------------------------------------------------------------
-ifndef PLATFORM
-  ifeq ($(shell uname -s),Darwin)
-    PLATFORM := metal
-  else ifneq ($(wildcard /opt/rocm),)
-    PLATFORM := rocm
+PLATFORM ?= auto
+ifeq ($(PLATFORM),auto)
+  ifneq ($(wildcard /opt/rocm),)
+    override PLATFORM := rocm
   else
-    PLATFORM := cuda
+    override PLATFORM := cuda
   endif
 endif
 
@@ -33,7 +30,7 @@ TARGET := cublas_dgemm
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := cublas_dgemm.cu
-  CUDA_ARCH ?= sm_90
+  CUDA_ARCH ?= native
   CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH)
   LIBS   := -lcublas
 
@@ -43,16 +40,8 @@ else ifeq ($(PLATFORM),rocm)
   CFLAGS := -O3 -std=c++14 -DUSE_ROCBLAS
   LIBS   := -lrocblas
 
-else ifeq ($(PLATFORM),metal)
-  CC     := clang++
-  SRC    := cublas_dgemm_metal.mm
-  CFLAGS := -O2 -std=c++17 -fobjc-arc \
-             -framework Foundation \
-             -framework Accelerate
-  LIBS   :=
-
 else
-  $(error Unknown PLATFORM=$(PLATFORM). Use cuda, rocm, or metal.)
+  $(error Unknown PLATFORM=$(PLATFORM). Use cuda or rocm.)
 endif
 
 # ---------------------------------------------------------------------------

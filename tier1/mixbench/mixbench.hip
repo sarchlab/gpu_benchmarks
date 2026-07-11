@@ -18,7 +18,8 @@
  *     num_fmas = r * 4   (since each FMA = 2 FLOP, total bytes = 8)
  *     achieved_gflops = (num_elements * num_fmas * 2) / time_s / 1e9
  *
- * Ratios tested: 0.5, 1, 2, 4, 8, 16, 32, 64
+ * Each invocation runs a single flops_per_byte ratio; the declared sweep is
+ * 0.5, 2, 4, 8, 32 (see params.json), driven via BENCH_PARAM_flops_per_byte.
  *
  * Usage:
  *   ./mixbench [buffer_size_mb]
@@ -29,11 +30,15 @@
  *   BENCH_PARAM_buffer_size_mb
  *   BENCH_PARAM_flops_per_byte
  *   BENCH_PARAM_threads_per_block
+ *   BENCH_PARAM_vector_add_warmup  (default true; clock-boost + LLC-evict
+ *                                   warmer before the timed run)
  *
- * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
- * the GPU event time and host wall-clock time, then a summary whose
- * total_time_ms is the SUM of all iterations' GPU event times. GFLOPS and
- * bandwidth are derived downstream from time_ms and the record params.
+ * Measurement: the kernel is launched and timed EXACTLY ONCE per process
+ * (repetition = fresh re-executions via `gpubench run --reps N`). Output:
+ * one {"type":"kernel",...} JSON line carrying the GPU event time and host
+ * wall-clock time for that single launch, then a summary whose total_time_ms
+ * equals it. GFLOPS and bandwidth are derived downstream from time_ms and
+ * the record params.
  */
 
 #include <cstdio>
@@ -154,8 +159,8 @@ __global__ void mixbench_kernel(float *data, int num_elements, int num_fmas)
  * @param num_elements  Number of floats in the array
  * @param ratio         Target flops-per-byte ratio
  * @param threads_per_block Threads per block
- * @param params        JSON body for the per-iteration records
- * @return Sum of the recorded iterations' GPU event times (ms)
+ * @param params        JSON body for the kernel record
+ * @return The single timed launch's GPU event time (ms)
  */
 static double benchmark_ratio(float *d_data, int num_elements, double ratio,
                               int threads_per_block,

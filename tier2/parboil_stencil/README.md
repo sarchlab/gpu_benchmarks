@@ -15,16 +15,32 @@ out[i] = c0 * in[i]
 ```
 where `c0 = 0.6`, `c1 = (1 - c0) / 6 ≈ 0.0667`.
 
-Boundary cells (1-cell border) are skipped. Multiple time-steps are performed per benchmark iteration using ping-pong buffers.
+Boundary cells (1-cell border) are skipped. The run performs `num_timesteps`
+time-steps using ping-pong buffers.
+
+## Measurement
+
+The stencil (all `num_timesteps` launches) runs **exactly once** per process
+execution (see the root README "Measurement Methodology"). With
+`BENCH_PARAM_vector_add_warmup` (default `true`), a vector-add warmer boosts
+the GPU clock and evicts the last-level cache immediately before the timed
+run. Repetition = `gpubench run --reps N`. There is **no result verification**
+in this benchmark.
+
+## Parameters
+
+| Env var (or `--flag`) | Description | Default |
+|----------|-------------|---------|
+| `BENCH_PARAM_grid_dim` / `--grid_dim` | Grid dimension N (N×N×N) | 64 |
+| `BENCH_PARAM_num_timesteps` / `--num_timesteps` | Stencil time-steps per run | 10 |
+| `BENCH_PARAM_vector_add_warmup` | Cold-cache clock warmer on/off | true |
 
 ## Files
 
 | File | Description |
 |------|-------------|
 | `parboil_stencil.hip` | HIP source — 3D stencil kernel + self-contained host utilities |
-| `parboil_stencil.metal` | Metal compute shader — 3D stencil kernel |
-| `parboil_stencil_metal.mm` | ObjC++ Metal host code |
-| `Makefile` | Auto-detecting build (Darwin→metal, ROCm→rocm, else→cuda) |
+| `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
 
 ## Build
 
@@ -32,7 +48,6 @@ Boundary cells (1-cell border) are skipped. Multiple time-steps are performed pe
 make               # auto-detect platform
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 ```
 
 ## Run
@@ -43,33 +58,21 @@ make PLATFORM=metal
 ./parboil_stencil --grid_dim 64 --num_timesteps 20
 ```
 
-### Environment variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BENCH_PARAM_grid_dim` | 64 | Grid dimension N (N×N×N) |
-| `BENCH_PARAM_num_timesteps` | 10 | Stencil time-steps per pass |
-| `BENCH_PARAM_block_size` | 256 | Threads per block (recorded in params) |
-| `BENCH_PARAM_warmup` | 3 | Warmup passes (untimed) |
-| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded |
-
 ## Output
 
-**stdout** — JSON lines: per timed pass, one `{"type":"kernel",...}` record carrying the stencil kernel's accumulated GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`) over the pass's `num_timesteps` launches, then a summary whose `total_time_ms` is the sum of all recorded GPU event times:
+**stdout** — JSON lines: one `{"type":"kernel",...}` record (`iter:0`) carrying the stencil kernel's GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`) accumulated over the run's `num_timesteps` launches, then a summary whose `total_time_ms` is the sum of all recorded GPU event times:
 ```
-{"type":"kernel","name":"stencil3d","iter":0,"time_ms":1.2345,"host_time_ms":1.3011,"params":{"grid_dim":64,...}}
-...
-{"type":"summary","total_time_ms":8.6415}
+{"type":"kernel","name":"stencil3d","iter":0,"time_ms":1.234500,"host_time_ms":1.301100,"params":{"grid_dim":64,"num_timesteps":10}}
+{"type":"summary","total_time_ms":1.234500}
 ```
 
 **stderr** — human-readable results:
 ```
-Device: Apple M4 Pro
-Grid: 64×64×64  |  Timesteps/pass: 10  |  Passes: 3 warmup + 7 timed
+Device: AMD Radeon RX 7900 XTX (id=0)
+Grid: 64×64×64  |  Timesteps/pass: 10
 
-pass 0: stencil3d gpu = 1.234 ms, host = 1.301 ms
-...
-Total GPU time: 8.642 ms over 7 passes (10 timesteps/pass)
+stencil3d gpu = 1.234 ms, host = 1.301 ms
+Total GPU time: 1.234 ms (10 timesteps/pass)
 ```
 
 ## Performance Metrics (derived downstream from time_ms and params)
@@ -81,5 +84,4 @@ Total GPU time: 8.642 ms over 7 passes (10 timesteps/pass)
 ## Platform Notes
 
 - **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `parboil_stencil.hip`
-- **Metal**: compiled with `clang++` from `parboil_stencil_metal.mm`; the Metal shader is loaded at runtime from the same directory as the binary
 - Input data is generated synthetically — no external input files required

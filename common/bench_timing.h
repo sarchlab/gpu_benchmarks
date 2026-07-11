@@ -8,10 +8,11 @@
  *     Repetition across fresh processes is the harness's job (gpubench --reps);
  *     there is no in-program warmup or iteration loop.
  *   - When BENCH_PARAM_vector_add_warmup is on (default), the vector-add warmer
- *     runs once immediately before the timed run to boost the GPU clock and
- *     evict the last-level cache, so the operation is measured cold-cache at a
- *     boosted clock (matching a cold-cache kernel simulator). With it off, the
- *     operation is timed as-is.
+ *     runs immediately before the timed run — repeated to a ~100 ms
+ *     sustained-load target so the GPU clock ramps up from idle, with the
+ *     final pass evicting the last-level cache — so the operation is measured
+ *     cold-cache at a boosted clock (matching a cold-cache kernel simulator).
+ *     With it off, the operation is timed as-is.
  *   - The single timed run records BOTH host wall-clock (chrono around
  *     launch + sync) and device time (hipEvent pair around the launch).
  *   - The timed bracket contains ONLY the operation under test. Setup copies,
@@ -129,11 +130,11 @@ static inline void bench_emit_summary(double total_gpu_ms)
  * bench_run_once — measure a single-kernel benchmark: one timed run.
  *
  * With BENCH_PARAM_vector_add_warmup on (default), the vector-add warmer runs
- * once first to boost the GPU clock and evict the last-level cache, so the
- * timed launch runs cold-cache at a boosted clock (matching a cold-cache kernel
- * simulator). With it off, the launch is timed as-is. Repetition across
- * processes is the harness's job (gpubench --reps); this runs `launch` exactly
- * once.
+ * first (repeated to a ~100 ms sustained-load target) to boost the GPU clock,
+ * its final pass evicting the last-level cache, so the timed launch runs
+ * cold-cache at a boosted clock (matching a cold-cache kernel simulator).
+ * With it off, the launch is timed as-is. Repetition across processes is the
+ * harness's job (gpubench --reps); this runs `launch` exactly once.
  *
  * `launch` enqueues exactly the operation under test on the null stream.
  * Emits one kernel record and returns its GPU event time (ms).

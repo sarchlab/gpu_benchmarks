@@ -10,15 +10,14 @@
 // Parameters: N=32768 bodies, theta=0.5 (opening angle)
 //
 // Usage:
-//   ./lonestar_bh [--bodies N] [--timesteps T] [--iterations I]
+//   ./lonestar_bh [--bodies N] [--timesteps T] [--theta THETA]
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_bodies, BENCH_PARAM_timesteps, BENCH_PARAM_theta,
-//   BENCH_PARAM_iterations (echoed in params)
+//   BENCH_PARAM_bodies, BENCH_PARAM_timesteps, BENCH_PARAM_theta
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
-// kernel (bh_force_kernel, integrate_kernel) carrying that kernel's
-// accumulated GPU event time and host time within the pass (summed over the
+// Output (stdout): for the single timed run, one {"type":"kernel",...} JSON
+// line per kernel (bh_force_kernel, integrate_kernel) carrying that kernel's
+// accumulated GPU event time and host time within the run (summed over the
 // timesteps), then a summary whose total_time_ms is the SUM of all recorded
 // GPU event times. GFLOPS is derived downstream from time_ms and params.
 // Output (stderr): human-readable results
@@ -424,9 +423,9 @@ int main(int argc, char** argv) {
              "\"bodies\":%d,\"timesteps\":%d,\"theta\":%.6f",
              bodies, timesteps_p, theta_p);
 
-    // Per-kernel accumulators: each pass runs one full simulation (timesteps
+    // Per-kernel accumulators: the run is one full simulation (timesteps
     // steps, each launching both kernels once); the accumulated GPU/host time
-    // within one pass becomes that pass's record for the kernel.
+    // within the run becomes that kernel's record.
     bench_timer_t timer;
     bench_timer_create(&timer);
     bench_lap_t acc_force, acc_integrate;
@@ -494,6 +493,7 @@ int main(int argc, char** argv) {
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
+    bool verify_ok = true;
     // -------------------------------------------------------------------
     // Verification: compare BH forces vs direct O(N^2) on small subset
     // -------------------------------------------------------------------
@@ -538,9 +538,10 @@ int main(int argc, char** argv) {
             }
         }
         fprintf(stderr, "Max relative error: %.4f (over %d bodies)\n", max_rel_err, verify_n);
-        if (errors > verify_n / 4)
+        if (errors > verify_n / 4) {
             fprintf(stderr, "FAIL: %d/%d bodies exceed error threshold\n", errors, verify_n);
-        else
+            verify_ok = false;
+        } else
             fprintf(stderr, "PASS\n");
     }
 
@@ -558,5 +559,5 @@ int main(int argc, char** argv) {
     if (d_tbw) HIP_CHECK(hipFree(d_tbw));
     if (d_tchild) HIP_CHECK(hipFree(d_tchild));
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

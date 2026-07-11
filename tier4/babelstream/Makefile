@@ -1,10 +1,9 @@
-ifndef PLATFORM
-  ifeq ($(shell uname -s),Darwin)
-    PLATFORM := metal
-  else ifneq ($(wildcard /opt/rocm),)
-    PLATFORM := rocm
+PLATFORM ?= auto
+ifeq ($(PLATFORM),auto)
+  ifneq ($(wildcard /opt/rocm),)
+    override PLATFORM := rocm
   else
-    PLATFORM := cuda
+    override PLATFORM := cuda
   endif
 endif
 
@@ -13,19 +12,13 @@ TARGET := babelstream
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := babelstream.cu
-  CUDA_ARCH ?= sm_90
+  CUDA_ARCH ?= native
   CFLAGS := -O3 -arch=$(CUDA_ARCH)
   LIBS   :=
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc
   SRC    := babelstream.hip
   CFLAGS := -O3 -DUSE_HIP
-  LIBS   :=
-else ifeq ($(PLATFORM),metal)
-  CC     := clang++
-  SRC    := babelstream_metal.mm
-  CFLAGS := -O2 -std=c++17 -fobjc-arc \
-            -framework Metal -framework Foundation
   LIBS   :=
 else
   $(error Unknown PLATFORM=$(PLATFORM))

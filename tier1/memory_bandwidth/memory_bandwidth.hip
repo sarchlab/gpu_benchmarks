@@ -9,11 +9,12 @@
  *   - Device-to-Host (D2H)
  *   - Device-to-Device (D2D)
  *
- * Each hipMemcpyAsync is timed with HIP events (device time) and host
- * wall-clock. Warmup copies absorb one-time costs (e.g. MI300A charges a
- * large DMA-registration cost to the first transfer touching a fresh pinned
- * buffer); every timed iteration is then recorded individually, so any
- * residual first-iteration effect stays visible in the data.
+ * Each selected direction is copied EXACTLY ONCE and timed with HIP events
+ * (device time) and host wall-clock; there is no in-program warmup or
+ * iteration loop. When BENCH_PARAM_vector_add_warmup is on (default), a
+ * vector-add warmer runs immediately before the timed copy to boost the GPU
+ * clock and evict the last-level cache, so the copy is measured cold-cache at
+ * a boosted clock. Repetition is the harness's job (gpubench --reps).
  *
  * Usage:
  *   ./memory_bandwidth [buffer_size_mb]
@@ -73,7 +74,7 @@ int main(int argc, char *argv[])
     /* Validate string params against their known sets, so the values echoed
      * into the JSON records are always canonical literals (no escaping
      * needed and no malformed output from arbitrary env content). */
-    const char* transfer_type = "all";
+    const char* transfer_type = "d2d";
     env_val = getenv("BENCH_PARAM_transfer_type");
     if (env_val) transfer_type = env_val;
     if (strcmp(transfer_type, "all") != 0 && strcmp(transfer_type, "h2d") != 0 &&

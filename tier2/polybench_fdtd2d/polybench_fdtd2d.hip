@@ -3,13 +3,21 @@
 // 2D Finite Difference Time Domain electromagnetic simulation.
 // Three field arrays: ex[NX][NY], ey[NX][NY], hz[NX][NY]
 //
-// Per time step update equations (PolyBench standard):
+// Per time step update equations (as implemented here):
 //   ex[0][j]  = 0                                         (boundary)
 //   ex[i][j] += 0.5*(hz[i][j] - hz[i-1][j])  for i >= 1
 //   ey[i][0]  = 0                                         (boundary)
 //   ey[i][j] += 0.5*(hz[i][j] - hz[i][j-1])  for j >= 1
 //   hz[i][j] -= 0.7*(ex[i][j+1]-ex[i][j] + ey[i+1][j]-ey[i][j])
 //                                              for i < NX-1, j < NY-1
+//
+// NOTE: this recurrence diverges from canonical PolyBench FDTD-2D, which
+// computes ey[i][j] -= 0.5*(hz[i][j]-hz[i-1][j]) and
+// ex[i][j] -= 0.5*(hz[i][j]-hz[i][j-1]) and drives the ey[0][j] boundary
+// from a _fict_[t] time source. Here the difference axes of ex/ey are
+// swapped, the E-field updates add rather than subtract, and the boundary
+// rows are zeroed instead of sourced. The memory-access pattern and
+// per-step traffic match the original; the field values do not.
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
@@ -20,13 +28,13 @@
 //   --tmax T        Time steps per benchmark pass   (default: 50)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_size, BENCH_PARAM_tmax, BENCH_PARAM_block_size
+//   BENCH_PARAM_size, BENCH_PARAM_tmax
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
-// kernel (fdtd_update_ex, fdtd_update_ey, fdtd_update_hz) carrying that
-// kernel's accumulated GPU event time and host wall-clock time over the
-// pass's TMAX time steps, then a summary whose total_time_ms is the SUM of
-// all recorded GPU event times. Effective bandwidth is derived downstream
+// Output (stdout): the TMAX-step simulation runs exactly once; one
+// {"type":"kernel",...} JSON line per kernel (fdtd_update_ex,
+// fdtd_update_ey, fdtd_update_hz) carrying that kernel's GPU event time and
+// host wall-clock time accumulated over the TMAX time steps, then a summary
+// whose total_time_ms is the SUM of all recorded GPU event times. Effective bandwidth is derived downstream
 // from time_ms and params.
 
 #include "../../common/bench_timing.h"
@@ -111,15 +119,12 @@ int main(int argc, char** argv) {
 
     int N    = parseIntParam(argc, argv, "--size", 512);
     int TMAX = parseIntParam(argc, argv, "--tmax",  50);
-    int block_size = parseIntParam(argc, argv, "--block_size", 256);
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
     env_val = getenv("BENCH_PARAM_tmax");
     if (env_val) TMAX = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size = atoi(env_val);
 
     int NX = N, NY = N;
     size_t grid_bytes = (size_t)NX * NY * sizeof(float);
@@ -155,19 +160,19 @@ int main(int argc, char** argv) {
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"tmax\":%d,\"block_size\":%d",
-             N, TMAX, block_size);
+             "\"size\":%d,\"tmax\":%d",
+             N, TMAX);
 
-    // Per-kernel accumulators: each pass runs TMAX time steps; the
+    // Per-kernel accumulators: the single pass runs TMAX time steps; the
     // accumulated GPU/host time of a kernel's TMAX launches becomes that
-    // pass's record for the kernel.
+    // kernel's record.
     bench_timer_t timer;
     bench_timer_create(&timer);
     bench_lap_t acc_ex, acc_ey, acc_hz;
 
-    // One full FDTD pass. The kernels update ex/ey/hz IN PLACE across the
-    // TMAX steps, so the pristine fields are re-uploaded (untimed) at the
-    // start of every pass to keep each pass's work identical.
+    // One full FDTD pass (run exactly once). The kernels update ex/ey/hz IN
+    // PLACE across the TMAX steps, so the pristine fields are re-uploaded
+    // (untimed) at the start of the pass to keep every execution identical.
     auto run_fdtd_pass = [&]() {
         bench_lap_reset(&acc_ex);
         bench_lap_reset(&acc_ey);

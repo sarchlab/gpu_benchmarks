@@ -11,9 +11,12 @@
  *   - conflict    : all threads in a warp access the same bank
  *                   (stride-32 between lanes)
  *
- * Each pattern is warmed up, then launched for a number of timed
- * iterations; every timed launch is bracketed with HIP events and
- * recorded individually — no averaging.
+ * Each selected pattern is launched EXACTLY ONCE and timed with HIP events;
+ * there is no in-program warmup or iteration loop. When
+ * BENCH_PARAM_vector_add_warmup is on (default), a vector-add warmer runs
+ * immediately before the timed launch to boost the GPU clock and evict the
+ * last-level cache, so the kernel is measured cold-cache at a boosted clock.
+ * Repetition is the harness's job (gpubench --reps).
  *
  * Usage:
  *   ./shared_mem_bandwidth
@@ -24,9 +27,9 @@
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_access_pattern   ("no_conflict", "conflict", or "both")
  *
- * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
+ * Output: one {"type":"kernel",...} JSON line per selected pattern carrying
  * the GPU event time and host wall-clock time, then a summary whose
- * total_time_ms is the SUM of all iterations' GPU event times across every
+ * total_time_ms is the SUM of the recorded GPU event times across every
  * pattern that ran. Derived metrics (GB/s) are intentionally not computed
  * here — derive them downstream from time and the work-descriptor params.
  */
@@ -48,7 +51,12 @@
 // ---------------------------------------------------------------------------
 
 static const int DEFAULT_BLOCK_SIZE   = 256;
-static const int DEFAULT_NUM_BLOCKS   = 128;
+// Default 1 block = single-SM/CU measurement: shared memory (LDS) is a
+// per-SM resource with no cross-SM interaction, so device peak ≈ per-SM
+// value × SM count (an upper bound — an all-SM load throttles below
+// single-SM boost clock).  Raise BENCH_PARAM_num_blocks (e.g. >= 8 × SM
+// count) for a device-wide run.
+static const int DEFAULT_NUM_BLOCKS   = 1;
 static const int DEFAULT_INNER_ITERS  = 1000;
 static const int SMEM_FLOATS          = 12288;         // 48 KB / 4 bytes
 
@@ -124,9 +132,9 @@ __global__ void smem_bw_conflict(float *d_sink, int inner_iters)
 typedef void (*KernelFn)(float *, int);
 
 /**
- * Run a single access pattern: warmup launches, then per-iteration timed
- * launches, each emitted as its own kernel record. Returns the sum of the
- * timed iterations' GPU event times.
+ * Run a single access pattern: one timed launch (preceded by the cold-cache
+ * clock warmer when enabled), emitted as one kernel record. Returns that
+ * launch's GPU event time.
  */
 static double run_benchmark(const char *kernel_name,
                             KernelFn kernel, float *d_sink,
@@ -168,7 +176,7 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_num_blocks");
     if (env_val) num_blocks = atoi(env_val);
 
-    const char* access_pattern = "both";
+    const char* access_pattern = "no_conflict";
     env_val = getenv("BENCH_PARAM_access_pattern");
     if (env_val) access_pattern = env_val;
 

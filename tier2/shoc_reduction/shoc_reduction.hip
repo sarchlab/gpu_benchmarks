@@ -7,14 +7,13 @@
 // with command-line --flags as fallback.
 //
 // Environment variables:
-//   BENCH_PARAM_size, BENCH_PARAM_block_size,
-//   BENCH_PARAM_precision (one of: float, double, half)
+//   BENCH_PARAM_size, BENCH_PARAM_block_size
 //
-// Output (stdout): per timed pass (one pass = the full multi-level
+// Output (stdout): for the single timed run (the full multi-level
 // reduction), one {"type":"kernel","name":"reduce_kernel",...} JSON line
-// carrying the pass's accumulated GPU event time (time_ms) and host
+// carrying the run's accumulated GPU event time (time_ms) and host
 // wall-clock time (host_time_ms) over all reduce_kernel launches, then a
-// summary whose total_time_ms is the SUM of all recorded GPU event times.
+// summary whose total_time_ms equals that record's GPU event time.
 // Effective bandwidth (GB/s) is derived downstream from time_ms and params.
 // Output (stderr): Human-readable diagnostics
 
@@ -39,16 +38,6 @@ static int parseIntParam(int argc, char** argv, const char* name,
             int v = atoi(argv[i + 1]);
             if (v > 0) return v;
             break;
-        }
-    }
-    return defaultVal;
-}
-
-static const char* parseStrParam(int argc, char** argv, const char* name,
-                                 const char* defaultVal) {
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], name) == 0) {
-            return argv[i + 1];
         }
     }
     return defaultVal;
@@ -157,12 +146,10 @@ int main(int argc, char** argv)
     // Defaults
     int size       = 4194304;
     int block_size = 256;
-    const char* precision = "float";
 
     // Command-line fallback
     size       = parseIntParam(argc, argv, "--size", size);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
-    precision  = parseStrParam(argc, argv, "--precision", precision);
 
     // Environment variable overrides
     const char* env_val;
@@ -170,18 +157,6 @@ int main(int argc, char** argv)
     if (env_val) size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_precision");
-    if (env_val) precision = env_val;
-    // Validate the precision string against the known set — only canonical
-    // literals are ever emitted in the params JSON.
-    if (strcmp(precision, "float") == 0)       precision = "float";
-    else if (strcmp(precision, "double") == 0) precision = "double";
-    else if (strcmp(precision, "half") == 0)   precision = "half";
-    else {
-        fprintf(stderr, "Error: precision must be one of float, double, half "
-                "(got \"%s\")\n", precision);
-        return 1;
-    }
     int N     = size;
     size_t bytesIn = (size_t)N * sizeof(float);
 
@@ -224,13 +199,13 @@ int main(int argc, char** argv)
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
-             size, block_size, precision);
+             "\"size\":%d,\"block_size\":%d",
+             size, block_size);
 
-    // Per-pass accumulator over all reduce_kernel launches in one full
+    // Accumulator over all reduce_kernel launches in the single full
     // multi-level reduction. The input array is never mutated and the
-    // partial/result buffers are fully overwritten each pass, so repeated
-    // passes perform identical work — no state reset is needed.
+    // partial/result buffers are fully overwritten, so every execution
+    // performs identical work — no state reset is needed.
     bench_timer_t timer;
     bench_timer_create(&timer);
     bench_lap_t acc_reduce;

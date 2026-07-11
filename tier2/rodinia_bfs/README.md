@@ -1,9 +1,14 @@
 # tier2/rodinia_bfs — Breadth-First Search (Rodinia BFS)
 
 Iterative BFS on a randomly-generated CSR (Compressed Sparse Row) graph.
-Two GPU kernels are launched per BFS level, iterated until the traversal completes. Measures effective memory bandwidth of irregular graph traversal.
+Two GPU kernels are launched per BFS level, iterated until the traversal
+completes. Measures effective memory bandwidth of irregular graph traversal.
 
-Derived from the [Rodinia benchmark suite](https://rodinia.cs.virginia.edu/) BFS workload.
+Derived from the [Rodinia benchmark suite](https://rodinia.cs.virginia.edu/)
+BFS workload. The kernels follow the Rodinia two-pass structure but are not
+verbatim: this port eliminates the upstream `g_updating_graph_mask` array
+(pass 2 detects newly-discovered nodes from `cost ≥ 0 && !visited` instead)
+and uses `int` masks rather than the original `bool` arrays.
 
 ## Algorithm
 
@@ -18,16 +23,25 @@ Each BFS level executes two kernel passes:
 
 **Pass 2 — bfs_update**: Promote nodes that were just discovered (`cost ≥ 0` but not yet `visited`) into the next frontier and set `visited[v] = 1`.
 
-Both passes are iterated until no new nodes are added to the frontier.
+Both passes are iterated until no new nodes are added to the frontier. The
+benchmark runs **one complete traversal, exactly once**; repetition is the
+harness's job (`gpubench run --reps N`).
+
+## Parameters
+
+| Parameter | Env var | Default | Notes |
+|-----------|---------|---------|-------|
+| `num_nodes` | `BENCH_PARAM_num_nodes` (or `--num_nodes N`) | 65536 | number of graph nodes (scaling axis) |
+| `edges_per_node` | `BENCH_PARAM_edges_per_node` (or `--edges_per_node E`) | 20 | out-degree of each node |
+| `block_size` | `BENCH_PARAM_block_size` (or `--block_size B`) | 256 | GPU thread-block size |
+| `vector_add_warmup` | `BENCH_PARAM_vector_add_warmup` | `true` | cold-cache calibration before the timed traversal |
 
 ## Files
 
 | File | Description |
 |------|-------------|
 | `rodinia_bfs.hip`        | HIP source — BFS kernels + self-contained utilities |
-| `rodinia_bfs.metal`      | Metal compute shaders — `bfs_kernel` and `bfs_update` |
-| `rodinia_bfs_metal.mm`   | ObjC++ Metal host code |
-| `Makefile`               | Auto-detecting build (Darwin→metal, ROCm→rocm, else→cuda) |
+| `Makefile`               | Auto-detecting build (ROCm→rocm, else→cuda) |
 
 ## Build
 
@@ -35,36 +49,35 @@ Both passes are iterated until no new nodes are added to the frontier.
 make               # auto-detect platform
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 ```
 
 ## Run
 
 ```bash
-./rodinia_bfs                                        # defaults: 65536 nodes, 20 edges/node, 20 iters
+./rodinia_bfs                                        # defaults: 65536 nodes, 20 edges/node
 ./rodinia_bfs --num_nodes 131072
-./rodinia_bfs --num_nodes 65536 --edges_per_node 10 --iterations 50
+BENCH_PARAM_num_nodes=65536 BENCH_PARAM_edges_per_node=5 ./rodinia_bfs
 ```
 
 ## Output
 
-**stdout** — CSV timing row:
+**stdout** — JSON lines: one `kernel` record per kernel, carrying that
+kernel's GPU event time accumulated over all BFS levels of the traversal,
+then a `summary` whose `total_time_ms` is the sum of the recorded times:
+
 ```
-kernel_name,problem_size,iterations,avg_ms,min_ms,max_ms,stddev_ms
-rodinia_bfs,65536,20,4.1234,4.0000,4.5000,0.1100
+{"type":"kernel","name":"bfs_kernel","iter":0,"time_ms":...,"host_time_ms":...,"params":{"num_nodes":65536,"edges_per_node":20,"block_size":256}}
+{"type":"kernel","name":"bfs_update","iter":0,"time_ms":...,"host_time_ms":...,"params":{...}}
+{"type":"summary","total_time_ms":...}
 ```
 
-**stderr** — human-readable results:
-```
-Device: Apple M4 Pro
-Nodes: 65536  |  Edges: 1310720  |  Iterations: 20
+Bandwidth / edges-per-second are derived downstream from `time_ms` and the
+params — the benchmark never computes them.
 
-Effective bandwidth: 12.34 GB/s  (avg 4.1234 ms/BFS)
-```
+**stderr** — device info, node/edge counts, and per-kernel timing.
 
 ## Platform Notes
 
 - **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `rodinia_bfs.hip`
-- **Metal**: compiled with `clang++` from `rodinia_bfs_metal.mm`; the Metal shader is loaded at runtime from the same directory as the binary
 - Input data is generated synthetically — no external input files required
 - The benchmark measures traversal bandwidth, not correctness; concurrent cost writes for the same neighbor are benign (all threads write the same value)

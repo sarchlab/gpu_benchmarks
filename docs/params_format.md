@@ -259,9 +259,19 @@ A valid `params.json` must satisfy:
 
 1. `benchmark` matches the directory name
 2. `tier` matches the parent directory (e.g., `tier2/rodinia_hotspot/` → `tier: 2`)
-3. `scaling_param.values` contains at least 10 values (recommended 20–30)
-4. Each non-scaling param has `default` that appears in its `values` list
-5. Each non-scaling param has 3–5 values
-6. All `kernels` entries are unique strings
-7. Parameter names are valid identifiers (`[a-z][a-z0-9_]*`)
-8. No duplicate parameter names across scaling + non-scaling params
+3. Each non-scaling param has `default` that appears in its `values` list
+4. All `kernels` entries are unique strings
+5. Parameter names are valid identifiers (`[a-z][a-z0-9_]*`)
+6. No duplicate parameter names across scaling + non-scaling params
+
+### Value-count guidance (advisory, not enforced as errors)
+
+The value *counts* are empirical rules of thumb, not hard requirements — a benchmark whose
+meaningful range is narrower may declare fewer values:
+
+- `scaling_param.values`: typically 20–30 ordered values, ideally at least 10, spanning
+  cache-resident/under-saturating sizes up to sizes that exceed the last-level cache.
+- Non-scaling params: typically 3–5 values each.
+
+`gpubench validate` reports counts below the guidance as warnings (exit code stays 0);
+everything under "must satisfy" above is an error.

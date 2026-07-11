@@ -3,28 +3,24 @@
 # Supported platforms:
 #   PLATFORM=cuda   — NVIDIA CUDA (default on Linux without ROCm)
 #   PLATFORM=rocm   — AMD ROCm/HIP (default when /opt/rocm exists)
-#   PLATFORM=metal  — Apple Metal (default on Darwin)
 #
-# Note: Apple GPUs do not have native FP64 hardware.  The Metal target
 #       measures FP32 FMA throughput as a proxy.  See README.md for details.
 #
 # Usage:
 #   make                        # auto-detect platform
 #   make PLATFORM=cuda
 #   make PLATFORM=rocm
-#   make PLATFORM=metal
 #   make clean
 
 # ---------------------------------------------------------------------------
 # Auto-detect platform
 # ---------------------------------------------------------------------------
-ifndef PLATFORM
-  ifeq ($(shell uname -s),Darwin)
-    PLATFORM := metal
-  else ifneq ($(wildcard /opt/rocm),)
-    PLATFORM := rocm
+PLATFORM ?= auto
+ifeq ($(PLATFORM),auto)
+  ifneq ($(wildcard /opt/rocm),)
+    override PLATFORM := rocm
   else
-    PLATFORM := cuda
+    override PLATFORM := cuda
   endif
 endif
 
@@ -36,7 +32,7 @@ TARGET := fp64_throughput
 ifeq ($(PLATFORM),cuda)
   CC      := nvcc
   SRC     := fp64_throughput.hip
-  CUDA_ARCH ?= sm_90
+  CUDA_ARCH ?= native
   CFLAGS  := -O3 -std=c++14 -arch=$(CUDA_ARCH) -x cu
 
 else ifeq ($(PLATFORM),rocm)
@@ -44,17 +40,8 @@ else ifeq ($(PLATFORM),rocm)
   SRC     := fp64_throughput.hip
   CFLAGS  := -O3 -std=c++14
 
-else ifeq ($(PLATFORM),metal)
-  CC      := clang++
-  SRC     := fp64_throughput_metal.mm
-  CFLAGS  := -O2 -std=c++14 \
-             -framework Metal \
-             -framework Foundation \
-             -framework MetalKit \
-             -fobjc-arc
-
 else
-  $(error Unknown PLATFORM=$(PLATFORM). Use cuda, rocm, or metal.)
+  $(error Unknown PLATFORM=$(PLATFORM). Use cuda or rocm.)
 endif
 
 # ---------------------------------------------------------------------------

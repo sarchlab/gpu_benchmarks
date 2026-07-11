@@ -2,7 +2,7 @@
 
 Faithful port of the Rodinia PathFinder benchmark: the device kernel
 (`dynproc_kernel`) and the host launch geometry are the **original** Rodinia 3.1
-CUDA source; only the outer driver loop is restructured for per-iteration timing.
+CUDA source; only the outer driver loop is restructured for single-pass timing.
 
 ## Algorithm
 
@@ -21,12 +21,13 @@ writing back, using a border (halo) of `pyramid_height` columns so neighbouring
 blocks stay consistent. A block computes a non-overlapping "small block" of
 `BLOCK_SIZE − 2·pyramid_height` columns per launch.
 
-One **recorded pass** is a full top-to-bottom traversal of all `ROWS`, driven by
-the original `calc_path` loop (`for t = 0; t < rows-1; t += pyramid_height`).
-Every pyramidal launch within the pass is timed and accumulated into a single
-`dynproc_kernel` record. With the defaults (`rows=100`, `pyramid_height=20`)
-there are `ceil((100-1)/20) = 5` launches per pass; the last advances
-`min(20, rows-t-1)` rows.
+The benchmark runs one full top-to-bottom traversal of all `ROWS` — **exactly
+once** — driven by the original `calc_path` loop
+(`for t = 0; t < rows-1; t += pyramid_height`). Every pyramidal launch is
+timed and accumulated into a single `dynproc_kernel` record. With the defaults
+(`rows=100`, `pyramid_height=20`) there are `ceil((100-1)/20) = 5` launches;
+the last advances `min(20, rows-t-1)` rows. Repetition is the harness's job
+(`gpubench run --reps N`).
 
 ## Default problem size
 
@@ -35,8 +36,7 @@ there are `ceil((100-1)/20) = 5` launches per pass; the last advances
 | `--cols` / `BENCH_PARAM_cols` | 100000 | matches the original standard run |
 | `--rows` / `BENCH_PARAM_rows` | 100 | wide/short grid, as in the original run |
 | `--pyramid_height` / `BENCH_PARAM_pyramid_height` | 20 | as in the original run |
-| `BENCH_PARAM_warmup` | 3 | warmup passes (untimed) |
-| `BENCH_PARAM_iteration` | 7 | timed passes, each recorded |
+| `BENCH_PARAM_vector_add_warmup` | `true` | cold-cache calibration before the timed traversal |
 
 `BLOCK_SIZE` is a fixed compile-time `256` in the original kernel; the emitted
 `block_size` descriptor reflects that fixed value. `pyramid_height` must be
@@ -47,8 +47,6 @@ there are `ceil((100-1)/20) = 5` launches per pass; the last advances
 | File | Description |
 |------|-------------|
 | `rodinia_pathfinder.hip` | HIP/CUDA implementation (faithful kernel + host driver) |
-| `rodinia_pathfinder.metal` | Metal compute shader (Apple) |
-| `rodinia_pathfinder_metal.mm` | ObjC++ Metal host (Apple) |
 | `Makefile` | Platform auto-detect build system |
 | `README.md` | This file |
 
@@ -58,7 +56,6 @@ there are `ceil((100-1)/20) = 5` launches per pass; the last advances
 make                  # auto-detect platform
 make PLATFORM=cuda    # NVIDIA CUDA
 make PLATFORM=rocm    # AMD ROCm/HIP
-make PLATFORM=metal   # Apple Metal
 make clean
 ```
 
@@ -70,24 +67,23 @@ make clean
 
 ## Output
 
-**stdout** — JSON lines: one `kernel` record per timed pass (the GPU event time
-is the sum of all pyramidal launches in that pass), then a `summary` whose
-`total_time_ms` is the sum of all recorded GPU event times:
+**stdout** — JSON lines: one `kernel` record (the GPU event time
+is the sum of all pyramidal launches in the traversal), then a `summary` whose
+`total_time_ms` is the recorded GPU event time:
 
 ```
 {"type":"kernel","name":"dynproc_kernel","iter":0,"time_ms":...,"host_time_ms":...,"params":{"cols":100000,"rows":100,"pyramid_height":20,"block_size":256}}
-...
 {"type":"summary","total_time_ms":...}
 ```
 
-**stderr** — device name, pyramid geometry, per-pass timing, and verification
-against a CPU dynamic-programming reference over the full grid.
+**stderr** — device name, pyramid geometry, timing, and verification against a
+CPU dynamic-programming reference over the full grid. On verification FAIL the
+benchmark exits with a non-zero status.
 
 ## Data reset
 
-`gpuWall` (the cost grid) is immutable and uploaded once. Each pass re-seeds the
-row-0 cost vector `gpuResult[0]` (untimed) so every recorded pass traverses the
-identical grid.
+`gpuWall` (the cost grid) is immutable and uploaded once. The row-0 cost vector
+`gpuResult[0]` is seeded (untimed) before the timed traversal.
 
 ## References
 

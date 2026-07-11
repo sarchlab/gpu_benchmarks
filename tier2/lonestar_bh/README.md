@@ -21,7 +21,13 @@ This is a simplified 2D Barnes-Hut implementation:
    if `(node_width / distance) < θ`, the node's center-of-mass approximation
    is used; otherwise, the node's children are opened.
 3. **Integration (GPU):** Update velocities and positions using Euler integration.
-4. **Repeat** for 10 timesteps (tree is rebuilt on CPU each step).
+4. **Repeat** for 10 timesteps.
+
+Note that the quadtree is built **on the CPU** at every timestep (and the
+flattened tree re-uploaded to the device); only the force calculation and the
+Euler integration run on the GPU, and only those two kernels are timed. The
+simulation runs exactly once per execution; repetition across fresh processes
+is the harness's job (`gpubench run --reps N`).
 
 ### Parameters
 
@@ -30,23 +36,20 @@ This is a simplified 2D Barnes-Hut implementation:
 | `--bodies`   | 32768   | Number of bodies                |
 | `--timesteps`| 10      | Simulation timesteps per run    |
 | `--theta`    | 0.5     | Opening angle for BH criterion  |
-| `--iterations`| 5      | Legacy parameter (echoed in params; pass count comes from `BENCH_PARAM_iteration`) |
 
 Environment variables (`BENCH_PARAM_bodies`, `BENCH_PARAM_timesteps`,
-`BENCH_PARAM_theta`, `BENCH_PARAM_iterations`) override the CLI flags, plus:
+`BENCH_PARAM_theta`) override the CLI flags, plus:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BENCH_PARAM_warmup` | 3 | Untimed warmup passes |
-| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded individually |
+| `BENCH_PARAM_vector_add_warmup` | true | Cold-cache calibration: boost the clock and evict the LLC before the timed run; set `false` to time as-is |
 
 ## Build
 
 ```bash
-make                    # auto-detect (Metal on macOS)
+make                    # auto-detect platform
 make PLATFORM=cuda      # NVIDIA CUDA
 make PLATFORM=rocm      # AMD ROCm
-make PLATFORM=metal     # Apple Metal
 ```
 
 ## Run
@@ -58,20 +61,20 @@ make PLATFORM=metal     # Apple Metal
 
 ## Output
 
-**JSON lines (stdout):** per timed pass, one `{"type":"kernel",...}` record per
-kernel (`bh_force_kernel`, `integrate_kernel`) with that pass's accumulated GPU
-event time (`time_ms`, summed over the timesteps) and host wall-clock time
-(`host_time_ms`), followed by a `{"type":"summary","total_time_ms":...}` line
-whose value is the sum of all recorded GPU event times. Derived metrics
+**JSON lines (stdout):** for the single timed run, one `{"type":"kernel",...}`
+record per kernel (`bh_force_kernel`, `integrate_kernel`) with that kernel's
+accumulated GPU event time (`time_ms`, summed over the timesteps) and host
+wall-clock time (`host_time_ms`), followed by a
+`{"type":"summary","total_time_ms":...}` line whose value is the sum of all
+recorded GPU event times. Derived metrics
 (GFLOPS) are computed downstream from `time_ms` and the params.
 
 **Human-readable (stderr):**
 ```
-Device: Apple M2
-Barnes-Hut N-body  |  Bodies: 32768  |  Theta: 0.50  |  Timesteps: 10  |  Iterations: 3 warmup + 7 timed
-pass 0: bh_force gpu = 42.123 ms, integrate gpu = 0.456 ms
-...
-Total GPU time: 300.123 ms over 7 passes
+Device: AMD Radeon RX 7900 XTX (id=0)
+Barnes-Hut N-body  |  Bodies: 32768  |  Theta: 0.50  |  Timesteps: 10
+bh_force gpu = 42.123 ms, integrate gpu = 0.456 ms
+Total GPU time: 42.579 ms
 Max relative error: 0.1234 (over 64 bodies)
 PASS
 ```
@@ -81,6 +84,7 @@ PASS
 Forces computed by the BH approximation are compared against direct O(N²)
 computation on a subset of 64 bodies. Since BH is an approximation, a relative
 error threshold of 50% is used (typical BH error with θ=0.5 is ~10-30%).
+On FAIL the binary exits with a non-zero status.
 
 ## References
 

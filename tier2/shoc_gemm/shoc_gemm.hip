@@ -4,13 +4,13 @@
 //
 // Parameters are read from BENCH_PARAM_* environment variables,
 // with command-line --flags as fallback:
-//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_size
 //
-// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
-// carrying the GPU event time (time_ms) and host wall-clock time
-// (host_time_ms), then a summary whose total_time_ms is the SUM of all
-// iterations' GPU event times. GFLOPS (2*N^3 / time) is derived downstream
-// from time_ms and params.
+// Output (stdout): one {"type":"kernel",...} JSON line for the single timed
+// launch carrying the GPU event time (time_ms) and host wall-clock time
+// (host_time_ms), then a summary whose total_time_ms equals that record's
+// GPU event time. GFLOPS (2*N^3 / time) is derived downstream from time_ms
+// and params.
 // Output (stderr): Human-readable diagnostics
 
 #include "../../common/bench_timing.h"
@@ -27,16 +27,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
             int v = atoi(argv[i + 1]);
             if (v > 0) return v;
             break;
-        }
-    }
-    return defaultVal;
-}
-
-static const char* parseStrParam(int argc, char** argv, const char* name,
-                                 const char* defaultVal) {
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], name) == 0) {
-            return argv[i + 1];
         }
     }
     return defaultVal;
@@ -105,30 +95,15 @@ int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     // Defaults
-    int size       = 512;
-    int block_size = 16;
-    const char* precision = "float";
+    int size = 512;
 
     // Command-line fallback
-    size       = parseIntParam(argc, argv, "--size", size);
-    block_size = parseIntParam(argc, argv, "--block_size", block_size);
-    precision  = parseStrParam(argc, argv, "--precision", precision);
+    size = parseIntParam(argc, argv, "--size", size);
 
     // Environment variable overrides
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_precision");
-    if (env_val) precision = env_val;
-    // Validate string params against their known sets so the values echoed
-    // into the JSON records are always canonical literals.
-    if (strcmp(precision, "float") != 0 && strcmp(precision, "double") != 0 &&
-        strcmp(precision, "half") != 0) {
-        fprintf(stderr, "Invalid precision '%s' (use float, double, half)\n", precision);
-        return 1;
-    }
 
     int M = size, N = size, K = size;
     float alpha = 1.0f, beta = 0.0f;
@@ -174,13 +149,12 @@ int main(int argc, char** argv) {
     dim3 grid((N + TILE_SIZE - 1) / TILE_SIZE, (M + TILE_SIZE - 1) / TILE_SIZE);
 
     char params[160];
-    snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
-             size, block_size, precision);
+    snprintf(params, sizeof(params), "\"size\":%d", size);
 
-    // Warmup + timed iterations, each recorded individually. With beta = 0
-    // the kernel fully overwrites C each launch (the beta*C term is zero),
-    // so repeated launches perform identical work — no reset needed.
+    // Single timed launch (bench_run_once: optional cold-cache warmer, then
+    // one bracketed launch). With beta = 0 the kernel fully overwrites C
+    // (the beta*C term is zero), so every execution performs identical work
+    // — no reset needed.
     double total_gpu_ms =
         bench_run_once("gemm_kernel", params, [&]() {
             gemm_kernel<<<grid, block>>>(d_A, d_B, d_C, M, N, K, alpha, beta);
@@ -190,6 +164,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Verify correctness (only for small sizes)
+    bool verify_ok = true;
     if (size <= 512) {
         HIP_CHECK(hipMemcpy(h_C, d_C, bytesC, hipMemcpyDeviceToHost));
         gemm_cpu(h_A, h_B, h_ref, M, N, K, alpha, beta);
@@ -207,6 +182,7 @@ int main(int argc, char** argv) {
         }
         if (errors > 0) {
             fprintf(stderr, "FAIL: %d errors\n", errors);
+            verify_ok = false;
         } else {
             fprintf(stderr, "PASS\n");
         }
@@ -222,5 +198,5 @@ int main(int argc, char** argv) {
     free(h_C);
     free(h_ref);
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

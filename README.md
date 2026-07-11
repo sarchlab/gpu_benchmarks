@@ -18,7 +18,7 @@ The suite is designed to cover the widest possible diversity of GPU compute and 
 
 ## Overview
 
-This suite contains **130 benchmarks across five tiers** of increasing complexity and scope, allowing researchers and engineers to evaluate GPU hardware and software stacks at every level — from raw memory bandwidth to end-to-end ML training throughput.
+This suite contains **126 benchmarks across five tiers** of increasing complexity and scope, allowing researchers and engineers to evaluate GPU hardware and software stacks at every level — from raw memory bandwidth to end-to-end ML training throughput.
 
 ---
 
@@ -42,10 +42,10 @@ The rules split cleanly by implementation language: everything that matters when
 
 4. **One measurement per execution.** A benchmark binary executes its operation **exactly once** and times it — no in-program warmup or iteration loop. The single run is the **full algorithm**: an iterative benchmark still runs its complete algorithm (BFS its whole traversal, k-means its whole `max_iter` refinement, a stencil all its timesteps) — "once" means the algorithm is not *repeated*, not that it is truncated.
 
-5. **Cold cache, warm clock.** Immediately before the timed operation, the benchmark runs a single **vector-add warmer** — a grid-stride read-modify-write kernel over a scratch buffer **larger than the last-level cache** (768 MB, above the MI300X 256 MB Infinity/MALL cache and far above any NVIDIA L2):
+5. **Cold cache, warm clock.** Immediately before the timed operation, the benchmark runs the **vector-add warmer** — a grid-stride read-modify-write kernel over a scratch buffer **larger than the last-level cache** (768 MB, above the MI300X 256 MB Infinity/MALL cache and far above any NVIDIA L2), repeated until **~100 ms of sustained load** has executed (one pass is only ~0.5–5 ms, far below the tens of milliseconds DVFS needs to ramp the clock from idle):
 
    - Its sustained ALU + memory traffic **boosts the clock** up from idle.
-   - One pass over the >LLC buffer **evicts the benchmark's working set** from the last-level cache; because the warmer touches *different data with a different kernel*, it never warms the benchmark's own buffers.
+   - The final pass over the >LLC buffer **evicts the benchmark's working set** from the last-level cache; because the warmer touches *different data with a different kernel*, it never warms the benchmark's own buffers.
 
    The timed operation therefore starts cold-cache at a boosted clock. (There is no vendor cache-flush API — NVIDIA exposes only `cudaCtxResetPersistingL2Cache` and AMD flushes at dispatch coherence boundaries — so the over-sized-buffer eviction is the portable idiom.) The warmer is controlled by one measurement parameter, read by the benchmark from its environment:
 
@@ -69,9 +69,9 @@ Each benchmark declares its parameters in `params.json`; the sweep is structured
 
 1. **Exactly one scaling parameter per benchmark.** It is the single axis that controls *how much* work the benchmark does (matrix dimension, array bytes, node count, …). It is chosen so performance is a predictable function of it (linear, polynomial, or exponential) — sweeping it traces the benchmark's performance curve.
 
-2. **Scaling values span the interesting range densely.** 20–30 ordered values (at least 10), from sizes small enough to be cache-resident / under-saturate the device up to sizes that far exceed the last-level cache / fully saturate it — so the sweep crosses the hardware's capacity boundaries rather than sampling one regime. Both aligned (power-of-two) and non-aligned sizes are worth including. No device-specific ceiling is assumed (a size that saturates one GPU may not saturate another); the practical upper bound is the harness timeout per run.
+2. **Scaling values span the interesting range densely.** Typically 20–30 ordered values (ideally at least 10), from sizes small enough to be cache-resident / under-saturate the device up to sizes that far exceed the last-level cache / fully saturate it — so the sweep crosses the hardware's capacity boundaries rather than sampling one regime. Both aligned (power-of-two) and non-aligned sizes are worth including. No device-specific ceiling is assumed (a size that saturates one GPU may not saturate another); the practical upper bound is the harness timeout per run. The value counts here and in rule 3 are empirical guidance, not hard requirements — a benchmark whose meaningful range is narrower may declare fewer values (`gpubench validate` flags shortfalls as warnings, not errors).
 
-3. **Non-scaling parameters change *how* the work is done, not how much.** Block size, mode, precision, algorithm variant — each with 3–5 values and a required default. By default the harness sweeps their cartesian product; `--sweep-non-scaling=false` pins them to defaults.
+3. **Non-scaling parameters change *how* the work is done, not how much.** Block size, mode, precision, algorithm variant — typically 3–5 values each, with a required default. By default the harness sweeps their cartesian product; `--sweep-non-scaling=false` pins them to defaults.
 
 4. **Every swept value must matter and must work.** Each value changes execution (no placeholder values whose runs would be identical), and every combination respects the benchmark's intrinsic constraints so it runs correctly — a value list that silently produces broken or duplicate runs is a bug in `params.json`.
 
@@ -109,7 +109,7 @@ Each benchmark declares its parameters in `params.json`; the sweep is structured
 gpu_benchmarks/
 ├── Makefile                        # Root build file
 ├── README.md                       # This file
-├── tier1/                          # Microbenchmarks (12)
+├── tier1/                          # Microbenchmarks (14)
 │   ├── Makefile
 │   ├── memory_bandwidth/
 │   ├── fp32_throughput/
@@ -117,13 +117,15 @@ gpu_benchmarks/
 │   ├── fp16_throughput/
 │   ├── int32_throughput/
 │   ├── cache_latency/
+│   ├── cache_bandwidth/
 │   ├── pcie_bandwidth/
 │   ├── tensor_core_throughput/
 │   ├── mixbench/
 │   ├── shared_mem_bandwidth/
 │   ├── atomic_operations/
-│   └── warp_shuffle/
-├── tier2/                          # Application benchmarks (64)
+│   ├── warp_shuffle/
+│   └── empty_kernel/
+├── tier2/                          # Application benchmarks (63)
 │   ├── Makefile
 │   ├── shoc_devicememory/
 │   ├── shoc_fft/
@@ -248,10 +250,8 @@ gpu_benchmarks/
 └── docs/                          # Detailed specifications
     ├── cli_design.md
     ├── output_protocol.md
-    ├── parameter_selection.md
     ├── params_format.md
-    ├── result_sharing.md
-    └── schema.sql
+    └── result_sharing.md
 ```
 
 ---
@@ -261,17 +261,19 @@ gpu_benchmarks/
 | Benchmark | Metric | Description |
 |-----------|--------|-------------|
 | `memory_bandwidth` | GB/s | Global memory bandwidth (H2D, D2H, D2D) |
-| `fp32_throughput` | GFLOPS | Single-precision FP32 FMA throughput |
-| `fp64_throughput` | GFLOPS | Double-precision FP64 FMA throughput |
-| `fp16_throughput` | GFLOPS | Half-precision FP16 FMA throughput |
-| `int32_throughput` | GIOPS | Integer INT32 multiply-add throughput |
+| `fp32_throughput` | GFLOPS | Single-precision FP32 FMA throughput (single SM/CU) |
+| `fp64_throughput` | GFLOPS | Double-precision FP64 FMA throughput (single SM/CU) |
+| `fp16_throughput` | GFLOPS | Half-precision FP16 FMA throughput (single SM/CU) |
+| `int32_throughput` | GIOPS | Integer INT32 multiply-add throughput (single SM/CU) |
 | `cache_latency` | ns | L1/L2/global cache latency via pointer-chasing |
 | `pcie_bandwidth` | GB/s | PCIe/Thunderbolt host-device transfer bandwidth |
 | `tensor_core_throughput` | TFLOPS | Tensor core / matrix FMA throughput |
 | `mixbench` | GFLOPS/GB/s | Compute-memory roofline sweep |
-| `shared_mem_bandwidth` | GB/s | Shared/threadgroup memory bandwidth |
+| `shared_mem_bandwidth` | GB/s | Shared/threadgroup memory bandwidth (single SM/CU) |
 | `atomic_operations` | Gops/s | Atomic operation throughput (Add/CAS/Min) |
-| `warp_shuffle` | GB/s | Warp/SIMD shuffle throughput |
+| `warp_shuffle` | Gops/s | Warp/SIMD shuffle issue rate (single SM/CU, dependent chain) |
+| `cache_bandwidth` | GB/s | Cache-hierarchy bandwidth vs working-set size (shared/private modes) |
+| `empty_kernel` | µs | Kernel dispatch time and launch/sync overhead (single empty launch) |
 
 ---
 
@@ -420,9 +422,8 @@ gpu_benchmarks/
 ### Prerequisites
 
 - GNU Make ≥ 3.81
-- **NVIDIA (CUDA):** CUDA Toolkit ≥ 11.0 (with `nvcc`) and a C++17-capable host compiler
+- **NVIDIA (CUDA):** CUDA Toolkit ≥ 11.6 (with `nvcc`) and a C++17-capable host compiler. Builds default to `-arch=native` (the GPU present at compile time); override with `make CUDA_ARCH=sm_80` when cross-compiling or building on a GPU-less node.
 - **AMD (ROCm):** ROCm ≥ 5.0 (with `hipcc`) installed at `/opt/rocm`
-- **Apple (Metal):** Xcode ≥ 14 with Metal and MetalPerformanceShaders frameworks
 
 ### Platform Detection
 
@@ -430,7 +431,6 @@ The build system auto-detects the platform at build time:
 
 | Condition | Platform selected |
 |-----------|------------------|
-| Running on macOS (`uname == Darwin`) | `metal` |
 | `/opt/rocm/bin/hipcc` exists | `rocm` |
 | Otherwise | `cuda` |
 
@@ -449,7 +449,6 @@ make
 # Build with explicit platform
 make PLATFORM=cuda    # NVIDIA GPU
 make PLATFORM=rocm    # AMD GPU
-make PLATFORM=metal   # Apple GPU
 
 # Build only a specific tier
 make tier1
@@ -606,12 +605,8 @@ BENCH_PARAM_matrix_size=1024 BENCH_PARAM_block_size=16 ./benchmark
 
 - [`docs/cli_design.md`](docs/cli_design.md) — Full CLI command reference
 - [`docs/output_protocol.md`](docs/output_protocol.md) — JSON-lines output protocol specification
-- [`docs/parameter_selection.md`](docs/parameter_selection.md) — Consolidated default parameter selections for all benchmarks
 - [`docs/params_format.md`](docs/params_format.md) — `params.json` format specification
 - [`docs/result_sharing.md`](docs/result_sharing.md) — Result export guide (JSON format spec)
-- [`docs/schema.sql`](docs/schema.sql) — SQLite results database schema
-- [`spec.md`](spec.md) — Project specification
-- [`roadmap.md`](roadmap.md) — Development roadmap and milestones
 - [`benchmark_report.md`](benchmark_report.md) — Research report: benchmark selection and rationale
 
 ---

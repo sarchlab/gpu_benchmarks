@@ -6,7 +6,7 @@ Computes **y = Aᵀ · (A · x)** where A is an NX×NY matrix and x, y are NY-ve
 
 ## Algorithm
 
-Two GPU kernels are executed per iteration:
+The ATAX pass runs exactly once per execution, launching two GPU kernels:
 
 1. **atax_kernel1** — `tmp = A · x`  
    Each thread computes one row: `tmp[i] = Σⱼ A[i,j] * x[j]`
@@ -16,7 +16,7 @@ Two GPU kernels are executed per iteration:
 
 ## Metric
 
-**GB/s** (memory bandwidth) — matrix A is read twice per pass (once per kernel):
+**GB/s** (memory bandwidth) — matrix A is read twice (once per kernel):
 
 ```
 GB/s = (2 * NX * NY * 4 bytes) / time_s / 1e9
@@ -26,27 +26,29 @@ Derived downstream from the emitted `time_ms` and params; not reported by the bi
 
 ## Output
 
-**stdout** — JSON lines: per timed pass, one `kernel` record per kernel
+**stdout** — JSON lines: one `kernel` record per kernel
 (`atax_kernel1`, `atax_kernel2`) with GPU event time and host time, then a
-`summary` whose `total_time_ms` is the sum of all recorded GPU event times:
+`summary` whose `total_time_ms` is the sum of the two GPU event times:
 
 ```
 {"type":"kernel","name":"atax_kernel1","iter":0,"time_ms":1.234000,"host_time_ms":1.290000,"params":{"nx":4096,"ny":4096,"block_size":256}}
 {"type":"kernel","name":"atax_kernel2","iter":0,"time_ms":2.345000,"host_time_ms":2.401000,"params":{"nx":4096,"ny":4096,"block_size":256}}
-...
-{"type":"summary","total_time_ms":25.053000}
+{"type":"summary","total_time_ms":3.579000}
 ```
+
+**stderr** — device info, per-kernel timing, and a correctness check: the
+first 8 elements of `y` are compared against a CPU reference. On mismatch
+the check prints `FAIL` and the process exits with a non-zero status.
 
 ## Build
 
 ```bash
-# Auto-detect platform (Darwin → metal, /opt/rocm exists → rocm, else → cuda)
+# Auto-detect platform (/opt/rocm exists → rocm, else → cuda)
 make
 
 # Explicit platform
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 ```
 
 ## Run
@@ -57,10 +59,10 @@ make PLATFORM=metal
 
 # Custom size
 ./polybench_atax --nx 2048 --ny 2048
-
-# More recorded passes
-BENCH_PARAM_iteration=10 ./polybench_atax
 ```
+
+The pass runs exactly once per execution; repetition is the harness's job
+(`gpubench run --reps N`).
 
 ## Parameters
 
@@ -69,8 +71,7 @@ BENCH_PARAM_iteration=10 ./polybench_atax
 | `--nx NX` / `BENCH_PARAM_nx` | 4096 | Number of matrix rows |
 | `--ny NY` / `BENCH_PARAM_ny` | 4096 | Number of matrix columns |
 | `BENCH_PARAM_block_size` | 256 | Threads per block |
-| `BENCH_PARAM_warmup` | 3 | Warmup passes (untimed) |
-| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded |
+| `BENCH_PARAM_vector_add_warmup` | true | Vector-add warmer (clock boost + LLC eviction) before the timed pass |
 
 ## Platform Notes
 
@@ -80,12 +81,6 @@ BENCH_PARAM_iteration=10 ./polybench_atax
 - Block size: 256 threads  
 - Grid: `ceil(NX/256)` for kernel1, `ceil(NY/256)` for kernel2  
 - Requires: `nvcc` (CUDA) or `hipcc` (ROCm)
-
-### Metal (Apple Silicon / macOS)
-
-- Source: `polybench_atax_metal.mm` + `polybench_atax.metal`  
-- The `.metal` shader file must be in the same directory as the binary at runtime  
-- Requires: macOS with Metal support, Xcode command-line tools
 
 ## Reference
 

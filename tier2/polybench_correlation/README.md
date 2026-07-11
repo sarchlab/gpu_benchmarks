@@ -2,7 +2,7 @@
 
 Computes the **correlation matrix** from a data matrix of **M samples × N features** (M = N). The computation involves four GPU kernels executed in sequence: column means, column standard deviations, data normalization, and the correlation matrix itself (a transposed matrix multiply on the normalized data).
 
-Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/).
+Modeled on the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) CORR workload: the same four-stage structure (mean, stddev, normalize, correlation), but the kernels are a reimplementation — notably the correlation stage is a generic tiled shared-memory matrix multiply rather than the upstream kernel.
 
 ## Algorithm
 
@@ -18,9 +18,7 @@ The correlation kernel uses tiled shared-memory multiplication (16×16 tiles).
 | File | Description |
 |------|-------------|
 | `polybench_correlation.hip` | HIP/ROCm implementation |
-| `polybench_correlation_metal.mm` | ObjC++ Metal host code |
-| `polybench_correlation.metal` | Metal compute shaders (4 kernels) |
-| `Makefile` | Auto-detecting build (Darwin→metal, ROCm→rocm, else→cuda) |
+| `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
 | `params.json` | Parameter specification |
 
 ## Build
@@ -29,7 +27,6 @@ The correlation kernel uses tiled shared-memory multiplication (16×16 tiles).
 make               # auto-detect platform
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 ```
 
 ## Run
@@ -44,22 +41,25 @@ Additional environment variables:
 
 | Env var | Default | Description |
 |---------|---------|-------------|
-| `BENCH_PARAM_warmup` | 3 | Warmup passes (untimed) |
-| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded |
+| `BENCH_PARAM_vector_add_warmup` | true | Vector-add warmer (clock boost + LLC eviction) before the timed pass |
+
+The four-kernel pass runs exactly once per execution; repetition is the
+harness's job (`gpubench run --reps N`). Because `normalize_kernel` mutates
+the data matrix in place, the pristine input is re-uploaded (untimed) at the
+start of the pass.
 
 ## Output
 
-**stdout** — JSON-lines. Per timed pass, one record per kernel carrying the
+**stdout** — JSON-lines. One record per kernel carrying the
 GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`), then a
-summary whose `total_time_ms` is the sum of all recorded GPU event times
+summary whose `total_time_ms` is the sum of the four recorded GPU event times
 (no metrics array; derived metrics are computed downstream):
 ```json
-{"type":"kernel","name":"mean_kernel","iter":0,"time_ms":0.123456,"host_time_ms":0.140000,"params":{"size":1024,"block_size":256,"precision":"float"}}
-{"type":"kernel","name":"stddev_kernel","iter":0,"time_ms":0.234567,"host_time_ms":0.250000,"params":{"size":1024,"block_size":256,"precision":"float"}}
-{"type":"kernel","name":"normalize_kernel","iter":0,"time_ms":0.345678,"host_time_ms":0.360000,"params":{"size":1024,"block_size":256,"precision":"float"}}
-{"type":"kernel","name":"correlation_kernel","iter":0,"time_ms":1.456789,"host_time_ms":1.480000,"params":{"size":1024,"block_size":256,"precision":"float"}}
-...
-{"type":"summary","total_time_ms":15.123430}
+{"type":"kernel","name":"mean_kernel","iter":0,"time_ms":0.123456,"host_time_ms":0.140000,"params":{"size":1024,"block_size":256}}
+{"type":"kernel","name":"stddev_kernel","iter":0,"time_ms":0.234567,"host_time_ms":0.250000,"params":{"size":1024,"block_size":256}}
+{"type":"kernel","name":"normalize_kernel","iter":0,"time_ms":0.345678,"host_time_ms":0.360000,"params":{"size":1024,"block_size":256}}
+{"type":"kernel","name":"correlation_kernel","iter":0,"time_ms":1.456789,"host_time_ms":1.480000,"params":{"size":1024,"block_size":256}}
+{"type":"summary","total_time_ms":2.160490}
 ```
 
 **stderr** — human-readable:
@@ -67,13 +67,11 @@ summary whose `total_time_ms` is the sum of all recorded GPU event times
 Device: NVIDIA GeForce RTX 4090 (id=0)
 Data matrix: 1024x1024
 
-pass 0: mean=0.1235  stddev=0.2346  normalize=0.3457  correlation=1.4568 (gpu ms)
-...
-Total GPU time: 15.123 ms over 7 passes
+mean=0.1235  stddev=0.2346  normalize=0.3457  correlation=1.4568 (gpu ms)
+Total GPU time: 2.160 ms
 ```
 
 ## Platform Notes
 
-- **CUDA/ROCm**: compiled with `nvcc`/`hipcc`; 4 separate kernel launches per iteration
-- **Metal**: compiled with `clang++`; the Metal shader (`polybench_correlation.metal`) is loaded at runtime from the same directory as the binary
-- The correlation kernel uses 16×16 tiled shared-memory (threadgroup memory on Metal) to compute `data^T * data`
+- **CUDA/ROCm**: compiled with `nvcc`/`hipcc`; 4 separate kernel launches per execution
+- The correlation kernel uses 16×16 tiled shared-memory to compute `data^T * data`

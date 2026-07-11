@@ -3,25 +3,22 @@
 # Supported platforms:
 #   PLATFORM=cuda   — NVIDIA CUDA  (default on Linux without ROCm)
 #   PLATFORM=rocm   — AMD ROCm/HIP (default when /opt/rocm exists)
-#   PLATFORM=metal  — Apple Metal  (default on Darwin)
 #
 # Usage:
 #   make                   # auto-detect platform
 #   make PLATFORM=cuda
 #   make PLATFORM=rocm
-#   make PLATFORM=metal
 #   make clean
 
 # ---------------------------------------------------------------------------
 # Auto-detect platform
 # ---------------------------------------------------------------------------
-ifndef PLATFORM
-  ifeq ($(shell uname -s),Darwin)
-    PLATFORM := metal
-  else ifneq ($(wildcard /opt/rocm),)
-    PLATFORM := rocm
+PLATFORM ?= auto
+ifeq ($(PLATFORM),auto)
+  ifneq ($(wildcard /opt/rocm),)
+    override PLATFORM := rocm
   else
-    PLATFORM := cuda
+    override PLATFORM := cuda
   endif
 endif
 
@@ -33,7 +30,7 @@ TARGET := polybench_correlation
 ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := polybench_correlation.hip
-  CUDA_ARCH ?= sm_90
+  CUDA_ARCH ?= native
   CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH) -x cu
 
 else ifeq ($(PLATFORM),rocm)
@@ -41,17 +38,8 @@ else ifeq ($(PLATFORM),rocm)
   SRC    := polybench_correlation.hip
   CFLAGS := -O3 -std=c++14
 
-else ifeq ($(PLATFORM),metal)
-  CC     := clang++
-  SRC    := polybench_correlation_metal.mm
-  CFLAGS := -O2 -std=c++14 \
-             -framework Metal \
-             -framework Foundation \
-             -framework MetalKit \
-             -fobjc-arc
-
 else
-  $(error Unknown PLATFORM=$(PLATFORM). Use cuda, rocm, or metal.)
+  $(error Unknown PLATFORM=$(PLATFORM). Use cuda or rocm.)
 endif
 
 # ---------------------------------------------------------------------------

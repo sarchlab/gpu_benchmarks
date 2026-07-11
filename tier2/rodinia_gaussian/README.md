@@ -28,9 +28,7 @@ The matrix `A` is initialized as diagonally dominant (`A_ii = N`, `A_ij ~ Unifor
 | File | Description |
 |------|-------------|
 | `rodinia_gaussian.hip` | HIP/CUDA source — fan1 + fan2 kernels, self-contained |
-| `rodinia_gaussian.metal` | Metal compute shaders — fan1_kernel + fan2_kernel |
-| `rodinia_gaussian_metal.mm` | ObjC++ Metal host code |
-| `Makefile` | Auto-detecting build (Darwin→metal, ROCm→rocm, else→cuda) |
+| `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
 
 ## Build
 
@@ -38,7 +36,6 @@ The matrix `A` is initialized as diagonally dominant (`A_ii = N`, `A_ij ~ Unifor
 make               # auto-detect platform
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 ```
 
 ## Run
@@ -46,7 +43,7 @@ make PLATFORM=metal
 ```bash
 ./rodinia_gaussian                         # defaults: N=512
 ./rodinia_gaussian --size 256
-BENCH_PARAM_iteration=5 ./rodinia_gaussian --size 1024
+BENCH_PARAM_size=1024 ./rodinia_gaussian
 ```
 
 ### Environment variables
@@ -54,43 +51,45 @@ BENCH_PARAM_iteration=5 ./rodinia_gaussian --size 1024
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BENCH_PARAM_size` | 512 | Matrix dimension N |
-| `BENCH_PARAM_block_size` | 256 | Threads per block (echoed in records) |
-| `BENCH_PARAM_verify` | true | Verification mode (`true`, `false`, `skip`) |
-| `BENCH_PARAM_warmup` | 3 | Warmup elimination passes (not recorded) |
-| `BENCH_PARAM_iteration` | 7 | Timed elimination passes, each recorded |
+| `BENCH_PARAM_vector_add_warmup` | `true` | Cold-cache calibration before the timed pass |
+
+`BENCH_PARAM_verify=false` skips CPU verification — an undeclared debug knob
+(not in `params.json`, not a sweep parameter). When verification runs and
+FAILs, the benchmark exits with a non-zero status.
+
+The forward elimination runs **exactly once**; repetition is the harness's
+job (`gpubench run --reps N`).
 
 ## Output
 
-**stdout** — JSON lines: per timed pass, one `kernel` record per kernel
+**stdout** — JSON lines: one `kernel` record per kernel
 (`fan1`, `fan2`) with that kernel's accumulated GPU event time (`time_ms`)
 and host time (`host_time_ms`) across all `N-1` pivot steps, then a summary
 whose `total_time_ms` is the sum of all recorded GPU event times:
 ```json
-{"type":"kernel","name":"fan1","iter":0,"time_ms":10.123,"host_time_ms":12.456,"params":{"size":512,"block_size":256,"verify":"true"}}
-{"type":"kernel","name":"fan2","iter":0,"time_ms":35.000,"host_time_ms":38.100,"params":{"size":512,"block_size":256,"verify":"true"}}
-{"type":"summary","total_time_ms":315.861}
+{"type":"kernel","name":"fan1","iter":0,"time_ms":10.123,"host_time_ms":12.456,"params":{"size":512}}
+{"type":"kernel","name":"fan2","iter":0,"time_ms":35.000,"host_time_ms":38.100,"params":{"size":512}}
+{"type":"summary","total_time_ms":45.123}
 ```
 
 **stderr** — human-readable details:
 ```
-Device: Apple M4 Pro
+Device: NVIDIA GeForce RTX 4090 (id=0)
 Matrix size: 512×512
 
-pass 0: fan1 gpu = 10.123 ms, fan2 gpu = 35.000 ms
-...
-Total GPU time: 315.861 ms over 7 passes
+fan1 gpu = 10.123 ms, fan2 gpu = 35.000 ms
+Total GPU time: 45.123 ms over 1 pass
 Verification: rel_err = 1.23e-06 — PASS
 ```
 
 ## Metrics
 
-- **Time**: GPU event time for forward elimination (fan1 + fan2 kernels across all `N-1` pivot steps), recorded per pass
+- **Time**: GPU event time for forward elimination (fan1 + fan2 kernels across all `N-1` pivot steps)
 - **GFLOPS**: `(2/3 × N³) / time_s / 1e9` — derived downstream from `time_ms` and params
 - **Verification**: relative residual `‖Ax − b‖ / ‖b‖ < 1e-4`
 
 ## Platform Notes
 
 - **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `rodinia_gaussian.hip`; uses `hipEvent_t` for timing
-- **Metal**: compiled with `clang++` from `rodinia_gaussian_metal.mm`; the Metal shader (`rodinia_gaussian.metal`) is loaded at runtime from the same directory as the binary; uses `mach_absolute_time()` for timing
 - Input data is generated synthetically — no external input files required
 - Back-substitution runs on the CPU after the GPU forward elimination phase

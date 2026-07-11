@@ -1,8 +1,8 @@
 /**
  * tensor_core_throughput.hip
  *
- * Measures Tensor Core throughput (TOPS — Tera Operations Per Second) using
- * the WMMA (Warp Matrix Multiply Accumulate) API.
+ * Measures Tensor Core throughput (TFLOPS — Tera Floating-Point Operations
+ * Per Second) using the WMMA (Warp Matrix Multiply Accumulate) API.
  *
  * Compiles for both AMD (ROCm/HIP via rocWMMA) and NVIDIA (CUDA via
  * nvcuda::wmma) targets using ifdefs.
@@ -12,7 +12,7 @@
  *   16×16×16 tiles.  The entire computation lives in registers / shared
  *   memory — we measure raw Tensor Core arithmetic throughput.
  *
- *   TOPS = 2 * M * N * K / time_s / 1e12
+ *   TFLOPS = 2 * M * N * K / time_s / 1e12
  *
  * Usage:
  *   ./tensor_core_throughput [matrix_dim]
@@ -21,11 +21,17 @@
  *
  * Environment variables (override argv):
  *   BENCH_PARAM_matrix_dim
- *   BENCH_PARAM_precision          ("fp16", "tf32", or "all")
+ *   BENCH_PARAM_precision          ("fp16" or "tf32"; the code also accepts
+ *                                   "all" to run both, though params.json
+ *                                   only declares fp16/tf32)
+ *   BENCH_PARAM_vector_add_warmup  (default true; clock-boost + LLC-evict
+ *                                   warmer before the timed run)
  *
- * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
- * the GPU event time and host wall-clock time, then a summary whose
- * total_time_ms is the SUM of all iterations' GPU event times. TOPS is
+ * Measurement: each selected precision's kernel is launched and timed
+ * EXACTLY ONCE per process (repetition = fresh re-executions via
+ * `gpubench run --reps N`). Output: one {"type":"kernel",...} JSON line per
+ * kernel that ran, carrying its GPU event time and host wall-clock time,
+ * then a summary whose total_time_ms is the sum of those times. TFLOPS is
  * derived downstream as 2*matrix_dim^3 / time.
  */
 
@@ -197,9 +203,9 @@ __global__ void wmma_tf32_gemm(const float *A, const float *B, float *C,
 // ---------------------------------------------------------------------------
 
 /**
- * Warm up, then run one recorded launch of one precision.
- * Emits one JSON record; returns the launch's GPU event time (ms). TOPS is
- * derived downstream as 2*matrix_dim^3 / time.
+ * Run one timed launch of one precision (preceded by the vector-add warmer
+ * unless disabled). Emits one JSON record; returns the launch's GPU event
+ * time (ms). TFLOPS is derived downstream as 2*matrix_dim^3 / time.
  */
 template <typename LaunchFn>
 static double benchmark_kernel(const char *kernel_name, const char *precision_str,

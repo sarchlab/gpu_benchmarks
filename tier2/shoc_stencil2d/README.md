@@ -3,8 +3,8 @@
 ## Description
 
 Applies a 9-point star stencil iteratively on a 2D floating-point grid.
-Emits raw per-pass kernel times; effective memory bandwidth (GB/s) is
-derived downstream.
+Emits one raw kernel time (accumulated over all stencil steps); effective
+memory bandwidth (GB/s) is derived downstream.
 Derived from the SHOC (Scalable Heterogeneous Computing) benchmark suite.
 
 ## Algorithm
@@ -20,17 +20,28 @@ out[i][j] = 0.5   * in[i][j]
 - **Grid**: N×N floats (default N=2048)
 - **Interior only**: rows/columns 1 .. N-2; boundary cells remain 0
 - **Thread blocks**: 16×16
-- **Ping-pong buffers**: `in_buf` and `out_buf` swapped each iteration
-- **Passes**: `BENCH_PARAM_warmup` warmup passes (default 3), then `BENCH_PARAM_iteration` timed passes (default 7), each recorded individually
+- **Ping-pong buffers**: `in_buf` and `out_buf` swapped each step
+- **Steps**: `iterations` stencil time-steps (default 5), all inside the single measured run
+
+## Measurement protocol
+
+The measured run — all `iterations` ping-pong stencil steps over the pristine
+input — executes **exactly once** per process; there is no in-program warmup
+or repetition loop. Each kernel launch is bracketed with GPU events and the
+times are accumulated into one record. When `BENCH_PARAM_vector_add_warmup` is
+`true` (default), the vector-add warmer runs after the (untimed) buffer
+initialization and immediately before the first timed launch: ~100 ms of
+sustained load ramps the GPU clock while its final pass evicts the last-level
+cache, so the run is cold-cache at a boosted clock. Repetition is the
+harness's job: `gpubench run --reps N` re-executes the binary in fresh
+processes.
 
 ## Files
 
 | File                        | Description                                |
 |-----------------------------|--------------------------------------------|
 | `shoc_stencil2d.hip`        | HIP/CUDA kernel + host (NVIDIA & AMD)      |
-| `shoc_stencil2d.metal`      | Metal compute shader (Apple)               |
-| `shoc_stencil2d_metal.mm`   | Metal Objective-C++ host (Apple)           |
-| `Makefile`                  | Multi-platform build (cuda/rocm/metal)     |
+| `Makefile`                  | Multi-platform build (cuda/rocm)           |
 | `README.md`                 | This file                                  |
 
 ## Build
@@ -42,7 +53,6 @@ make
 # Explicit platform
 make PLATFORM=cuda    # NVIDIA CUDA
 make PLATFORM=rocm    # AMD ROCm/HIP
-make PLATFORM=metal   # Apple Metal
 
 make clean
 ```
@@ -50,11 +60,11 @@ make clean
 ## Run
 
 ```bash
-# Default: 2048×2048 grid, 5 stencil steps per pass
+# Default: 2048×2048 grid, 5 stencil steps
 ./shoc_stencil2d
 
 # Custom parameters
-BENCH_PARAM_iteration=5 ./shoc_stencil2d --n 4096 --iterations 10
+./shoc_stencil2d --n 4096 --iterations 10
 ```
 
 ### Options
@@ -62,24 +72,27 @@ BENCH_PARAM_iteration=5 ./shoc_stencil2d --n 4096 --iterations 10
 | Option           | Default | Description                         |
 |------------------|---------|-------------------------------------|
 | `--n N`          | 2048    | Grid dimension (N×N floats)         |
-| `--iterations I` | 5       | Stencil steps per timed pass        |
-| `--trials T`     | 3       | Legacy trial-count param (echoed in records) |
+| `--iterations I` | 5       | Stencil time-steps in the measured run |
 
-Environment variables (`BENCH_PARAM_*`) override the flags. In addition,
-`BENCH_PARAM_warmup` (default 3) sets the warmup passes and
-`BENCH_PARAM_iteration` (default 7) the timed passes.
+Environment variables override the flags:
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `BENCH_PARAM_n` | 2048 | Grid dimension |
+| `BENCH_PARAM_iterations` | 5 | Stencil time-steps |
+| `BENCH_PARAM_block_size` | 16 | Thread-block dimension (block_size × block_size) |
+| `BENCH_PARAM_vector_add_warmup` | true | Clock-boost + LLC-evict warmer before the timed run |
 
 ## Output Format
 
-**stderr**: device info, per-pass timing, correctness check result
+**stderr**: device info, timing, correctness check result
 
-**stdout** (JSON lines): one `kernel` record per timed pass with the
-accumulated GPU event time (`time_ms`) and host time (`host_time_ms`) of all
-stencil steps in that pass, then a summary whose `total_time_ms` is the sum
-of all recorded GPU event times:
+**stdout** (JSON lines): one `kernel` record with the accumulated GPU event
+time (`time_ms`) and host time (`host_time_ms`) of all stencil steps in the
+run, then a summary whose `total_time_ms` equals that record's GPU event time:
 ```json
-{"type":"kernel","name":"stencil2d_kernel","iter":0,"time_ms":12.345,"host_time_ms":13.100,"params":{"n":2048,"iterations":5,"trials":3,"block_size":16}}
-{"type":"summary","total_time_ms":86.42}
+{"type":"kernel","name":"stencil2d_kernel","iter":0,"time_ms":12.345,"host_time_ms":13.100,"params":{"n":2048,"iterations":5,"block_size":16}}
+{"type":"summary","total_time_ms":12.345}
 ```
 
 ## Performance Metric (derived downstream)
@@ -97,4 +110,7 @@ GB/s = ITERATIONS × 2 × N × N × sizeof(float) / (time_s × 1e9)
 Before the timed run, a single stencil iteration is applied to a small
 64×64 grid on both CPU and GPU. The GPU result is compared element-wise
 to the CPU reference; the check passes when the maximum relative error
-across all interior cells is less than 1×10⁻⁴.
+across all interior cells is less than 1×10⁻⁴. On FAIL the process exits
+non-zero (after the measurements have been emitted), so the harness marks
+the run as failed without losing the timing data. There is no verification
+on/off parameter.

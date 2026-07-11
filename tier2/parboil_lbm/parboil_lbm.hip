@@ -268,6 +268,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Verification
+    bool verify_ok = true;
     {
         std::vector<float> h_f_out(Q * N);
         HIP_CHECK(hipMemcpy(h_f_out.data(), d_f_src, f_bytes, hipMemcpyDeviceToHost));
@@ -294,14 +295,16 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (errors > 0)
+        if (errors > 0) {
             fprintf(stderr, "FAIL: %d suspicious nodes in %d verified\n", errors, verify_n);
-        else
+            verify_ok = false;
+        } else {
             fprintf(stderr, "PASS\n");
+        }
     }
 
     HIP_CHECK(hipFree(d_f_src));
     HIP_CHECK(hipFree(d_f_dst));
 
-    return 0;
+    return verify_ok ? 0 : 1;
 }

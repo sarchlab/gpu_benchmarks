@@ -10,7 +10,7 @@
 //   BENCH_PARAM_grid_size, BENCH_PARAM_block_size,
 //   BENCH_PARAM_num_iterations, BENCH_PARAM_amb_temp
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line
+// Output (stdout): one {"type":"kernel",...} JSON line
 // carrying the kernel's accumulated GPU event time and host wall-clock time
 // over the pass's num_iterations stencil steps, then a summary whose
 // total_time_ms is the SUM of all recorded GPU event times. Effective

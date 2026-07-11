@@ -1,6 +1,6 @@
 # polybench_jacobi2d
 
-PolyBench 2D Jacobi stencil benchmark — GPU implementation for CUDA, ROCm/HIP, and Apple Metal.
+PolyBench 2D Jacobi stencil benchmark — GPU implementation for CUDA and ROCm/HIP.
 
 ## Algorithm
 
@@ -12,13 +12,13 @@ B[i][j] = (A[i-1][j] + A[i+1][j] + A[i][j-1] + A[i][j+1] + A[i][j]) / 5.0
 
 After each step, the source and destination buffers are swapped (double-buffer technique). Only interior points (`i = 1..N-2`, `j = 1..N-2`) are updated; boundary values remain fixed at 0.
 
+**Divergence from canonical PolyBench:** each `tstep` here performs ONE stencil sweep followed by a buffer swap, whereas canonical PolyBench jacobi-2d performs TWO sweeps per tstep (A→B then B→A). `tsteps=T` here therefore corresponds to roughly T/2 canonical time steps.
+
 ## Files
 
 | File | Description |
 |------|-------------|
 | `polybench_jacobi2d.hip` | HIP kernel + host code (CUDA and ROCm/HIP) |
-| `polybench_jacobi2d.metal` | Metal compute shader |
-| `polybench_jacobi2d_metal.mm` | Objective-C++ Metal host code |
 | `Makefile` | Build system with platform auto-detection |
 | `README.md` | This file |
 
@@ -39,11 +39,6 @@ make PLATFORM=cuda
 make PLATFORM=rocm
 ```
 
-### Apple Metal
-```bash
-make PLATFORM=metal
-```
-
 ### Clean
 ```bash
 make clean
@@ -58,24 +53,22 @@ make clean
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--n N` | Grid size (N×N) | 1024 |
-| `--tsteps T` | Number of time steps per pass | 50 |
-| `--trials K` | Legacy trial count (echoed in params only; the number of timed passes is `BENCH_PARAM_iteration`) | 3 |
+| `--tsteps T` | Number of time steps per execution | 50 |
 
 Environment variables override argv:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `BENCH_PARAM_n` | Grid size (N×N) | 1024 |
-| `BENCH_PARAM_tsteps` | Time steps per pass | 50 |
-| `BENCH_PARAM_trials` | Legacy trial count (echoed in params) | 3 |
-| `BENCH_PARAM_block_size` | Echoed in params | 256 |
-| `BENCH_PARAM_warmup` | Warmup passes (untimed) | 3 |
-| `BENCH_PARAM_iteration` | Timed passes, each recorded | 7 |
+| `BENCH_PARAM_tsteps` | Time steps per execution | 50 |
+| `BENCH_PARAM_vector_add_warmup` | Vector-add warmer (clock boost + LLC eviction) before the timed pass | true |
+
+The TSTEPS-step pass runs exactly once per execution; repetition is the harness's job (`gpubench run --reps N`).
 
 ### Examples
 
 ```bash
-# Default run (1024×1024, 50 steps per pass)
+# Default run (1024×1024, 50 steps)
 ./polybench_jacobi2d
 
 # Large grid
@@ -87,20 +80,19 @@ Environment variables override argv:
 
 ## Output Format
 
-**stdout** — JSON-lines: one `{"type":"kernel",...}` record per timed pass (one pass = TSTEPS kernel launches from the restored initial state) carrying the pass's accumulated GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`), then a summary whose `total_time_ms` is the sum of all recorded GPU event times:
+**stdout** — JSON-lines: one `{"type":"kernel",...}` record for the single pass (TSTEPS kernel launches from the initial state) carrying the accumulated GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`), then a summary whose `total_time_ms` equals that GPU event time:
 ```json
-{"type":"kernel","name":"jacobi2d_kernel","iter":0,"time_ms":25.12,"host_time_ms":27.40,"params":{"n":1024,"tsteps":50,"trials":3,"block_size":256}}
-{"type":"summary","total_time_ms":175.84}
+{"type":"kernel","name":"jacobi2d_kernel","iter":0,"time_ms":25.12,"host_time_ms":27.40,"params":{"n":1024,"tsteps":50}}
+{"type":"summary","total_time_ms":25.12}
 ```
 
-**stderr** — device info, per-pass timing, and correctness check result:
+**stderr** — device info, timing, and correctness check result:
 ```
 Device: NVIDIA GeForce RTX 3080 (id=0)
-Grid: 1024×1024  |  TSTEPS: 50  |  3 warmup + 7 timed passes
+Grid: 1024×1024  |  TSTEPS: 50  |  single timed pass
 
-pass 0: gpu = 25.123 ms (50 steps)
-...
-Total GPU time: 175.840 ms over 7 passes
+gpu = 25.123 ms (50 steps)
+Total GPU time: 25.123 ms over 1 pass
 Correctness check (CPU vs GPU, 64×64, 50 steps): PASS (max_rel=0.00e+00)
 ```
 
@@ -112,11 +104,11 @@ Memory bandwidth is derived downstream from the emitted `time_ms` and params as:
 GB/s = TSTEPS × 2 × N × N × sizeof(float) / time_s / 1e9
 ```
 
-Each time step reads the full N×N source array and writes the full N×N destination array. The two grids ping-pong across the TSTEPS steps within a pass; the initial state is restored (untimed) before every pass, and the step count is fixed, so every pass measures identical work.
+Each time step reads the full N×N source array and writes the full N×N destination array. The two grids ping-pong across the TSTEPS steps; the initial state is uploaded (untimed) before the pass, and the step count is fixed, so every execution measures identical work.
 
 ## Correctness Verification
 
-A CPU reference computation is run on a small 64×64 grid for the same number of TSTEPS. The GPU result is compared against the CPU result. The test passes if the maximum relative error across all interior points is below 1e-3.
+A CPU reference computation is run on a small 64×64 grid for the same number of TSTEPS. The GPU result is compared against the CPU result. The test passes if the maximum relative error across all interior points is below 1e-3; on `FAIL` the process exits with a non-zero status.
 
 ## Kernel Configuration
 

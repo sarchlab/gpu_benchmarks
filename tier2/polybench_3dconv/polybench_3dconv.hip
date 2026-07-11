@@ -2,18 +2,20 @@
 //
 // 3D convolution over an NxNxN volume with a small 3D filter (e.g., 3x3x3).
 // Each output point is the weighted sum of its neighborhood.
-// Derived from the PolyBench/GPU benchmark suite.
+// Modeled on the PolyBench/GPU 3DCONV workload; this is a generic
+// filter_size^3 convolution with a random normalized filter and zero-padded
+// borders, not the upstream fixed-coefficient stencil.
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_filter_size
 //
-// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
-// carrying the GPU event time and host wall-clock time, then a summary whose
-// total_time_ms is the SUM of all iterations' GPU event times. GFLOPS is
+// Output (stdout): one {"type":"kernel",...} JSON line for the single timed
+// launch, carrying the GPU event time and host wall-clock time, then a
+// summary whose total_time_ms equals that GPU event time. GFLOPS is
 // derived downstream from time_ms and params.
-// Output (stderr): device info, per-iteration timing
+// Output (stderr): device info, timing
 
 #include "../../common/bench_timing.h"
 #include <cstdio>
@@ -139,9 +141,10 @@ int main(int argc, char** argv) {
              "\"size\":%d,\"block_size\":%d,\"filter_size\":%d",
              N, block_size, filter_size);
 
-    // Warmup + timed iterations, each recorded individually. The kernel
-    // rewrites d_output as a pure function of the constant input volume and
-    // filter, so repeated launches do identical work — no reset needed.
+    // Single timed launch (optionally preceded by the vector-add warmer).
+    // The kernel rewrites d_output as a pure function of the constant input
+    // volume and filter, so every execution does identical work — no reset
+    // needed.
     double total_gpu_ms =
         bench_run_once("conv3d_kernel", params, [&]() {
             conv3d_kernel<<<grid, block>>>(d_input, d_filter, d_output, N,

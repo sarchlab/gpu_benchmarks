@@ -16,13 +16,12 @@
 # ---------------------------------------------------------------------------
 # Auto-detect platform
 # ---------------------------------------------------------------------------
-ifndef PLATFORM
-  ifeq ($(shell uname -s),Darwin)
-    PLATFORM := metal
-  else ifneq ($(wildcard /opt/rocm),)
-    PLATFORM := rocm
+PLATFORM ?= auto
+ifeq ($(PLATFORM),auto)
+  ifneq ($(wildcard /opt/rocm),)
+    override PLATFORM := rocm
   else
-    PLATFORM := cuda
+    override PLATFORM := cuda
   endif
 endif
 
@@ -34,7 +33,7 @@ TARGET := empty_kernel
 ifeq ($(PLATFORM),cuda)
   CC      := nvcc
   SRC     := empty_kernel.hip
-  CUDA_ARCH ?= sm_90
+  CUDA_ARCH ?= native
   CFLAGS  := -O3 -std=c++14 -arch=$(CUDA_ARCH) -x cu
 
 else ifeq ($(PLATFORM),rocm)

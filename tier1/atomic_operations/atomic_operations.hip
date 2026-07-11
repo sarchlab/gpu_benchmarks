@@ -27,12 +27,16 @@
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_threads_per_block
  *   BENCH_PARAM_atomic_op   ("atomicAdd", "atomicCAS", "atomicMin")
+ *   BENCH_PARAM_vector_add_warmup  (default true; clock-boost + LLC-evict
+ *                                   warmer before the timed run)
  *
- * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
- * the GPU event time and host wall-clock time, then a summary whose
- * total_time_ms is the SUM of all iterations' GPU event times. Derived
- * metrics (Gops/s) are intentionally not computed here — derive them
- * downstream from time and the work-descriptor params.
+ * Measurement: the selected kernel is launched and timed EXACTLY ONCE per
+ * process (repetition = fresh re-executions via `gpubench run --reps N`).
+ * Output: one {"type":"kernel",...} JSON line carrying the GPU event time
+ * and host wall-clock time for that single launch, then a summary whose
+ * total_time_ms equals it. Derived metrics (Gops/s) are intentionally not
+ * computed here — derive them downstream from time and the work-descriptor
+ * params.
  */
 
 #include <cstdio>
@@ -53,7 +57,7 @@
 
 static const int DEFAULT_OPS_PER_THREAD  = 1024;
 static const int DEFAULT_THREADS_PER_BLK = 256;
-static const int DEFAULT_NUM_BLOCKS      = 1024;
+static const int DEFAULT_NUM_BLOCKS      = 2048;
 
 // ---------------------------------------------------------------------------
 // Atomic kernels
@@ -89,18 +93,17 @@ __global__ void atomicMin_kernel(unsigned int *counter, int ops_per_thread)
 typedef void (*KernelFunc)(unsigned int *, int);
 
 /**
- * Run a single atomic benchmark: warmup + per-iteration timed launches.
- * Emits one kernel JSON line per timed iteration and returns the sum of all
- * iterations' GPU event times in ms.
+ * Run a single atomic benchmark: one timed launch (preceded by the vector-add
+ * warmer unless disabled). Emits one kernel JSON line and returns that
+ * launch's GPU event time in ms.
  */
 static double run_benchmark(const char *kernel_name,
                             KernelFunc kernel, unsigned int *d_counter,
                             int ops_per_thread, int num_blocks,
                             int threads_per_block, const char *atomic_op)
 {
-    /* Reset counter once, outside the timed region. Counter accumulation
-     * across warmup/timed iterations does not affect timing, so no per-loop
-     * reset is needed. */
+    /* Reset counter once, outside the timed region. The counter's value does
+     * not affect timing, so no further reset is needed. */
     unsigned int zero = 0;
     HIP_CHECK(hipMemcpy(d_counter, &zero, sizeof(unsigned int),
                         hipMemcpyHostToDevice));

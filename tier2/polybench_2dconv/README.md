@@ -1,8 +1,9 @@
 # tier2/polybench_2dconv — PolyBench 2D Convolution
 
-GPU benchmark for PolyBench 2D Convolution. Applies a fixed 3×3 kernel to an
-N×N input matrix. Emits raw per-iteration kernel times; throughput (GFLOPS)
-is derived downstream.
+GPU benchmark modeled on PolyBench/GPU 2D Convolution. Applies a fixed 3×3
+kernel to an N×N input matrix, running the convolution exactly once per
+execution. Emits the raw kernel time; throughput (GFLOPS) is derived
+downstream.
 
 ## Algorithm
 
@@ -15,7 +16,8 @@ B[i][j] = c[0][0]*A[i-1][j-1] + c[0][1]*A[i-1][j] + c[0][2]*A[i-1][j+1]
          for 1 <= i < N-1, 1 <= j < N-1
 ```
 
-Fixed PolyBench 3×3 kernel coefficients:
+Fixed 3×3 coefficient set (same 9-tap structure as PolyBench/GPU, but the
+values differ from upstream's signed c11..c33 set):
 
 ```
 c = {{0.8, 0.2, 0.3},
@@ -31,8 +33,6 @@ emitted times and params)
 | File | Description |
 |------|-------------|
 | `polybench_2dconv.hip` | HIP kernel + host (CUDA/ROCm, self-contained) |
-| `polybench_2dconv.metal` | Metal compute shader |
-| `polybench_2dconv_metal.mm` | ObjC++ Metal host |
 | `Makefile` | Platform auto-detect build |
 
 ## Build
@@ -44,7 +44,6 @@ make
 ```
 
 Platform is auto-detected:
-- **Darwin** → `metal`
 - **Linux + `/opt/rocm`** → `rocm`
 - **Linux, no ROCm** → `cuda`
 
@@ -53,7 +52,6 @@ Platform is auto-detected:
 ```bash
 make PLATFORM=cuda    # NVIDIA (nvcc)
 make PLATFORM=rocm    # AMD ROCm (hipcc)
-make PLATFORM=metal   # Apple Metal (clang++)
 ```
 
 ## Run
@@ -69,20 +67,19 @@ make PLATFORM=metal   # Apple Metal (clang++)
 | Environment variable | Default | Description |
 |----------------------|---------|-------------|
 | `BENCH_PARAM_size` | 2048 | Matrix dimension N×N (overrides `--size`) |
-| `BENCH_PARAM_block_size` | 256 | Reported thread-block size |
-| `BENCH_PARAM_precision` | float | Precision label (`half`, `float`, `double`) |
-| `BENCH_PARAM_warmup` | 3 | Warmup launches (untimed) |
-| `BENCH_PARAM_iteration` | 7 | Timed launches, each recorded |
+| `BENCH_PARAM_vector_add_warmup` | true | Run the vector-add warmer (clock boost + LLC eviction) before the timed launch |
+
+The kernel runs exactly once per execution; repetition is the harness's job
+(`gpubench run --reps N`).
 
 ## Output
 
-**stdout** — JSON lines, one kernel record per timed iteration with the GPU
-event time (`time_ms`) and host wall-clock time (`host_time_ms`), then a
-summary whose `total_time_ms` is the sum of all iterations' GPU event times:
+**stdout** — JSON lines: one kernel record for the single timed launch with
+the GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`),
+then a summary whose `total_time_ms` equals that GPU event time:
 ```
-{"type":"kernel","name":"convolution2D_kernel","iter":0,"time_ms":3.210000,"host_time_ms":3.270000,"params":{"size":2048,"block_size":256,"precision":"float"}}
-...
-{"type":"summary","total_time_ms":22.470000}
+{"type":"kernel","name":"convolution2D_kernel","iter":0,"time_ms":3.210000,"host_time_ms":3.270000,"params":{"size":2048}}
+{"type":"summary","total_time_ms":3.210000}
 ```
 
 Derived metrics such as GFLOPS are computed downstream from `time_ms` and
@@ -93,16 +90,12 @@ the params.
 Device: NVIDIA A100 (id=0)
 Matrix: 2048×2048
 
-convolution2D_kernel iter 0: gpu = 3.210 ms, host = 3.270 ms
-...
-Total GPU time: 22.470 ms over 7 iterations
+convolution2D_kernel: gpu = 3.210 ms, host = 3.270 ms
+Total GPU time: 3.210 ms
 ```
 
 ## Notes
 
-- Border elements (row/col 0 and N−1) are skipped, matching the PolyBench reference.
+- Border elements (row/col 0 and N−1) are skipped, matching the PolyBench reference structure.
+- The coefficient values are a fixed set specific to this implementation; canonical PolyBench/GPU uses a different (signed) c11..c33 set. The 9-tap access pattern and FLOP count are the same.
 - Input is initialized with `rand() % 100 / 10.0f` using seed 42 (reproducible).
-- Metal: shader source is compiled at runtime from `polybench_2dconv.metal`
-  (must reside alongside the binary).
-- The benchmark runs `BENCH_PARAM_warmup` warmup launches (default 3)
-  before the timed iterations.

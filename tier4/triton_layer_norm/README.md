@@ -8,7 +8,7 @@ eps=1e-5. Reports memory bandwidth in GB/s.
 - Python 3.8+
 - PyTorch 2.x
 - Triton (for CUDA/ROCm): `pip3 install triton`
-- CUDA GPU (NVIDIA) or ROCm GPU (AMD) or Apple Silicon (Metal/MPS)
+- CUDA GPU (NVIDIA) or ROCm GPU (AMD)
 
 ## Build & Run
 
@@ -20,11 +20,6 @@ make run PLATFORM=cuda
 ### ROCm (AMD)
 ```
 make run PLATFORM=rocm
-```
-
-### Metal (Apple)
-```
-make run PLATFORM=metal
 ```
 
 ## Output Format

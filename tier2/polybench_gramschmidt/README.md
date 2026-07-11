@@ -35,22 +35,17 @@ After all N columns, Q has orthonormal columns: `Qᵀ Q ≈ Iₙ`.
 | `gram_normalize` | M threads | `Q[:,k] = A[:,k] / nrm` |
 | `gram_project` | N−k−1 threads | Update columns j > k |
 
-On Metal, the norm is computed on the CPU using the shared memory buffer, which
-is efficient on Apple Silicon's unified memory architecture.
-
 ## Files
 
 | File | Description |
 |------|-------------|
 | `polybench_gramschmidt.hip` | HIP/CUDA implementation (NVIDIA + AMD) |
-| `polybench_gramschmidt.metal` | Metal compute shaders (Apple) |
-| `polybench_gramschmidt_metal.mm` | Metal Objective-C++ host |
 | `Makefile` | Multi-platform build |
 | `README.md` | This file |
 
 ## Build
 
-Platform is auto-detected; override with `PLATFORM=cuda|rocm|metal`.
+Platform is auto-detected; override with `PLATFORM=cuda|rocm`.
 
 ```bash
 # Auto-detect
@@ -62,9 +57,6 @@ make PLATFORM=cuda
 # AMD ROCm/HIP
 make PLATFORM=rocm
 
-# Apple Metal
-make PLATFORM=metal
-
 # Clean
 make clean
 ```
@@ -75,42 +67,43 @@ make clean
 |----------|-----------|
 | CUDA | NVIDIA CUDA toolkit (`nvcc`) |
 | ROCm | AMD ROCm (`hipcc`) |
-| Metal | Xcode command-line tools (`clang++`) |
 
 ## Run
 
 ```bash
-./polybench_gramschmidt                    # default: M=512, N=512, 3 passes
-./polybench_gramschmidt --m 1024 --n 512  # larger matrix
-./polybench_gramschmidt --passes 5        # more factorizations per recorded iteration
+./polybench_gramschmidt                    # default: M=512, N=64, 3 passes
+./polybench_gramschmidt --m 1024 --n 64   # larger matrix
+./polybench_gramschmidt --passes 5        # more factorizations per execution
 ```
 
 | Environment variable | Default | Description |
 |----------------------|---------|-------------|
 | `BENCH_PARAM_m` | 512 | Number of rows (overrides `--m`) |
-| `BENCH_PARAM_n` | 512 | Number of columns (overrides `--n`) |
-| `BENCH_PARAM_passes` | 3 | QR factorizations per recorded iteration (overrides `--passes`) |
-| `BENCH_PARAM_block_size` | 256 | Reported thread-block size |
-| `BENCH_PARAM_warmup` | 3 | Warmup iterations (untimed) |
-| `BENCH_PARAM_iteration` | 7 | Timed iterations, each recorded |
+| `BENCH_PARAM_n` | 64 | Number of columns (overrides `--n`) |
+| `BENCH_PARAM_passes` | 3 | QR factorizations per execution (overrides `--passes`) |
+| `BENCH_PARAM_vector_add_warmup` | true | Vector-add warmer (clock boost + LLC eviction) before each factorization |
+
+The run executes once per process: it performs `passes` full QR
+factorizations and emits one record per kernel accumulating all of them.
+Repetition across runs is the harness's job (`gpubench run --reps N`).
 
 ## Output Format
 
-**stderr** — device info, per-iteration timing, orthogonality check result,
+**stderr** — device info, per-kernel timing, orthogonality check result,
 summary
 
-**stdout** — JSON lines: per timed iteration, one kernel record per kernel
+**stdout** — JSON lines: one kernel record per kernel
 (`gram_norm`, `gram_norm_finish`, `gram_normalize`, `gram_project`) carrying
 that kernel's GPU event time (`time_ms`) and host wall-clock time
-(`host_time_ms`) accumulated over the iteration's `passes` factorizations,
+(`host_time_ms`) accumulated over all `passes` factorizations,
 then a summary whose `total_time_ms` is the sum of all recorded GPU event
 times. The matrix A is restored (and Q/R zeroed) before every factorization,
 outside the timed brackets:
 
 ```
-{"type":"kernel","name":"gram_norm","iter":0,"time_ms":12.345600,"host_time_ms":13.010000,"params":{"m":512,"n":512,"passes":3,"block_size":256}}
+{"type":"kernel","name":"gram_norm","iter":0,"time_ms":12.345600,"host_time_ms":13.010000,"params":{"m":512,"n":64,"passes":3}}
 ...
-{"type":"summary","total_time_ms":316.622600}
+{"type":"summary","total_time_ms":45.622600}
 ```
 
 ## Performance Metric (derived downstream)
@@ -126,10 +119,11 @@ computed downstream from the emitted `time_ms` and params.
 
 ## Orthogonality Verification
 
-After the final timed iteration, the benchmark computes `Qᵀ Q` on the CPU for the
+After the timed run, the benchmark computes `Qᵀ Q` on the CPU for the
 first `min(8, N)` columns and checks:
 
 - **Diagonal** elements: `|dot(Q[:,i], Q[:,i]) − 1| < 0.01`
 - **Off-diagonal** elements: `|dot(Q[:,i], Q[:,j])| < 0.01`
 
-A `PASS` / `FAIL` result is printed to stderr.
+A `PASS` / `FAIL` result is printed to stderr; on `FAIL` the process exits
+with a non-zero status.

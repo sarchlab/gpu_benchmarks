@@ -319,6 +319,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // Verification (run_cg reuses the timer, so destroy it afterwards)
+    bool verify_ok = true;
     {
         run_cg();
         HIP_CHECK(hipDeviceSynchronize());
@@ -336,10 +337,12 @@ int main(int argc, char** argv) {
         float rel_res = res_norm / fmaxf(b_norm, 1e-20f);
         fprintf(stderr, "Residual ||b-Ax||/||b|| = %.6e\n", rel_res);
 
-        if (rel_res < 1.0f)
+        if (rel_res < 1.0f) {
             fprintf(stderr, "PASS\n");
-        else
+        } else {
             fprintf(stderr, "FAIL: relative residual too large\n");
+            verify_ok = false;
+        }
     }
 
     bench_timer_destroy(&timer);
@@ -354,5 +357,5 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipFree(d_Ap));
     HIP_CHECK(hipFree(d_partial));
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

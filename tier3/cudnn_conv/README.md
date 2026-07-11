@@ -1,4 +1,4 @@
-# tier3/cudnn_conv — Forward 2D Convolution via cuDNN / MIOpen / MPS
+# tier3/cudnn_conv — Forward 2D Convolution via cuDNN / MIOpen
 
 A multi-platform benchmark for forward 2D convolution, wrapping vendor-optimised
 deep learning libraries:
@@ -7,7 +7,6 @@ deep learning libraries:
 |----------|--------------------------------------|
 | NVIDIA   | **cuDNN** (`cudnnConvolutionForward`) |
 | AMD      | **MIOpen** (`miopenConvolutionForward`) |
-| Apple    | **Metal Performance Shaders** (`MPSCNNConvolution`) |
 
 ## Convolution Parameters
 
@@ -39,19 +38,11 @@ output[n][k][oh][ow] = Σ_{c,r,s} input[n][c][oh*stride-pad+r][ow*stride-pad+s] 
 - Algorithm auto-tuning selects the fastest available kernel
 - A workspace buffer is allocated for algorithms that require temporary memory
 
-### Metal (MPS)
-
-- `MPSCNNConvolution` with a custom `MPSCNNConvolutionDataSource`
-- Weights provided in OHWI (output × height × width × input) format
-- Batch of 32 images encoded as 32 convolution commands in one command buffer
-- Padding via `offset = (0, 0, 0)` and `edgeMode = MPSImageEdgeModeZero`
-
 ## Files
 
 | File                     | Description                                           |
 |--------------------------|-------------------------------------------------------|
 | `cudnn_conv.hip`         | CUDA/ROCm source (`#ifdef USE_CUDNN` / `USE_MIOPEN`) |
-| `cudnn_conv_metal.mm`    | Objective-C++ Metal host using `MPSCNNConvolution`    |
 | `Makefile`               | Auto-detecting build system                           |
 | `README.md`              | This file                                             |
 
@@ -68,7 +59,6 @@ Explicit platform:
 ```bash
 make PLATFORM=cuda    # NVIDIA CUDA + cuDNN
 make PLATFORM=rocm    # AMD ROCm/HIP + MIOpen
-make PLATFORM=metal   # Apple Metal + MPS
 ```
 
 Clean:
@@ -121,7 +111,7 @@ convolution accumulation.
 
 After the timed run, a small patch of the GPU output (batch=0, first 4 output
 channels, 4×4 spatial region) is compared against a CPU reference convolution.
-The relative error threshold is 1e-3 (CUDA/ROCm) or 1e-2 (Metal).
+The relative error threshold is 1e-3.
 
 The benchmark exits with status 0 on pass and 1 on failure.
 
@@ -131,4 +121,3 @@ The benchmark exits with status 0 on pass and 1 on failure.
 - **5 timed** iterations; the reported time is the average
 
 On CUDA/ROCm, timing uses `cudaEvent` / `hipEvent` (GPU-side timer).
-On Metal, timing uses `mach_absolute_time()` around `waitUntilCompleted`.

@@ -3,12 +3,10 @@
 
 PLATFORM ?= auto
 ifeq ($(PLATFORM),auto)
-  ifeq ($(shell uname -s),Darwin)
-    PLATFORM := metal
-  else ifneq ($(wildcard /opt/rocm),)
-    PLATFORM := rocm
+  ifneq ($(wildcard /opt/rocm),)
+    override PLATFORM := rocm
   else
-    PLATFORM := cuda
+    override PLATFORM := cuda
   endif
 endif
 

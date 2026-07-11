@@ -6,15 +6,13 @@
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
 // Usage:
-//   ./cuda_nbody [--bodies N] [--iterations I] [--timesteps T]
+//   ./cuda_nbody [--bodies N] [--timesteps T]
 //
 //   --bodies N       Number of bodies (default: 16384)
-//   --iterations I   Legacy iteration-count param, echoed into records only
 //   --timesteps T    Simulation timesteps per run (default: 10)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_bodies, BENCH_PARAM_timesteps, BENCH_PARAM_iterations,
-//   BENCH_PARAM_block_size
+//   BENCH_PARAM_bodies, BENCH_PARAM_timesteps
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
 // nbody_kernel carrying the accumulated GPU event time of all timesteps in
@@ -172,12 +170,10 @@ int main(int argc, char** argv) {
     // Default values from params.json
     int N          = 16384;
     int timesteps  = 10;
-    int block_size = 256;
 
     // Command-line args as fallback
     N          = parseIntParam(argc, argv, "--bodies", N);
     timesteps  = parseIntParam(argc, argv, "--timesteps", timesteps);
-    block_size = parseIntParam(argc, argv, "--block_size", block_size);
 
     // Env vars override
     const char* env_val;
@@ -185,8 +181,6 @@ int main(int argc, char** argv) {
     if (env_val) N = atoi(env_val);
     env_val = getenv("BENCH_PARAM_timesteps");
     if (env_val) timesteps = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size = atoi(env_val);
 
     // Print device info
     int device_id = 0;
@@ -224,8 +218,8 @@ int main(int argc, char** argv) {
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"bodies\":%d,\"timesteps\":%d,\"block_size\":%d",
-             N, timesteps, block_size);
+             "\"bodies\":%d,\"timesteps\":%d",
+             N, timesteps);
 
     bench_timer_t timer;
     bench_timer_create(&timer);
@@ -268,6 +262,7 @@ int main(int argc, char** argv) {
     // Verification: run 1 timestep on CPU with small subset, compare
     // -------------------------------------------------------------------
     int verifyN = (N <= 4096) ? N : 4096;  // limit CPU verification size
+    bool verify_ok = true;
     {
         // Re-init from originals
         std::vector<float4> cpuPos(h_pos_orig.begin(), h_pos_orig.begin() + verifyN);
@@ -307,10 +302,12 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (errors > 0)
+        if (errors > 0) {
             fprintf(stderr, "FAIL: %d errors out of %d bodies\n", errors, verifyN);
-        else
+            verify_ok = false;
+        } else {
             fprintf(stderr, "PASS (verified %d bodies, 1 timestep)\n", verifyN);
+        }
 
         HIP_CHECK(hipFree(d_vpos));
         HIP_CHECK(hipFree(d_vvel));
@@ -319,5 +316,5 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipFree(d_pos));
     HIP_CHECK(hipFree(d_vel));
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

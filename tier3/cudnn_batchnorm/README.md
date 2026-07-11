@@ -1,4 +1,4 @@
-# tier3/cudnn_batchnorm — Batch Normalization via cuDNN / MIOpen / MPS
+# tier3/cudnn_batchnorm — Batch Normalization via cuDNN / MIOpen
 
 A multi-platform benchmark for batch normalization (forward + backward),
 wrapping vendor-optimised DNN libraries:
@@ -7,7 +7,6 @@ wrapping vendor-optimised DNN libraries:
 |----------|------------------------------------|--------------------|
 | NVIDIA   | **cuDNN** (`cudnnBatchNormalization*`)   | Forward + Backward |
 | AMD      | **MIOpen** (`miopenBatchNormalization*`) | Forward + Backward |
-| Apple    | **Metal Performance Shaders** (`MPSCNNBatchNormalization`) | Forward only |
 
 ## Algorithm
 
@@ -33,19 +32,11 @@ grad_bias   = sum(grad_output)
 - Epsilon: 1e-5
 - Mode: `CUDNN_BATCHNORM_SPATIAL` / `miopenBNSpatial`
 
-### Metal Note
-
-The Apple Metal version uses `MPSCNNBatchNormalization` for **forward-only**
-inference. The backward pass (`MPSCNNBatchNormalizationGradient`) requires a
-more complex training graph setup via `MPSNNGraph` and is not included.
-The bandwidth metric for Metal reflects forward-only data movement.
-
 ## Files
 
 | File                           | Description                                      |
 |--------------------------------|--------------------------------------------------|
 | `cudnn_batchnorm.hip`          | CUDA/ROCm source (`#ifdef USE_CUDNN` / `#elif defined(USE_MIOPEN)`) |
-| `cudnn_batchnorm_metal.mm`     | Objective-C++ Metal host using `MPSCNNBatchNormalization` |
 | `Makefile`                     | Auto-detecting build system                      |
 | `README.md`                    | This file                                        |
 
@@ -62,7 +53,6 @@ Explicit platform:
 ```bash
 make PLATFORM=cuda    # NVIDIA CUDA + cuDNN
 make PLATFORM=rocm    # AMD ROCm/HIP + MIOpen
-make PLATFORM=metal   # Apple Metal + MPS
 ```
 
 Clean:
@@ -115,11 +105,6 @@ This accounts for:
 - **Backward:** read input (N×C×H×W), read grad_output (N×C×H×W), write grad_input (N×C×H×W)
 - Plus per-channel scale/bias/mean/var (negligible relative to spatial data)
 
-For forward-only (Metal):
-```
-total_bytes ≈ 2 × N × C × H × W × sizeof(float)
-```
-
 ## Verification
 
 After the timed run, a sanity check verifies that:
@@ -134,4 +119,3 @@ The benchmark exits with status 0 on pass and 1 on failure.
 - **5 timed** iterations; the reported time is the average
 
 On CUDA/ROCm, timing uses `cudaEvent` / `hipEvent` (GPU-side timer).
-On Metal, timing uses `mach_absolute_time()` around `waitUntilCompleted`.

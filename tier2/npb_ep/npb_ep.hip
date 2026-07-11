@@ -392,5 +392,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipFree(sx_device));
     HIP_CHECK(hipFree(sy_device));
 
-    return 0;
+    // Unknown M has no reference sums (verification skipped): exit 0.
+    // A known class whose sums mismatch is a wrong computation: exit non-zero.
+    return (!have_ref || verified) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

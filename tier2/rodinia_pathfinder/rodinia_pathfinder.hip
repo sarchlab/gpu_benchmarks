@@ -10,7 +10,7 @@
 // 1-D block loaded once into shared memory, with a border (halo) so
 // neighbouring blocks stay consistent. The host driver (calc_path launch loop
 // + pyramid geometry) is the original too; only the outer loop is restructured
-// for the per-iteration timing harness and JSON output.
+// for the single-pass timing harness and JSON output.
 //
 // Compiles with hipcc (AMD ROCm) or nvcc -x cu (CUDA) via the HIP compat layer.
 //
@@ -24,7 +24,7 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_cols, BENCH_PARAM_rows, BENCH_PARAM_pyramid_height
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
+// Output (stdout): one {"type":"kernel",...} JSON line for
 // dynproc_kernel carrying the accumulated GPU event time of all pyramidal
 // launches within the pass (a full top-to-bottom grid traversal) plus host
 // wall-clock time, then a summary whose total_time_ms is the SUM of all
@@ -285,5 +285,5 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipFree(gpuResult[1]));
     free(data);
 
-    return 0;
+    return ok ? 0 : 1;
 }

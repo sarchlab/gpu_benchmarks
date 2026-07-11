@@ -16,11 +16,11 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_size, BENCH_PARAM_num_taps, BENCH_PARAM_block_size
 //
-// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
-// carrying the GPU event time (time_ms) and host wall-clock time
-// (host_time_ms), then a summary whose total_time_ms is the SUM of all
-// iterations' GPU event times. Throughput (GB/s) is derived downstream
-// from time_ms and params.
+// Output (stdout): one {"type":"kernel",...} JSON line for the single timed
+// fir_filter_kernel launch carrying the GPU event time (time_ms) and host
+// wall-clock time (host_time_ms), then a summary whose total_time_ms is the
+// sum of all recorded GPU event times. Throughput (GB/s) is derived
+// downstream from time_ms and params.
 // Output (stderr): human-readable results
 
 #include "../../common/bench_timing.h"
@@ -191,10 +191,9 @@ int main(int argc, char** argv) {
              "\"size\":%d,\"num_taps\":%d,\"block_size\":%d",
              size, num_taps, block_size);
 
-    // Warmup + timed iterations, each recorded individually. The kernel
-    // reads immutable input/coeff arrays and fully overwrites the output
-    // array every launch, so repeated launches perform identical work — no
-    // per-iteration state reset is needed.
+    // Single timed launch (bench_run_once). The kernel reads immutable
+    // input/coeff arrays and fully overwrites the output array, so no
+    // state reset is needed before the measurement.
     double total_gpu_ms =
         bench_run_once("fir_filter_kernel", params, [&]() {
             fir_filter_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_input, d_output, d_coeff, N, taps);
@@ -206,6 +205,7 @@ int main(int argc, char** argv) {
     // -------------------------------------------------------------------
     // Verification (compare first 1024 samples with CPU reference)
     // -------------------------------------------------------------------
+    bool verify_ok = true;
     {
         int verify_n = (N < 1024) ? N : 1024;
         HIP_CHECK(hipMemcpy(h_output, d_output, output_bytes, hipMemcpyDeviceToHost));
@@ -225,11 +225,13 @@ int main(int argc, char** argv) {
                 errors++;
             }
         }
-        if (errors > 0)
+        if (errors > 0) {
             fprintf(stderr, "FAIL: %d errors in first %d samples\n",
                     errors, verify_n);
-        else
+            verify_ok = false;
+        } else {
             fprintf(stderr, "PASS\n");
+        }
 
         free(h_ref);
     }
@@ -241,5 +243,5 @@ int main(int argc, char** argv) {
     free(h_output);
     free(h_coeff);
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -366,6 +366,7 @@ int main(int argc, char** argv) {
     // -------------------------------------------------------------------
     int verify_w = (width  <= 512) ? width  : 512;
     int verify_h = (height <= 512) ? height : 512;
+    bool verify_ok = true;
 
     {
         HIP_CHECK(hipMemcpy(h_output, d_output, imageBytes, hipMemcpyDeviceToHost));
@@ -391,11 +392,13 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (errors > 0)
+        if (errors > 0) {
             fprintf(stderr, "FAIL: %d errors in %dx%d verification region\n",
                     errors, verify_w, verify_h);
-        else
+            verify_ok = false;
+        } else {
             fprintf(stderr, "PASS\n");
+        }
     }
 
     HIP_CHECK(hipFree(d_input));
@@ -404,5 +407,5 @@ int main(int argc, char** argv) {
     free(h_input);
     free(h_output);
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

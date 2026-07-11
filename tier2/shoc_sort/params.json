@@ -25,15 +25,6 @@
   },
   "non_scaling_params": [
     {
-      "name": "precision",
-      "description": "Key data-type label (keys are always sorted as 32-bit unsigned)",
-      "type": "enum",
-      "default": "uint",
-      "values": [
-        "uint"
-      ]
-    },
-    {
       "name": "vector_add_warmup",
       "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
       "type": "enum",

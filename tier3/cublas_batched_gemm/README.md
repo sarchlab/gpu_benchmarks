@@ -1,4 +1,4 @@
-# tier3/cublas_batched_gemm — Batched FP32 GEMM via cuBLAS / rocBLAS / MPS
+# tier3/cublas_batched_gemm — Batched FP32 GEMM via cuBLAS / rocBLAS
 
 A multi-platform benchmark for batched single-precision (FP32) general matrix multiplication (GEMM),
 wrapping vendor-optimised BLAS libraries:
@@ -7,7 +7,6 @@ wrapping vendor-optimised BLAS libraries:
 |----------|----------------------------------|
 | NVIDIA   | **cuBLAS** (`cublasSgemmBatched`) |
 | AMD      | **rocBLAS** (`rocblas_sgemm_batched`) |
-| Apple    | **Metal Performance Shaders** (`MPSMatrixMultiplication`, batched encodes) |
 
 ## Algorithm
 
@@ -32,16 +31,11 @@ cublasSgemmBatched(handle, OP_N, OP_N, N, M, K, &alpha, dBptrs, N, dAptrs, K, &b
 which computes the column-major product `Cᵀ = Bᵀ·Aᵀ` for each batch and writes the result
 into dC — which, when read back in row-major, gives the correct C = A·B.
 
-For Apple Metal, `MPSMatrixMultiplication` natively uses row-major layout, so no
-transposition trick is needed. All batch\_count multiplications are encoded into a
-single command buffer for efficient execution.
-
 ## Files
 
 | File                              | Description                                      |
 |-----------------------------------|--------------------------------------------------|
 | `cublas_batched_gemm.hip`         | CUDA/ROCm source (`#ifdef USE_CUBLAS` / `#elif defined(USE_ROCBLAS)`) |
-| `cublas_batched_gemm_metal.mm`    | Objective-C++ Metal host using `MPSMatrixMultiplication` |
 | `Makefile`                        | Auto-detecting build system                      |
 | `README.md`                       | This file                                        |
 
@@ -58,7 +52,6 @@ Explicit platform:
 ```bash
 make PLATFORM=cuda    # NVIDIA CUDA + cuBLAS
 make PLATFORM=rocm    # AMD ROCm/HIP + rocBLAS
-make PLATFORM=metal   # Apple Metal + MPS
 ```
 
 Clean:
@@ -92,7 +85,7 @@ cublas_batched_gemm,64x512,8.456,2038.50
 **Human-readable (stderr):**
 
 ```
-Device: Apple M2 Pro
+Device: <device name>
 batch_count=64  M=512  N=512  K=512  warmup=5  iters=5
 
   iter 0: 8.401 ms
@@ -127,4 +120,3 @@ The benchmark exits with status 0 on pass and 1 on failure.
 - **5 timed** iterations; the reported time is the average
 
 On CUDA/ROCm, timing uses `cudaEvent` / `hipEvent` (GPU-side timer).
-On Metal, timing uses `mach_absolute_time()` around `waitUntilCompleted`.

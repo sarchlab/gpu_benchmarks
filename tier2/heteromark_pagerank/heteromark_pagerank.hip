@@ -9,7 +9,7 @@
 //   ./heteromark_pagerank [--vertices N] [--pr-iterations P]
 //
 //   --vertices N       Number of vertices (default: 65536)
-//   --pr-iterations P  PageRank iterations per run (default: 20)
+//   --pr-iterations P  PageRank iterations per run (default: 5)
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_vertices, BENCH_PARAM_pr_iterations, BENCH_PARAM_damping_factor
@@ -170,7 +170,7 @@ int main(int argc, char** argv) {
 
     // Defaults from params.json
     int vertices     = 65536;
-    int pr_iterations = 20;
+    int pr_iterations = 5;
     double damping_factor = 0.85;
 
     // Command-line fallback
@@ -297,6 +297,7 @@ int main(int argc, char** argv) {
             errors++;
         }
     }
+    bool verify_ok = (errors == 0);
     if (errors > 0)
         fprintf(stderr, "FAIL: %d errors out of %d vertices\n", errors, N);
     else
@@ -309,5 +310,5 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipFree(d_prOld));
     HIP_CHECK(hipFree(d_prNew));
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

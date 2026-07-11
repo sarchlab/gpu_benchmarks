@@ -1,10 +1,9 @@
-ifndef PLATFORM
-  ifeq ($(shell uname -s),Darwin)
-    PLATFORM := metal
-  else ifneq ($(wildcard /opt/rocm),)
-    PLATFORM := rocm
+PLATFORM ?= auto
+ifeq ($(PLATFORM),auto)
+  ifneq ($(wildcard /opt/rocm),)
+    override PLATFORM := rocm
   else
-    PLATFORM := cuda
+    override PLATFORM := cuda
   endif
 endif
 
@@ -13,17 +12,12 @@ endif
 all: run
 
 run:
-ifeq ($(PLATFORM),metal)
-	python3 bench_mps.py
-else
 	python3 bench.py
-endif
 
 setup:
 	@echo "=== Ollama Setup ==="
 	@echo ""
 	@echo "1. Install ollama:"
-	@echo "   macOS:  brew install ollama"
 	@echo "   Linux:  curl -fsSL https://ollama.com/install.sh | sh"
 	@echo ""
 	@echo "2. Start the ollama server:"

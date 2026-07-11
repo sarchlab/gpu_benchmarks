@@ -165,4 +165,4 @@ for full simulation options and configuration.
 - Benchmark warmup is not a benchmark parameter; trace collection runs the same
   invocation that normal `gpubench run` uses for the selected parameter config.
 - Traces are compressed with zstd and are typically much smaller than raw traces.
-- NVBit only works on NVIDIA GPUs with CUDA. ROCm and Metal platforms are not supported.
+- NVBit only works on NVIDIA GPUs with CUDA. The ROCm platform is not supported.

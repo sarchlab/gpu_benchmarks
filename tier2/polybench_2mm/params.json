@@ -36,15 +36,6 @@
   },
   "non_scaling_params": [
     {
-      "name": "block_size",
-      "description": "Number of threads per block",
-      "type": "int",
-      "default": 256,
-      "values": [
-        256
-      ]
-    },
-    {
       "name": "alpha",
       "description": "Scaling factor alpha for matrix multiply",
       "type": "float",
@@ -60,15 +51,6 @@
       "default": 1.2,
       "values": [
         1.2
-      ]
-    },
-    {
-      "name": "precision",
-      "description": "Floating-point precision for computation",
-      "type": "enum",
-      "default": "float",
-      "values": [
-        "float"
       ]
     },
     {

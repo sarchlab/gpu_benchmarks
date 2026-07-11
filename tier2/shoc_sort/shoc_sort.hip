@@ -8,23 +8,23 @@
 // scanArrayRecursive). A full sort of 32-bit keys is performed as 8 passes of
 // 4 radix bits; each pass runs radixSortBlocks -> findRadixOffsets ->
 // recursive block-sum scan -> reorderData. Only the host driver is
-// restructured for the per-iteration timing harness and JSON output.
+// restructured for the single-run timing harness and JSON output.
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
 // Usage:
-//   ./shoc_sort [--size N] [--precision P]
+//   ./shoc_sort [--size N]
 //     --size N       Number of key/value pairs (multiple of 1024)  (default 4194304)
-//     --precision P  Key data type label: uint|int|float           (default uint)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_size, BENCH_PARAM_precision
+//   BENCH_PARAM_size
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
-// distinct kernel (radixSortBlocks, findRadixOffsets, scan, vectorAddUniform4,
-// reorderData) carrying that kernel's GPU event time accumulated over all of
-// its launches in the pass (8 radix passes plus the recursive scans), then a
-// summary whose total_time_ms is the SUM of all recorded GPU event times.
+// Output (stdout): for the single timed run (one full sort), one
+// {"type":"kernel",...} JSON line per distinct kernel (radixSortBlocks,
+// findRadixOffsets, scan, vectorAddUniform4, reorderData) carrying that
+// kernel's GPU event time accumulated over all of its launches in the run
+// (8 radix passes plus the recursive scans), then a summary whose
+// total_time_ms is the SUM of all recorded GPU event times.
 // Output (stderr): human-readable diagnostics.
 
 #include "../../common/bench_timing.h"
@@ -51,16 +51,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
             int v = atoi(argv[i + 1]);
             if (v > 0) return v;
             break;
-        }
-    }
-    return defaultVal;
-}
-
-static const char* parseStrParam(int argc, char** argv, const char* name,
-                                 const char* defaultVal) {
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], name) == 0) {
-            return argv[i + 1];
         }
     }
     return defaultVal;
@@ -564,21 +554,12 @@ int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     int size = 1 << 22; // 4M key/value pairs (~16 MB keys, SHOC class ~2)
-    const char* precision = "uint";
 
-    size      = parseIntParam(argc, argv, "--size", size);
-    precision = parseStrParam(argc, argv, "--precision", precision);
+    size = parseIntParam(argc, argv, "--size", size);
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");      if (env_val) size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_precision"); if (env_val) precision = env_val;
 
-    // Validate string params so echoed JSON values are canonical literals.
-    if (strcmp(precision, "uint") != 0 && strcmp(precision, "int") != 0 &&
-        strcmp(precision, "float") != 0) {
-        fprintf(stderr, "Invalid precision '%s' (use uint, int, float)\n", precision);
-        return EXIT_FAILURE;
-    }
     // The SHOC pipeline requires the element count to be a multiple of 1024
     // (4 * SCAN_BLOCK_SIZE) so every kernel's grid geometry divides evenly.
     if (size % 1024 != 0) {
@@ -600,8 +581,10 @@ int main(int argc, char** argv) {
             size, (double)bytes / (1024.0 * 1024.0), SORT_BITS / 4);
 
     // Host key/value buffers. SHOC uses key==val==i%1024; we use synthetic
-    // random uint keys (values carry the source index) — radix sort work is
-    // data-independent, so timing is unaffected.
+    // random uint keys (values carry the source index). The radix sort's
+    // operation count is data-independent, but memory locality is not:
+    // reorderData's scatter pattern depends on the key distribution, and
+    // uniform random keys give representative (well-spread) scatter traffic.
     uint* hKeys = (uint*)malloc(bytes);
     uint* hVals = (uint*)malloc(bytes);
     if (!hKeys || !hVals) { fprintf(stderr, "Host malloc failed\n"); return 1; }
@@ -651,18 +634,18 @@ int main(int argc, char** argv) {
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"precision\":\"%s\",\"sort_block_size\":%d,\"scan_block_size\":%d",
-             size, precision, SORT_BLOCK_SIZE, SCAN_BLOCK_SIZE);
+             "\"size\":%d,\"sort_block_size\":%d,\"scan_block_size\":%d",
+             size, SORT_BLOCK_SIZE, SCAN_BLOCK_SIZE);
 
     bench_timer_t timer;
     bench_timer_create(&timer);
     bench_lap_t acc_radix, acc_find, acc_scan, acc_vadd, acc_reorder;
     SortTiming T{ &timer, &acc_radix, &acc_find, &acc_scan, &acc_vadd, &acc_reorder };
 
-    // One recorded pass = a full sort of the array: 8 radix passes of 4 bits.
-    // The sort is DESTRUCTIVE and returns its result in dKeys/dVals (each
-    // radixSortStep ping-pongs keys->tempKeys->keys), so the pristine keys and
-    // values are re-uploaded (untimed) at the start of every pass.
+    // The single timed run = a full sort of the array: 8 radix passes of 4
+    // bits. The sort is DESTRUCTIVE and returns its result in dKeys/dVals
+    // (each radixSortStep ping-pongs keys->tempKeys->keys); the pristine keys
+    // and values are uploaded (untimed) at the start of the run.
     auto run_pass = [&]() {
         bench_lap_reset(&acc_radix);
         bench_lap_reset(&acc_find);
@@ -707,7 +690,8 @@ int main(int argc, char** argv) {
 
     // Correctness check on the last pass's result.
     HIP_CHECK(hipMemcpy(hKeys, dKeys, bytes, hipMemcpyDeviceToHost));
-    fprintf(stderr, "Correctness: %s\n", verifySort(hKeys, size) ? "PASS" : "FAIL");
+    bool sorted_ok = verifySort(hKeys, size);
+    fprintf(stderr, "Correctness: %s\n", sorted_ok ? "PASS" : "FAIL");
 
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
@@ -724,5 +708,5 @@ int main(int argc, char** argv) {
     free(hKeys);
     free(hVals);
 
-    return 0;
+    return sorted_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -5,7 +5,7 @@ diffusion). This is a **faithful port** of Rodinia SRAD v2: the device kernels
 `srad_cuda_1` and `srad_cuda_2` are the original upstream kernels
 (`rodinia/cuda/srad/srad_v2/srad_kernel.cu`), copied verbatim, including their
 shared-memory neighborhood tiling and the compile-time `BLOCK_SIZE 16` thread
-block. Only the host driver is restructured for the per-iteration timing
+block. Only the host driver is restructured for the single-pass timing
 harness and JSON output.
 
 Derived from the [Rodinia benchmark suite](https://rodinia.cs.virginia.edu/).
@@ -33,9 +33,7 @@ stay in the pass but **outside** the timed brackets.
 | File | Description |
 |------|-------------|
 | `rodinia_srad.hip` | HIP/CUDA source — original `srad_cuda_1`/`srad_cuda_2` kernels + timing driver |
-| `rodinia_srad.metal` | Metal compute shader (separate reimplementation, not the upstream kernel) |
-| `rodinia_srad_metal.mm` | ObjC++ Metal host code |
-| `Makefile` | Auto-detecting build (Darwin→metal, ROCm→rocm, else→cuda) |
+| `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
 | `params.json` | Parameter specification |
 
 ## Build
@@ -44,15 +42,14 @@ stay in the pass but **outside** the timed brackets.
 make               # auto-detect platform
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 ```
 
 ## Run
 
 ```bash
-./rodinia_srad                                  # defaults: 512×512, 100 SRAD iters/pass, lambda 0.5
+./rodinia_srad                                  # defaults: 512×512, 100 SRAD iterations, lambda 0.5
 ./rodinia_srad --image_size 1024
-BENCH_PARAM_iteration=10 ./rodinia_srad --image_size 256 --num_iterations 200
+./rodinia_srad --image_size 256 --num_iterations 200
 ./rodinia_srad --lambda 0.3
 ```
 
@@ -61,30 +58,31 @@ BENCH_PARAM_iteration=10 ./rodinia_srad --image_size 256 --num_iterations 200
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BENCH_PARAM_image_size` | 512 | Image dimension (N×N, rounded up to a multiple of 16) |
-| `BENCH_PARAM_num_iterations` | 100 | SRAD iterations per pass (each runs both kernels) |
+| `BENCH_PARAM_num_iterations` | 100 | SRAD iterations (each runs both kernels) |
 | `BENCH_PARAM_lambda` | 0.5 | Diffusion step size in (0,1) |
-| `BENCH_PARAM_warmup` | 3 | Warmup passes (not recorded) |
-| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded |
+| `BENCH_PARAM_vector_add_warmup` | `true` | Cold-cache calibration before the timed run |
 
 `block_size` is fixed at the original compile-time `BLOCK_SIZE=16` and is
 emitted as a param for downstream derivation only.
 
+The full `num_iterations`-step diffusion runs **exactly once**; repetition is
+the harness's job (`gpubench run --reps N`).
+
 ## Output
 
-**stdout** — JSON lines: per timed pass, one `kernel` record per kernel
+**stdout** — JSON lines: one `kernel` record per kernel
 (`srad_cuda_1`, `srad_cuda_2`) with that kernel's accumulated GPU event time
-(`time_ms`) and host time (`host_time_ms`) across the pass's SRAD iterations,
+(`time_ms`) and host time (`host_time_ms`) across all SRAD iterations,
 then a summary whose `total_time_ms` is the sum of all recorded GPU event times:
 ```json
 {"type":"kernel","name":"srad_cuda_1","iter":0,"time_ms":6.123,"host_time_ms":9.001,"params":{"image_size":512,"num_iterations":100,"block_size":16,"lambda":0.500}}
 {"type":"kernel","name":"srad_cuda_2","iter":0,"time_ms":6.222,"host_time_ms":9.100,"params":{"image_size":512,"num_iterations":100,"block_size":16,"lambda":0.500}}
-{"type":"summary","total_time_ms":86.415}
+{"type":"summary","total_time_ms":12.345}
 ```
 
-**stderr** — human-readable per-pass timing.
+**stderr** — human-readable timing.
 
 ## Platform Notes
 
 - **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `rodinia_srad.hip` (the faithful upstream kernels).
-- **Metal**: a separate reimplementation in `rodinia_srad_metal.mm`; it is not the upstream kernel.
 - The input image is generated synthetically (`J = exp(I)` for a random `I`) — no external input files required.

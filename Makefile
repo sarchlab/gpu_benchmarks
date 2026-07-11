@@ -7,7 +7,6 @@
 #   make clean                  # Clean all build artifacts
 #   make PLATFORM=cuda          # Force CUDA/NVIDIA build
 #   make PLATFORM=rocm          # Force ROCm/AMD build
-#   make PLATFORM=metal         # Force Metal/Apple build
 #
 # gpubench CLI shortcuts:
 #   make list                   # List all benchmarks
@@ -17,16 +16,13 @@
 #
 # Platform Detection:
 #   PLATFORM=auto (default) — detects the platform at build time:
-#     - Darwin   → metal
 #     - /opt/rocm present → rocm
 #     - Otherwise → cuda
 
 PLATFORM ?= auto
 
 ifeq ($(PLATFORM), auto)
-  ifeq ($(shell uname), Darwin)
-    PLATFORM = metal
-  else ifneq ($(wildcard /opt/rocm/bin/hipcc),)
+  ifneq ($(wildcard /opt/rocm/bin/hipcc),)
     PLATFORM = rocm
   else
     PLATFORM = cuda

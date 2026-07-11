@@ -8,13 +8,13 @@
 // with command-line --flags as fallback.
 //
 // Environment variables:
-//   BENCH_PARAM_array_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_array_size, BENCH_PARAM_block_size
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
-// kernel (scan_block_kernel, add_block_sums_kernel) carrying that kernel's
-// accumulated GPU event time across all recursion levels in the pass plus
-// the host wall-clock time, then a summary whose total_time_ms is the SUM
-// of all recorded GPU event times. Bandwidth (GB/s) is derived downstream
+// Output (stdout): for the single timed run, one {"type":"kernel",...} JSON
+// line per kernel (scan_block_kernel, add_block_sums_kernel) carrying that
+// kernel's accumulated GPU event time across all recursion levels in the run
+// plus the host wall-clock time, then a summary whose total_time_ms is the
+// SUM of all recorded GPU event times. Bandwidth (GB/s) is derived downstream
 // from time_ms and params.
 // Output (stderr): Human-readable diagnostics
 
@@ -33,16 +33,6 @@ static int parseIntParam(int argc, char** argv, const char* name,
             int v = atoi(argv[i + 1]);
             if (v > 0) return v;
             break;
-        }
-    }
-    return defaultVal;
-}
-
-static const char* parseStrParam(int argc, char** argv, const char* name,
-                                 const char* defaultVal) {
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], name) == 0) {
-            return argv[i + 1];
         }
     }
     return defaultVal;
@@ -188,12 +178,10 @@ int main(int argc, char** argv) {
     // Defaults
     int array_size = 1048576;
     int block_size = 256;
-    const char* precision = "float";
 
     // Command-line fallback
     array_size = parseIntParam(argc, argv, "--array_size", array_size);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
-    precision  = parseStrParam(argc, argv, "--precision", precision);
 
     // Environment variable overrides
     const char* env_val;
@@ -201,16 +189,6 @@ int main(int argc, char** argv) {
     if (env_val) array_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_precision");
-    if (env_val) precision = env_val;
-    // Validate string params against their known sets so the values echoed
-    // into the JSON records are always canonical literals.
-    if (strcmp(precision, "half") != 0 && strcmp(precision, "float") != 0 &&
-        strcmp(precision, "double") != 0) {
-        fprintf(stderr, "Invalid precision '%s' (use half, float, double)\n",
-                precision);
-        return EXIT_FAILURE;
-    }
     int N     = array_size;
 
     // Clamp block_size
@@ -252,8 +230,8 @@ int main(int argc, char** argv) {
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"array_size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
-             array_size, block_size, precision);
+             "\"array_size\":%d,\"block_size\":%d",
+             array_size, block_size);
 
     bench_timer_t timer;
     bench_timer_create(&timer);
@@ -323,9 +301,9 @@ int main(int argc, char** argv) {
     free(h_output);
     free(h_ref);
 
-    // Verification is reported above (stderr) but is non-fatal: an fp32 prefix
-    // sum of millions of elements legitimately diverges from the sequential CPU
-    // reference by more than the tolerance (summation-order rounding), so it must
-    // not discard the timing measurements. Matches shoc_reduction's behavior.
-    return 0;
+    // All JSON records and the summary line have already been emitted above,
+    // so the harness keeps the timing data even when verification fails; the
+    // non-zero exit code marks the run as failed. Matches shoc_reduction's
+    // behavior.
+    return (errors > 0) ? EXIT_FAILURE : EXIT_SUCCESS;
 }

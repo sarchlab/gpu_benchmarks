@@ -37,12 +37,10 @@ The benchmark auto-detects the first available model (preferring tinyllama).
 ```bash
 make run PLATFORM=cuda    # Linux NVIDIA
 make run PLATFORM=rocm    # Linux AMD
-make run PLATFORM=metal   # macOS Apple Silicon
 ```
 
 Since Ollama handles GPU backend selection internally, all platforms use
-the same HTTP API. The `bench_mps.py` variant is functionally identical
-to `bench.py`.
+the same HTTP API.
 
 ## Output Format
 

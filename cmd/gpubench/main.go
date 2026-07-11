@@ -100,7 +100,7 @@ func main() {
 	compileCmd.Flags().String("tier", "", "Filter by tier")
 	compileCmd.Flags().String("suite", "", "Filter by suite")
 	compileCmd.Flags().String("benchmark", "", "Filter by benchmark name")
-	compileCmd.Flags().String("platform", "", "Platform: cuda, rocm, metal")
+	compileCmd.Flags().String("platform", "", "Platform: cuda, rocm")
 	compileCmd.Flags().Int("jobs", 0, "Parallel jobs")
 	compileCmd.Flags().Bool("verbose", false, "Verbose output")
 
@@ -160,7 +160,7 @@ func main() {
 	runCmd.Flags().String("benchmark", "", "Filter by benchmark name")
 	runCmd.Flags().String("reps", "", "Repetitions (default: 7)")
 	runCmd.Flags().String("db", "", "SQLite file (default: results.db)")
-	runCmd.Flags().String("platform", "", "Platform: cuda, rocm, metal")
+	runCmd.Flags().String("platform", "", "Platform: cuda, rocm")
 	runCmd.Flags().Bool("sweep-non-scaling", true, "Sweep non-scaling params (use --sweep-non-scaling=false for defaults only)")
 	runCmd.Flags().String("timeout", "", "Timeout secs (default: 60)")
 	runCmd.Flags().String("scaling-values", "", "Override values (csv)")

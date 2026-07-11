@@ -1,25 +1,28 @@
 // polybench_syr2k.hip — PolyBench SYR2K benchmark (HIP, self-contained)
 //
-// Symmetric rank-2k update: C = alpha*A*B^T + alpha*B*A^T + beta*C
-// A and B are NxM matrices, C is NxN symmetric matrix.
-// Derived from the PolyBench/GPU benchmark suite.
+// Rank-2k update: C = alpha*A*B^T + alpha*B*A^T + beta*C
+// A and B are NxM matrices, C is NxN. Note: C is initialized with random
+// (non-symmetric) values and the kernel updates the FULL matrix, so unlike
+// BLAS SYR2K the stored C is not symmetric; the alpha*(A*B^T + B*A^T)
+// update term itself is symmetric.
+// Modeled on the PolyBench/GPU SYR2K workload (tiled reimplementation).
 //
 // Default: N=1024, M=1024, alpha=1.5, beta=1.2
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
 // Usage:
-//   ./polybench_syr2k [--size N]
+//   ./polybench_syr2k [--size N] [--inner_size M] [--alpha A] [--beta B]
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_matrix_size, BENCH_PARAM_inner_size, BENCH_PARAM_block_size,
+//   BENCH_PARAM_matrix_size, BENCH_PARAM_inner_size,
 //   BENCH_PARAM_alpha, BENCH_PARAM_beta
 //
-// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
-// carrying the GPU event time and host wall-clock time, then a summary whose
-// total_time_ms is the SUM of all iterations' GPU event times. GFLOPS
+// Output (stdout): one {"type":"kernel",...} JSON line for the single timed
+// launch, carrying the GPU event time and host wall-clock time, then a
+// summary whose total_time_ms equals that GPU event time. GFLOPS
 // (4*N^2*M / time) is derived downstream from time_ms and params.
-// Output (stderr): device info, per-iteration timing
+// Output (stderr): device info, timing
 
 #include "../../common/bench_timing.h"
 #include <cstdio>
@@ -117,7 +120,6 @@ int main(int argc, char** argv) {
 
     int N     = parseIntParam(argc, argv, "--size", 1024);
     int M     = parseIntParam(argc, argv, "--inner_size", 1024);
-    int block_size = parseIntParam(argc, argv, "--block_size", 256);
     float alpha = parseFloatParam(argc, argv, "--alpha", 1.5f);
     float beta  = parseFloatParam(argc, argv, "--beta", 1.2f);
 
@@ -127,8 +129,6 @@ int main(int argc, char** argv) {
     if (env_val) N = atoi(env_val);
     env_val = getenv("BENCH_PARAM_inner_size");
     if (env_val) M = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_alpha");
     if (env_val) alpha = (float)atof(env_val);
     env_val = getenv("BENCH_PARAM_beta");
@@ -175,14 +175,14 @@ int main(int argc, char** argv) {
 
     char params[192];
     snprintf(params, sizeof(params),
-             "\"matrix_size\":%d,\"inner_size\":%d,\"block_size\":%d,"
+             "\"matrix_size\":%d,\"inner_size\":%d,"
              "\"alpha\":%.2f,\"beta\":%.2f",
-             N, M, block_size, alpha, beta);
+             N, M, alpha, beta);
 
-    // Warmup + timed iterations, each recorded individually. The kernel
-    // rewrites C in place (beta*C term); float FMA timing is value-
-    // independent, so iterating without re-uploading C does not change the
-    // measured time and keeps the cache state steady across iterations.
+    // Single timed launch (optionally preceded by the vector-add warmer).
+    // The kernel rewrites C in place (beta*C term), but it runs only once
+    // per process on the freshly uploaded C, so every execution performs
+    // identical work.
     double total_gpu_ms =
         bench_run_once("syr2k_kernel", params, [&]() {
             syr2k_kernel<<<grid, block>>>(d_A, d_B, d_C, N, M, alpha, beta);

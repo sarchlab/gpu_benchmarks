@@ -12,7 +12,7 @@
 //   gram_project      : for j>k: R[k,j]=dot(Q[:,k],A[:,j]); A[:,j]-=R[k,j]*Q[:,k]
 //                       one thread per column j > k
 //
-// Default: M = N = 512
+// Default: M = 512, N = 64
 //
 // Compiles with hipcc (AMD ROCm) or nvcc -x cu (CUDA).
 //
@@ -20,18 +20,18 @@
 //   ./polybench_gramschmidt [--m M] [--n N] [--passes P]
 //
 //   --m M       Number of rows                          (default: 512)
-//   --n N       Number of columns                       (default: 512)
-//   --passes P  QR factorizations per recorded iteration (default: 3)
+//   --n N       Number of columns                       (default: 64)
+//   --passes P  QR factorizations per execution          (default: 3)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_m, BENCH_PARAM_n, BENCH_PARAM_passes, BENCH_PARAM_block_size
+//   BENCH_PARAM_m, BENCH_PARAM_n, BENCH_PARAM_passes
 //
-// Output (stdout): per timed iteration, one {"type":"kernel",...} JSON line
-// per kernel (gram_norm, gram_norm_finish, gram_normalize, gram_project)
-// carrying that kernel's accumulated GPU event time (time_ms) and host
-// wall-clock time (host_time_ms) over all `passes` factorizations of that
-// iteration, then a summary whose total_time_ms is the SUM of all recorded
-// GPU event times. GB/s is derived downstream from time_ms and params.
+// Output (stdout): one {"type":"kernel",...} JSON line per kernel
+// (gram_norm, gram_norm_finish, gram_normalize, gram_project) carrying that
+// kernel's GPU event time (time_ms) and host wall-clock time (host_time_ms)
+// accumulated over all `passes` factorizations of the single run, then a
+// summary whose total_time_ms is the SUM of all recorded GPU event times.
+// GB/s is derived downstream from time_ms and params.
 // Output (stderr): device info, timing details, orthogonality check
 
 #include "../../common/bench_timing.h"
@@ -147,9 +147,8 @@ int main(int argc, char** argv)
     setvbuf(stdout, NULL, _IONBF, 0);
 
     int M      = parseIntParam(argc, argv, "--m", 512);
-    int N      = parseIntParam(argc, argv, "--n", 512);
+    int N      = parseIntParam(argc, argv, "--n", 64);
     int passes = parseIntParam(argc, argv, "--passes", 3);
-    int block_size_param = parseIntParam(argc, argv, "--block_size", 256);
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_m");
@@ -158,8 +157,6 @@ int main(int argc, char** argv)
     if (env_val) N = atoi(env_val);
     env_val = getenv("BENCH_PARAM_passes");
     if (env_val) passes = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size_param = atoi(env_val);
 
     size_t bytes_A = (size_t)M * N * sizeof(float);
     size_t bytes_Q = (size_t)M * N * sizeof(float);
@@ -200,17 +197,17 @@ int main(int argc, char** argv)
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"m\":%d,\"n\":%d,\"passes\":%d,\"block_size\":%d",
-             M, N, passes, block_size_param);
+             "\"m\":%d,\"n\":%d,\"passes\":%d",
+             M, N, passes);
 
-    // Per-kernel accumulators: one recorded iteration = `passes` full QR
+    // Per-kernel accumulators: the single run = `passes` full QR
     // factorizations; each kernel's GPU/host time is accumulated over all
-    // k-columns and all passes within the iteration.
+    // k-columns and all passes, giving one record per kernel.
     bench_timer_t timer;
     bench_timer_create(&timer);
     bench_lap_t acc_norm, acc_norm_finish, acc_normalize, acc_project;
 
-    // One recorded iteration. Gram-Schmidt orthogonalizes A in place, so A
+    // The single recorded run. Gram-Schmidt orthogonalizes A in place, so A
     // is restored from the pristine host copy (and Q/R zeroed) before every
     // factorization — otherwise later factorizations would run on an
     // already-orthogonalized matrix. Resets stay outside timed brackets.
@@ -297,5 +294,5 @@ int main(int argc, char** argv)
     free(h_A_orig);
     free(h_Q);
 
-    return 0;
+    return orth_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

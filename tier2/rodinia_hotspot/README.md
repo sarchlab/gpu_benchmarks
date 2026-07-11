@@ -1,44 +1,58 @@
 # tier2/rodinia_hotspot — 2D Thermal Simulation (Rodinia Hotspot)
 
-Iterative 2D stencil thermal simulation for chip temperature estimation. Each cell's temperature is updated based on its four neighbors (N/S/E/W), local power density, and thermal resistances. Classic structured-grid benchmark.
+Transient thermal simulation of a chip: an iterative 2D structured-grid stencil
+where each cell's temperature is updated from its four neighbors (N/S/E/W),
+the local power density, and thermal resistances. Classic structured-grid
+benchmark.
 
-Derived from the [Rodinia benchmark suite](https://rodinia.cs.virginia.edu/) Hotspot workload.
+Faithful port of the [Rodinia benchmark suite](https://rodinia.cs.virginia.edu/)
+3.1 CUDA Hotspot: the device kernel (`calculate_temp`) and its **pyramidal /
+ghost-zone temporal-blocking** scheme are the original; only the host driver is
+restructured for single-pass timing and JSON output.
 
 ## Algorithm
 
-For each cell `(row, col)` in an `N×N` grid:
+The per-cell update is the classic hotspot stencil:
 ```
 T_new[i][j] = T[i][j] + step_div_cap * (
     power[i][j]
     + (T[i-1][j] + T[i+1][j] - 2*T[i][j]) * Ry_1    // N-S neighbors
     + (T[i][j-1] + T[i][j+1] - 2*T[i][j]) * Rx_1    // E-W neighbors
-    + (AMB_TEMP  - T[i][j]) * Rz_1                    // heat to substrate
+    + (AMB_TEMP  - T[i][j]) * Rz_1                  // heat to substrate
 )
 ```
-Boundary cells use clamped (no-flux) boundary conditions.
+with clamped (no-flux) boundary conditions.
 
-Multiple time-steps are run per timed pass using ping-pong buffers; the
-initial temperature grid is re-uploaded (untimed) at the start of every pass
-so all passes simulate the same trajectory.
+Rather than one kernel launch per time step, the original **pyramidal**
+scheme advances `pyramid_height` time steps per launch: each 16×16 block
+loads an expanded tile (the pyramid base, grown by `EXPAND_RATE = 2` cells
+per border per step) into shared memory once, iterates the stencil
+`pyramid_height` times in shared memory, and writes back only the valid
+inner region. Ping-pong buffers alternate between launches; the whole
+simulation runs `ceil(total_iterations / pyramid_height)` launches of
+`calculate_temp`.
+
+The benchmark runs **one full simulation of `total_iterations` time steps,
+exactly once**; repetition is the harness's job (`gpubench run --reps N`).
 
 ## Parameters
 
 | Env var | Default | Description |
 |---------|---------|-------------|
-| `BENCH_PARAM_grid_size` | 512 | Grid dimension (N×N) |
-| `BENCH_PARAM_block_size` | 16 | Thread-block dimension (B×B) |
-| `BENCH_PARAM_num_iterations` | 10 | Stencil time-steps per pass |
-| `BENCH_PARAM_warmup` | 3 | Warmup passes (untimed) |
-| `BENCH_PARAM_iteration` | 7 | Timed passes, each recorded |
+| `BENCH_PARAM_grid_size` (or `--grid_size N`) | 1024 | Grid dimension (N×N), scaling axis |
+| `BENCH_PARAM_total_iterations` (or `--total_iterations T`) | 360 | Total thermal time steps simulated |
+| `BENCH_PARAM_pyramid_height` (or `--pyramid_height P`) | 2 | Time steps advanced per pyramidal launch (must be < BLOCK_SIZE/2 = 8) |
+| `BENCH_PARAM_vector_add_warmup` | `true` | Cold-cache calibration before the timed simulation |
+
+The thread-block size is **fixed** at `BLOCK_SIZE = 16` (16×16), as in the
+original — not a knob.
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `rodinia_hotspot.hip` | HIP source — stencil kernel + self-contained utilities |
-| `rodinia_hotspot.metal` | Metal compute shader — stencil kernel |
-| `rodinia_hotspot_metal.mm` | ObjC++ Metal host code |
-| `Makefile` | Auto-detecting build (Darwin→metal, ROCm→rocm, else→cuda) |
+| `rodinia_hotspot.hip` | HIP source — original pyramidal kernel + self-contained host driver |
+| `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
 
 ## Build
 
@@ -46,42 +60,39 @@ so all passes simulate the same trajectory.
 make               # auto-detect platform
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 ```
 
 ## Run
 
 ```bash
-./rodinia_hotspot                                         # defaults: 512×512, 10 steps/pass
-./rodinia_hotspot --grid_size 1024
-./rodinia_hotspot --grid_size 256 --num_iterations 20
+./rodinia_hotspot                                         # defaults: 1024×1024, 360 steps, pyramid 2
+./rodinia_hotspot --grid_size 2048
+./rodinia_hotspot --grid_size 512 --total_iterations 360 --pyramid_height 4
 ```
 
 ## Output
 
-**stdout** — JSON lines, one `kernel` record per timed pass carrying the
-accumulated GPU event time (`time_ms`) of all stencil steps in that pass plus
-host wall-clock time (`host_time_ms`), then a `summary` whose `total_time_ms`
-is the sum of all recorded GPU event times. Effective bandwidth
-(3 × cells × 4 bytes × steps / time) is derived downstream:
+**stdout** — JSON lines: one `kernel` record for `calculate_temp` carrying the
+accumulated GPU event time (`time_ms`) of all pyramidal launches in the
+simulation plus host wall-clock time (`host_time_ms`), then a `summary` whose
+`total_time_ms` is the sum of the recorded GPU event times. Effective
+bandwidth is derived downstream:
 ```
-{"type":"kernel","name":"hotspot_kernel","iter":0,"time_ms":8.765400,"host_time_ms":8.990000,"params":{"grid_size":512,"block_size":16,"num_iterations":10}}
-...
-{"type":"summary","total_time_ms":61.357800}
+{"type":"kernel","name":"calculate_temp","iter":0,"time_ms":8.765400,"host_time_ms":8.990000,"params":{"grid_size":1024,"total_iterations":360,"pyramid_height":2,"block_size":16}}
+{"type":"summary","total_time_ms":8.765400}
 ```
 
 **stderr** — human-readable results:
 ```
-Device: Apple M4 Pro
-Grid: 512×512  |  Block: 16×16  |  Steps/launch: 10
+Device: NVIDIA GeForce RTX 4090 (id=0)
+Grid: 1024×1024  |  pyramid_height: 2  |  total_iterations: 360
+Grid of blocks: 86×86 (BLOCK_SIZE=16)
 
-pass 0: hotspot_kernel gpu = 8.765 ms, host = 8.990 ms
-...
-Total GPU time: 61.358 ms over 7 passes (10 steps/pass)
+calculate_temp gpu = 8.765 ms, host = 8.990 ms
+Total GPU time: 8.765 ms over 1 pass (360 steps/pass)
 ```
 
 ## Platform Notes
 
 - **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `rodinia_hotspot.hip`
-- **Metal**: compiled with `clang++` from `rodinia_hotspot_metal.mm`; the Metal shader is loaded at runtime from the same directory as the binary
 - Input data is generated synthetically — no external input files required

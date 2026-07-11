@@ -7,13 +7,13 @@
 // the ORIGINAL SHOC/Volkov code, taken verbatim from
 //   shoc/src/cuda/level1/fft/codelets.h
 // and driven with the forward-then-inverse structure of fftlib.cu / FFT.cpp
-// runTest. Only the host driver is restructured for the per-iteration timing
+// runTest. Only the host driver is restructured for the single-run timing
 // harness and JSON output.
 //
-// Timed kernels: FFT512_device (forward) and IFFT512_device (inverse). One
-// recorded pass runs the forward batched FFT over all n_ffts blocks, then the
-// inverse batched FFT (which includes the built-in 1/512 normalization,
-// verbatim in IFFT512_device). Each is one launch/pass and gets its own record.
+// Timed kernels: FFT512_device (forward) and IFFT512_device (inverse). The
+// single timed run is the forward batched FFT over all n_ffts blocks, then
+// the inverse batched FFT (which includes the built-in 1/512 normalization,
+// verbatim in IFFT512_device). Each is one launch and gets its own record.
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
@@ -25,10 +25,10 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_n_ffts, BENCH_PARAM_precision
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
-// FFT512_device and one for IFFT512_device, each carrying its GPU event time,
-// then a summary whose total_time_ms is the SUM of all recorded GPU event
-// times. GFLOPS is derived downstream from time_ms and params.
+// Output (stdout): one {"type":"kernel",...} JSON line for FFT512_device and
+// one for IFFT512_device, each carrying its GPU event time from the single
+// timed run, then a summary whose total_time_ms is the SUM of the recorded
+// GPU event times. GFLOPS is derived downstream from time_ms and params.
 // Output (stderr): human-readable results.
 
 #include "../../common/bench_timing.h"
@@ -353,7 +353,7 @@ void IFFT512_device( T2 *work )
 
 // ===========================================================================
 // HOST DRIVER — adapted from SHOC fftlib.cu forward()/inverse() + FFT.cpp
-// runTest, with each batched launch bracketed for per-iteration timing.
+// runTest, with each batched launch bracketed for per-kernel timing.
 // ===========================================================================
 
 template <class T2, class T>
@@ -396,11 +396,10 @@ static int runFFT(int n_ffts, const char* precision)
     bench_timer_create(&timer);
     bench_lap_t acc_fwd, acc_inv;
 
-    // One recorded pass = forward batched FFT over all n_ffts blocks followed
-    // by the inverse batched FFT (IFFT512_device normalizes by 1/512 in-kernel,
-    // verbatim). The transform is data-independent in time; the pristine source
-    // is re-uploaded (untimed) each pass so every pass does identical work and
-    // the post-run round-trip check is meaningful.
+    // The single timed run = forward batched FFT over all n_ffts blocks
+    // followed by the inverse batched FFT (IFFT512_device normalizes by 1/512
+    // in-kernel, verbatim). The pristine source is uploaded (untimed) before
+    // the run so the post-run round-trip check is meaningful.
     auto run_pass = [&]() {
         bench_lap_reset(&acc_fwd);
         bench_lap_reset(&acc_inv);
@@ -449,7 +448,7 @@ static int runFFT(int n_ffts, const char* precision)
     HIP_CHECK(hipFree(work));
     free(source);
     free(result);
-    return 0;
+    return (max_err < 1e-2) ? 0 : EXIT_FAILURE;
 }
 
 // ---------------------------------------------------------------------------

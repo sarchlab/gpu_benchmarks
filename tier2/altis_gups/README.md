@@ -26,12 +26,12 @@ patterns that defeat caching and prefetching mechanisms.
 | `block_size`    | 256       | Threads per block                    |
 | `num_updates`   | 128       | Random updates per thread            |
 | `num_threads`   | 65536     | Total threads launched               |
-| `num_warmup`    | 3         | Warmup passes (untimed)              |
-| `num_iters`     | 7         | Timed passes, each recorded          |
+| `vector_add_warmup` | true  | Cold-cache calibration: boost the clock and evict the LLC before the timed launch; set `false` to time as-is |
 
 Parameters are read from `BENCH_PARAM_*` environment variables.
-The table is restored to its pristine contents before every pass (untimed),
-so each recorded pass performs identical work.
+The kernel runs exactly once per execution; the pristine table is uploaded
+before the timed launch (untimed). Repetition across fresh processes is the
+harness's job (`gpubench run --reps N`).
 
 ## Build & Run
 
@@ -41,7 +41,6 @@ make
 ./altis_gups
 
 # Explicit platform
-make PLATFORM=metal
 make PLATFORM=cuda
 make PLATFORM=rocm
 
@@ -51,22 +50,20 @@ BENCH_PARAM_table_size=2097152 BENCH_PARAM_num_updates=256 ./altis_gups
 
 ## Output Format
 
-**JSON-lines to stdout** — one `kernel` record per timed pass, then a
-`summary` whose `total_time_ms` is the sum of all passes' GPU event times:
+**JSON-lines to stdout** — one `kernel` record for the single timed launch,
+then a `summary` whose `total_time_ms` equals that launch's GPU event time:
 ```json
 {"type":"kernel","name":"gups_kernel","iter":0,"time_ms":12.345000,"host_time_ms":12.501000,"params":{"table_size":1048576,...}}
-...
-{"type":"summary","total_time_ms":86.415000}
+{"type":"summary","total_time_ms":12.345000}
 ```
 
 **Human-readable to stderr:**
 ```
-Device: Apple M1
+Device: AMD Radeon RX 7900 XTX (id=0)
 GUPS benchmark  |  Table size: 1048576 (8.39 MB)  |  Updates/thread: 128  |  ...
 
-gups_kernel iter 0: gpu = 12.345 ms, host = 12.501 ms
-...
-Total GPU time: 86.415 ms over 7 iterations
+gups_kernel: gpu = 12.345 ms, host = 12.501 ms
+Total GPU time: 12.345 ms
 PASS
 ```
 
@@ -81,4 +78,5 @@ from the emitted `time_ms` and params; not reported by the binary.
 
 Compares GPU table state against a sequential CPU reference implementation
 for the first 1024 entries. Because atomic XOR is used, results are
-deterministic and must match exactly.
+deterministic and must match exactly. On FAIL the binary exits with a
+non-zero status.

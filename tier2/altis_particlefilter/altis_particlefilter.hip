@@ -15,7 +15,7 @@
 //   --size N         Number of particles (default: 100000)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_size, BENCH_PARAM_num_particles_ratio, BENCH_PARAM_seed
+//   BENCH_PARAM_size
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (update_particles_kernel, compute_weights_kernel, prefix_sum_kernel,
@@ -347,8 +347,6 @@ int main(int argc, char** argv) {
 
     // Defaults from params.json
     int N          = 100000;
-    const char* num_particles_ratio = "0.5";
-    int seed_param = 42;
 
     // Command-line fallback
     N          = parseIntParam(argc, argv, "--size", N);
@@ -357,24 +355,6 @@ int main(int argc, char** argv) {
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_num_particles_ratio");
-    if (env_val) {
-        // Validate against the known enum set so the emitted params string is
-        // always a canonical literal, never raw env text.
-        if      (strcmp(env_val, "0.25") == 0) num_particles_ratio = "0.25";
-        else if (strcmp(env_val, "0.5")  == 0) num_particles_ratio = "0.5";
-        else if (strcmp(env_val, "0.75") == 0) num_particles_ratio = "0.75";
-        else if (strcmp(env_val, "1.0")  == 0) num_particles_ratio = "1.0";
-        else {
-            fprintf(stderr,
-                    "Invalid BENCH_PARAM_num_particles_ratio (expected 0.25, "
-                    "0.5, 0.75 or 1.0)\n");
-            return 1;
-        }
-    }
-    env_val = getenv("BENCH_PARAM_seed");
-    if (env_val) seed_param = atoi(env_val);
-
 
     // Print device info
     int device_id = 0;
@@ -443,10 +423,12 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_rng, h_rng.data(), uint_bytes,  hipMemcpyHostToDevice));
     };
 
+    // The seed recorded here is the fixed initialization seed used above; it
+    // is a constant of the benchmark, not a tunable parameter.
     char params[160];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"num_particles_ratio\":\"%s\",\"seed\":%d",
-             N, num_particles_ratio, seed_param);
+             "\"size\":%d,\"seed\":12345",
+             N);
 
     // Per-kernel accumulators: each pass launches every kernel once per time
     // step; the accumulated GPU/host time of all TIME_STEPS within one pass
@@ -556,6 +538,7 @@ int main(int argc, char** argv) {
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
+    bool verify_ok = true;
     // -----------------------------------------------------------------------
     // Verification: run CPU reference and compare mean positions
     // -----------------------------------------------------------------------
@@ -660,6 +643,7 @@ int main(int argc, char** argv) {
             fprintf(stderr, "PASS\n");
         } else {
             fprintf(stderr, "FAIL: mean position difference %.4f exceeds tolerance\n", diff);
+            verify_ok = false;
         }
 
         HIP_CHECK(hipFree(d_vblock_sums));
@@ -675,5 +659,5 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipFree(d_rng));
     HIP_CHECK(hipFree(d_block_sums));
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

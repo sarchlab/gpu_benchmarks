@@ -1,6 +1,6 @@
 # tier2/tango_binomial_options — Binomial Option Pricing (CRR Model)
 
-Benchmarks the Cox-Ross-Rubinstein (CRR) binomial tree model for **American put option** pricing with early exercise. Reports per-iteration GPU times; throughput (options/sec) is derived downstream.
+Benchmarks the Cox-Ross-Rubinstein (CRR) binomial tree model for **American put option** pricing with early exercise. Emits one raw kernel time per execution; throughput (options/sec) is derived downstream.
 
 Derived from the [Tango benchmark suite](https://github.com/AkshayUsha/Tango) binomial options workload.
 
@@ -15,14 +15,22 @@ Derived from the [Tango benchmark suite](https://github.com/AkshayUsha/Tango) bi
 - Input parameters randomized: S∈[5,200], K∈[1,300], T∈[0.25,10], σ∈[0.1,1.0], r=0.02
 - Metric: options/sec = N / time\_sec (derived downstream from the recorded times)
 
+## Measurement protocol
+
+The binomial kernel is launched and timed **exactly once** per execution —
+there is no in-program warmup or iteration loop. When
+`BENCH_PARAM_vector_add_warmup` is `true` (default), the vector-add warmer runs
+immediately before the timed launch: ~100 ms of sustained load ramps the GPU
+clock while its final pass evicts the last-level cache, so the kernel is
+measured cold-cache at a boosted clock. Repetition is the harness's job:
+`gpubench run --reps N` re-executes the binary in fresh processes.
+
 ## Files
 
 | File | Description |
 |------|-------------|
 | `tango_binomial_options.hip` | HIP source — binomial tree kernel (one block per option, shared memory) |
-| `tango_binomial_options.metal` | Metal compute shader — binomial tree kernel (threadgroup memory) |
-| `tango_binomial_options_metal.mm` | ObjC++ Metal host code |
-| `Makefile` | Auto-detecting build (Darwin→metal, ROCm→rocm, else→cuda) |
+| `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
 
 ## Build
 
@@ -30,7 +38,6 @@ Derived from the [Tango benchmark suite](https://github.com/AkshayUsha/Tango) bi
 make               # auto-detect platform
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 ```
 
 ## Run
@@ -40,23 +47,20 @@ make PLATFORM=metal
 ./tango_binomial_options --options 256 --steps 512        # fewer options and steps
 ```
 
-### Environment variables
+### Environment variables (override argv)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BENCH_PARAM_options` | 512 | Number of options |
-| `BENCH_PARAM_steps` | 1024 | Binomial tree steps per option |
-| `BENCH_PARAM_precision` | float | Precision label (float, double, half; recorded in params) |
-| `BENCH_PARAM_warmup` | 3 | Warmup launches (untimed) |
-| `BENCH_PARAM_iteration` | 7 | Timed launches, each recorded |
+| `BENCH_PARAM_steps` | 1024 | Binomial tree steps per option (clamped to 4096) |
+| `BENCH_PARAM_vector_add_warmup` | true | Clock-boost + LLC-evict warmer before the timed run |
 
 ## Output
 
-**stdout** — JSON lines: one `{"type":"kernel",...}` record per timed iteration with `time_ms` (GPU event time) and `host_time_ms` (host wall-clock), then a summary whose `total_time_ms` is the sum of all iterations' GPU event times:
+**stdout** — JSON lines: one `{"type":"kernel",...}` record with `time_ms` (GPU event time) and `host_time_ms` (host wall-clock), then a summary whose `total_time_ms` equals that record's GPU event time:
 ```
-{"type":"kernel","name":"binomial_kernel","iter":0,"time_ms":45.6789,"host_time_ms":45.9012,"params":{"options":512,"steps":1024,"precision":"float"}}
-...
-{"type":"summary","total_time_ms":319.7523}
+{"type":"kernel","name":"binomial_kernel","iter":0,"time_ms":45.6789,"host_time_ms":45.9012,"params":{"options":512,"steps":1024}}
+{"type":"summary","total_time_ms":45.678900}
 ```
 
 Derived metrics (options/sec) are computed downstream from `time_ms` and the params.
@@ -64,21 +68,20 @@ Derived metrics (options/sec) are computed downstream from `time_ms` and the par
 **stderr** — human-readable results:
 ```
 Device: AMD Radeon RX 7900 XTX (id=0)
-Options: 512  |  Steps: 1024  |  Iterations: 3 warmup + 7 timed
+Options: 512  |  Steps: 1024
 
-binomial_kernel iter 0: gpu = 45.679 ms, host = 45.901 ms
-...
-Total GPU time: 319.752 ms over 7 iterations
+binomial_kernel: gpu = 45.679 ms, host = 45.901 ms
+Total GPU time: 45.679 ms
 PASS
 ```
 
 ## Verification
 
-- Compares GPU results against CPU reference for the first 10 options
+- After the timed run (measurements already emitted), GPU results are compared against a CPU reference for the first 10 options
 - CPU reference uses identical backward induction algorithm
 - Tolerance: relative error with absolute floor
+- On FAIL the process exits non-zero, so the harness marks the run as failed without losing the measurements; there is no verification on/off parameter
 
 ## Platform Notes
 
 - **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `tango_binomial_options.hip`; one block per option, shared memory for tree levels, `__syncthreads()` between levels
-- **Metal**: compiled with `clang++` from `tango_binomial_options_metal.mm`; the Metal shader (`tango_binomial_options.metal`) is loaded and compiled at runtime from the same directory as the binary; uses threadgroup memory and `threadgroup_barrier`

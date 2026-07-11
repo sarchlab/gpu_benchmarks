@@ -7,11 +7,11 @@
 //
 // Parameters are read from BENCH_PARAM_* environment variables,
 // with command-line --flags as fallback:
-//   BENCH_PARAM_array_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_array_size, BENCH_PARAM_block_size
 //
-// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
-// carrying the GPU event time and host wall-clock time, then a summary whose
-// total_time_ms is the SUM of all iterations' GPU event times. Effective
+// Output (stdout): one {"type":"kernel",...} JSON line for the single timed
+// launch carrying the GPU event time and host wall-clock time, then a summary
+// whose total_time_ms equals that record's GPU event time. Effective
 // bandwidth is derived downstream from time_ms and params.
 // Output (stderr): Human-readable diagnostics
 
@@ -31,16 +31,6 @@ static int parseIntParam(int argc, char** argv, const char* name,
             int v = atoi(argv[i + 1]);
             if (v > 0) return v;
             break;
-        }
-    }
-    return defaultVal;
-}
-
-static const char* parseStrParam(int argc, char** argv, const char* name,
-                                 const char* defaultVal) {
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], name) == 0) {
-            return argv[i + 1];
         }
     }
     return defaultVal;
@@ -78,12 +68,10 @@ int main(int argc, char** argv) {
     // Defaults
     int array_size  = 4194304;
     int block_size  = 256;
-    const char* precision = "float";
 
     // Command-line fallback
     array_size = parseIntParam(argc, argv, "--array_size", array_size);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
-    precision  = parseStrParam(argc, argv, "--precision", precision);
 
     // Environment variable overrides
     const char* env_val;
@@ -91,18 +79,6 @@ int main(int argc, char** argv) {
     if (env_val) array_size = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_precision");
-    if (env_val) precision = env_val;
-
-    // Validate precision against the supported set; params must carry
-    // canonical literals, never raw env/argv text.
-    if (strcmp(precision, "float") == 0) {
-        precision = "float";
-    } else {
-        fprintf(stderr, "Unsupported precision '%s' (supported: float)\n",
-                precision);
-        return EXIT_FAILURE;
-    }
 
     int N = array_size;
     size_t bytes  = (size_t)N * sizeof(float);
@@ -143,12 +119,13 @@ int main(int argc, char** argv) {
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"array_size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
-             array_size, block_size, precision);
+             "\"array_size\":%d,\"block_size\":%d",
+             array_size, block_size);
 
-    // Warmup + timed iterations, each recorded individually. The kernel only
-    // reads b and c and overwrites a from scratch, so repeated launches
-    // perform identical work — no state reset needed.
+    // Single timed launch (bench_run_once: optional cold-cache warmer, then
+    // one bracketed launch). The kernel only reads b and c and overwrites a
+    // from scratch, so every execution performs identical work — no state
+    // reset needed.
     double total_gpu_ms =
         bench_run_once("triad_kernel", params, [&]() {
             triad_kernel<<<dim3(grid), dim3(block_size)>>>(d_a, d_b, d_c, scalar, N);

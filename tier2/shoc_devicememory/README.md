@@ -1,6 +1,6 @@
 # tier2/shoc_devicememory — Device Memory Bandwidth (SHOC)
 
-Benchmarks GPU global memory bandwidth for three access patterns: read-only, write-only, and read-write. Emits per-iteration kernel times; GB/s for each pattern is derived downstream.
+Benchmarks GPU global memory bandwidth for three access patterns: read-only, write-only, and read-write. Emits one raw per-kernel GPU time per execution; GB/s for each pattern is derived downstream.
 
 Derived from the [SHOC benchmark suite](https://github.com/vetter/shoc) DeviceMemory workload.
 
@@ -15,6 +15,16 @@ Derived from the [SHOC benchmark suite](https://github.com/vetter/shoc) DeviceMe
 `BENCH_PARAM_transfer_mode` selects which kernels run: `read`, `write`, or
 `readwrite` (all three; default).
 
+## Measurement protocol
+
+Each enabled kernel is launched and timed **exactly once** per execution —
+there is no in-program warmup or iteration loop. When
+`BENCH_PARAM_vector_add_warmup` is `true` (default), the vector-add warmer runs
+immediately before each timed launch: ~100 ms of sustained load ramps the GPU
+clock while its final pass evicts the last-level cache, so every kernel is
+measured cold-cache at a boosted clock. Repetition is the harness's job:
+`gpubench run --reps N` re-executes the binary in fresh processes.
+
 ## Parameters
 
 | Env var | Default | Description |
@@ -22,17 +32,14 @@ Derived from the [SHOC benchmark suite](https://github.com/vetter/shoc) DeviceMe
 | `BENCH_PARAM_array_size_mb` | 64 | Array size in MB |
 | `BENCH_PARAM_block_size` | 256 | Threads per block |
 | `BENCH_PARAM_transfer_mode` | readwrite | Access pattern(s): read, write, readwrite |
-| `BENCH_PARAM_warmup` | 3 | Warmup launches per kernel (untimed) |
-| `BENCH_PARAM_iteration` | 7 | Timed launches per kernel, each recorded |
+| `BENCH_PARAM_vector_add_warmup` | true | Clock-boost + LLC-evict warmer before each timed launch |
 
 ## Files
 
 | File | Description |
 |------|-------------|
 | `shoc_devicememory.hip` | HIP source — 3 kernels + self-contained utilities |
-| `shoc_devicememory.metal` | Metal compute shaders — 3 kernels |
-| `shoc_devicememory_metal.mm` | ObjC++ Metal host code |
-| `Makefile` | Auto-detecting build (Darwin→metal, ROCm→rocm, else→cuda) |
+| `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
 
 ## Build
 
@@ -40,7 +47,6 @@ Derived from the [SHOC benchmark suite](https://github.com/vetter/shoc) DeviceMe
 make               # auto-detect platform
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 ```
 
 ## Run
@@ -53,33 +59,30 @@ make PLATFORM=metal
 
 ## Output
 
-**stdout** — JSON lines: for each enabled kernel, one `kernel` record per
-timed iteration carrying the GPU event time (`time_ms`) and host wall-clock
-time (`host_time_ms`), then a `summary` whose `total_time_ms` is the sum of
-all recorded GPU event times:
+**stdout** — JSON lines: one `kernel` record per enabled kernel carrying the
+GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`), then a
+`summary` whose `total_time_ms` is the sum of the recorded GPU event times
+(with `transfer_mode=readwrite`, all three kernels):
 ```
 {"type":"kernel","name":"readOnly_kernel","iter":0,"time_ms":2.345600,"host_time_ms":2.400000,"params":{"array_size_mb":64,"block_size":256,"transfer_mode":"readwrite"}}
-...
 {"type":"kernel","name":"writeOnly_kernel","iter":0,"time_ms":1.987600,"host_time_ms":2.020000,"params":{...}}
-...
 {"type":"kernel","name":"readWrite_kernel","iter":0,"time_ms":4.123400,"host_time_ms":4.180000,"params":{...}}
-...
-{"type":"summary","total_time_ms":59.196200}
+{"type":"summary","total_time_ms":8.456600}
 ```
 
 Bandwidth in GB/s is derived downstream from `time_ms` and params.
 
-**stderr** — human-readable per-iteration times:
+**stderr** — human-readable per-kernel times:
 ```
-Device: Apple M4 Pro
+Device: NVIDIA GeForce RTX 4090 (id=0)
 Array size: 64 MB (16777216 floats)  |  Block size: 256
 
-readOnly_kernel iter 0: gpu = 2.346 ms, host = 2.400 ms
-...
-Total GPU time: 59.196 ms (7 iterations per kernel)
+readOnly_kernel: gpu = 2.346 ms, host = 2.400 ms
+writeOnly_kernel: gpu = 1.988 ms, host = 2.020 ms
+readWrite_kernel: gpu = 4.123 ms, host = 4.180 ms
+Total GPU time: 8.457 ms
 ```
 
 ## Platform Notes
 
 - **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `shoc_devicememory.hip`
-- **Metal**: compiled with `clang++` from `shoc_devicememory_metal.mm`; the Metal shader is loaded at runtime from the same directory as the binary

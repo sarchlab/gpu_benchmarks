@@ -20,11 +20,11 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_nx, BENCH_PARAM_ny, BENCH_PARAM_block_size
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
-// kernel (atax_kernel1, atax_kernel2) carrying that kernel's GPU event time
-// and host time, then a summary whose total_time_ms is the SUM of all
-// recorded GPU event times. Bandwidth (A read twice: 2*NX*NY*4 bytes / time)
-// is derived downstream from time_ms and params.
+// Output (stdout): the ATAX pass runs exactly once; one {"type":"kernel",...}
+// JSON line per kernel (atax_kernel1, atax_kernel2) carrying that kernel's
+// GPU event time and host time, then a summary whose total_time_ms is the
+// SUM of the two GPU event times. Bandwidth (A read twice:
+// 2*NX*NY*4 bytes / time) is derived downstream from time_ms and params.
 // Output (stderr): device info, timing details
 
 #include "../../common/bench_timing.h"
@@ -159,10 +159,10 @@ int main(int argc, char** argv) {
              "\"nx\":%d,\"ny\":%d,\"block_size\":%d",
              nx, ny, block_size);
 
-    // One full ATAX pass: kernel1 writes d_tmp, kernel2 consumes it and
-    // writes d_y. A and x are never modified and both outputs are fully
-    // overwritten every pass, so repeated passes perform identical work —
-    // no state reset is needed.
+    // One full ATAX pass (run exactly once): kernel1 writes d_tmp, kernel2
+    // consumes it and writes d_y. A and x are never modified and both
+    // outputs are fully overwritten, so every execution performs identical
+    // work — no state reset is needed.
     bench_timer_t timer;
     bench_timer_create(&timer);
     bench_lap_t acc_k1, acc_k2;
@@ -226,5 +226,5 @@ int main(int argc, char** argv) {
     free(h_x);
     free(h_y);
 
-    return 0;
+    return pass ? EXIT_SUCCESS : EXIT_FAILURE;
 }

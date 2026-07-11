@@ -39,15 +39,6 @@
   },
   "non_scaling_params": [
     {
-      "name": "num_bins",
-      "description": "Number of histogram bins",
-      "type": "int",
-      "default": 256,
-      "values": [
-        256
-      ]
-    },
-    {
       "name": "block_size",
       "description": "GPU thread-block size for histogram kernel",
       "type": "int",

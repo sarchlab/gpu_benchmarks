@@ -8,7 +8,6 @@ Self-contained — no external library dependencies.
 |----------|----------------|--------------------------------------|
 | NVIDIA   | **CUDA**       | Custom HIP kernel (compiled via nvcc) |
 | AMD      | **ROCm/HIP**   | Custom HIP kernel (compiled via hipcc) |
-| Apple    | **Metal**      | Custom Metal compute shader          |
 
 ## Algorithm
 
@@ -27,7 +26,7 @@ GPU GEMM optimization without relying on vendor libraries:
 1. **Block tiling**: Each thread block computes a **BM × BN = 64 × 64** tile of C.
 2. **K-dimension tiling**: The K-dimension is traversed in tiles of **BK = 8**.
 3. **Shared-memory staging**: Each K-tile loads BM × BK elements of A and BK × BN
-   elements of B into shared memory (threadgroup memory on Metal) cooperatively.
+   elements of B into shared memory cooperatively.
 4. **Register tiling**: Each thread computes a **TM × TN = 8 × 8** sub-tile in
    registers using outer-product accumulation over the BK dimension.
 
@@ -45,8 +44,6 @@ Shared memory per block:
 | File                      | Description                                      |
 |---------------------------|--------------------------------------------------|
 | `cutlass_gemm.hip`        | CUDA/ROCm source (`#ifdef USE_CUDA` / `#elif defined(USE_HIP)`) |
-| `cutlass_gemm.metal`      | Metal compute shader (tiled GEMM kernel)         |
-| `cutlass_gemm_metal.mm`   | Objective-C++ Metal host code                    |
 | `Makefile`                | Auto-detecting build system                      |
 | `README.md`               | This file                                        |
 
@@ -63,7 +60,6 @@ Explicit platform:
 ```bash
 make PLATFORM=cuda    # NVIDIA CUDA
 make PLATFORM=rocm    # AMD ROCm/HIP
-make PLATFORM=metal   # Apple Metal
 ```
 
 Clean:
@@ -77,9 +73,6 @@ make clean
 ```bash
 ./cutlass_gemm
 ```
-
-**Note (Metal):** The `cutlass_gemm.metal` shader source must be in the same
-directory as the `cutlass_gemm` binary, as it is compiled at runtime.
 
 ## Output Format
 
@@ -100,7 +93,7 @@ cutlass_gemm,4096,45.678,3009.12
 **Human-readable (stderr):**
 
 ```
-Device: Apple M2 Pro
+Device: <device name>
 M=4096  N=4096  K=4096  BM=64 BN=64 TM=8 TN=8
 threads/group=64  warmup=5  iters=5
 
@@ -135,13 +128,12 @@ The benchmark exits with status 0 on pass and 1 on failure.
 - **5 timed** iterations; the reported time is the average
 
 On CUDA/ROCm, timing uses `cudaEvent` / `hipEvent` (GPU-side timer).
-On Metal, timing uses `mach_absolute_time()` around `waitUntilCompleted`.
 
 ## Key Differences from cublas_sgemm
 
 | Aspect          | cublas_sgemm                | cutlass_gemm                   |
 |-----------------|-----------------------------|--------------------------------|
 | Kernel          | Vendor library (cuBLAS/etc) | Custom tiled kernel            |
-| Dependencies    | cuBLAS / rocBLAS / MPS      | None (self-contained)          |
+| Dependencies    | cuBLAS / rocBLAS            | None (self-contained)          |
 | Optimization    | Vendor-tuned                | Demonstrates tiling principles |
 | Expected perf   | Near peak                   | Good but below vendor          |

@@ -17,7 +17,7 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_sequence_length, BENCH_PARAM_block_size, BENCH_PARAM_penalty
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// Output (stdout): one {"type":"kernel",...} JSON line per
 // kernel (nw_kernel1, nw_kernel2) carrying that kernel's accumulated GPU
 // event time and host time within the pass (summed over the wavefront
 // diagonals), then a summary whose total_time_ms is the SUM of all recorded

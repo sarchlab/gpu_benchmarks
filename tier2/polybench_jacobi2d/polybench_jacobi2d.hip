@@ -6,24 +6,27 @@
 //
 // Only interior points (i=1..N-2, j=1..N-2) are updated; boundaries remain 0.
 //
+// NOTE: each tstep performs ONE stencil sweep followed by a buffer swap.
+// Canonical PolyBench jacobi-2d performs TWO sweeps per tstep (A→B then
+// B→A), so tsteps=T here corresponds to roughly T/2 canonical time steps.
+//
 // Default: N=1024, TSTEPS=50
 //
 // Compiles with hipcc (AMD ROCm) or nvcc -x cu (CUDA).
 //
 // Usage:
-//   ./polybench_jacobi2d [--n N] [--tsteps T] [--trials K]
+//   ./polybench_jacobi2d [--n N] [--tsteps T]
 //
 //   --n N        Grid size N×N           (default: 1024)
 //   --tsteps T   Number of time steps    (default: 50)
-//   --trials K   Legacy trial count (echoed in params; the measured pass
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_n, BENCH_PARAM_tsteps, BENCH_PARAM_trials, BENCH_PARAM_block_size
+//   BENCH_PARAM_n, BENCH_PARAM_tsteps
 //
-// Output (stdout): per timed pass (one pass = TSTEPS kernel launches), one
-// {"type":"kernel",...} JSON line carrying the pass's accumulated GPU event
-// time (time_ms) and host wall-clock time (host_time_ms), then a summary
-// whose total_time_ms is the SUM of all recorded GPU event times.
+// Output (stdout): the pass (TSTEPS kernel launches) runs exactly once; one
+// {"type":"kernel",...} JSON line carrying the accumulated GPU event
+// time (time_ms) and host wall-clock time (host_time_ms) of the TSTEPS
+// launches, then a summary whose total_time_ms equals that GPU event time.
 // Bandwidth (GB/s) is derived downstream from time_ms and params.
 // Output (stderr): device info, correctness check, per-pass timing
 
@@ -89,18 +92,12 @@ int main(int argc, char** argv) {
 
     int N      = parseIntParam(argc, argv, "--n",      1024);
     int TSTEPS = parseIntParam(argc, argv, "--tsteps", 50);
-    int trials = parseIntParam(argc, argv, "--trials", 3);
-    int block_size_param = parseIntParam(argc, argv, "--block_size", 256);
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_n");
     if (env_val) N = atoi(env_val);
     env_val = getenv("BENCH_PARAM_tsteps");
     if (env_val) TSTEPS = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_trials");
-    if (env_val) trials = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size_param = atoi(env_val);
 
     size_t bytes = (size_t)N * N * sizeof(float);
 
@@ -137,8 +134,8 @@ int main(int argc, char** argv) {
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"n\":%d,\"tsteps\":%d,\"trials\":%d,\"block_size\":%d",
-             N, TSTEPS, trials, block_size_param);
+             "\"n\":%d,\"tsteps\":%d",
+             N, TSTEPS);
 
     // Per-pass accumulator: one pass = TSTEPS jacobi2d_kernel launches,
     // each launch individually bracketed.
@@ -146,11 +143,11 @@ int main(int argc, char** argv) {
     bench_timer_create(&timer);
     bench_lap_t acc_jacobi;
 
-    // One full Jacobi pass. The two grids ping-pong across the TSTEPS
-    // internal steps; the initial state is restored at the start of every
-    // pass (untimed) — the same reset the original code performed. The step
-    // count is fixed (no convergence test), and the stencil timing is
-    // value-independent, so each pass measures identical work.
+    // One full Jacobi pass (run exactly once). The two grids ping-pong
+    // across the TSTEPS internal steps; the initial state is restored at the
+    // start of the pass (untimed). The step count is fixed (no convergence
+    // test), and the stencil timing is value-independent, so every execution
+    // measures identical work.
     auto run_jacobi_pass = [&]() {
         bench_lap_reset(&acc_jacobi);
 
@@ -185,6 +182,7 @@ int main(int argc, char** argv) {
             total_gpu_ms);
 
     // Correctness check: run CPU for TSTEPS on small 64×64 grid
+    bool verify_ok = true;
     {
         int CN = 64;
         std::vector<float> cA((size_t)CN * CN, 0.0f);
@@ -245,6 +243,7 @@ int main(int argc, char** argv) {
         }
         fprintf(stderr, "Correctness check (CPU vs GPU, %d×%d, %d steps): %s (max_rel=%.2e)\n\n",
                 CN, CN, TSTEPS, pass ? "PASS" : "FAIL", max_rel);
+        verify_ok = pass;
 
         HIP_CHECK(hipFree(cd_A));
         HIP_CHECK(hipFree(cd_B));
@@ -254,5 +253,5 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipFree(d_A));
     HIP_CHECK(hipFree(d_B));
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

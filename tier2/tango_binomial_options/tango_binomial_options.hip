@@ -14,11 +14,10 @@
 //
 // Environment variables (override argv):
 //   BENCH_PARAM_options, BENCH_PARAM_steps,
-//   BENCH_PARAM_precision (float|double|half)
 //
-// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
-// carrying the GPU event time and host wall-clock time, then a summary whose
-// total_time_ms is the SUM of all iterations' GPU event times.
+// Output (stdout): one {"type":"kernel",...} JSON line for the single timed
+// launch carrying the GPU event time and host wall-clock time, then a summary
+// whose total_time_ms equals that record's GPU event time.
 // Options/sec is derived downstream from time_ms and params.
 // Output (stderr): human-readable results
 
@@ -170,7 +169,6 @@ int main(int argc, char** argv) {
     // Defaults from params.json
     int numOptions = 512;
     int numSteps   = 1024;
-    const char* precision = "float";
 
     // Command-line fallback
     numOptions = parseIntParam(argc, argv, "--options", numOptions);
@@ -182,15 +180,6 @@ int main(int argc, char** argv) {
     if (env_val) numOptions = atoi(env_val);
     env_val = getenv("BENCH_PARAM_steps");
     if (env_val) numSteps = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_precision");
-    if (env_val) precision = env_val;
-    /* Validate string params against their known sets, so the values echoed
-     * into the JSON records are always canonical literals. */
-    if (strcmp(precision, "float") != 0 && strcmp(precision, "double") != 0 &&
-        strcmp(precision, "half") != 0) {
-        fprintf(stderr, "Invalid precision '%s' (use float, double, half)\n", precision);
-        return EXIT_FAILURE;
-    }
     // Shared memory must hold (numSteps+1) floats; clamp to reasonable limit
     if (numSteps > 4096) {
         fprintf(stderr, "Warning: clamping steps to 4096 (shared memory limit)\n");
@@ -237,12 +226,13 @@ int main(int argc, char** argv) {
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"options\":%d,\"steps\":%d,\"precision\":\"%s\"",
-             numOptions, numSteps, precision);
+             "\"options\":%d,\"steps\":%d",
+             numOptions, numSteps);
 
-    // Warmup + timed iterations, each recorded individually. The kernel
-    // reads only the immutable option data and fully overwrites d_prices on
-    // each launch, so no state reset is needed between iterations.
+    // Single timed launch (bench_run_once: optional cold-cache warmer, then
+    // one bracketed launch). The kernel reads only the immutable option data
+    // and fully overwrites d_prices, so every execution performs identical
+    // work — no state reset needed.
     double total_gpu_ms =
         bench_run_once("binomial_kernel", params, [&]() {
             binomial_kernel<<<dim3(gridSize), dim3(blockSize), sharedBytes, 0>>>(
@@ -279,5 +269,5 @@ int main(int argc, char** argv) {
     free(h_options);
     free(h_prices);
 
-    return 0;
+    return (errors > 0) ? EXIT_FAILURE : EXIT_SUCCESS;
 }

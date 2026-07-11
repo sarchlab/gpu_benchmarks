@@ -4,14 +4,13 @@ Microbenchmark that measures the peak **double-precision (FP64) floating-point
 compute throughput** of a GPU in GFLOPS (10⁹ floating-point operations per
 second).
 
-Supported platforms: **NVIDIA CUDA**, **AMD ROCm/HIP**, and **Apple Metal**
-(FP32 proxy — see [Apple GPU limitation](#apple-gpu-limitation) below).
+Supported platforms: **NVIDIA CUDA** and **AMD ROCm/HIP**.
 
 ---
 
 ## What it measures
 
-The benchmark saturates the GPU's FP64 arithmetic pipelines by executing a
+The benchmark saturates an SM/CU's FP64 arithmetic pipelines by executing a
 dense loop of **fused multiply-add (FMA)** instructions:
 
 ```c
@@ -28,24 +27,6 @@ full issue-rate throughput.
 
 ---
 
-## Apple GPU limitation
-
-> **Apple GPUs do not have native FP64 (double-precision) hardware.**
-
-The Metal Shading Language does not expose a `double` type on Apple Silicon.
-When built with `PLATFORM=metal` this benchmark runs **FP32 FMA operations**
-instead and clearly labels the output as an FP32 proxy measurement:
-
-```
-FP32 Throughput : 2845.67 GFLOPS  (FP64 proxy — Apple GPUs lack native FP64)
-```
-
-This result **cannot** be directly compared to FP64 GFLOPS from CUDA or HIP
-builds.  For true FP64 throughput, use an NVIDIA or AMD GPU with
-`PLATFORM=cuda` or `PLATFORM=rocm`.
-
----
-
 ## FP64 vs FP32 throughput (CUDA/HIP platforms)
 
 FP64 throughput varies significantly by GPU class:
@@ -55,7 +36,6 @@ FP64 throughput varies significantly by GPU class:
 | Consumer (GeForce RTX) | 1:32 or 1:64 |
 | Professional (Quadro / RTX A-series) | 1:16 or 1:32 |
 | Datacenter / HPC (V100, A100, H100, MI250X) | ~1:2 |
-| Apple Silicon (M-series) | N/A — no native FP64 |
 
 ---
 
@@ -66,21 +46,20 @@ FP64 throughput varies significantly by GPU class:
 | FLOPs per FMA | **2** (1 multiply + 1 add) |
 | GFLOPS formula | `(threads × fmas_per_thread × 2) / elapsed_s / 1e9` |
 
-The binary does not print GFLOPS; it is derived downstream from each
-recorded iteration's `time_ms` and params using the formula above.
+The binary does not print GFLOPS; it is derived downstream from the
+recorded `time_ms` and params using the formula above.
 
 ---
 
 ## Build
 
 ```bash
-# Auto-detect platform (Darwin → metal, /opt/rocm present → rocm, else cuda)
+# Auto-detect platform (/opt/rocm present → rocm, else cuda)
 make
 
 # Explicit platform selection
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 
 make clean
 ```
@@ -91,7 +70,6 @@ Requirements by platform:
 |---|---|
 | `cuda` | NVIDIA CUDA Toolkit (`nvcc`) |
 | `rocm` | AMD ROCm/HIP (`hipcc` at `/opt/rocm/bin/hipcc`) |
-| `metal` | macOS with Xcode Command Line Tools (`clang++`) |
 
 ---
 
@@ -107,30 +85,41 @@ Requirements by platform:
 
 Parameters can also be set via environment variables
 (`BENCH_PARAM_fmas_per_thread`, `BENCH_PARAM_num_blocks`,
-`BENCH_PARAM_threads_per_block`), plus the measurement-harness controls:
+`BENCH_PARAM_threads_per_block`), plus one measurement control:
 
 | Env var | Default | Description |
 |---|---|---|
-| `BENCH_PARAM_warmup` | `3` | Warm-up kernel launches (not timed) |
-| `BENCH_PARAM_iteration` | `7` | Timed kernel launches, each recorded individually |
+| `BENCH_PARAM_vector_add_warmup` | `true` | Run the vector-add warmer (~100 ms of sustained load boosting the clock and evicting the last-level cache) before the timed launch; set `false` to time the kernel as-is |
+
+Each execution launches and times the kernel **exactly once** — there is no
+in-program warmup or iteration loop. Repeat measurements come from fresh
+process re-executions: `gpubench run --reps N`.
+
+> **Single-SM/CU measurement.** The default grid is one block
+> (`num_blocks = 1`), so the benchmark measures a single SM/CU at boost
+> clock. Because FMA pipes are per-SM resources with no cross-SM
+> interaction, whole-device peak GFLOPS can be estimated as the per-SM
+> value × the GPU's SM/CU count. Treat that as an upper bound: an all-SM
+> workload is power/thermal-limited and typically sustains a lower clock
+> than a single busy SM. For a device-wide run, set
+> `BENCH_PARAM_num_blocks` manually (e.g. ≥ 8 × SM count).
 
 ---
 
 ## Example output
 
 Progress and device info go to stderr; stdout carries JSON lines — one record
-per timed iteration plus a final summary:
+for the single timed launch plus a final summary:
 
 ```
 {"type":"kernel","name":"fp64_fma_kernel","iter":0,"time_ms":11.987120,"host_time_ms":12.104532,"params":{"fmas_per_thread":4096,"num_blocks":1,"threads_per_block":256}}
-...
-{"type":"summary","total_time_ms":83.910041}
+{"type":"summary","total_time_ms":11.987120}
 ```
 
-Every timed iteration is emitted individually (no averaging); `time_ms` is
-the GPU event time, `host_time_ms` the host wall-clock around launch + sync,
-and `total_time_ms` is the sum of all iterations' GPU event times. No GFLOPS
-figure is printed — it is derived downstream.
+`time_ms` is the GPU event time for the single kernel launch, `host_time_ms`
+the host wall-clock around launch + sync, and `total_time_ms` equals the
+single launch's GPU event time. No GFLOPS figure is printed — it is derived
+downstream.
 
 > **Note:** On consumer GPUs, FP64 throughput is severely limited by hardware.
 > Consider reducing `fmas_per_thread` (e.g. to 256 or 512) to keep the
@@ -143,7 +132,5 @@ figure is printed — it is derived downstream.
 | File | Purpose |
 |---|---|
 | `fp64_throughput.hip` | HIP source — AMD ROCm + NVIDIA HIP-on-CUDA |
-| `fp64_throughput_metal.mm` | Apple Metal host code (Objective-C++) |
-| `fp64_throughput.metal` | Metal compute kernel (FP32 FMA — Apple FP64 proxy) |
-| `Makefile` | Build rules for all three platforms |
+| `Makefile` | Build rules for all platforms |
 | `README.md` | This file |

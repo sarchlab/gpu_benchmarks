@@ -228,8 +228,7 @@ func cmdInfo(jsonOut bool) int {
 
 var identRE = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
-func validateParams(params map[string]interface{}, paramsPath string) []string {
-	var errs []string
+func validateParams(params map[string]interface{}, paramsPath string) (errs, warns []string) {
 	bdir := filepath.Dir(paramsPath)
 	dirName := filepath.Base(bdir)
 	tierDir := filepath.Base(filepath.Dir(bdir))
@@ -242,7 +241,7 @@ func validateParams(params map[string]interface{}, paramsPath string) []string {
 		}
 	}
 	if len(errs) > 0 {
-		return errs
+		return errs, warns
 	}
 
 	// benchmark vs directory name
@@ -277,7 +276,9 @@ func validateParams(params map[string]interface{}, paramsPath string) []string {
 		}
 		if values, ok := sp["values"].([]interface{}); ok {
 			if len(values) < 10 {
-				errs = append(errs, fmt.Sprintf("scaling_param needs >= 10 values, has %d", len(values)))
+				// Value counts are empirical guidance (see docs/params_format.md),
+				// not hard requirements — surface as a warning, not an error.
+				warns = append(warns, fmt.Sprintf("scaling_param has %d values (recommended >= 10, typically 20-30)", len(values)))
 			}
 		}
 	}
@@ -338,7 +339,7 @@ func validateParams(params map[string]interface{}, paramsPath string) []string {
 		seen[n] = true
 	}
 
-	return errs
+	return errs, warns
 }
 
 func cmdValidate(tierStr, suite, benchmark string) int {
@@ -350,7 +351,7 @@ func cmdValidate(tierStr, suite, benchmark string) int {
 		return ExitNoBench
 	}
 
-	totalErrors, valid := 0, 0
+	totalErrors, totalWarnings, valid := 0, 0, 0
 	for _, b := range benchmarks {
 		pp := b.ParamsPath
 		rel, _ := filepath.Rel(repoRoot, pp)
@@ -372,22 +373,29 @@ func cmdValidate(tierStr, suite, benchmark string) int {
 			continue
 		}
 
-		es := validateParams(params, pp)
+		es, ws := validateParams(params, pp)
 		if len(es) > 0 {
 			fmt.Printf("✗ %s\n", rel)
 			for _, e := range es {
 				fmt.Printf("    - %s\n", e)
 			}
 			totalErrors += len(es)
+		} else if len(ws) > 0 {
+			fmt.Printf("⚠ %s\n", rel)
+			valid++
 		} else {
 			fmt.Printf("✓ %s\n", rel)
 			valid++
+		}
+		for _, w := range ws {
+			fmt.Printf("    ~ %s\n", w)
+			totalWarnings++
 		}
 	}
 
 	fmt.Printf("\n=== Validation Summary ===\n")
 	fmt.Printf("  Valid:  %d/%d\n", valid, len(benchmarks))
-	fmt.Printf("  Errors: %d\n", totalErrors)
+	fmt.Printf("  Errors: %d  Warnings: %d\n", totalErrors, totalWarnings)
 
 	if totalErrors > 0 {
 		return ExitSomeFailed
@@ -406,15 +414,9 @@ func buildEnv(scalingName string, scalingValue interface{}, nsDict map[string]in
 	return env
 }
 
-func getBenchCommand(params *BenchmarkParams, plat string) []string {
+func getBenchCommand(params *BenchmarkParams) []string {
 	lang := getLanguage(params)
 	if lang == "python" {
-		if plat == "metal" {
-			mps := filepath.Join(params.Dir, "bench_mps.py")
-			if _, err := os.Stat(mps); err == nil {
-				return []string{"python3", mps}
-			}
-		}
 		return []string{"python3", filepath.Join(params.Dir, "bench.py")}
 	}
 	return []string{filepath.Join(params.Dir, params.Benchmark)}
@@ -724,7 +726,7 @@ func cmdRun(args runArgs) int {
 		for idx, b := range benchmarks {
 			spName := b.ScalingParam.Name
 			configs := generateConfigs(b, args.sweepNonScaling, scalingOverride, measurementOverrides)
-			cmd := getBenchCommand(b, plat)
+			cmd := getBenchCommand(b)
 			eprintf("[%3d/%d] tier%d/%s (%s)\n",
 				idx+1, len(benchmarks), b.Tier, b.Benchmark, getLanguage(b))
 			eprintf("  Scaling: %s (%d configs × %d reps = %d runs)\n",
@@ -855,7 +857,7 @@ func cmdRun(args runArgs) int {
 				spName, len(configs), reps, len(configs)*reps)
 
 			bp, bf, bs, br, bt := 0, 0, 0, 0, 0
-			cmd := getBenchCommand(b, plat)
+			cmd := getBenchCommand(b)
 
 			for _, cfg := range configs {
 				if interrupted {
@@ -1067,7 +1069,7 @@ func cmdRun(args runArgs) int {
 			spName, len(configs), reps, len(configs)*reps)
 
 		bp, bf := 0, 0
-		cmd := getBenchCommand(b, plat)
+		cmd := getBenchCommand(b)
 
 		for _, cfg := range configs {
 			if interrupted {

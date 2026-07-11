@@ -8,7 +8,7 @@
 // cuda/backprop/backprop_cuda_kernel.cu, together with the original host launch
 // geometry (num_blocks = in/16, grid(1,num_blocks), threads(16,16), HEIGHT=WIDTH=16
 // shared-memory tiling with an in-block log-step reduction tree). Only the driver
-// loop is restructured for the per-iteration timing harness and JSON output.
+// loop is restructured for the single-pass timing harness and JSON output.
 //
 // The CPU-side partial-sum reduction and output-layer/delta computation from the
 // original are NOT reproduced: they are host code outside the two timed GPU
@@ -20,7 +20,7 @@
 // Usage:
 //   ./rodinia_backprop [--input N]
 //
-//   --input N   Input layer size (multiple of 16)   (default: 65536)
+//   --input N   Input layer size (multiple of 16)   (default: 1000000)
 //
 // The hidden layer is fixed at 16 units: the kernels tile with HEIGHT=WIDTH=16
 // and index the weight matrix with a (hid+1) stride, so hid==16 is baked into
@@ -29,7 +29,7 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_input
 //
-// Output (stdout): per timed epoch, one {"type":"kernel",...} JSON line for each
+// Output (stdout): one {"type":"kernel",...} JSON line for each
 // of the two kernels carrying that kernel's GPU event time and host time, then a
 // summary whose total_time_ms is the SUM of all recorded GPU event times.
 // Output (stderr): device info, per-epoch timing.

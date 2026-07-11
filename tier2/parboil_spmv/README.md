@@ -4,7 +4,7 @@ Faithful port of the Parboil **SpMV** benchmark: the device kernel `spmv_jds`
 is the original (`parboil/benchmarks/spmv/src/cuda/jds_kernels.cu`), and the host
 driver builds the original **JDS (Jagged Diagonal Storage)** layout with a port
 of Parboil's `coo_to_jds` converter (`common_src/convert-dataset/convert_dataset.c`).
-Only the host driver is restructured for the per-iteration timing harness.
+Only the host driver is restructured for the single-run timing harness.
 
 ## Algorithm (JDS — the faithful part)
 
@@ -28,16 +28,26 @@ padding entries carry column index `0` (instead of the converter's `-1`) with
 value `0`, so the read-only gather never dereferences a negative index; the
 value is `0` so the product is unchanged.
 
+## Measurement
+
+The `spmv_jds` kernel launches **exactly once** per process execution (see the
+root README "Measurement Methodology"). With `BENCH_PARAM_vector_add_warmup`
+(default `true`), a vector-add warmer boosts the GPU clock and evicts the
+last-level cache immediately before the timed launch. Repetition =
+`gpubench run --reps N`.
+
 ## Parameters
 
 | Env var / flag | Description | Default |
 |----------------|-------------|---------|
-| `BENCH_PARAM_num_rows` / `--num_rows` | Matrix rows (≤ ~160000) | 50000 |
+| `BENCH_PARAM_num_rows` / `--num_rows` | Matrix rows (≤ ~160000) | 131072 |
 | `BENCH_PARAM_avg_nnz_per_row` / `--avg_nnz_per_row` | Avg non-zeros per row (depth < 5000) | 80 |
-| `BENCH_PARAM_block_size` / `--block_size` | Override block size (0 = original `compute_active_thread`) | 0 |
-| `--seed` | RNG seed for matrix generation | 42 |
-| `BENCH_PARAM_warmup` | Warmup launches (untimed) | 3 |
-| `BENCH_PARAM_iteration` | Timed launches, each recorded | 7 |
+| `BENCH_PARAM_vector_add_warmup` | Cold-cache clock warmer on/off | true |
+
+Undeclared debug knobs (not in `params.json`, not swept):
+`BENCH_PARAM_block_size` / `--block_size` overrides the launch block size
+(default 0 = the original `compute_active_thread` geometry); `--seed` sets the
+matrix RNG seed (default 42).
 
 Matrix and vector are generated synthetically (no `.mtx` file); sized to a
 Parboil-scale matrix (Dubcova3/mixtank are tens of thousands of rows).
@@ -45,19 +55,15 @@ Parboil-scale matrix (Dubcova3/mixtank are tens of thousands of rows).
 ## Build / Run
 
 ```bash
-make               # auto-detect platform (cuda / rocm / metal)
+make               # auto-detect platform (cuda / rocm)
 ./parboil_spmv
 ./parboil_spmv --num_rows 100000 --avg_nnz_per_row 40
 ```
 
 ## Output
 
-**stdout** — one `kernel` record per timed iteration for `spmv_jds` (one launch
-per pass), then a `summary` whose `total_time_ms` is the sum of all iterations'
-GPU event times. **stderr** — device info, per-iteration timing, PASS/FAIL (all
-rows vs. a CPU reference built from the generated COO). GFLOPS (`2 × nnz / t`) is
-derived downstream from `time_ms` and params.
-
-> **Metal note:** `parboil_spmv.metal` / `parboil_spmv_metal.mm` still contain the
-> earlier CSR implementation and were not updated by this faithful port
-> (HIP/CUDA only).
+**stdout** — one `kernel` record (`iter:0`) for the single `spmv_jds` launch,
+then a `summary` whose `total_time_ms` is the sum of all recorded GPU event
+times. **stderr** — device info, timing, PASS/FAIL (all rows vs. a CPU
+reference built from the generated COO); on FAIL the process exits non-zero.
+GFLOPS (`2 × nnz / t`) is derived downstream from `time_ms` and params.

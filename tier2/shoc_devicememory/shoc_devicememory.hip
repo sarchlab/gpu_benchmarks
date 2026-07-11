@@ -8,9 +8,10 @@
 //   BENCH_PARAM_array_size_mb, BENCH_PARAM_block_size,
 //   BENCH_PARAM_transfer_mode (read | write | readwrite)
 //
-// Output (stdout): per enabled kernel, one {"type":"kernel",...} JSON line per
-// timed iteration carrying the GPU event time and host wall-clock time, then a
-// summary whose total_time_ms is the SUM of all recorded GPU event times.
+// Output (stdout): one {"type":"kernel",...} JSON line per enabled kernel
+// (each launched and timed exactly once) carrying the GPU event time and host
+// wall-clock time, then a summary whose total_time_ms is the SUM of all
+// recorded GPU event times.
 // GB/s figures are derived downstream from time_ms and params.
 // Output (stderr): Human-readable diagnostics
 
@@ -178,8 +179,8 @@ int main(int argc, char** argv) {
 
     // --- Read-write bandwidth ---
     if (run_rw) {
-        // Re-initialize d_input (readOnly warmups do not touch it, but keep
-        // the pristine values for a well-defined starting point)
+        // Re-initialize d_input to the pristine values for a well-defined
+        // starting point before the in-place read-write kernel runs.
         {
             float* h_rw = (float*)malloc(bytes);
             for (size_t i = 0; i < N; ++i) h_rw[i] = (float)(i % 1000) * 0.001f;
@@ -188,7 +189,7 @@ int main(int argc, char** argv) {
         }
         // readWrite_kernel scales data in place by 1.0001; the float multiply
         // is value-independent (no control flow or memory-access pattern
-        // depends on the data), so no per-iteration reset is needed.
+        // depends on the data), so no data reset is needed.
         total_gpu_ms += bench_run_once("readWrite_kernel", params, [&]() {
             readWrite_kernel<<<dim3(num_blocks), dim3(block_size)>>>(d_input, (int)N);
         });

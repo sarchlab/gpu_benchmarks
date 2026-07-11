@@ -4,7 +4,6 @@ FP64 (double-precision) general matrix-matrix multiplication benchmark.
 
 - **NVIDIA**: wraps `cublasDgemm` from cuBLAS
 - **AMD**: wraps `rocblas_dgemm` from rocBLAS
-- **Apple**: uses `cblas_dgemm` from the Accelerate framework (CPU-only — Apple Metal has no FP64 support)
 
 ## Parameters
 
@@ -20,8 +19,7 @@ FP64 (double-precision) general matrix-matrix multiplication benchmark.
 | File | Description |
 |------|-------------|
 | `cublas_dgemm.hip` | HIP/CUDA source; uses `#ifdef USE_CUBLAS` / `#elif defined(USE_ROCBLAS)` |
-| `cublas_dgemm_metal.mm` | ObjC++ host using `cblas_dgemm` from Accelerate (CPU-only) |
-| `Makefile` | Auto-detects Darwin→metal, `/opt/rocm`→rocm, else→cuda |
+| `Makefile` | Auto-detects `/opt/rocm`→rocm, else→cuda |
 | `README.md` | This file |
 
 ## Build & Run
@@ -40,22 +38,10 @@ make PLATFORM=rocm
 ./cublas_dgemm
 ```
 
-### Apple (Accelerate cblas_dgemm — CPU-only)
-
-```bash
-make PLATFORM=metal
-./cublas_dgemm
-```
-
-> **Note:** Apple Metal does not support FP64 compute. The Metal build uses
-> `cblas_dgemm` from Apple's Accelerate framework, which runs on the CPU with
-> highly optimized BLAS routines. There is no GPU acceleration on this platform
-> for this benchmark.
-
 ### Auto-detect
 
 ```bash
-make        # detects Darwin → metal, /opt/rocm present → rocm, else → cuda
+make        # detects /opt/rocm present → rocm, else → cuda
 ./cublas_dgemm
 ```
 

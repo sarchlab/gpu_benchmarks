@@ -11,7 +11,7 @@
 //   --size N         Number of input bytes (default: 16777216 = 16M)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_size, BENCH_PARAM_num_bins, BENCH_PARAM_block_size
+//   BENCH_PARAM_size, BENCH_PARAM_block_size
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed pass
 // carrying the GPU event time (time_ms) and host wall-clock time
@@ -110,27 +110,23 @@ int main(int argc, char** argv) {
 
     // Defaults from params.json
     int size       = 16777216;
-    int num_bins   = NUM_BINS;
     int block_size = BLOCK_SIZE;
 
     // Command-line fallback
     size       = parseIntParam(argc, argv, "--size", size);
-    num_bins   = parseIntParam(argc, argv, "--num_bins", num_bins);
     block_size = parseIntParam(argc, argv, "--block_size", block_size);
 
     // Environment variable overrides
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_num_bins");
-    if (env_val) num_bins = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
 
     int N     = size;
 
     size_t data_bytes  = (size_t)N * sizeof(unsigned char);
-    size_t histo_bytes = num_bins * sizeof(unsigned int);
+    size_t histo_bytes = NUM_BINS * sizeof(unsigned int);
 
     // Print device info
     int device_id = 0;
@@ -139,7 +135,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Histogram  |  N: %d (%.2f MB)  |  Bins: %d\n\n",
-            N, (double)data_bytes / (1024.0 * 1024.0), num_bins);
+            N, (double)data_bytes / (1024.0 * 1024.0), NUM_BINS);
 
     // Generate random input data (deterministic seed)
     unsigned char* h_data = (unsigned char*)malloc(data_bytes);
@@ -169,8 +165,8 @@ int main(int argc, char** argv) {
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"num_bins\":%d,\"block_size\":%d",
-             size, num_bins, block_size);
+             "\"size\":%d,\"block_size\":%d",
+             size, block_size);
 
     bench_timer_t timer;
     bench_timer_create(&timer);
@@ -206,17 +202,18 @@ int main(int argc, char** argv) {
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
+    bool verify_ok = true;
     // -------------------------------------------------------------------
     // Verification (compare GPU histogram against CPU reference)
     // -------------------------------------------------------------------
     {
         HIP_CHECK(hipMemcpy(h_histo, d_histo, histo_bytes, hipMemcpyDeviceToHost));
 
-        std::vector<unsigned int> cpu_histo(num_bins);
+        std::vector<unsigned int> cpu_histo(NUM_BINS);
         histogram_cpu(h_data, cpu_histo.data(), N);
 
         int errors = 0;
-        for (int b = 0; b < num_bins; ++b) {
+        for (int b = 0; b < NUM_BINS; ++b) {
             if (h_histo[b] != cpu_histo[b]) {
                 if (errors < 10) {
                     fprintf(stderr, "Mismatch at bin %d: GPU=%u CPU=%u\n",
@@ -226,10 +223,11 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (errors > 0)
+        if (errors > 0) {
             fprintf(stderr, "FAIL: %d bin errors out of %d bins\n",
-                    errors, num_bins);
-        else
+                    errors, NUM_BINS);
+            verify_ok = false;
+        } else
             fprintf(stderr, "PASS\n");
     }
 
@@ -238,5 +236,5 @@ int main(int argc, char** argv) {
     free(h_data);
     free(h_histo);
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

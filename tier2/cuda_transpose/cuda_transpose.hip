@@ -12,12 +12,12 @@
 //   --size N  Matrix dimension N (N×N)  (default: 4096)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_tile_dim
+//   BENCH_PARAM_size
 //
-// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
-// of each variant (transpose_naive, transpose_optimized) carrying the GPU
-// event time and host wall-clock time, then a summary whose total_time_ms is
-// the SUM of all iterations' GPU event times. Effective bandwidth
+// Output (stdout): one {"type":"kernel",...} JSON line per variant
+// (transpose_naive, transpose_optimized), each timed exactly once, carrying
+// the GPU event time and host wall-clock time, then a summary whose
+// total_time_ms is the sum of all recorded GPU event times. Effective bandwidth
 // (2*N*N*sizeof(float) / time) is derived downstream from time_ms and params.
 // Output (stderr): human-readable results
 
@@ -128,23 +128,15 @@ int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     // Default values from params.json
-    int N          = 4096;
-    int block_size = 256;
-    int tile_dim   = 32;
+    int N = 4096;
 
     // Command-line args as fallback
-    N          = parseIntParam(argc, argv, "--size", N);
-    block_size = parseIntParam(argc, argv, "--block_size", block_size);
-    tile_dim   = parseIntParam(argc, argv, "--tile_dim", tile_dim);
+    N = parseIntParam(argc, argv, "--size", N);
 
     // Env vars override
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_tile_dim");
-    if (env_val) tile_dim = atoi(env_val);
 
     size_t num_elems = (size_t)N * N;
     size_t bytes     = num_elems * sizeof(float);
@@ -177,9 +169,7 @@ int main(int argc, char** argv) {
     dim3 grid((N + TILE_DIM - 1) / TILE_DIM, (N + TILE_DIM - 1) / TILE_DIM);
 
     char params[128];
-    snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d,\"tile_dim\":%d",
-             N, block_size, tile_dim);
+    snprintf(params, sizeof(params), "\"size\":%d", N);
 
     // Both variants read d_idata (never modified) and overwrite d_odata in
     // full; repeating a launch performs identical work regardless of the
@@ -211,6 +201,7 @@ int main(int argc, char** argv) {
     }
     fprintf(stderr, "  Verification: %s\n",
             (naive_errors == 0) ? "PASS" : "FAIL");
+    bool verify_ok = (naive_errors == 0);
 
     // -----------------------------------------------------------------------
     // Variant 2: Optimized transpose (shared memory + bank-conflict-free)
@@ -237,6 +228,7 @@ int main(int argc, char** argv) {
     }
     fprintf(stderr, "  Verification: %s\n",
             (opt_errors == 0) ? "PASS" : "FAIL");
+    if (opt_errors != 0) verify_ok = false;
 
     // -----------------------------------------------------------------------
     // Summary: sum of every recorded iteration's GPU event time
@@ -253,5 +245,5 @@ int main(int argc, char** argv) {
     free(h_odata);
     free(h_ref);
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

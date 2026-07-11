@@ -24,7 +24,7 @@ TARGET := nccl_allreduce
 ifeq ($(PLATFORM),cuda)
   CC        := nvcc
   SRC       := nccl_allreduce.cu
-  CUDA_ARCH ?= sm_90
+  CUDA_ARCH ?= native
   CFLAGS    := -O3 -std=c++14 -arch=$(CUDA_ARCH)
   LIBS      := -lnccl
 

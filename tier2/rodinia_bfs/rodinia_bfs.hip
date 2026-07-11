@@ -17,7 +17,7 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_num_nodes, BENCH_PARAM_edges_per_node, BENCH_PARAM_block_size
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
+// Output (stdout): one {"type":"kernel",...} JSON line per
 // kernel (bfs_kernel, bfs_update) carrying that kernel's accumulated GPU
 // event time and host time within the pass, then a summary whose
 // total_time_ms is the SUM of all recorded GPU event times. Bandwidth /

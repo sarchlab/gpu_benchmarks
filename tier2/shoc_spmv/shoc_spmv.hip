@@ -7,11 +7,11 @@
 // with command-line --flags as fallback.
 //
 // Environment variables:
-//   BENCH_PARAM_num_rows, BENCH_PARAM_nnz_per_row, BENCH_PARAM_precision
+//   BENCH_PARAM_num_rows, BENCH_PARAM_nnz_per_row
 //
-// Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
-// carrying the GPU event time and host wall-clock time, then a summary whose
-// total_time_ms is the SUM of all iterations' GPU event times. Bandwidth and
+// Output (stdout): one {"type":"kernel",...} JSON line for the single timed
+// launch carrying the GPU event time and host wall-clock time, then a summary
+// whose total_time_ms equals that record's GPU event time. Bandwidth and
 // GFLOPS are derived downstream from time_ms and params.
 // Output (stderr): Human-readable diagnostics
 
@@ -29,16 +29,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
             int v = atoi(argv[i + 1]);
             if (v > 0) return v;
             break;
-        }
-    }
-    return defaultVal;
-}
-
-static const char* parseStrParam(int argc, char** argv, const char* name,
-                                 const char* defaultVal) {
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], name) == 0) {
-            return argv[i + 1];
         }
     }
     return defaultVal;
@@ -93,12 +83,10 @@ int main(int argc, char** argv)
     // Defaults
     int num_rows    = 16384;
     int nnz_per_row = 32;
-    const char* precision = "float";
 
     // Command-line fallback
     num_rows    = parseIntParam(argc, argv, "--num_rows", num_rows);
     nnz_per_row = parseIntParam(argc, argv, "--nnz_per_row", nnz_per_row);
-    precision   = parseStrParam(argc, argv, "--precision", precision);
 
     // Environment variable overrides
     const char* env_val;
@@ -106,16 +94,6 @@ int main(int argc, char** argv)
     if (env_val) num_rows = atoi(env_val);
     env_val = getenv("BENCH_PARAM_nnz_per_row");
     if (env_val) nnz_per_row = atoi(env_val);
-    /* Validate string params against their known sets, so the values echoed
-     * into the JSON records are always canonical literals. */
-    env_val = getenv("BENCH_PARAM_precision");
-    if (env_val) precision = env_val;
-    if (strcmp(precision, "float") != 0 && strcmp(precision, "double") != 0 &&
-        strcmp(precision, "half") != 0) {
-        fprintf(stderr, "Invalid precision '%s' (use float, double, half)\n",
-                precision);
-        return EXIT_FAILURE;
-    }
 
     int num_cols   = num_rows;
     int nnz        = num_rows * nnz_per_row;
@@ -175,12 +153,13 @@ int main(int argc, char** argv)
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"num_rows\":%d,\"nnz_per_row\":%d,\"precision\":\"%s\"",
-             num_rows, nnz_per_row, precision);
+             "\"num_rows\":%d,\"nnz_per_row\":%d",
+             num_rows, nnz_per_row);
 
-    // Warmup + timed iterations, each recorded individually. The kernel only
-    // reads the matrix and x (never modified) and fully overwrites y, so
-    // repeated launches perform identical work — no per-iteration reset.
+    // Single timed launch (bench_run_once: optional cold-cache warmer, then
+    // one bracketed launch). The kernel only reads the matrix and x (never
+    // modified) and fully overwrites y, so every execution performs
+    // identical work — no reset needed.
     double total_gpu_ms =
         bench_run_once("spmv_csr_kernel", params, [&]() {
             spmv_csr_kernel<<<grid_size, BLOCK_SIZE>>>(

@@ -38,18 +38,15 @@ compiled out upstream and are omitted here).
 | File | Description |
 |------|-------------|
 | `rodinia_kmeans.hip` | HIP/CUDA source — original `invert_mapping`/`kmeansPoint` kernels + timing driver |
-| `rodinia_kmeans.metal` | Metal compute shaders (separate reimplementation, not the upstream kernels) |
-| `rodinia_kmeans_metal.mm` | ObjC++ Metal host code |
 | `Makefile` | Platform auto-detect build system |
 | `params.json` | Parameter specification |
 
 ## Build
 
 ```bash
-make               # auto-detect (Darwin→metal, /opt/rocm→rocm, else→cuda)
+make               # auto-detect (/opt/rocm→rocm, else→cuda)
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 make clean
 ```
 
@@ -66,34 +63,30 @@ BENCH_PARAM_points=65536 ./rodinia_kmeans
 | `BENCH_PARAM_points` | 100000 | Number of data points |
 | `BENCH_PARAM_features` | 34 | Features per point (constant-memory limit: `clusters*features ≤ 1088`) |
 | `BENCH_PARAM_clusters` | 5 | Number of clusters (K) |
-| `BENCH_PARAM_max_iter` | 10 | K-means iterations per pass |
-| `BENCH_PARAM_warmup` | 3 | Warmup clustering passes (untimed) |
-| `BENCH_PARAM_iteration` | 7 | Timed clustering passes, each recorded |
+| `BENCH_PARAM_max_iter` | 10 | K-means assignment iterations in the run |
+| `BENCH_PARAM_vector_add_warmup` | `true` | Cold-cache calibration before the timed run |
+
+The clustering (all `max_iter` iterations) runs **exactly once**; repetition
+is the harness's job (`gpubench run --reps N`).
 
 ## Output
 
-**stdout** — JSON lines: per timed pass, one `kernel` record per kernel
+**stdout** — JSON lines: one `kernel` record per kernel
 (`invert_mapping`, `kmeansPoint`) with that kernel's accumulated GPU event time
-(`time_ms`) and host time (`host_time_ms`), then a summary whose `total_time_ms`
-is the sum of all recorded GPU event times. Cluster centers are re-initialized to
-the pristine initial centers at the start of every pass (untimed), so each pass
-converges over identical work:
+(`time_ms`) and host time (`host_time_ms`) over the run, then a summary whose
+`total_time_ms` is the sum of all recorded GPU event times:
 
 ```json
 {"type":"kernel","name":"invert_mapping","iter":0,"time_ms":0.412,"host_time_ms":0.480,"params":{"points":100000,"features":34,"clusters":5,"max_iter":10,"threads_per_block":256}}
 {"type":"kernel","name":"kmeansPoint","iter":0,"time_ms":8.123,"host_time_ms":9.500,"params":{...}}
-{"type":"summary","total_time_ms":86.419}
+{"type":"summary","total_time_ms":8.535}
 ```
 
-`invert_mapping` reads immutable features and produces the same result every
-pass; it is re-run once per pass only so that it emits a timing record.
-
-**stderr** — human-readable per-pass timing.
+**stderr** — human-readable timing.
 
 ## Platform Notes
 
 - **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `rodinia_kmeans.hip` (the faithful upstream kernels; texture fetch → `__ldg`).
-- **Metal**: a separate reimplementation in `rodinia_kmeans_metal.mm`; it is not the upstream kernel.
 - Input data is generated synthetically — no external input files required.
 
 ## Reference

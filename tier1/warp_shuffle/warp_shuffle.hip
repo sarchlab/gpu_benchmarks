@@ -13,7 +13,13 @@
  * Strategy:
  *   Each thread performs N shuffle operations in a tight loop, passing an
  *   integer value between lanes.  The kernel is free of memory traffic, so
- *   the measured time reflects shuffle throughput.
+ *   the measured time reflects shuffle throughput.  The achieved rate in
+ *   Giga-Operations/s is:
+ *
+ *       Gops = (num_threads * ops_per_thread) / elapsed_seconds / 1e9
+ *
+ *   (Optionally, an effective data-movement rate can be derived by
+ *   multiplying by sizeof(int) = 4 bytes per shuffle.)
  *
  * Usage:
  *   ./warp_shuffle [ops_per_thread]
@@ -26,12 +32,16 @@
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_threads_per_block
  *   BENCH_PARAM_shuffle_variant   ("all", "shfl_xor", "shfl_up", "shfl_down", "shfl")
+ *   BENCH_PARAM_vector_add_warmup  (default true; clock-boost + LLC-evict
+ *                                   warmer before each timed run)
  *
- * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
- * the GPU event time and host wall-clock time, then a summary whose
- * total_time_ms is the SUM of all iterations' GPU event times across every
- * variant that ran. Derived metrics (Gops/s) are intentionally not computed
- * here — derive them downstream from time and the work-descriptor params.
+ * Measurement: each selected variant's kernel is launched and timed EXACTLY
+ * ONCE per process (repetition = fresh re-executions via
+ * `gpubench run --reps N`). Output: one {"type":"kernel",...} JSON line per
+ * variant that ran, carrying its GPU event time and host wall-clock time,
+ * then a summary whose total_time_ms is the sum of those times. Derived
+ * metrics (Gops/s) are intentionally not computed here — derive them
+ * downstream from time and the work-descriptor params.
  */
 
 #include <cstdio>
@@ -52,7 +62,12 @@
 
 static const int DEFAULT_OPS_PER_THREAD  = 4096;
 static const int DEFAULT_THREADS_PER_BLK = 256;
-static const int DEFAULT_NUM_BLOCKS      = 1024;
+// Default 1 block = single-SM/CU, latency-bound measurement: each thread's
+// shuffles form a serial dependent chain, so the result is the dependent-
+// shuffle issue rate of one SM, not peak shuffle throughput.  Raising
+// BENCH_PARAM_num_blocks adds warp-level parallelism but the per-thread
+// chain remains dependent by design.
+static const int DEFAULT_NUM_BLOCKS      = 1;
 
 /** Warp size (64 on AMD GCN/CDNA, 32 on NVIDIA). */
 #ifdef __HIP_PLATFORM_AMD__
@@ -117,9 +132,9 @@ __global__ void shfl_down_kernel(int *out, int ops_per_thread)
 typedef void (*KernelFunc)(int *, int);
 
 /**
- * Run a single shuffle variant: warmup launches, then per-iteration timed
- * launches, each emitted as its own kernel record. Returns the sum of the
- * timed iterations' GPU event times.
+ * Run a single shuffle variant: one timed launch (preceded by the vector-add
+ * warmer unless disabled), emitted as its own kernel record. Returns that
+ * launch's GPU event time in ms.
  */
 static double run_benchmark(const char *kernel_name,
                             KernelFunc kernel, int *d_out,

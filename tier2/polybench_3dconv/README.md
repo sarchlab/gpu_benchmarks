@@ -1,8 +1,8 @@
 # tier2/polybench_3dconv — 3D Convolution (PolyBench)
 
-Benchmarks 3D convolution over an **N×N×N** volume with a small 3D filter (e.g., 3×3×3). Each output voxel is the weighted sum of its spatial neighborhood. Emits per-iteration kernel times; compute throughput in GFLOPS is derived downstream.
+Benchmarks 3D convolution over an **N×N×N** volume with a small 3D filter (e.g., 3×3×3). Each output voxel is the weighted sum of its spatial neighborhood. The convolution runs exactly once per execution; the raw kernel time is emitted and compute throughput in GFLOPS is derived downstream.
 
-Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/).
+Modeled on the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) 3DCONV workload; this is a generic filter_size³ reimplementation with a random normalized filter and zero-padded borders, not the upstream fixed-coefficient stencil.
 
 ## Algorithm
 
@@ -18,17 +18,16 @@ Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/project
 | `BENCH_PARAM_size` | Volume dimension N (N×N×N) | 128 |
 | `BENCH_PARAM_block_size` | Threads per block dimension (block_size³ block) | 8 |
 | `BENCH_PARAM_filter_size` | Filter dimension (filter_size³ kernel) | 3 |
-| `BENCH_PARAM_warmup` | Warmup launches (untimed) | 3 |
-| `BENCH_PARAM_iteration` | Timed launches, each recorded | 7 |
+| `BENCH_PARAM_vector_add_warmup` | Vector-add warmer (clock boost + LLC eviction) before the timed launch | true |
+
+The kernel runs exactly once per execution; repetition is the harness's job (`gpubench run --reps N`).
 
 ## Files
 
 | File | Description |
 |------|-------------|
 | `polybench_3dconv.hip` | HIP/ROCm implementation |
-| `polybench_3dconv_metal.mm` | ObjC++ Metal host code |
-| `polybench_3dconv.metal` | Metal compute shader |
-| `Makefile` | Auto-detecting build (Darwin→metal, ROCm→rocm, else→cuda) |
+| `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
 | `params.json` | Parameter specification |
 
 ## Build
@@ -37,7 +36,6 @@ Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/project
 make               # auto-detect platform
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 ```
 
 ## Run
@@ -50,12 +48,11 @@ BENCH_PARAM_filter_size=5 ./polybench_3dconv            # 5×5×5 filter
 
 ## Output
 
-**stdout** — JSON lines, one `kernel` record per timed iteration followed by a
-`summary` whose `total_time_ms` is the sum of all iterations' GPU event times:
+**stdout** — JSON lines, one `kernel` record for the single timed launch followed by a
+`summary` whose `total_time_ms` equals that GPU event time:
 ```json
 {"type":"kernel","name":"conv3d_kernel","iter":0,"time_ms":12.345678,"host_time_ms":12.401000,"params":{"size":128,"block_size":8,"filter_size":3}}
-...
-{"type":"summary","total_time_ms":86.419200}
+{"type":"summary","total_time_ms":12.345678}
 ```
 
 Derived metrics (e.g. GFLOPS) are computed downstream from `time_ms` and params.
@@ -65,12 +62,10 @@ Derived metrics (e.g. GFLOPS) are computed downstream from `time_ms` and params.
 Device: NVIDIA GeForce RTX 4090 (id=0)
 Volume: 128x128x128  |  Filter: 3x3x3
 
-conv3d_kernel iter 0: gpu = 12.346 ms, host = 12.401 ms
-...
-Total GPU time: 86.419 ms over 7 iterations
+conv3d_kernel: gpu = 12.346 ms, host = 12.401 ms
+Total GPU time: 12.346 ms
 ```
 
 ## Platform Notes
 
 - **CUDA/ROCm**: 3D thread blocks (block_size³), compiled with `nvcc`/`hipcc`
-- **Metal**: compiled with `clang++`; the Metal shader (`polybench_3dconv.metal`) is loaded at runtime from the same directory as the binary

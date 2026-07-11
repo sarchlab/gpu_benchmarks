@@ -12,7 +12,7 @@
 //   --size N         Number of mesh cells (default: 97000)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_size, BENCH_PARAM_block_size
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (compute_flux_kernel, rk_update_kernel) carrying that kernel's
@@ -308,7 +308,6 @@ int main(int argc, char** argv) {
     // Defaults from params.json
     int N          = 97000;
     int block_size = 256;
-    const char* precision = "float";
 
     // Command-line fallback
     N          = parseIntParam(argc, argv, "--size", N);
@@ -319,15 +318,6 @@ int main(int argc, char** argv) {
     if (env_val) N = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_precision");
-    if (env_val) precision = env_val;
-    // Validate string params so the values echoed into the JSON records are
-    // always canonical literals (never raw env text).
-    if (strcmp(precision, "half") != 0 && strcmp(precision, "float") != 0 &&
-        strcmp(precision, "double") != 0) {
-        fprintf(stderr, "Invalid precision '%s' (use half, float, double)\n", precision);
-        return EXIT_FAILURE;
-    }
     // Print device info
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
@@ -435,8 +425,8 @@ int main(int argc, char** argv) {
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
-             N, block_size, precision);
+             "\"size\":%d,\"block_size\":%d",
+             N, block_size);
 
     // Lambda: upload initial conditions
     auto upload_initial = [&]() {
@@ -504,6 +494,7 @@ int main(int argc, char** argv) {
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
+    bool verify_ok = true;
     // -----------------------------------------------------------------------
     // Verification: compare GPU flux for first 256 cells with CPU reference
     // -----------------------------------------------------------------------
@@ -548,9 +539,10 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (errors > 0)
+        if (errors > 0) {
             fprintf(stderr, "FAIL: %d errors in first %d cells\n", errors, verify_n);
-        else
+            verify_ok = false;
+        } else
             fprintf(stderr, "PASS\n");
     }
 
@@ -575,5 +567,5 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipFree(d_normals));
     HIP_CHECK(hipFree(d_areas));
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

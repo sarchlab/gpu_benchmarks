@@ -48,15 +48,6 @@
       ]
     },
     {
-      "name": "key_length",
-      "description": "AES key length in bits",
-      "type": "enum",
-      "default": "256",
-      "values": [
-        "256"
-      ]
-    },
-    {
       "name": "vector_add_warmup",
       "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
       "type": "enum",

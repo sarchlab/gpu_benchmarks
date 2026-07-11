@@ -26,14 +26,20 @@ number of iterations is reached.
 | Parameter         | Default  | Description                              |
 |------------------|----------|------------------------------------------|
 | `num_vertices`    | 100000   | Number of graph vertices                 |
-| `avg_degree`      | 16       | Average edges per vertex                 |
+| `avg_degree`      | 16       | Edge-draw parameter (see note below)     |
 | `max_iterations`  | 100      | Max label propagation iterations per run |
 | `block_size`      | 256      | Threads per block                        |
-| `iterations`      | 5        | Legacy iteration-count param (echoed in records) |
-| `num_warmup`      | 3        | Warmup CC passes (not recorded)          |
-| `num_iters`       | 7        | Timed CC passes, each recorded           |
+| `vector_add_warmup` | true   | Cold-cache calibration: boost the clock and evict the LLC before the timed run; set `false` to time as-is |
 
 Parameters are read from `BENCH_PARAM_*` environment variables.
+
+**Generator note:** each vertex draws roughly `avg_degree` random neighbors,
+and every drawn edge is inserted **symmetrically** (into both endpoints'
+adjacency lists, then deduplicated). The *actual* mean degree of the generated
+undirected graph is therefore about **2× `avg_degree`** — unlike `graph_pr` /
+`graph_tc`, where the parameter is the real per-vertex out-degree. The
+propagation runs exactly once per execution; repetition across fresh processes
+is the harness's job (`gpubench run --reps N`).
 
 ## Build & Run
 
@@ -43,7 +49,6 @@ make
 ./graph_cc
 
 # Explicit platform
-make PLATFORM=metal
 make PLATFORM=cuda
 make PLATFORM=rocm
 
@@ -53,23 +58,22 @@ BENCH_PARAM_num_vertices=500000 BENCH_PARAM_avg_degree=8 ./graph_cc
 
 ## Output Format
 
-**JSON-lines to stdout:** one `kernel` record per timed pass with the
-accumulated GPU event time (`time_ms`) and host time (`host_time_ms`) of all
-label-propagation iterations in that pass, then a summary whose
-`total_time_ms` is the sum of all recorded GPU event times:
+**JSON-lines to stdout:** the single timed run emits one `kernel` record with
+the accumulated GPU event time (`time_ms`) and host time (`host_time_ms`) of
+all label-propagation iterations until convergence, then a summary whose
+`total_time_ms` equals the recorded GPU event time:
 ```json
 {"type":"kernel","name":"cc_propagate_kernel","iter":0,"time_ms":15.234,"host_time_ms":16.001,"params":{"num_vertices":100000,...}}
-{"type":"summary","total_time_ms":76.17}
+{"type":"summary","total_time_ms":15.234}
 ```
 
 **Human-readable to stderr:**
 ```
-Device: Apple M1
-Connected Components (label propagation)  |  Vertices: 100000  |  Edges: 1600000  |  ...
+Device: AMD Radeon RX 7900 XTX (id=0)
+Connected Components (label propagation)  |  Vertices: 100000  |  Edges: 3186470  |  ...
 
-pass 0: gpu = 15.234 ms, host = 16.001 ms (12 CC iterations)
-...
-Total GPU time: 76.170 ms over 7 passes
+gpu = 15.234 ms, host = 16.001 ms (12 CC iterations)
+Total GPU time: 15.234 ms
 PASS
 ```
 
@@ -82,4 +86,4 @@ Derived downstream from `time_ms` and params — not reported by the binary:
 ## Verification
 
 Compares GPU labels against a sequential CPU reference implementation for
-the first 1024 vertices. Reports PASS if all labels match exactly.
+the first 1024 vertices. Reports PASS if all labels match exactly; on FAIL the binary exits with a non-zero status.

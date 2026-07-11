@@ -1,8 +1,8 @@
 # tier2/parboil_lbm — Lattice Boltzmann Method D3Q19 (Parboil)
 
-Benchmarks a Lattice Boltzmann Method (LBM) fluid simulation using the D3Q19 velocity set on a regular 3D grid. Each GPU thread processes one lattice node, performing a fused collide-stream operation with the BGK collision operator and bounce-back boundary conditions. Emits per-pass kernel times; throughput in MLUPS (million lattice updates per second) is derived downstream.
+Benchmarks a Lattice Boltzmann Method (LBM) fluid simulation using the D3Q19 velocity set on a regular 3D grid. Each GPU thread processes one lattice node, performing a fused collide-stream operation with the BGK collision operator and bounce-back boundary conditions. Emits the run's kernel time; throughput in MLUPS (million lattice updates per second) is derived downstream.
 
-Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parboil/parboil.aspx) LBM workload.
+Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parboil/parboil.aspx) LBM workload. **Note:** this is a generic D3Q19 implementation with an SoA (structure-of-arrays) distribution layout and double-buffered ping-pong streaming — it does *not* reproduce the upstream Parboil cell layout (margin cells, per-cell flags, obstacle geometry).
 
 ## Algorithm
 
@@ -11,9 +11,17 @@ Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parbo
 - BGK collision operator: f_post = f + ω(f_eq − f), where ω = 1/τ
 - Equilibrium distribution: f_eq = w_q × ρ × (1 + 3(e·u) + 4.5(e·u)² − 1.5|u|²)
 - Fused collide-stream kernel with bounce-back at domain boundaries
-- Double-buffered distribution arrays, swapped each timestep
+- SoA distribution arrays, double-buffered and swapped each timestep
 - MLUPS = N³ × num_timesteps / time_sec / 10⁶ (derived downstream from the emitted times)
-- The equilibrium initial state is re-uploaded before every measurement pass (untimed), so each recorded pass simulates the same `num_timesteps` from the same starting point
+- The near-equilibrium initial state is uploaded before the run (untimed); the run then advances the full `num_timesteps`
+
+## Measurement
+
+The simulation (all `num_timesteps` timesteps) runs **exactly once** per
+process execution (see the root README "Measurement Methodology"). With
+`BENCH_PARAM_vector_add_warmup` (default `true`), a vector-add warmer boosts
+the GPU clock and evicts the last-level cache immediately before the timed
+run. Repetition = `gpubench run --reps N`.
 
 ## Parameters
 
@@ -21,21 +29,16 @@ Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parbo
 |---------|-------------|---------|
 | `BENCH_PARAM_grid_dim` | Grid dimension N (N×N×N lattice) | 64 |
 | `BENCH_PARAM_block_size` | Threads per block | 128 |
-| `BENCH_PARAM_num_timesteps` | LBM timesteps per pass | 100 |
+| `BENCH_PARAM_num_timesteps` | LBM timesteps per run | 100 |
 | `BENCH_PARAM_tau` | BGK relaxation time | 0.7 |
-| `BENCH_PARAM_warmup` | Warmup passes (untimed) | 3 |
-| `BENCH_PARAM_iteration` | Timed passes, each recorded | 7 |
-
-`BENCH_PARAM_iterations` is superseded by `BENCH_PARAM_iteration` and is ignored.
+| `BENCH_PARAM_vector_add_warmup` | Cold-cache clock warmer on/off | true |
 
 ## Files
 
 | File | Description |
 |------|-------------|
 | `parboil_lbm.hip` | HIP source — portable ROCm/CUDA implementation |
-| `parboil_lbm.metal` | Metal compute shader — LBM kernel |
-| `parboil_lbm_metal.mm` | ObjC++ Metal host code |
-| `Makefile` | Auto-detecting build (Darwin→metal, ROCm→rocm, else→cuda) |
+| `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
 | `params.json` | Parameter specification |
 
 ## Build
@@ -44,7 +47,6 @@ Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parbo
 make               # auto-detect platform
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 ```
 
 ## Run
@@ -57,26 +59,23 @@ BENCH_PARAM_num_timesteps=50 BENCH_PARAM_tau=1.0 ./parboil_lbm
 
 ## Output
 
-**stdout** — JSON lines: one `kernel` record per timed pass (GPU event time
-and host time accumulated over the pass's `num_timesteps` kernel launches),
-then a `summary` whose `total_time_ms` is the sum of all recorded GPU event
-times:
+**stdout** — JSON lines: one `kernel` record (`iter:0`) with the GPU event and
+host times accumulated over the run's `num_timesteps` kernel launches, then a
+`summary` whose `total_time_ms` is the sum of all recorded GPU event times:
 ```json
 {"type":"kernel","name":"lbm_collide_stream_kernel","iter":0,"time_ms":45.678900,"host_time_ms":46.102000,"params":{"grid_dim":64,"block_size":128,"num_timesteps":100,"tau":0.70}}
-...
-{"type":"summary","total_time_ms":319.752300}
+{"type":"summary","total_time_ms":45.678900}
 ```
 
 Derived metrics (MLUPS) are computed downstream from `time_ms` and params.
 
 **stderr** — human-readable:
 ```
-Device: Apple M1 Max
-LBM D3Q19  |  Grid: 64x64x64 = 262144  |  Timesteps: 100  |  Tau: 0.70  |  Iterations: 3 warmup + 7 timed
+Device: AMD Radeon RX 7900 XTX (id=0)
+LBM D3Q19  |  Grid: 64x64x64 = 262144  |  Timesteps: 100  |  Tau: 0.70
 
-pass 0: gpu = 45.679 ms, host = 46.102 ms
-...
-Total GPU time: 319.752 ms over 7 passes
+gpu = 45.679 ms, host = 46.102 ms
+Total GPU time: 45.679 ms
 PASS
 ```
 
@@ -84,9 +83,8 @@ PASS
 
 - 128 randomly-selected interior nodes are checked for reasonable density (0.5 < ρ < 2.0)
 - Near-equilibrium initialization ensures density should stay close to 1.0
-- Reports PASS/FAIL with details of suspicious nodes
+- Reports PASS/FAIL with details of suspicious nodes; on FAIL the process exits non-zero
 
 ## Platform Notes
 
 - **CUDA/ROCm**: Uses `__constant__` memory for D3Q19 velocity vectors and weights; SoA layout for distribution functions
-- **Metal**: Uses `constant` array literals in the shader; loads `parboil_lbm.metal` at runtime from the same directory as the binary

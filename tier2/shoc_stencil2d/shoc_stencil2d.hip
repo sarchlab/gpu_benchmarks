@@ -17,20 +17,18 @@
 // Compiles with hipcc (AMD ROCm) or nvcc -x cu (CUDA).
 //
 // Usage:
-//   ./shoc_stencil2d [--n N] [--iterations I] [--trials T]
+//   ./shoc_stencil2d [--n N] [--iterations I]
 //
-//   --n N            Grid dimension (N×N)           (default: 2048)
-//   --iterations I   Stencil steps per pass          (default: 5)
-//   --trials T       Legacy trial-count param (echoed in records)
+//   --n N            Grid dimension (N×N)                     (default: 2048)
+//   --iterations I   Stencil steps in the timed run           (default: 5)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_n, BENCH_PARAM_iterations, BENCH_PARAM_trials,
-//   BENCH_PARAM_block_size
+//   BENCH_PARAM_n, BENCH_PARAM_iterations, BENCH_PARAM_block_size
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
-// stencil2d_kernel carrying the accumulated GPU event time (time_ms) and
-// host time (host_time_ms) of all stencil steps within the pass, then a
-// summary whose total_time_ms is the SUM of all recorded GPU event times.
+// Output (stdout): for the single timed run, one {"type":"kernel",...} JSON
+// line for stencil2d_kernel carrying the accumulated GPU event time (time_ms)
+// and host time (host_time_ms) of all stencil steps within the run, then a
+// summary whose total_time_ms equals that record's GPU event time.
 // Bandwidth (GB/s) is derived downstream from time_ms and params.
 // Output (stderr): device info, timing details, correctness check
 
@@ -179,7 +177,6 @@ int main(int argc, char** argv)
 
     int N      = parseIntParam(argc, argv, "--n",          2048);
     int iters  = parseIntParam(argc, argv, "--iterations", 5);
-    int trials = parseIntParam(argc, argv, "--trials",     3);
     int block_size = 16;
 
     const char* env_val;
@@ -187,8 +184,6 @@ int main(int argc, char** argv)
     if (env_val) N = atoi(env_val);
     env_val = getenv("BENCH_PARAM_iterations");
     if (env_val) iters = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_trials");
-    if (env_val) trials = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
 
@@ -229,16 +224,16 @@ int main(int argc, char** argv)
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"n\":%d,\"iterations\":%d,\"trials\":%d,\"block_size\":%d",
-             N, iters, trials, block_size);
+             "\"n\":%d,\"iterations\":%d,\"block_size\":%d",
+             N, iters, block_size);
 
     bench_timer_t timer;
     bench_timer_create(&timer);
     bench_lap_t acc;
 
     // One full stencil pass: `iters` ping-pong steps, each launch bracketed.
-    // The buffers are reset to the pristine input at the start of every pass
-    // (untimed) so each pass applies the stencil to the same data.
+    // The buffers are set to the pristine input at the start of the run
+    // (untimed) so the stencil is applied to well-defined data.
     auto run_pass = [&]() {
         bench_lap_reset(&acc);
 
@@ -275,5 +270,8 @@ int main(int argc, char** argv)
     HIP_CHECK(hipFree(d_buf0));
     HIP_CHECK(hipFree(d_buf1));
 
-    return 0;
+    // The correctness check ran before the timed run; all JSON records and
+    // the summary line have been emitted by now, so failing here only marks
+    // the run as failed without losing the measurements.
+    return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -1,6 +1,6 @@
 # tier2/npb_is — Integer Sort (NAS IS)
 
-Benchmarks a **parallel bucket sort** of N random integers in range [0, 2¹⁹). Emits raw per-iteration kernel times; throughput (Mkeys/sec) is derived downstream.
+Benchmarks a **parallel bucket sort** of N random integers in range [0, 2¹⁹). The sort runs exactly once per execution and emits raw per-kernel times; throughput (Mkeys/sec) is derived downstream.
 
 Derived from the [NAS Parallel Benchmarks](https://www.nas.nasa.gov/software/npb.html) IS kernel.
 
@@ -19,9 +19,8 @@ Derived from the [NAS Parallel Benchmarks](https://www.nas.nasa.gov/software/npb
 | File | Description |
 |------|-------------|
 | `npb_is.hip` | HIP source — histogram, prefix sum, and scatter kernels |
-| `npb_is.metal` | Metal compute shaders — histogram, prefix sum, and scatter |
-| `npb_is_metal.mm` | ObjC++ Metal host code |
-| `Makefile` | Auto-detecting build (Darwin→metal, ROCm→rocm, else→cuda) |
+| `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
+| `params.json` | Parameter specification |
 
 ## Build
 
@@ -29,7 +28,6 @@ Derived from the [NAS Parallel Benchmarks](https://www.nas.nasa.gov/software/npb
 make               # auto-detect platform
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 ```
 
 ## Run
@@ -40,24 +38,25 @@ make PLATFORM=metal
 BENCH_PARAM_size=1048576 ./npb_is     # env vars override argv
 ```
 
-Environment variables: `BENCH_PARAM_size`, `BENCH_PARAM_block_size`,
-`BENCH_PARAM_verify`, plus `BENCH_PARAM_warmup` (warmup sort passes,
-default 3) and `BENCH_PARAM_iteration` (timed sort passes, each recorded,
-default 7).
+Environment variables: `BENCH_PARAM_size` (default 8388608), `BENCH_PARAM_block_size`
+(default 256), and `BENCH_PARAM_vector_add_warmup` (default true — cold-cache
+calibration: boosts the clock and evicts the LLC before the timed sort).
+
+`BENCH_PARAM_verify=false` (also `0`/`skip`) skips CPU verification — an
+undeclared debug knob, not a sweep parameter in `params.json`.
 
 ## Output
 
-**stdout** — JSON lines: per timed sort pass, one kernel record per phase
+**stdout** — JSON lines: for the single timed sort, one kernel record per phase
 (histogram, prefix sum, scatter) with that phase's GPU event time
 (`time_ms`) and host wall-clock time (`host_time_ms`), then a summary whose
-`total_time_ms` is the sum of all recorded GPU event times. The per-pass
-histogram reset and device-to-device offset copy are untimed:
+`total_time_ms` is the sum of the three GPU event times. The histogram reset
+and the 4 KB device-to-device offset copy are untimed:
 ```
-{"type":"kernel","name":"histogram_kernel","iter":0,"time_ms":1.523400,"host_time_ms":1.580000,"params":{"size":8388608,"block_size":256,"verify":"true"}}
+{"type":"kernel","name":"histogram_kernel","iter":0,"time_ms":1.523400,"host_time_ms":1.580000,"params":{"size":8388608,"block_size":256}}
 {"type":"kernel","name":"prefix_sum_kernel","iter":0,"time_ms":0.041200,"host_time_ms":0.058000,"params":{...}}
 {"type":"kernel","name":"scatter_kernel","iter":0,"time_ms":3.558800,"host_time_ms":3.610000,"params":{...}}
-...
-{"type":"summary","total_time_ms":35.864800}
+{"type":"summary","total_time_ms":5.123400}
 ```
 
 Derived metrics such as Mkeys/sec are computed downstream from `time_ms` and
@@ -66,11 +65,10 @@ the params.
 **stderr** — human-readable results:
 ```
 Device: AMD Radeon RX 7900 XTX (id=0)
-IS keys: 8388608 (2^23)  |  Buckets: 1024  |  Iterations: 3 warmup + 7 timed
+IS keys: 8388608 (2^23)  |  Buckets: 1024
 
-pass 0: histogram gpu = 1.523 ms, prefix_sum gpu = 0.041 ms, scatter gpu = 3.559 ms
-...
-Total GPU time: 35.865 ms over 7 passes
+histogram gpu = 1.523 ms, prefix_sum gpu = 0.041 ms, scatter gpu = 3.559 ms
+Total GPU time: 5.123 ms
 PASS
 ```
 
@@ -78,8 +76,8 @@ PASS
 
 - Checks that the sorted output is non-decreasing at bucket boundaries (bucket-ordered)
 - Each key's bucket index = key / (MAX_KEY / NUM_BUCKETS); consecutive elements must have non-decreasing bucket indices
+- On FAIL the binary exits with a non-zero status
 
 ## Platform Notes
 
 - **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `npb_is.hip`; three kernel launches per sort (histogram + prefix sum + scatter)
-- **Metal**: compiled with `clang++` from `npb_is_metal.mm`; the Metal shader (`npb_is.metal`) is loaded and compiled at runtime from the same directory as the binary

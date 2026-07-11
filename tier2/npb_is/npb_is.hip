@@ -13,7 +13,8 @@
 //   --size N         Number of keys (default: 8388608 = 2^23)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_verify
+//   BENCH_PARAM_size, BENCH_PARAM_block_size (drives launch config),
+//   BENCH_PARAM_verify (debug knob)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (histogram_kernel, prefix_sum_kernel, scatter_kernel) carrying that
@@ -172,7 +173,6 @@ int main(int argc, char** argv) {
     // Defaults from params.json
     int N          = 8388608;   // 2^23
     int block_size = 256;
-    const char* verify = "true";
 
     // Command-line fallback
     N          = parseIntParam(argc, argv, "--size", N);
@@ -183,14 +183,15 @@ int main(int argc, char** argv) {
     if (env_val) N = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
+
+    // Debug knob (not a sweep parameter): CPU verification runs by default;
+    // "false"/"0"/"skip" skip it.
+    bool do_verify = true;
     env_val = getenv("BENCH_PARAM_verify");
-    if (env_val) verify = env_val;
-    // Validate string params against their known sets so the values echoed
-    // into the JSON records are always canonical literals.
-    if (strcmp(verify, "true") != 0 && strcmp(verify, "false") != 0 &&
-        strcmp(verify, "skip") != 0) {
-        fprintf(stderr, "Invalid verify '%s' (use true, false, skip)\n", verify);
-        return 1;
+    if (env_val && (strcmp(env_val, "false") == 0 ||
+                    strcmp(env_val, "0")     == 0 ||
+                    strcmp(env_val, "skip")  == 0)) {
+        do_verify = false;
     }
     // Print device info
     int device_id = 0;
@@ -229,8 +230,8 @@ int main(int argc, char** argv) {
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d,\"verify\":\"%s\"",
-             N, block_size, verify);
+             "\"size\":%d,\"block_size\":%d",
+             N, block_size);
 
     // Per-kernel accumulators: one full IS pass launches each kernel once;
     // each pass's per-kernel GPU/host time becomes that pass's record.
@@ -292,13 +293,19 @@ int main(int argc, char** argv) {
 
     // -------------------------------------------------------------------
     // Verification: check sorted output is bucket-ordered
+    // (debug knob; skipped when BENCH_PARAM_verify=false)
     // -------------------------------------------------------------------
-    HIP_CHECK(hipMemcpy(h_sorted, d_sorted, keysBytes, hipMemcpyDeviceToHost));
+    bool verify_ok = true;
+    if (do_verify) {
+        HIP_CHECK(hipMemcpy(h_sorted, d_sorted, keysBytes, hipMemcpyDeviceToHost));
 
-    if (verify_sorted(h_sorted, N))
-        fprintf(stderr, "PASS\n");
-    else
-        fprintf(stderr, "FAIL\n");
+        if (verify_sorted(h_sorted, N)) {
+            fprintf(stderr, "PASS\n");
+        } else {
+            fprintf(stderr, "FAIL\n");
+            verify_ok = false;
+        }
+    }
 
     HIP_CHECK(hipFree(d_keys));
     HIP_CHECK(hipFree(d_sorted));
@@ -307,5 +314,5 @@ int main(int argc, char** argv) {
     free(h_keys);
     free(h_sorted);
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

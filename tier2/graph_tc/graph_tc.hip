@@ -13,8 +13,9 @@
 //   D=<avg_degree>   Average degree (default: 32)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_vertices, BENCH_PARAM_avg_degree, BENCH_PARAM_block_size,
-//   BENCH_PARAM_verify (true|false|skip)
+//   BENCH_PARAM_vertices, BENCH_PARAM_avg_degree, BENCH_PARAM_block_size
+//   BENCH_PARAM_verify=false|0|skip skips CPU verification (debug knob, not a
+//   declared parameter; it is not echoed into records)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // carrying the GPU event time and host wall-clock time, then a summary whose
@@ -49,8 +50,9 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
 
 // ---------------------------------------------------------------------------
 // Kernel: Count triangles via sorted-list intersection
-// Each thread handles one edge (u, v) with u < v, and counts
-// the number of common neighbors w with w < u (to avoid triple-counting).
+// Each thread handles one edge (u, v) with u < v, and counts ALL common
+// neighbors of u and v. Each triangle is therefore counted once per each of
+// its three edges; the host divides the summed counts by 3.
 // ---------------------------------------------------------------------------
 
 __global__ void triangle_count_kernel(
@@ -120,25 +122,9 @@ static long long triangle_count_cpu(
             }
         }
     }
-    // Each triangle is counted once per edge (u,v) with u<v where w is a common neighbor.
-    // But each triangle has 3 edges, so we've counted each triangle 3 times.
-    // Actually, for each edge (u,v) with u<v, we count ALL common neighbors (both less than u and greater than v).
-    // Each triangle (a,b,c) with a<b<c gets counted once on edge (a,b) for neighbor c,
-    // once on edge (a,c) for neighbor b, and once on edge (b,c) for neighbor a.
-    // So total / 3 would be wrong. Actually each triangle is counted exactly 3 times.
-    // Wait, let's reconsider. For triangle (a,b,c):
-    //   - Edge (a,b): common neighbor c is found => count++
-    //   - Edge (a,c): common neighbor b is found => count++
-    //   - Edge (b,c): common neighbor a is found => count++
-    // So total counts each triangle 3 times. Divide by 3.
-    // Actually no: we process only edges u<v and count ALL common neighbors.
-    // Each triangle has exactly 3 directed edges u<v, and is counted once per each.
-    // So divide by 3.
-    // Actually that's wrong too. For triangle (a<b<c), edge (a,b) finds common neighbor c,
-    // edge (a,c) finds common neighbor b, edge (b,c) finds common neighbor a.
-    // That's 3 counts per triangle. So total / 3.
-    // BUT WAIT: we're not dividing in the GPU version either, we return raw count.
-    // Let's just return raw total and compare.
+    // Each edge (u,v) with u<v counts ALL common neighbors, so a triangle
+    // (a,b,c) is counted once per each of its three edges — 3 times total.
+    // Return the raw count; the caller divides by 3 (same as the GPU path).
     return total;
 }
 
@@ -199,7 +185,6 @@ int main(int argc, char** argv) {
     int vertices   = 16384;
     int avg_degree = 32;
     int block_size = 256;
-    const char* verify = "true";
 
     // Command-line fallback
     vertices   = parseIntParam(argc, argv, "N=", vertices);
@@ -213,15 +198,14 @@ int main(int argc, char** argv) {
     if (env_val) avg_degree = atoi(env_val);
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_verify");
-    if (env_val) verify = env_val;
-    /* Validate string params against their known sets, so the values echoed
-     * into the JSON records are always canonical literals. */
-    if (strcmp(verify, "true") != 0 && strcmp(verify, "false") != 0 &&
-        strcmp(verify, "skip") != 0) {
-        fprintf(stderr, "Invalid verify '%s' (use true, false, skip)\n", verify);
-        return EXIT_FAILURE;
-    }
+
+    // Debug knob (not a declared parameter): BENCH_PARAM_verify=false|0|skip
+    // skips the CPU verification pass (expensive at large sizes); default runs it.
+    const char* verify_env = getenv("BENCH_PARAM_verify");
+    bool run_verify = !(verify_env &&
+                        (strcmp(verify_env, "false") == 0 ||
+                         strcmp(verify_env, "0") == 0 ||
+                         strcmp(verify_env, "skip") == 0));
     int N = vertices;
     int D = avg_degree;
 
@@ -278,13 +262,13 @@ int main(int argc, char** argv) {
 
     char params[192];
     snprintf(params, sizeof(params),
-             "\"vertices\":%d,\"avg_degree\":%d,\"block_size\":%d,\"verify\":\"%s\"",
-             vertices, avg_degree, block_size, verify);
+             "\"vertices\":%d,\"avg_degree\":%d,\"block_size\":%d",
+             vertices, avg_degree, block_size);
 
-    // Warmup + timed iterations, each recorded individually. The kernel
+    // Single timed launch (repetition is the harness's job). The kernel
     // reads only the immutable graph arrays and fully overwrites every
     // edge_counts element on each launch, so no state reset is needed
-    // between iterations.
+    // between executions.
     double total_gpu_ms =
         bench_run_once("triangle_count_kernel", params, [&]() {
             triangle_count_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
@@ -316,10 +300,12 @@ int main(int argc, char** argv) {
     // Human-readable output to stderr
     fprintf(stderr, "Triangles found:  %lld\n", num_triangles);
 
+    bool verify_ok = true;
     // -------------------------------------------------------------------
-    // Verification: compare against CPU reference on small subset
+    // Verification: compare against CPU reference
+    // (skipped when BENCH_PARAM_verify=false|0|skip)
     // -------------------------------------------------------------------
-    if (strcmp(verify, "skip") != 0) {
+    if (run_verify) {
         fprintf(stderr, "Running CPU verification...\n");
         long long cpu_raw = triangle_count_cpu(row_ptr, col_idx, N);
         long long cpu_triangles = cpu_raw / 3;
@@ -330,6 +316,7 @@ int main(int argc, char** argv) {
         } else {
             fprintf(stderr, "FAIL (CPU=%lld, GPU=%lld triangles, raw GPU=%lld, raw CPU=%lld)\n",
                     cpu_triangles, num_triangles, gpu_total, cpu_raw);
+            verify_ok = false;
         }
     }
 
@@ -339,5 +326,5 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipFree(d_edge_dst));
     HIP_CHECK(hipFree(d_edge_counts));
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

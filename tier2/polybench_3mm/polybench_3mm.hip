@@ -13,14 +13,14 @@
 //   --size N         Matrix dimension N (NxN for all matrices) (default: 256)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_size, BENCH_PARAM_block_size, BENCH_PARAM_precision
+//   BENCH_PARAM_size
 //
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
-// kernel (mm3_kernel1/2/3) carrying that kernel's GPU event time and host
-// wall-clock time within the pass, then a summary whose total_time_ms is the
-// SUM of all recorded GPU event times. GFLOPS
+// Output (stdout): the 3mm pass runs exactly once; one {"type":"kernel",...}
+// JSON line per kernel (mm3_kernel1/2/3) carrying that kernel's GPU event
+// time and host wall-clock time, then a summary whose total_time_ms is the
+// SUM of the three GPU event times. GFLOPS
 // (total_flops = 2*NI*NK*NJ + 2*NJ*NM*NL + 2*NI*NJ*NL) is derived downstream.
-// Output (stderr): device info, per-pass timing
+// Output (stderr): device info, timing
 
 #include "../../common/bench_timing.h"
 #include <cstdio>
@@ -103,23 +103,10 @@ int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     int N     = parseIntParam(argc, argv, "--size", 256);
-    int block_size = 256;
-    const char* precision = "float";
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_precision");
-    if (env_val) precision = env_val;
-    // Validate string params so the values echoed into the JSON records are
-    // always canonical literals (never raw env text).
-    if (strcmp(precision, "half") != 0 && strcmp(precision, "float") != 0 &&
-        strcmp(precision, "double") != 0) {
-        fprintf(stderr, "Invalid precision '%s' (use half, float, double)\n", precision);
-        return EXIT_FAILURE;
-    }
     // All matrices are N×N
     const int NI = N, NJ = N, NK = N, NL = N, NM = N;
 
@@ -180,13 +167,12 @@ int main(int argc, char** argv) {
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d,\"precision\":\"%s\"",
-             N, block_size, precision);
+             "\"size\":%d", N);
 
-    // Per-kernel accumulators: each pass launches the three kernels once.
-    // No state reset is needed between passes — inputs A/B/C/D are read-only
-    // and E/F/G are fully overwritten every pass, so every pass does
-    // identical work on identical data.
+    // Per-kernel accumulators: the single pass launches the three kernels
+    // once each. No state reset is needed — inputs A/B/C/D are read-only and
+    // E/F/G are fully overwritten, so every execution does identical work on
+    // identical data.
     bench_timer_t timer;
     bench_timer_create(&timer);
     bench_lap_t acc_k1, acc_k2, acc_k3;

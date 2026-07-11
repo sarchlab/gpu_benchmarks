@@ -47,13 +47,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
 }
 
 // ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-#define LOW_THRESH  50.0f
-#define HIGH_THRESH 100.0f
-
-// ---------------------------------------------------------------------------
 // Kernel 1: Gaussian blur (5x5)
 // ---------------------------------------------------------------------------
 
@@ -237,7 +230,8 @@ __global__ void hysteresis_kernel(
 // CPU reference: simple Canny edge detection (for verification subset)
 // ---------------------------------------------------------------------------
 
-static void canny_cpu(const float* input, unsigned char* output, int W, int H) {
+static void canny_cpu(const float* input, unsigned char* output, int W, int H,
+                      float low_thresh, float high_thresh) {
     // Gaussian kernel
     const float gauss[25] = {
         2.f/159, 4.f/159,  5.f/159,  4.f/159, 2.f/159,
@@ -334,16 +328,16 @@ static void canny_cpu(const float* input, unsigned char* output, int W, int H) {
         for (int x = 0; x < W; ++x) {
             int idx = y * W + x;
             float val = nms[idx];
-            if (val >= HIGH_THRESH) {
+            if (val >= high_thresh) {
                 output[idx] = 255;
-            } else if (val >= LOW_THRESH) {
+            } else if (val >= low_thresh) {
                 unsigned char is_edge = 0;
                 for (int ky = -1; ky <= 1 && !is_edge; ++ky) {
                     for (int kx = -1; kx <= 1 && !is_edge; ++kx) {
                         if (kx == 0 && ky == 0) continue;
                         int nx = x + kx, ny = y + ky;
                         if (nx >= 0 && nx < W && ny >= 0 && ny < H) {
-                            if (nms[ny * W + nx] >= HIGH_THRESH) {
+                            if (nms[ny * W + nx] >= high_thresh) {
                                 is_edge = 255;
                             }
                         }
@@ -486,6 +480,7 @@ int main(int argc, char** argv) {
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
+    bool verify_ok = true;
     // -------------------------------------------------------------------
     // Verification: compare a small sub-region with CPU reference
     // -------------------------------------------------------------------
@@ -503,7 +498,7 @@ int main(int argc, char** argv) {
         }
 
         std::vector<unsigned char> cpu_edges(vW * vH);
-        canny_cpu(sub_input.data(), cpu_edges.data(), vW, vH);
+        canny_cpu(sub_input.data(), cpu_edges.data(), vW, vH, low_t, high_t);
 
         // Get GPU results for the same sub-region
         std::vector<unsigned char> h_edges(npix);
@@ -511,11 +506,14 @@ int main(int argc, char** argv) {
                              hipMemcpyDeviceToHost));
 
         // Note: GPU processes full image so border effects at (128,128) differ
-        // from CPU processing only the sub-image. Compare interior only (skip 3px border).
+        // from CPU processing only the sub-image. Compare interior only,
+        // skipping a 6px border: the pipeline's influence radius is ~5px
+        // (gaussian 2 + sobel 1 + nms 1 + hysteresis 1), so pixels closer to
+        // the sub-region border can legitimately differ.
         int errors = 0;
         int compared = 0;
-        for (int y = 3; y < vH - 3; ++y) {
-            for (int x = 3; x < vW - 3; ++x) {
+        for (int y = 6; y < vH - 6; ++y) {
+            for (int x = 6; x < vW - 6; ++x) {
                 unsigned char gpu_val = h_edges[y * W + x];
                 unsigned char cpu_val = cpu_edges[y * vW + x];
                 if (gpu_val != cpu_val) {
@@ -526,12 +524,13 @@ int main(int argc, char** argv) {
         }
 
         float error_rate = compared > 0 ? (float)errors / compared * 100.0f : 0.0f;
-        if (error_rate < 5.0f) {
+        if (error_rate < 1.0f) {
             fprintf(stderr, "PASS (%.1f%% pixel mismatch in %dx%d interior, %d/%d)\n",
-                    error_rate, vW - 6, vH - 6, errors, compared);
+                    error_rate, vW - 12, vH - 12, errors, compared);
         } else {
             fprintf(stderr, "FAIL (%.1f%% pixel mismatch in %dx%d interior, %d/%d)\n",
-                    error_rate, vW - 6, vH - 6, errors, compared);
+                    error_rate, vW - 12, vH - 12, errors, compared);
+            verify_ok = false;
         }
     }
 
@@ -544,5 +543,5 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipFree(d_nms));
     HIP_CHECK(hipFree(d_edges));
 
-    return 0;
+    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

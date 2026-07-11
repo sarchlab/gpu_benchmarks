@@ -2,7 +2,7 @@
   "benchmark": "heteromark_fir",
   "tier": 2,
   "suite": "heteromark",
-  "description": "1D FIR (Finite Impulse Response) convolution: output[i] = sum(coeff[k] * input[i-k]). Filter coefficients loaded into shared memory. NUM_TAPS=128. Emits per-iteration kernel times; throughput is derived downstream.",
+  "description": "1D FIR (Finite Impulse Response) convolution: output[i] = sum(coeff[k] * input[i-k]). Filter coefficients loaded into shared memory. Emits per-iteration kernel times; throughput is derived downstream.",
   "scaling_param": {
     "name": "size",
     "description": "Number of input samples",

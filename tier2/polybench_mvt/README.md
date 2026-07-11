@@ -10,7 +10,7 @@ where A is an N×N matrix and x1, x2, y1, y2 are N-vectors.
 
 ## Algorithm
 
-Two GPU kernels are executed per iteration:
+The MVT pass runs exactly once per execution, launching two GPU kernels:
 
 1. **mvt_kernel1** — `x1 = A · y1`  
    Each thread computes one row: `x1[i] = Σⱼ A[i,j] * y1[j]`
@@ -20,8 +20,8 @@ Two GPU kernels are executed per iteration:
 
 ## Metric
 
-**GB/s** (memory bandwidth) — matrix A is read twice per pass (once per kernel).
-The formula is applied downstream to the emitted per-iteration times:
+**GB/s** (memory bandwidth) — matrix A is read twice (once per kernel).
+The formula is applied downstream to the emitted times:
 
 ```
 GB/s = (2 * N * N * 4 bytes) / time_s / 1e9   (derived downstream)
@@ -29,30 +29,33 @@ GB/s = (2 * N * N * 4 bytes) / time_s / 1e9   (derived downstream)
 
 ## Output
 
-**stdout** — JSON lines: per timed pass, one `kernel` record per kernel
+**stdout** — JSON lines: one `kernel` record per kernel
 (`mvt_kernel1`, `mvt_kernel2`) with that kernel's GPU event time and host
-wall-clock time, then a `summary` whose `total_time_ms` is the sum of all
+wall-clock time, then a `summary` whose `total_time_ms` is the sum of the two
 recorded GPU event times:
 
 ```json
-{"type":"kernel","name":"mvt_kernel1","iter":0,"time_ms":6.123400,"host_time_ms":6.150000,"params":{"n":4096,"block_size":256,"precision":"float"}}
-{"type":"kernel","name":"mvt_kernel2","iter":0,"time_ms":6.234500,"host_time_ms":6.260000,"params":{"n":4096,"block_size":256,"precision":"float"}}
-...
-{"type":"summary","total_time_ms":86.505300}
+{"type":"kernel","name":"mvt_kernel1","iter":0,"time_ms":6.123400,"host_time_ms":6.150000,"params":{"n":4096}}
+{"type":"kernel","name":"mvt_kernel2","iter":0,"time_ms":6.234500,"host_time_ms":6.260000,"params":{"n":4096}}
+{"type":"summary","total_time_ms":12.357900}
 ```
 
 Derived metrics (e.g. GB/s) are computed downstream from `time_ms` and params.
 
+**stderr** — device info, per-kernel timing, and a correctness check: the
+first 8 elements of `x1` and `x2` are compared against a CPU reference. On
+mismatch the check prints `FAIL` and the process exits with a non-zero
+status.
+
 ## Build
 
 ```bash
-# Auto-detect platform (Darwin → metal, /opt/rocm exists → rocm, else → cuda)
+# Auto-detect platform (/opt/rocm exists → rocm, else → cuda)
 make
 
 # Explicit platform
 make PLATFORM=cuda
 make PLATFORM=rocm
-make PLATFORM=metal
 ```
 
 ## Run
@@ -74,10 +77,10 @@ make PLATFORM=metal
 | Env var | Description | Default |
 |---------|-------------|---------|
 | `BENCH_PARAM_n` | Matrix dimension (N×N) | 4096 |
-| `BENCH_PARAM_block_size` | Threads per block | 256 |
-| `BENCH_PARAM_precision` | Precision label (half, float, double) | float |
-| `BENCH_PARAM_warmup` | Warmup passes (untimed) | 3 |
-| `BENCH_PARAM_iteration` | Timed passes, each recorded | 7 |
+| `BENCH_PARAM_vector_add_warmup` | Vector-add warmer (clock boost + LLC eviction) before the timed pass | true |
+
+The pass runs exactly once per execution; repetition is the harness's job
+(`gpubench run --reps N`).
 
 ## Platform Notes
 
@@ -87,12 +90,6 @@ make PLATFORM=metal
 - Block size: 256 threads  
 - Grid: `ceil(N/256)` for both kernels  
 - Requires: `nvcc` (CUDA) or `hipcc` (ROCm)
-
-### Metal (Apple Silicon / macOS)
-
-- Source: `polybench_mvt_metal.mm` + `polybench_mvt.metal`  
-- The `.metal` shader file must be in the same directory as the binary at runtime  
-- Requires: macOS with Metal support, Xcode command-line tools
 
 ## Reference
 

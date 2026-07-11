@@ -3,7 +3,7 @@
 Faithful port of the Rodinia Backpropagation benchmark. The two GPU kernels are
 the **original** Rodinia 3.1 CUDA source
 (`cuda/backprop/backprop_cuda_kernel.cu`); only the host driver is restructured
-for per-iteration timing.
+for single-pass timing.
 
 ## Algorithm
 
@@ -23,29 +23,26 @@ on the **CPU** in the original and are *not* GPU kernels; they are therefore not
 timed here, and the `hidden_delta` vector consumed by the adjust kernel is
 synthesized rather than back-propagated.
 
-One **recorded pass** = one epoch = forward kernel followed by adjust kernel; one
-JSON record is emitted per kernel per pass.
+The benchmark executes **one epoch, exactly once** — forward kernel followed by
+adjust kernel — and emits one JSON record per kernel. Repetition is the
+harness's job (`gpubench run --reps N` re-executes the binary).
 
-## Default problem size
+## Parameters
 
-| Parameter | Default | Notes |
-|-----------|---------|-------|
-| `--input` / `BENCH_PARAM_input` | 65536 | input layer size; multiple of 16. Matches the original standard size. |
-| hidden | 16 | **fixed** by the `HEIGHT=WIDTH=16` tiling and `(hid+1)` weight stride — not a knob |
-| `BENCH_PARAM_warmup` | 3 | warmup epochs (untimed) |
-| `BENCH_PARAM_iteration` | 7 | timed epochs, each recorded |
+| Parameter | Env var | Default | Notes |
+|-----------|---------|---------|-------|
+| `input` | `BENCH_PARAM_input` (or `--input N`) | 1000000 | input layer size; rounded down to a multiple of 16 |
+| `vector_add_warmup` | `BENCH_PARAM_vector_add_warmup` | `true` | cold-cache calibration: boost the clock and evict the LLC before the timed pass |
 
-Host launch geometry is the original: `num_blocks = input/16`,
-`grid(1, num_blocks)`, `threads(16, 16)`. With the default input the weight
-matrix is `(65536+1)×(16+1)` floats ≈ 4.5 MB.
+The hidden layer is **fixed** at 16 units by the `HEIGHT=WIDTH=16` tiling and
+`(hid+1)` weight stride — not a knob. Host launch geometry is the original:
+`num_blocks = input/16`, `grid(1, num_blocks)`, `threads(16, 16)`.
 
 ## Files
 
 | File | Description |
 |------|-------------|
 | `rodinia_backprop.hip` | HIP/CUDA implementation (faithful kernels + host driver) |
-| `rodinia_backprop.metal` | Metal compute shaders (Apple) |
-| `rodinia_backprop_metal.mm` | Metal Objective-C++ host (Apple) |
 | `Makefile` | Build system with auto-detection |
 | `README.md` | This file |
 
@@ -55,7 +52,6 @@ matrix is `(65536+1)×(16+1)` floats ≈ 4.5 MB.
 make                  # auto-detect platform
 make PLATFORM=cuda    # NVIDIA CUDA
 make PLATFORM=rocm    # AMD ROCm/HIP
-make PLATFORM=metal   # Apple Metal
 make clean
 ```
 
@@ -63,23 +59,21 @@ make clean
 
 ```bash
 ./rodinia_backprop [--input N]        # N must be a multiple of 16
-BENCH_PARAM_iteration=10 ./rodinia_backprop
+BENCH_PARAM_input=65536 ./rodinia_backprop
 ```
 
 ## Output
 
-**stdout** — JSON lines: per timed epoch, one `kernel` record for each of the two
-kernels, then a `summary` whose `total_time_ms` is the sum of all recorded GPU
-event times:
+**stdout** — JSON lines: one `kernel` record for each of the two kernels, then a
+`summary` whose `total_time_ms` is the sum of the recorded GPU event times:
 
 ```
-{"type":"kernel","name":"bpnn_layerforward_CUDA","iter":0,"time_ms":...,"host_time_ms":...,"params":{"input":65536,"hidden":16,"height":16,"width":16}}
+{"type":"kernel","name":"bpnn_layerforward_CUDA","iter":0,"time_ms":...,"host_time_ms":...,"params":{"input":1000000,"hidden":16,"height":16,"width":16}}
 {"type":"kernel","name":"bpnn_adjust_weights_cuda","iter":0,"time_ms":...,"host_time_ms":...,"params":{...}}
-...
 {"type":"summary","total_time_ms":...}
 ```
 
-**stderr** — device info and per-epoch forward/adjust timing.
+**stderr** — device info and forward/adjust timing.
 
 ## Data reset
 
@@ -87,9 +81,9 @@ event times:
 `bpnn_adjust_weights_cuda` mutates both the weight and previous-weight (momentum)
 buffers. The original re-allocates and re-uploads these buffers on every training
 call, so this port re-uploads the weight matrix and momentum buffer (untimed) at
-the start of every epoch — matching the original per-call semantics and keeping
-every timed epoch identical. `input` and `hidden_delta` are read-only and
-uploaded once.
+the start of the epoch, and re-uploads the weight matrix again between the two
+kernels (the forward kernel clobbers it) — matching the original per-call
+semantics. `input` and `hidden_delta` are read-only and uploaded once.
 
 ## References
 

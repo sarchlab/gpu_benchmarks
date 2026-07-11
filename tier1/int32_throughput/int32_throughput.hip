@@ -25,12 +25,16 @@
  *   BENCH_PARAM_mads_per_thread
  *   BENCH_PARAM_num_blocks
  *   BENCH_PARAM_threads_per_block
+ *   BENCH_PARAM_vector_add_warmup  (default true; clock-boost + LLC-evict
+ *                                   warmer before the timed run)
  *
- * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
- * the GPU event time and host wall-clock time, then a summary whose
- * total_time_ms is the SUM of all iterations' GPU event times. Derived
- * metrics (GIOPS) are intentionally not computed here — derive them
- * downstream from time and the work-descriptor params.
+ * Measurement: the kernel is launched and timed EXACTLY ONCE per process
+ * (repetition = fresh re-executions via `gpubench run --reps N`). Output:
+ * one {"type":"kernel",...} JSON line carrying the GPU event time and host
+ * wall-clock time for that single launch, then a summary whose
+ * total_time_ms equals it. Derived metrics (GIOPS) are intentionally not
+ * computed here — derive them downstream from time and the work-descriptor
+ * params.
  */
 
 #include <cstdio>
@@ -50,7 +54,11 @@
 
 static const int DEFAULT_MADS_PER_THREAD = 4096;
 static const int DEFAULT_THREADS_PER_BLOCK = 256;
-static const int DEFAULT_NUM_BLOCKS = 1024;
+// Default 1 block = single-SM/CU measurement: integer ALUs are per-SM
+// resources, so device peak ≈ per-SM value × SM count (an upper bound —
+// an all-SM load throttles below single-SM boost clock).  Raise
+// BENCH_PARAM_num_blocks (e.g. >= 8 × SM count) for a device-wide run.
+static const int DEFAULT_NUM_BLOCKS = 1;
 
 // ---------------------------------------------------------------------------
 // INT32 MAD kernel

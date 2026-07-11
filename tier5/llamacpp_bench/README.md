@@ -10,7 +10,7 @@ and measures token generation throughput via the `llama-cli` binary.
 - CMake 3.14+
 - Git
 - curl
-- GPU: CUDA (NVIDIA), ROCm (AMD), or Metal (Apple Silicon)
+- GPU: CUDA (NVIDIA) or ROCm (AMD)
 
 ## Setup
 
@@ -33,11 +33,6 @@ make run PLATFORM=cuda
 ### ROCm (AMD)
 ```
 make run PLATFORM=rocm
-```
-
-### Metal (Apple)
-```
-make run PLATFORM=metal
 ```
 
 ## Output Format

@@ -12,10 +12,12 @@
  *   3. Bidirectional       — concurrent H2D + D2H on two HIP streams
  *
  * Pinned (page-locked) host memory is allocated with hipHostMalloc() to
- * bypass OS paging and saturate the PCIe link. Warmup copies absorb
- * one-time costs (e.g. MI300A charges a large DMA-registration cost to the
- * first transfer touching a fresh pinned buffer); every timed iteration is
- * then recorded individually.
+ * bypass OS paging and saturate the PCIe link. Each selected test is run
+ * EXACTLY ONCE and timed with HIP events; there is no in-program warmup or
+ * iteration loop. When BENCH_PARAM_vector_add_warmup is on (default), a
+ * vector-add warmer runs immediately before the timed transfer to boost the
+ * GPU clock and evict the last-level cache. Repetition is the harness's job
+ * (gpubench --reps).
  *
  * Usage:
  *   ./pcie_bandwidth [buffer_size_mb]
@@ -25,11 +27,11 @@
  *   BENCH_PARAM_transfer_type     (h2d, d2h, bidir, all)
  *   BENCH_PARAM_use_pinned_memory (true, false)
  *
- * Output: one {"type":"kernel",...} JSON line per timed iteration carrying
+ * Output: one {"type":"kernel",...} JSON line per selected test carrying
  * the GPU event time and host wall-clock time, then a summary whose
- * total_time_ms is the SUM of all recorded iterations' GPU event times.
+ * total_time_ms is the SUM of all recorded tests' GPU event times.
  * Bandwidth is derived downstream from buffer_size_mb and time_ms (bidir
- * moves 2x buffer_size_mb per iteration).
+ * moves 2x buffer_size_mb per transfer).
  */
 
 #include <cstdio>

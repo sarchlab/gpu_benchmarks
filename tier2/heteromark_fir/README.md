@@ -2,7 +2,9 @@
 
 Benchmarks a 1D FIR (Finite Impulse Response) filter on the GPU. Each thread computes one output sample. Emits the raw kernel time of a single launch; throughput (GB/s) is derived downstream.
 
-Derived from the [HeteroMark benchmark suite](https://github.com/NUCAR-DEV/Hetero-Mark) FIR workload.
+## Provenance & fidelity
+
+Faithful reproduction of the [HeteroMark benchmark suite](https://github.com/NUCAR-DEV/Hetero-Mark) FIR workload.
 
 ## Algorithm
 

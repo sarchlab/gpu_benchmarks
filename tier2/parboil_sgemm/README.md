@@ -2,7 +2,13 @@
 
 Benchmarks tiled single-precision matrix multiplication: **C = α·A·B + β·C** for square N×N matrices. Emits the raw kernel time of a single launch; GFLOPS is derived downstream.
 
-Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parboil/parboil.aspx) SGEMM workload.
+## Provenance & fidelity
+
+Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parboil/) — the `sgemm` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- Row-major textbook tiled GEMM vs Parboil's mysgemmNT column-major register-tiled kernel.
+
+Read this as "an SGEMM benchmark in the spirit of Parboil," not Parboil's `sgemm`.
 
 ## Algorithm
 

@@ -2,6 +2,14 @@
 
 PolyBench 2D Jacobi stencil benchmark — GPU implementation for CUDA and ROCm/HIP.
 
+## Provenance & fidelity
+
+Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) — the `jacobi-2d` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- One sweep per step vs PolyBench's canonical two sweeps (see "Divergence from canonical PolyBench" below).
+
+Read this as "a Jacobi-2D benchmark in the spirit of PolyBench," not PolyBench's `jacobi-2d`.
+
 ## Algorithm
 
 Iterates a 2D Jacobi stencil on an N×N grid for TSTEPS time steps:

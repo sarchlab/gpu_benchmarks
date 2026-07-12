@@ -158,6 +158,11 @@ __global__ void prefix_sum_kernel(
 
     int n = blockDim.x * 2;
 
+    // Barrier before the up-sweep: thread `index` reads sdata[index - stride],
+    // written by another (possibly cross-warp) thread's load above. Without this
+    // the first add races. (Present in the Metal port; dropped here.)
+    __syncthreads();
+
     // Up-sweep (reduce)
     for (int stride = 1; stride < n; stride *= 2) {
         int index = (tid + 1) * stride * 2 - 1;

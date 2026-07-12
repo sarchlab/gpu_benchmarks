@@ -88,11 +88,19 @@ __global__ void binomial_kernel(
 
     int numNodes = numSteps + 1;
 
+    // Double-buffer the tree level (upstream does the same). A single in-place
+    // buffer races: computing node j reads shared_values[j+1] while the thread
+    // owning node j+1 overwrites it in the same sweep — only one barrier per
+    // level, so on sm_70+ this corrupts even within a warp. `cur` is read-only
+    // for the level, `nxt` is written, then they swap.
+    float* cur = shared_values;
+    float* nxt = shared_values + numNodes;
+
     // Step 1: Compute terminal payoffs (stride loop)
     for (int j = tid; j < numNodes; j += bdim) {
         float ST = opt.S * powf(u, (float)(2 * j - numSteps));
         float payoff = fmaxf(opt.K - ST, 0.0f);
-        shared_values[j] = payoff;
+        cur[j] = payoff;
     }
     __syncthreads();
 
@@ -100,18 +108,20 @@ __global__ void binomial_kernel(
     for (int step = numSteps; step > 0; --step) {
         for (int j = tid; j < step; j += bdim) {
             // Expected value discounted
-            float cont = Rinv * (p * shared_values[j + 1] + q * shared_values[j]);
+            float cont = Rinv * (p * cur[j + 1] + q * cur[j]);
             // American option: can exercise early
             float ST = opt.S * powf(u, (float)(2 * j - (step - 1)));
             float exercise = fmaxf(opt.K - ST, 0.0f);
-            shared_values[j] = fmaxf(cont, exercise);
+            nxt[j] = fmaxf(cont, exercise);
         }
         __syncthreads();
+        float* tmp = cur; cur = nxt; nxt = tmp;
     }
 
-    // Thread 0 writes the option price
+    // Thread 0 writes the option price (final result lives in `cur` after the
+    // last swap).
     if (tid == 0) {
-        prices[optIdx] = shared_values[0];
+        prices[optIdx] = cur[0];
     }
 }
 
@@ -180,7 +190,8 @@ int main(int argc, char** argv) {
     if (env_val) numOptions = atoi(env_val);
     env_val = getenv("BENCH_PARAM_steps");
     if (env_val) numSteps = atoi(env_val);
-    // Shared memory must hold (numSteps+1) floats; clamp to reasonable limit
+    // Shared memory must hold 2*(numSteps+1) floats (double-buffered induction);
+    // clamp so that stays within the 48 KB default (2*4097*4 ≈ 32 KB).
     if (numSteps > 4096) {
         fprintf(stderr, "Warning: clamping steps to 4096 (shared memory limit)\n");
         numSteps = 4096;
@@ -222,7 +233,7 @@ int main(int argc, char** argv) {
     // Clamp blockSize to 1024 (HIP/CUDA max), kernel uses stride loops
     int blockSize = (numSteps + 1 > 1024) ? 1024 : (numSteps + 1);
     int gridSize  = numOptions;
-    size_t sharedBytes = (size_t)(numSteps + 1) * sizeof(float);
+    size_t sharedBytes = (size_t)2 * (numSteps + 1) * sizeof(float);
 
     char params[128];
     snprintf(params, sizeof(params),

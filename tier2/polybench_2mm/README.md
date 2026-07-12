@@ -6,7 +6,13 @@ Benchmarks two consecutive dense matrix multiplications:
 
 for square N×N single-precision matrices. The 2MM pass runs exactly once per execution and emits one GPU/host time record per kernel; compute throughput (GFLOPS) is derived downstream.
 
-Modeled on the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) 2MM workload; the kernels are a generic tiled shared-memory GEMM reimplementation, not the upstream naive kernels.
+## Provenance & fidelity
+
+Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) — the `2mm` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- Tiled implementation with different chain semantics than PolyBench 2mm.
+
+Read this as "a 2MM benchmark in the spirit of PolyBench," not PolyBench's `2mm`.
 
 ## Algorithm
 

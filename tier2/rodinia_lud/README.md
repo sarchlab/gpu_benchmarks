@@ -3,6 +3,10 @@
 Implements the Rodinia LUD benchmark: blocked LU decomposition (no pivoting)
 of a dense NxN single-precision matrix.
 
+## Provenance & fidelity
+
+Derived from the [Rodinia benchmark suite](http://lava.cs.virginia.edu/Rodinia/) — the `lud` workload. Independent reimplementation, spot-verified to reproduce Rodinia's algorithm faithfully.
+
 ## Algorithm
 
 Three GPU kernels are launched in sequence for each diagonal block step `k`:

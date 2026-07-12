@@ -8,6 +8,10 @@ Computes:
 
 where A is an N×N matrix and x1, x2, y1, y2 are N-vectors.
 
+## Provenance & fidelity
+
+Derived from the [PolyBench/GPU](https://sourceforge.net/projects/polybench/) benchmark suite — the `mvt` workload. Independent reimplementation, spot-verified to reproduce PolyBench's algorithm faithfully.
+
 ## Algorithm
 
 The MVT pass runs exactly once per execution, launching two GPU kernels:

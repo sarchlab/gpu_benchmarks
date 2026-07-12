@@ -2,7 +2,13 @@
 
 Benchmarks a simple ray tracer on the GPU. Each thread casts one ray from a camera through an image plane, tests all spheres for intersection, and shades the nearest hit with Phong lighting. The kernel runs exactly once per execution; its time is emitted and throughput in Mrays/sec is derived downstream.
 
-Derived from the [Altis benchmark suite](https://github.com/utcs-scea/altis) ray tracing workload.
+## Provenance & fidelity
+
+Derived from the [Altis benchmark suite](https://github.com/utcs-scea/altis) — the `raytracing` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- A rewrite of the raytracing workload (mostly disclosed) — the scene setup, intersection, and shading are our own code, not the upstream kernel.
+
+Read this as "a ray-tracing benchmark in the spirit of Altis," not Altis's `raytracing`.
 
 ## Algorithm
 

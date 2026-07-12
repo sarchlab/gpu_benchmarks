@@ -7,7 +7,9 @@ copied verbatim, including its staging of the home box and each neighbor box's
 particles into shared memory before the all-pairs interaction. Only the host
 driver is restructured for the single-pass timing harness and JSON output.
 
-Derived from the [Rodinia benchmark suite](https://rodinia.cs.virginia.edu/).
+## Provenance & fidelity
+
+Derived from the [Rodinia benchmark suite](http://lava.cs.virginia.edu/Rodinia/) — the `lavaMD` workload. Independent reimplementation, spot-verified to reproduce Rodinia's algorithm faithfully.
 
 ## Algorithm
 

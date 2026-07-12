@@ -4,6 +4,14 @@
 
 This benchmark implements CSR (Compressed Sparse Row) Sparse Matrix-Vector Multiplication (SpMV): **y = A × x**, derived from the SHOC (Scalable HeterOgeneous Computing) benchmark suite.
 
+## Provenance & fidelity
+
+Derived from the SHOC benchmark suite (https://github.com/vetter/shoc) — the `SpMV` workload. This is an independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction of the upstream kernel. It differs from SHOC's version as follows:
+
+- CSR-scalar only vs SHOC's multiple SpMV variants.
+
+Read this as "a CSR-SpMV benchmark in the spirit of SHOC," not as SHOC's `SpMV`.
+
 A synthetic sparse matrix is generated with exactly `nnz_per_row` non-zeros per row (default 32) and `num_rows` rows (default 16384). The row-per-thread CSR SpMV kernel assigns one GPU thread to each output row.
 
 ## Algorithm

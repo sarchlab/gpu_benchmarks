@@ -4,6 +4,10 @@ Faithful port of the [NAS Parallel Benchmarks](https://www.nas.nasa.gov/software
 
 EP generates 2^(M+1) pseudorandom numbers, forms Gaussian deviate pairs, and tallies them into 10 concentric square annuli. It is purely compute-bound with negligible memory traffic — the canonical "embarrassingly parallel" workload.
 
+## Provenance & fidelity
+
+Faithful port of the [NAS Parallel Benchmarks](https://www.nas.nasa.gov/software/npb.html) `EP` kernel: `randlc`/`vranlc` + skip-ahead reproduced verbatim, and the reference sums match published NPB digit-for-digit. Only the host driver is restructured for the single-run timing harness and JSON output.
+
 ## Algorithm (original NAS EP)
 
 - Generate 2^(M+1) uniform numbers with the NAS 46-bit linear congruential generator `randlc`/`vranlc` (R23/R46 split, `A = 5^13 = 1,220,703,125`, seed `S = 271828183`).

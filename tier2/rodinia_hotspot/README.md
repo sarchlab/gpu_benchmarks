@@ -5,10 +5,14 @@ where each cell's temperature is updated from its four neighbors (N/S/E/W),
 the local power density, and thermal resistances. Classic structured-grid
 benchmark.
 
-Faithful port of the [Rodinia benchmark suite](https://rodinia.cs.virginia.edu/)
+Faithful port of the [Rodinia benchmark suite](http://lava.cs.virginia.edu/Rodinia/)
 3.1 CUDA Hotspot: the device kernel (`calculate_temp`) and its **pyramidal /
 ghost-zone temporal-blocking** scheme are the original; only the host driver is
 restructured for single-pass timing and JSON output.
+
+## Provenance & fidelity
+
+Derived from the [Rodinia benchmark suite](http://lava.cs.virginia.edu/Rodinia/) — the `hotspot` workload. Independent reimplementation, spot-verified to reproduce Rodinia's algorithm faithfully (full pyramid reproduced).
 
 ## Algorithm
 

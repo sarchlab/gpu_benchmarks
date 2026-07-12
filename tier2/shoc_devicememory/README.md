@@ -2,7 +2,13 @@
 
 Benchmarks GPU global memory bandwidth for three access patterns: read-only, write-only, and read-write. Emits one raw per-kernel GPU time per execution; GB/s for each pattern is derived downstream.
 
-Derived from the [SHOC benchmark suite](https://github.com/vetter/shoc) DeviceMemory workload.
+## Provenance & fidelity
+
+Derived from the SHOC benchmark suite (https://github.com/vetter/shoc) — the `DeviceMemory` workload. This is an independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction of the upstream kernel. It differs from SHOC's version as follows:
+
+- Three simple grid-stride kernels vs SHOC's unrolled/local-memory/texture set.
+
+Read this as "a device-memory-bandwidth benchmark in the spirit of SHOC," not as SHOC's `DeviceMemory`.
 
 ## Kernels
 

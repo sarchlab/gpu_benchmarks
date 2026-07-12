@@ -2,7 +2,13 @@
 
 7-point 3D Jacobi stencil computation over a cubic grid using ping-pong buffers. Each interior cell is updated from its six face-adjacent neighbors. Boundary cells remain fixed. A classic memory-bandwidth-bound benchmark.
 
-Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parboil/parboil.aspx) stencil workload.
+## Provenance & fidelity
+
+Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parboil/) — the `stencil` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- Different stencil formula than Parboil's.
+
+Read this as "a 3D Jacobi stencil benchmark in the spirit of Parboil," not Parboil's `stencil`.
 
 ## Algorithm
 

@@ -4,6 +4,10 @@ Faithful port of the Rodinia PathFinder benchmark: the device kernel
 (`dynproc_kernel`) and the host launch geometry are the **original** Rodinia 3.1
 CUDA source; only the outer driver loop is restructured for single-pass timing.
 
+## Provenance & fidelity
+
+Derived from the [Rodinia benchmark suite](http://lava.cs.virginia.edu/Rodinia/) — the `pathfinder` workload. Independent reimplementation, spot-verified to reproduce Rodinia's algorithm faithfully.
+
 ## Algorithm
 
 Dynamic-programming shortest descent through a `ROWS × COLS` integer cost grid.

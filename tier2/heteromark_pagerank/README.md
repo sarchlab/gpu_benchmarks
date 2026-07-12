@@ -2,7 +2,9 @@
 
 Benchmarks iterative PageRank (power method) on a **synthetic Erdős–Rényi graph** stored in CSR format. Emits the run's kernel time; throughput in edges per second is derived downstream.
 
-Derived from the [HeteroMark benchmark suite](https://github.com/NUCAR-DEV/Hetero-Mark) PageRank workload.
+## Provenance & fidelity
+
+Faithful reproduction of the [HeteroMark benchmark suite](https://github.com/NUCAR-DEV/Hetero-Mark) PageRank workload: genuine pull-based (gather) power-method PageRank.
 
 ## Algorithm
 

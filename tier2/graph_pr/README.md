@@ -1,5 +1,9 @@
 # graph_pr — Graph PageRank (Pull-Based)
 
+## Provenance & fidelity
+
+Not named after a specific upstream suite — a generic graph-analytics PageRank. Faithful to the algorithm it claims: a genuinely pull-based (CSC gather) power-method PageRank.
+
 ## Algorithm
 
 Computes PageRank on a random sparse directed graph using the iterative

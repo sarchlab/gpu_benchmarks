@@ -2,7 +2,13 @@
 
 Benchmarks the Cox-Ross-Rubinstein (CRR) binomial tree model for **American put option** pricing with early exercise. Emits one raw kernel time per execution; throughput (options/sec) is derived downstream.
 
-Derived from the [Tango benchmark suite](https://github.com/AkshayUsha/Tango) binomial options workload.
+## Provenance & fidelity
+
+Derived from the [Tango benchmark suite](https://gitlab.com/Tango-DNNbench/Tango) — the binomial options workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- Prices American puts with a per-node `powf` vs the upstream European FMA induction — a transcendental-heavy, different workload class. (A shared-memory race in the backward induction has been fixed.)
+
+Read this as "a binomial-options benchmark in the spirit of Tango," not Tango's binomial options.
 
 ## Algorithm
 

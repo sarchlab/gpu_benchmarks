@@ -2,6 +2,10 @@
 
 Benchmarks the BiCG sub-kernel of the BiCGStab iterative linear solver on GPU.
 
+## Provenance & fidelity
+
+Derived from the [PolyBench/GPU](https://web.cse.ohio-state.edu/~pouchet.2/software/polybench/) benchmark suite — the `bicg` workload. Independent reimplementation, spot-verified to reproduce PolyBench's algorithm faithfully.
+
 ## Algorithm
 
 Computes two matrix-vector products simultaneously:

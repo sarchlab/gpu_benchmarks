@@ -1,5 +1,13 @@
 # lonestar_sssp — Single-Source Shortest Path (Bellman-Ford)
 
+## Provenance & fidelity
+
+Derived from the [Lonestar GPU](https://iss.oden.utexas.edu/?p=projects/galois/lonestar) suite — the `sssp` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- Topology-driven Bellman-Ford vs Lonestar's worklist SSSP; "inspired by" rather than a port. (Disclosed.)
+
+Read this as "an SSSP benchmark in the spirit of Lonestar," not Lonestar's `sssp`.
+
 ## Algorithm
 
 Computes single-source shortest paths on a random sparse directed graph using

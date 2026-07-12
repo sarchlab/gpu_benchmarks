@@ -7,6 +7,14 @@ Emits one raw kernel time (accumulated over all stencil steps); effective
 memory bandwidth (GB/s) is derived downstream.
 Derived from the SHOC (Scalable Heterogeneous Computing) benchmark suite.
 
+## Provenance & fidelity
+
+Derived from the SHOC benchmark suite (https://github.com/vetter/shoc) — the `Stencil2D` workload. This is an independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction of the upstream kernel. It differs from SHOC's version as follows:
+
+- Untiled stencil vs SHOC's shared-memory tiled kernel.
+
+Read this as "a 9-point 2D-stencil benchmark in the spirit of SHOC," not as SHOC's `Stencil2D`.
+
 ## Algorithm
 
 The stencil reads 9 neighbors for each interior cell:

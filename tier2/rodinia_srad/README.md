@@ -8,7 +8,9 @@ shared-memory neighborhood tiling and the compile-time `BLOCK_SIZE 16` thread
 block. Only the host driver is restructured for the single-pass timing
 harness and JSON output.
 
-Derived from the [Rodinia benchmark suite](https://rodinia.cs.virginia.edu/).
+## Provenance & fidelity
+
+Derived from the [Rodinia benchmark suite](http://lava.cs.virginia.edu/Rodinia/) — the `srad` (v2) workload. Independent reimplementation, spot-verified to reproduce Rodinia's algorithm faithfully (includes the documented AMD out-of-bounds fix).
 
 ## Algorithm
 

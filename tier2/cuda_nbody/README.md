@@ -2,7 +2,9 @@
 
 Benchmarks a gravitational N-body simulation using the **classic tile-based shared memory optimization**. Each thread computes the force on one body from all others. Emits the run's kernel time; throughput in GFLOPS is derived downstream.
 
-Derived from the [CUDA N-Body sample](https://developer.nvidia.com/gpugems/gpugems3/part-v-physics-simulation/chapter-31-fast-n-body-simulation-cuda).
+## Provenance & fidelity
+
+Faithful reproduction of the [CUDA N-Body sample](https://developer.nvidia.com/gpugems/gpugems3/part-v-physics-simulation/chapter-31-fast-n-body-simulation-cuda): the classic GPU Gems 3 tile-based all-pairs N-body kernel is reproduced. (Now double-buffers positions.)
 
 ## Algorithm
 

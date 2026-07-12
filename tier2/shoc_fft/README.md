@@ -9,6 +9,10 @@ the **original SHOC/Volkov code**, taken verbatim from
 structure of `fftlib.cu` / `FFT.cpp` `runTest`. Only the host driver is
 restructured for the single-run timing harness and JSON output.
 
+## Provenance
+
+Derived from the SHOC benchmark suite (https://github.com/vetter/shoc) — the `FFT` workload. Independent reimplementation, spot-verified to reproduce SHOC's algorithm and constants faithfully: the Volkov radix-8 FFT and its twiddle-factor codelets are reproduced (taken verbatim from `shoc/src/cuda/level1/fft/codelets.h`). See "Deviations from upstream" below for the (host-only) differences in the verification path.
+
 ## Algorithm
 
 - **n_ffts** independent 512-point complex FFTs, one CUDA/HIP block each

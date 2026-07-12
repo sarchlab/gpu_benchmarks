@@ -4,6 +4,10 @@ Dynamic programming sequence alignment using the Needleman-Wunsch algorithm.
 The scoring matrix is filled with block-based anti-diagonal wavefront parallelism
 and threadgroup/shared-memory tiling, based on the Rodinia NW benchmark.
 
+## Provenance & fidelity
+
+Derived from the [Rodinia benchmark suite](http://lava.cs.virginia.edu/Rodinia/) — the `nw` workload. Independent reimplementation, spot-verified to reproduce Rodinia's algorithm faithfully.
+
 ## Algorithm
 
 - Sequences of length **N** over an alphabet of size 10 (synthetic, reproducible).

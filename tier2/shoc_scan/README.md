@@ -16,6 +16,14 @@ two-phase scan** (up-sweep + down-sweep) with shared/threadgroup memory, and
 supports arrays of arbitrary size via recursive multi-block scan.  Derived from
 the [SHOC benchmark suite](https://github.com/vetter/shoc).
 
+## Provenance & fidelity
+
+Derived from the SHOC benchmark suite (https://github.com/vetter/shoc) — the `Scan` workload. This is an independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction of the upstream kernel. It differs from SHOC's version as follows:
+
+- Recursive Blelloch scan vs SHOC's vec4 reduce/top-scan/bottom-scan.
+
+Read this as "an exclusive-prefix-scan benchmark in the spirit of SHOC," not as SHOC's `Scan`.
+
 ## Files
 
 | File | Description |

@@ -4,6 +4,10 @@ PolyBench ATAX benchmark: matrix-transpose times vector.
 
 Computes **y = Aᵀ · (A · x)** where A is an NX×NY matrix and x, y are NY-vectors.
 
+## Provenance & fidelity
+
+Derived from the [PolyBench/GPU](https://sourceforge.net/projects/polybench/) benchmark suite — the `atax` workload. Independent reimplementation, spot-verified to reproduce PolyBench's algorithm faithfully.
+
 ## Algorithm
 
 The ATAX pass runs exactly once per execution, launching two GPU kernels:

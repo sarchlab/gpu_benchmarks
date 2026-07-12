@@ -6,6 +6,10 @@ Faithful port of the SHOC level1 **Sort** benchmark. The device kernels are the
 pipeline from `Sort.cu` (`radixSortStep` + `scanArrayRecursive`). Only the host
 driver is restructured for the single-run timing harness and JSON output.
 
+## Provenance
+
+Derived from the SHOC benchmark suite (https://github.com/vetter/shoc) — the `Sort` workload. Independent reimplementation, spot-verified to reproduce SHOC's algorithm and constants faithfully: the CUDPP 4-bit radix sort is reproduced verbatim (from `shoc/src/cuda/level1/sort/sort_kernel.cu`), including its quirks. The only deviation is the synthetic key distribution (uniform random `uint32` vs SHOC's periodic `i % 1024`), noted under "Notes" below; the sort's operation count is data-independent.
+
 ## Algorithm
 
 A full sort of 32-bit unsigned keys is performed as **8 passes of 4 radix

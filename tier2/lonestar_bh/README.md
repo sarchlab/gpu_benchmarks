@@ -3,6 +3,14 @@
 **Suite:** Lonestar GPU  
 **Tier:** 2 — Established Benchmark Suites
 
+## Provenance & fidelity
+
+Derived from the [Lonestar GPU](https://iss.oden.utexas.edu/?p=projects/galois/lonestar) suite — the `bh` (Barnes-Hut) workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- The 2D quadtree is **BUILT ON THE CPU** and re-uploaded every timestep; only force-traversal and integration run on the GPU. The irregular GPU tree-build that Barnes-Hut is known for is **untimed host code** — what is measured is tree traversal + integrate, **not** the tree build.
+
+Read this as "a Barnes-Hut force-traversal benchmark in the spirit of Lonestar," not Lonestar's `bh`.
+
 ## Algorithm
 
 The Barnes-Hut algorithm is an O(N log N) approximation to the N-body gravitational

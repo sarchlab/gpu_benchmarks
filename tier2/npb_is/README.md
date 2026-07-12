@@ -2,7 +2,13 @@
 
 Benchmarks a **parallel bucket sort** of N random integers in range [0, 2¹⁹). The sort runs exactly once per execution and emits raw per-kernel times; throughput (Mkeys/sec) is derived downstream.
 
-Derived from the [NAS Parallel Benchmarks](https://www.nas.nasa.gov/software/npb.html) IS kernel.
+## Provenance & fidelity
+
+Derived from the [NAS Parallel Benchmarks](https://www.nas.nasa.gov/software/npb.html) — the `IS` (Integer Sort) kernel. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- Generic one-pass bucket sort vs NPB IS's 10 ranking iterations over gaussian-distributed keys.
+
+Read this as "an integer-sort benchmark in the spirit of NPB," not NPB's `IS`.
 
 ## Algorithm
 

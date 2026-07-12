@@ -2,7 +2,9 @@
 
 Benchmarks AES-256 encryption in ECB mode on the GPU. Each thread encrypts one 16-byte block through 14 rounds. Emits the raw kernel time of a single launch; throughput (GB/s) is derived downstream.
 
-Derived from the [HeteroMark benchmark suite](https://github.com/NUCAR-DEV/Hetero-Mark) AES workload.
+## Provenance & fidelity
+
+Faithful reproduction of the [HeteroMark benchmark suite](https://github.com/NUCAR-DEV/Hetero-Mark) AES workload: the cipher is FIPS-197 verified (S-box, rcon, and round structure).
 
 ## Algorithm
 

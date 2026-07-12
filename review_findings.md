@@ -254,7 +254,75 @@ valid measurement (e.g. the binomial-options race below would be recorded as `ok
 
 ## Part C — Tier 2 findings by suite
 
+### Disposition & work checklist
+
+Direction (approved 2026-07-11): we do **not** vendor upstream source. Instead we stop *claiming* to
+be the upstream suite — attribution without a faithfulness claim. This lowers the bar from
+"reproduces suite X detail-for-detail" to "is a correct, representative instance of workload Y."
+
+**Resolution (2026-07-12): directory/identifier renames are SKIPPED.** De-prefixing produced too many
+cryptic names (`cc`, `mg`, `is`, `ep`, `bh`, `nw`, `lud`) and `graph_`/`heteromark_`/`chai_` are
+categories, not suite claims. The honesty goal is instead delivered by a **README provenance sweep**
+(done — 57 READMEs): each benchmark carries a "Provenance & fidelity" section stating what it is
+derived from and exactly how it differs from upstream (faithful ones get a lighter fidelity note). So
+the **`rename` tag below is satisfied by that README disclosure**, not by moving directories. This
+does **not** excuse correctness bugs or fix a workload whose identity is itself broken.
+
+Tags:
+- **rename** — honest provenance disclosure in the README (✅ done via the sweep). Directory names
+  are kept as-is (see Resolution above); this tag no longer implies a directory move.
+- **fix-bug** — correctness/race defect; must fix regardless of naming.
+- **fix-identity** — deviation breaks the workload's identity; either fix the algorithm to match
+  the name, or rename to what it honestly is.
+- **methodology** — timed-path/measurement violation (rules 4/6/8); orthogonal to naming.
+- **sweep** — also has a sweep-quality issue (details in the Sweep-quality section below).
+- **decision** — needs an owner call before code (fix-vs-honest-rename).
+
+Naming caveat (moot now that dir renames are skipped, kept for the record): de-prefixing collides on
+`gemm` (shoc+polybench) and `spmv` (shoc+parboil); everything else is unique but often cryptic.
+
+Status: ✅ = fixed (2026-07-11, code committed to worktree); unmarked = open.
+
+| Dir | → workload | Tags | What the work is |
+|---|---|---|---|
+| cuda_nbody | nbody | ✅ fix-bug | Restored position double buffer (read `posIn` / write `posOut`, ping-pong per step); verification launch + frees updated. |
+| parboil_lbm | lbm | ✅ fix-bug; rename open | Replaced the `is_boundary` branch with per-link bounce-back (bounce iff destination leaves the domain) → every f_dst slot has exactly one writer; no face race, no stale slot. |
+| shoc_reduction | reduction | ✅ fix-bug, rename | Driver now ping-pongs `d_partial`↔`d_temp` so no level reads and writes the same buffer. |
+| altis_particlefilter | particlefilter | ✅ fix-bug (barrier); methodology, rename open | Added missing `__syncthreads` before the up-sweep in `prefix_sum_kernel`. Host-side inter-block scan still open. |
+| tango_binomial_options | binomial_options | ✅ fix-bug, rename; sweep open | Double-buffered `shared_values` (`cur`/`nxt` swap per level); shared bytes doubled (~32 KB, under 48 KB). |
+| npb_mg | mg | ✅ fix-bug (residual sign); fix-identity, methodology, sweep open | Residual now `rhs − A·u` (was `rhs + A·u`, = 2·rhs at fixed point) → V-cycle actually reduces its measure. Untimed `residual_kernel` in timed pass still open. |
+| graph_cc | cc | ✅ fix-bug; rename, sweep open | Double-buffered (Jacobi) propagation: read `labels_in`, always write `labels_out`, ping-pong → deterministic iteration count (rule 9). Same unique fixed point, so results unchanged. |
+| npb_cg | cg | ✅ fix-identity (verified H100: residual=0, PASS); methodology, sweep open | Generator now builds a symmetric, strictly diagonally-dominant matrix (⇒ SPD) so CG is well-posed. Verification re-runs the solve (methodology) still open. |
+| polybench_fdtd2d | fdtd2d | ✅ fix-identity (verified H100: compiles + runs) | Restored the canonical PolyBench recurrence: `ey` carries the i-difference + `_fict_[t]=t` source, `ex` the j-difference, both `-=`. Now faithful. |
+| altis_cfd | cfd | ✅ decision: document-only | Owner call: keep as-is. README discloses it computes Euler/Rusanov+RK over synthetic random connectivity (not a physical mesh). No code change. sweep open. |
+| rodinia_gaussian | gaussian | ✅ decision: keep as-is | Owner call: correct Gaussian elimination; README notes the access pattern differs from Rodinia's uncoalesced Fan2 signature. No code change. sweep open. |
+| lonestar_bh | bh | DEFERRED INDEFINITELY — issue [#57](https://github.com/sarchlab/gpu_benchmarks/issues/57) | GPU tree build (option b) deferred indefinitely 2026-07-12: results are correct/deterministic and honestly documented, so this is completeness not correctness. Accepted as a force-traversal + integrate benchmark. Its cold-cache/timing sub-issue folds into the methodology cluster. |
+| lonestar_sssp | sssp | rename | Topology-driven Bellman-Ford; "inspired by" already disclosed. |
+| shoc_scan | scan | methodology, rename | Verification re-runs the whole scan + a second warmer (untimed). |
+| shoc_stencil2d | stencil2d | methodology, rename | 64×64 pre-timed launch warms I-cache/module state. |
+| parboil_sgemm | sgemm | methodology, rename | N≤256 unbracketed verification relaunch. |
+| polybench_gramschmidt | gramschmidt | methodology, sweep | `passes` (3, swept to 10) accumulate into one record — rule-4. |
+| rodinia_srad | srad | methodology | Faithful otherwise; first-iter `hipMemcpy(J)` after warmer repopulates LLC. |
+| npb_is | is | methodology, rename | Generic one-pass bucket sort; small documented untimed D2D copy (negligible). |
+| parboil_spmv | spmv | fix-bug, sweep | `coo_to_jds` corrupts the matrix when the last row has exactly 1 nonzero (~1/159 combos): duplicate write + spurious FAIL. |
+
+Mechanical **rename-only** (no algorithm/measurement work — just drop the prefix + provenance
+line): the verbatim/faithful set listed below, plus the disclosed simpler-variant rewrites
+(shoc_gemm/triad/devicememory/spmv, polybench_2mm/correlation/3dconv/jacobi2d/gemm/syr2k,
+rodinia_bfs/hotspot3d, parboil_stencil, altis_gups/raytracing, cuda_scan_large). These are valid
+instances of their workload once the suite name is dropped.
+
 ### Genuine kernel bugs (critical)
+> **RESOLVED & VERIFIED 2026-07-12** (all 7). Compiled with nvcc 12.9 (`-arch=native`) and run on an
+> NVIDIA H100 — all 7 build clean and pass verification: nbody PASS, particlefilter PASS, reduction
+> PASS (rel err 1.4e-8), graph_cc PASS + deterministic (5 iters every run, rule 9), lbm PASS, mg
+> `‖r‖/‖rhs‖`=2.0e-2 PASS (was a vacuous ~2), binomial_options PASS. Every one was a porting artifact
+> (buffer collapse / dropped barrier / botched rewrite), not an upstream bug. Fixes: 1 nbody — restored
+> position double buffer; 2 lbm — per-link bounce-back; 3 shoc_reduction — ping-pong the driver
+> buffers; 4 particlefilter — restored `__syncthreads`; 5 binomial_options — double-buffered
+> `shared_values`; 6 npb_mg — corrected residual sign; 7 graph_cc — Jacobi double-buffer. See the
+> disposition table above for per-item detail. Descriptions below are the original diagnosis.
+
 1. **cuda_nbody** (cuda_nbody.hip:75-116, same in .metal): integrator writes updated `pos[i]`
    into the array other blocks are still tiling from — unsynchronized global read/write race
    (upstream double-buffers). Nondeterministic results; verification can flake.
@@ -284,6 +352,10 @@ valid measurement (e.g. the binomial-options race below would be recorded as `ok
    (atomicMin propagation), bounded but not fixed.
 
 ### Faithfulness to upstream (rule 1)
+> Evidence for the disposition table above. Under the rename direction, the "rewrites/deviations"
+> below are no longer rule-1 violations — they become `rename`-only, *except* the identity-broken
+> few (fdtd2d, npb_cg, altis_cfd, rodinia_gaussian) already tagged `fix-identity`.
+
 Verbatim/faithful (spot-verified quirks and constants): shoc_fft (Volkov radix-8 + twiddles),
 shoc_sort (CUDPP 4-bit radix incl. quirks), rodinia backprop/hotspot (full pyramid)/kmeans/lud/
 nw/pathfinder/srad (incl. documented AMD OOB fix)/lavamd, parboil cutcp (verbatim binning)/

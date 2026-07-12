@@ -2,6 +2,14 @@
 
 Benchmarks a sparse iterative Conjugate Gradient (CG) solver from the NAS Parallel Benchmarks. Solves Ax = b where A is a synthetic sparse matrix in CSR format. Emits per-solve, per-kernel GPU times; SpMV bandwidth and solve throughput are derived downstream.
 
+## Provenance & fidelity
+
+Derived from the [NAS Parallel Benchmarks](https://www.nas.nasa.gov/software/npb.html) — the `CG` (Conjugate Gradient) kernel. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- The matrix is a **synthetic symmetric, strictly diagonally-dominant** sparse matrix (mirrored random off-diagonals with value −1, diagonal = #off-diagonals + 1), rather than NPB's specific `makea` construction. It is genuinely SPD, so CG is well-posed. (An earlier version generated non-mirrored random off-diagonals — a non-symmetric, non-SPD matrix on which CG is improper — which has been fixed.)
+
+Read this as "a Conjugate-Gradient benchmark in the spirit of NPB," not NPB's `CG`.
+
 ## Algorithm
 
 - **N×N** sparse matrix with configurable nonzeros per row (default: 7)

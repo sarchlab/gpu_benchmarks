@@ -1,6 +1,14 @@
 # tier2/rodinia_gaussian — Gaussian Elimination (Rodinia)
 
-Gaussian elimination with back-substitution to solve `Ax = b` for an `N×N` dense matrix. Derived from the [Rodinia benchmark suite](https://rodinia.cs.virginia.edu/) Gaussian workload.
+Gaussian elimination with back-substitution to solve `Ax = b` for an `N×N` dense matrix.
+
+## Provenance & fidelity
+
+Derived from the [Rodinia benchmark suite](http://lava.cs.virginia.edu/Rodinia/) — the `gaussian` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- Correct Gaussian elimination, but the Fan2 thread→data mapping is coalesced, whereas Rodinia's signature is a famously uncoalesced Fan2 access pattern — the benchmark's characteristic memory behavior is optimized away. Math is correct; the memory-access signature differs.
+
+Read this as "a Gaussian elimination benchmark in the spirit of Rodinia," not Rodinia's `gaussian`.
 
 ## Algorithm
 

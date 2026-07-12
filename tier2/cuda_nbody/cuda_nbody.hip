@@ -58,13 +58,21 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
 //   Uses shared memory to cache tiles of positions for coalesced access.
 // ---------------------------------------------------------------------------
 
-__global__ void nbody_kernel(float4* __restrict__ pos,
+// Positions are double-buffered: the kernel reads every body's position from
+// posIn (its own and all tiles) and writes only its own updated position to
+// posOut. Reading and writing the same array in one launch would race, because
+// a block tiling posIn[idx] has no ordering guarantee against another block
+// writing posOut[i] — upstream (GPU Gems 3) double-buffers for exactly this.
+// Velocity is per-thread (thread i is the sole reader/writer of vel[i]), so it
+// stays single-buffered.
+__global__ void nbody_kernel(const float4* __restrict__ posIn,
+                              float4* __restrict__ posOut,
                               float4* __restrict__ vel,
                               int N) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     float4 myPos;
-    if (i < N) myPos = pos[i];
+    if (i < N) myPos = posIn[i];
 
     float3 acc = {0.0f, 0.0f, 0.0f};
 
@@ -73,7 +81,7 @@ __global__ void nbody_kernel(float4* __restrict__ pos,
     for (int tile = 0; tile < N; tile += TILE_SIZE) {
         int idx = tile + threadIdx.x;
         if (idx < N)
-            shPos[threadIdx.x] = pos[idx];
+            shPos[threadIdx.x] = posIn[idx];
         else
             shPos[threadIdx.x] = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
 
@@ -109,8 +117,8 @@ __global__ void nbody_kernel(float4* __restrict__ pos,
         myPos.y += myVel.y * DT;
         myPos.z += myVel.z * DT;
 
-        pos[i] = myPos;
-        vel[i] = myVel;
+        posOut[i] = myPos;
+        vel[i]    = myVel;
     }
 }
 
@@ -208,10 +216,12 @@ int main(int argc, char** argv) {
         h_vel_orig[i] = h_vel[i];
     }
 
-    // Device allocation
-    float4 *d_pos, *d_vel;
-    HIP_CHECK(hipMalloc(&d_pos, bytes));
-    HIP_CHECK(hipMalloc(&d_vel, bytes));
+    // Device allocation. Two position buffers (ping-pong): each step reads one
+    // and writes the other, so no launch reads a buffer another block is writing.
+    float4 *d_pos, *d_pos2, *d_vel;
+    HIP_CHECK(hipMalloc(&d_pos,  bytes));
+    HIP_CHECK(hipMalloc(&d_pos2, bytes));
+    HIP_CHECK(hipMalloc(&d_vel,  bytes));
 
     int blockSize = TILE_SIZE;
     int gridSize  = (N + blockSize - 1) / blockSize;
@@ -240,10 +250,13 @@ int main(int argc, char** argv) {
          * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
         bench_pass_warm();
 
+        float4* posIn  = d_pos;
+        float4* posOut = d_pos2;
         for (int t = 0; t < timesteps; ++t) {
             bench_lap_add(&acc_nbody, bench_time_op(&timer, [&]() {
-                nbody_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_pos, d_vel, N);
+                nbody_kernel<<<dim3(gridSize), dim3(blockSize)>>>(posIn, posOut, d_vel, N);
             }));
+            float4* tmp = posIn; posIn = posOut; posOut = tmp;
         }
     };
 
@@ -269,19 +282,20 @@ int main(int argc, char** argv) {
         std::vector<float4> cpuVel(h_vel_orig.begin(), h_vel_orig.begin() + verifyN);
 
         // GPU: run 1 timestep on verifyN bodies
-        float4 *d_vpos, *d_vvel;
+        float4 *d_vpos, *d_vpos2, *d_vvel;
         size_t vbytes = verifyN * sizeof(float4);
-        HIP_CHECK(hipMalloc(&d_vpos, vbytes));
-        HIP_CHECK(hipMalloc(&d_vvel, vbytes));
+        HIP_CHECK(hipMalloc(&d_vpos,  vbytes));
+        HIP_CHECK(hipMalloc(&d_vpos2, vbytes));
+        HIP_CHECK(hipMalloc(&d_vvel,  vbytes));
         HIP_CHECK(hipMemcpy(d_vpos, cpuPos.data(), vbytes, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_vvel, cpuVel.data(), vbytes, hipMemcpyHostToDevice));
 
         int vgrid = (verifyN + blockSize - 1) / blockSize;
-        nbody_kernel<<<dim3(vgrid), dim3(blockSize)>>>(d_vpos, d_vvel, verifyN);
+        nbody_kernel<<<dim3(vgrid), dim3(blockSize)>>>(d_vpos, d_vpos2, d_vvel, verifyN);
         HIP_CHECK(hipDeviceSynchronize());
 
         std::vector<float4> gpuPos(verifyN);
-        HIP_CHECK(hipMemcpy(gpuPos.data(), d_vpos, vbytes, hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(gpuPos.data(), d_vpos2, vbytes, hipMemcpyDeviceToHost));
 
         // CPU reference
         nbody_cpu(cpuPos.data(), cpuVel.data(), verifyN);
@@ -310,10 +324,12 @@ int main(int argc, char** argv) {
         }
 
         HIP_CHECK(hipFree(d_vpos));
+        HIP_CHECK(hipFree(d_vpos2));
         HIP_CHECK(hipFree(d_vvel));
     }
 
     HIP_CHECK(hipFree(d_pos));
+    HIP_CHECK(hipFree(d_pos2));
     HIP_CHECK(hipFree(d_vel));
 
     return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;

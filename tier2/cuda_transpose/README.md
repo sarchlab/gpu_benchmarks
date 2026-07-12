@@ -2,7 +2,9 @@
 
 Benchmarks matrix transpose for a square N×N single-precision matrix (default 4096×4096). Compares naive vs. optimized (bank-conflict-free) transpose kernels, each timed exactly once. Effective memory bandwidth in GB/s is derived downstream.
 
-Based on the classic [CUDA Matrix Transpose](https://developer.nvidia.com/blog/efficient-matrix-transpose-cuda-cc/) optimization pattern.
+## Provenance & fidelity
+
+Faithful reproduction of the classic [CUDA Matrix Transpose](https://developer.nvidia.com/blog/efficient-matrix-transpose-cuda-cc/) optimization pattern: all transpose variants (naive + shared-memory tiled, bank-conflict-free) are reproduced.
 
 ## Algorithm
 

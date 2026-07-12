@@ -6,7 +6,7 @@ Benchmarks a sparse iterative Conjugate Gradient (CG) solver from the NAS Parall
 
 Derived from the [NAS Parallel Benchmarks](https://www.nas.nasa.gov/software/npb.html) — the `CG` (Conjugate Gradient) kernel. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
 
-- The matrix is a **synthetic symmetric, strictly diagonally-dominant** sparse matrix (mirrored random off-diagonals with value −1, diagonal = #off-diagonals + 1), rather than NPB's specific `makea` construction. It is genuinely SPD, so CG is well-posed. (An earlier version generated non-mirrored random off-diagonals — a non-symmetric, non-SPD matrix on which CG is improper — which has been fixed.)
+- The matrix is a **synthetic symmetric, strictly diagonally-dominant** sparse matrix (mirrored random off-diagonals with value −1, diagonal = #off-diagonals + 1), rather than NPB's specific `makea` construction. It is genuinely SPD, so CG is well-posed. `nonzeros_per_row` sets the target **average** nonzeros per row (1 diagonal + ~`nonzeros_per_row`−1 mirrored off-diagonals). The right-hand side `b` is random, so the solution is nontrivial. (An earlier version generated non-mirrored random off-diagonals — a non-symmetric, non-SPD matrix on which CG is improper — and used `b ≡ 1`, for which `x ≡ 1` is a trivial exact solution; both have been fixed.)
 
 Read this as "a Conjugate-Gradient benchmark in the spirit of NPB," not NPB's `CG`.
 

@@ -166,19 +166,26 @@ int main(int argc, char** argv) {
             N, N, nonzeros_per_row, max_cg_iters);
 
     // Generate a synthetic SYMMETRIC positive-definite sparse matrix in CSR
-    // format. CG is only valid for SPD systems, so we build a symmetric sparsity
-    // pattern — every off-diagonal (i,j) has its mirror (j,i), both with value
-    // -1 — and make each row strictly diagonally dominant with a positive
-    // diagonal (diag = #off-diagonals + 1). Symmetric + strictly diagonally
-    // dominant + positive diagonal ⇒ SPD, so CG is well-posed and converges.
-    // (The previous generator placed random off-diagonals with no mirror, so the
-    // matrix was non-symmetric and CG was improper.)
-    int nnz_per_row = nonzeros_per_row;
+    // format targeting ~nonzeros_per_row nonzeros per row (1 diagonal plus
+    // ~nonzeros_per_row-1 off-diagonals on average). CG is only valid for SPD
+    // systems, so we build a symmetric sparsity pattern — every off-diagonal
+    // (i,j) has its mirror (j,i), both = -1 — and make each row strictly
+    // diagonally dominant with a positive diagonal (diag = #off-diagonals + 1).
+    // Symmetric + strictly diagonally dominant + positive diagonal ⇒ SPD.
+    //
+    // Each undirected edge is inserted once but lands in TWO rows, so to hit an
+    // average off-degree of nonzeros_per_row-1 we generate (nonzeros_per_row-1)/2
+    // forward neighbors per row (× the mirror ≈ nonzeros_per_row-1 per row).
+    // (The previous generator placed random off-diagonals with no mirror — a
+    // non-symmetric, non-SPD matrix on which CG is improper — and inserted
+    // nnz_per_row-1 per row, which after mirroring was ~2× the declared count.)
+    int nnz_per_row  = nonzeros_per_row;
+    int fwd_per_row  = (nnz_per_row - 1) / 2;   // mirrored → ~nnz_per_row-1 off-diag/row
     unsigned int seed = 42;
 
     std::vector<std::set<int>> adj(N);
     for (int i = 0; i < N; ++i) {
-        for (int k = 1; k < nnz_per_row; ++k) {
+        for (int k = 0; k < fwd_per_row; ++k) {
             int col;
             do { col = (int)(lcg_rand(&seed) % (unsigned)N); } while (col == i);
             adj[i].insert(col);
@@ -208,9 +215,12 @@ int main(int argc, char** argv) {
     }
     long long total_nnz = h_row_ptr[N];
 
+    // Right-hand side: random in [-1, 1] so the solution x = A^{-1} b is
+    // nontrivial. (With b ≡ 1 and this diagonal every row sums to 1, so x ≡ 1
+    // solves the system exactly — a degenerate case CG reaches immediately.)
     for (int i = 0; i < N; ++i) {
         h_x[i] = 0.0f;
-        h_b[i] = 1.0f;
+        h_b[i] = (float)(lcg_rand(&seed) & 0xFFFF) / 32767.5f - 1.0f;
     }
 
     // Device allocations

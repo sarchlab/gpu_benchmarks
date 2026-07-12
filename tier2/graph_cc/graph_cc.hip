@@ -131,6 +131,12 @@ static void cc_cpu(int N, int max_iters,
     labels.resize(N);
     for (int i = 0; i < N; ++i) labels[i] = i;
 
+    // Jacobi (double-buffered) propagation, matching the GPU kernel: every
+    // vertex reads neighbor labels from the previous iteration (`labels`) and
+    // writes to `next`, then the buffers swap. Using the same semantics as the
+    // device makes this a faithful reference (identical per-iteration state, not
+    // just the same final fixed point).
+    std::vector<int> next(labels);
     for (int iter = 0; iter < max_iters; ++iter) {
         bool any_changed = false;
         for (int v = 0; v < N; ++v) {
@@ -141,11 +147,10 @@ static void cc_cpu(int N, int max_iters,
                     new_label = labels[u];
                 }
             }
-            if (new_label < labels[v]) {
-                labels[v] = new_label;
-                any_changed = true;
-            }
+            next[v] = new_label;
+            if (new_label < labels[v]) any_changed = true;
         }
+        labels.swap(next);
         if (!any_changed) break;
     }
 }

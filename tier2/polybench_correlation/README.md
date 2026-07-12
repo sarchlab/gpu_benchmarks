@@ -2,7 +2,13 @@
 
 Computes the **correlation matrix** from a data matrix of **M samples × N features** (M = N). The computation involves four GPU kernels executed in sequence: column means, column standard deviations, data normalization, and the correlation matrix itself (a transposed matrix multiply on the normalized data).
 
-Modeled on the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) CORR workload: the same four-stage structure (mean, stddev, normalize, correlation), but the kernels are a reimplementation — notably the correlation stage is a generic tiled shared-memory matrix multiply rather than the upstream kernel.
+## Provenance & fidelity
+
+Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) — the `correlation` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- Tiled full-matrix correlation vs PolyBench's triangular naive form.
+
+It keeps the same four-stage structure (mean, stddev, normalize, correlation), but the correlation stage is a generic tiled shared-memory matrix multiply rather than the upstream kernel. Read this as "a correlation benchmark in the spirit of PolyBench," not PolyBench's `correlation`.
 
 ## Algorithm
 

@@ -2,7 +2,13 @@
 
 Benchmarks 3D convolution over an **N×N×N** volume with a small 3D filter (e.g., 3×3×3). Each output voxel is the weighted sum of its spatial neighborhood. The convolution runs exactly once per execution; the raw kernel time is emitted and compute throughput in GFLOPS is derived downstream.
 
-Modeled on the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) 3DCONV workload; this is a generic filter_size³ reimplementation with a random normalized filter and zero-padded borders, not the upstream fixed-coefficient stencil.
+## Provenance & fidelity
+
+Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) — the `3d-conv` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- Generic runtime-filter convolution vs PolyBench's fixed sparse stencil; boundary semantics differ (random normalized filter with zero-padded borders, not the upstream fixed-coefficient stencil).
+
+Read this as "a 3D-convolution benchmark in the spirit of PolyBench," not PolyBench's `3d-conv`.
 
 ## Algorithm
 

@@ -83,15 +83,24 @@ static void generate_csr_graph(int N, int avg_degree, uint32_t seed,
 // Kernel: CC label propagation
 // ---------------------------------------------------------------------------
 
+// Double-buffered (Jacobi) label propagation: read every label from labels_in
+// and write the updated label to labels_out. The previous in-place version read
+// and wrote one `labels` array, so a vertex could observe a neighbor's label
+// from the current iteration or the previous one depending on block scheduling —
+// making the iteration count (= measured work) vary run to run on identical
+// input (rule 9). Reading only labels_in makes each iteration a pure function of
+// the prior state, so convergence is deterministic. The fixed point (each vertex
+// = min vertex id in its component) is unique, so results are unchanged.
 __global__ void cc_propagate_kernel(const int* __restrict__ row_offsets,
                                      const int* __restrict__ col_indices,
-                                     int* __restrict__ labels,
+                                     const int* __restrict__ labels_in,
+                                     int* __restrict__ labels_out,
                                      int* __restrict__ changed,
                                      int N) {
     int v = blockIdx.x * blockDim.x + threadIdx.x;
     if (v >= N) return;
 
-    int my_label = labels[v];
+    int my_label = labels_in[v];
     int new_label = my_label;
 
     int start = row_offsets[v];
@@ -99,14 +108,14 @@ __global__ void cc_propagate_kernel(const int* __restrict__ row_offsets,
 
     for (int e = start; e < end; ++e) {
         int u = col_indices[e];
-        int neighbor_label = labels[u];
+        int neighbor_label = labels_in[u];
         if (neighbor_label < new_label) {
             new_label = neighbor_label;
         }
     }
 
+    labels_out[v] = new_label;      // always write — Jacobi update
     if (new_label < my_label) {
-        labels[v] = new_label;
         *changed = 1;
     }
 }
@@ -122,6 +131,12 @@ static void cc_cpu(int N, int max_iters,
     labels.resize(N);
     for (int i = 0; i < N; ++i) labels[i] = i;
 
+    // Jacobi (double-buffered) propagation, matching the GPU kernel: every
+    // vertex reads neighbor labels from the previous iteration (`labels`) and
+    // writes to `next`, then the buffers swap. Using the same semantics as the
+    // device makes this a faithful reference (identical per-iteration state, not
+    // just the same final fixed point).
+    std::vector<int> next(labels);
     for (int iter = 0; iter < max_iters; ++iter) {
         bool any_changed = false;
         for (int v = 0; v < N; ++v) {
@@ -132,11 +147,10 @@ static void cc_cpu(int N, int max_iters,
                     new_label = labels[u];
                 }
             }
-            if (new_label < labels[v]) {
-                labels[v] = new_label;
-                any_changed = true;
-            }
+            next[v] = new_label;
+            if (new_label < labels[v]) any_changed = true;
         }
+        labels.swap(next);
         if (!any_changed) break;
     }
 }
@@ -149,7 +163,7 @@ static void cc_cpu(int N, int max_iters,
 
 static int run_cc_gpu(int N, int max_iters, int block_size,
                       int* d_row_offsets, int* d_col_indices,
-                      int* d_labels, int* d_changed,
+                      int* d_labels, int* d_labels_scratch, int* d_changed,
                       bench_timer_t* timer, bench_lap_t* acc) {
     bench_lap_reset(acc);
 
@@ -168,18 +182,28 @@ static int run_cc_gpu(int N, int max_iters, int block_size,
      * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
     bench_pass_warm();
 
+    // Ping-pong: read `cur`, write `nxt`, then swap. `cur` starts at d_labels.
+    int* cur = d_labels;
+    int* nxt = d_labels_scratch;
     for (int iter = 0; iter < max_iters; ++iter) {
         h_changed = 0;
         HIP_CHECK(hipMemcpy(d_changed, &h_changed, sizeof(int), hipMemcpyHostToDevice));
 
         bench_lap_add(acc, bench_time_op(timer, [&]() {
             cc_propagate_kernel<<<dim3(gridSize), dim3(block_size)>>>(
-                d_row_offsets, d_col_indices, d_labels, d_changed, N);
+                d_row_offsets, d_col_indices, cur, nxt, d_changed, N);
         }));
 
         HIP_CHECK(hipMemcpy(&h_changed, d_changed, sizeof(int), hipMemcpyDeviceToHost));
+        int* tmp = cur; cur = nxt; nxt = tmp;   // updated labels are now in cur
         iters_done = iter + 1;
         if (h_changed == 0) break;
+    }
+
+    // Leave the final labels in d_labels for the caller (untimed D2D copy only
+    // when the last write landed in the scratch buffer).
+    if (cur != d_labels) {
+        HIP_CHECK(hipMemcpy(d_labels, cur, N * sizeof(int), hipMemcpyDeviceToDevice));
     }
 
     return iters_done;
@@ -228,10 +252,11 @@ int main(int argc, char** argv) {
             N, num_edges, avg_degree, max_iterations);
 
     // Allocate device memory
-    int *d_row_offsets, *d_col_indices, *d_labels, *d_changed;
+    int *d_row_offsets, *d_col_indices, *d_labels, *d_labels2, *d_changed;
     HIP_CHECK(hipMalloc(&d_row_offsets, (N + 1) * sizeof(int)));
     HIP_CHECK(hipMalloc(&d_col_indices, num_edges * sizeof(int)));
-    HIP_CHECK(hipMalloc(&d_labels, N * sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_labels,  N * sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_labels2, N * sizeof(int)));   // ping-pong scratch
     HIP_CHECK(hipMalloc(&d_changed, sizeof(int)));
 
     HIP_CHECK(hipMemcpy(d_row_offsets, row_offsets.data(), (N + 1) * sizeof(int), hipMemcpyHostToDevice));
@@ -252,8 +277,8 @@ int main(int argc, char** argv) {
     // -------------------------------------------------------------------
     double total_gpu_ms = 0.0;
     int cc_iters = run_cc_gpu(N, max_iterations, block_size,
-                              d_row_offsets, d_col_indices, d_labels, d_changed,
-                              &timer, &acc);
+                              d_row_offsets, d_col_indices, d_labels, d_labels2,
+                              d_changed, &timer, &acc);
     bench_emit_iter("cc_propagate_kernel", 0, &acc, params);
     total_gpu_ms += acc.gpu_ms;
     fprintf(stderr, "gpu = %.3f ms, host = %.3f ms (%d CC iterations)\n",
@@ -268,8 +293,8 @@ int main(int argc, char** argv) {
     // -------------------------------------------------------------------
     {
         run_cc_gpu(N, max_iterations, block_size,
-                   d_row_offsets, d_col_indices, d_labels, d_changed,
-                   &timer, &acc);
+                   d_row_offsets, d_col_indices, d_labels, d_labels2,
+                   d_changed, &timer, &acc);
 
         std::vector<int> h_gpu_labels(N);
         HIP_CHECK(hipMemcpy(h_gpu_labels.data(), d_labels, N * sizeof(int), hipMemcpyDeviceToHost));
@@ -302,6 +327,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipFree(d_row_offsets));
     HIP_CHECK(hipFree(d_col_indices));
     HIP_CHECK(hipFree(d_labels));
+    HIP_CHECK(hipFree(d_labels2));
     HIP_CHECK(hipFree(d_changed));
 
     return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;

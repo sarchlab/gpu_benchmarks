@@ -22,6 +22,7 @@
 #include <cstring>
 #include <cmath>
 #include <vector>
+#include <set>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -164,38 +165,62 @@ int main(int argc, char** argv) {
             "CG iters: %d\n\n",
             N, N, nonzeros_per_row, max_cg_iters);
 
-    // Generate synthetic sparse matrix in CSR format
-    int nnz_per_row = nonzeros_per_row;
-    long long total_nnz = (long long)N * nnz_per_row;
-
-    std::vector<int>   h_row_ptr(N + 1);
-    std::vector<int>   h_col_idx(total_nnz);
-    std::vector<float> h_values(total_nnz);
-    std::vector<float> h_x(N);
-    std::vector<float> h_b(N);
-
+    // Generate a synthetic SYMMETRIC positive-definite sparse matrix in CSR
+    // format targeting ~nonzeros_per_row nonzeros per row (1 diagonal plus
+    // ~nonzeros_per_row-1 off-diagonals on average). CG is only valid for SPD
+    // systems, so we build a symmetric sparsity pattern — every off-diagonal
+    // (i,j) has its mirror (j,i), both = -1 — and make each row strictly
+    // diagonally dominant with a positive diagonal (diag = #off-diagonals + 1).
+    // Symmetric + strictly diagonally dominant + positive diagonal ⇒ SPD.
+    //
+    // Each undirected edge is inserted once but lands in TWO rows, so to hit an
+    // average off-degree of nonzeros_per_row-1 we generate (nonzeros_per_row-1)/2
+    // forward neighbors per row (× the mirror ≈ nonzeros_per_row-1 per row).
+    // (The previous generator placed random off-diagonals with no mirror — a
+    // non-symmetric, non-SPD matrix on which CG is improper — and inserted
+    // nnz_per_row-1 per row, which after mirroring was ~2× the declared count.)
+    int nnz_per_row  = nonzeros_per_row;
+    int fwd_per_row  = (nnz_per_row - 1) / 2;   // mirrored → ~nnz_per_row-1 off-diag/row
     unsigned int seed = 42;
 
+    std::vector<std::set<int>> adj(N);
     for (int i = 0; i < N; ++i) {
-        h_row_ptr[i] = i * nnz_per_row;
-    }
-    h_row_ptr[N] = (int)total_nnz;
-
-    for (int i = 0; i < N; ++i) {
-        int base = i * nnz_per_row;
-        h_col_idx[base] = i;
-        h_values[base]  = (float)(nnz_per_row + 1);
-        for (int k = 1; k < nnz_per_row; ++k) {
+        for (int k = 0; k < fwd_per_row; ++k) {
             int col;
-            do { col = lcg_rand(&seed) % N; } while (col == i);
-            h_col_idx[base + k] = col;
-            h_values[base + k]  = -1.0f;
+            do { col = (int)(lcg_rand(&seed) % (unsigned)N); } while (col == i);
+            adj[i].insert(col);
+            adj[col].insert(i);   // mirror keeps A symmetric
         }
     }
 
+    std::vector<int>   h_row_ptr(N + 1);
+    std::vector<int>   h_col_idx;
+    std::vector<float> h_values;
+    std::vector<float> h_x(N);
+    std::vector<float> h_b(N);
+    h_col_idx.reserve((size_t)N * 2 * nnz_per_row);
+    h_values.reserve((size_t)N * 2 * nnz_per_row);
+
+    h_row_ptr[0] = 0;
+    for (int i = 0; i < N; ++i) {
+        int off_count = (int)adj[i].size();
+        // Diagonal first (strict diagonal dominance: > sum of |off-diagonals|).
+        h_col_idx.push_back(i);
+        h_values.push_back((float)(off_count + 1));
+        for (int col : adj[i]) {
+            h_col_idx.push_back(col);
+            h_values.push_back(-1.0f);
+        }
+        h_row_ptr[i + 1] = h_row_ptr[i] + 1 + off_count;
+    }
+    long long total_nnz = h_row_ptr[N];
+
+    // Right-hand side: random in [-1, 1] so the solution x = A^{-1} b is
+    // nontrivial. (With b ≡ 1 and this diagonal every row sums to 1, so x ≡ 1
+    // solves the system exactly — a degenerate case CG reaches immediately.)
     for (int i = 0; i < N; ++i) {
         h_x[i] = 0.0f;
-        h_b[i] = 1.0f;
+        h_b[i] = (float)(lcg_rand(&seed) & 0xFFFF) / 32767.5f - 1.0f;
     }
 
     // Device allocations

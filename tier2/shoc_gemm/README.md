@@ -2,7 +2,13 @@
 
 Benchmarks dense matrix multiplication: **C = α·A·B + β·C** for square N×N single-precision matrices. Emits one raw kernel time per execution; compute throughput (GFLOPS) is derived downstream.
 
-Derived from the [SHOC benchmark suite](https://github.com/vetter/shoc) GEMM workload.
+## Provenance & fidelity
+
+Derived from the SHOC benchmark suite (https://github.com/vetter/shoc) — the `GEMM` workload. This is an independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction of the upstream kernel. It differs from SHOC's version as follows:
+
+- Naive 16×16 tiled GEMM vs SHOC's cuBLAS N/T path.
+
+Read this as "a dense-GEMM benchmark in the spirit of SHOC," not as SHOC's `GEMM`.
 
 ## Algorithm
 

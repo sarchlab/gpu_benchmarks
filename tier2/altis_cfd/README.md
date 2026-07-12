@@ -2,7 +2,13 @@
 
 Benchmarks a compressible Euler equations solver on an unstructured mesh using a finite-volume method. Each GPU thread processes one mesh cell, computing fluxes from neighbor data and performing Runge-Kutta time integration. One RK time step (2 stages) runs exactly once per execution; per-kernel times are emitted and Mcells/sec is derived downstream.
 
-Derived from the [Altis benchmark suite](https://github.com/utcs-scea/altis) CFD workload.
+## Provenance & fidelity
+
+Derived from the [Altis benchmark suite](https://github.com/utcs-scea/altis) — the `cfd` (euler3d) workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- Computes compressible-Euler Rusanov fluxes + Runge-Kutta integration, but over **RANDOM, asymmetric neighbor connectivity** — a synthetic gather pattern, not a physical mesh; it is **not** euler3d and will not produce meaningful physics. Fixed timestep.
+
+Read this as "a CFD-style flux/integration benchmark in the spirit of Altis," not Altis's `cfd`.
 
 ## Algorithm
 

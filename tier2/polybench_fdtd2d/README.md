@@ -1,6 +1,10 @@
 # polybench_fdtd2d — PolyBench FDTD-2D Benchmark
 
-2D Finite Difference Time Domain (FDTD) electromagnetic simulation, modeled on the PolyBench FDTD-2D workload. Measures effective memory bandwidth of iterative stencil updates on three 2D field arrays.
+2D Finite Difference Time Domain (FDTD) electromagnetic simulation implementing the canonical PolyBench FDTD-2D recurrence. Measures effective memory bandwidth of iterative stencil updates on three 2D field arrays.
+
+## Provenance & fidelity
+
+Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) — the `fdtd-2d` workload. Independent reimplementation for portable measurement, **not** upstream source, but it reproduces the canonical PolyBench FDTD-2D recurrence: `ey` carries the `i`-difference plus the `_fict_[t] = t` time-source row, `ex` carries the `j`-difference, both E-field updates subtract, and `hz -= 0.7·(∂ex + ∂ey)`. (An earlier version had the `ex`/`ey` difference axes swapped, added instead of subtracted, and dropped the source; that has been corrected.)
 
 ## Algorithm
 
@@ -17,7 +21,7 @@ hz[i][j] -= 0.7*(ex[i][j+1] - ex[i][j] +
                  ey[i+1][j]  - ey[i][j])  for i < NX-1, j < NY-1
 ```
 
-**Divergence from canonical PolyBench:** upstream FDTD-2D computes `ey[i][j] -= 0.5*(hz[i][j]-hz[i-1][j])` and `ex[i][j] -= 0.5*(hz[i][j]-hz[i][j-1])`, and drives the `ey[0][j]` boundary from a `_fict_[t]` time source. This implementation swaps the difference axes of `ex`/`ey`, adds rather than subtracts in the E-field updates, and zeroes the boundary rows instead of sourcing them. The per-step memory-access pattern and traffic match the original; the computed field values do not.
+**Fidelity to canonical PolyBench:** this implements the upstream FDTD-2D recurrence — `ey[0][j] = _fict_[t]` (with `_fict_[t] = t`), `ey[i][j] -= 0.5*(hz[i][j]-hz[i-1][j])` for `i ≥ 1`, `ex[i][j] -= 0.5*(hz[i][j]-hz[i][j-1])` for `j ≥ 1`, and `hz[i][j] -= 0.7*(ex[i][j+1]-ex[i][j] + ey[i+1][j]-ey[i][j])`.
 
 The benchmark runs the `TMAX`-step simulation exactly once per execution and records each kernel's GPU time accumulated over the steps. Effective bandwidth (`7 * NX * NY * sizeof(float)` bytes per step) is derived downstream.
 

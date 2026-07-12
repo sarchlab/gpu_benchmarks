@@ -8,7 +8,9 @@ loads — `invert_mapping` transforms the row-major `[point][feature]` array int
 column-major `[feature][point]` array, and `kmeansPoint` indexes it as
 `point_id + j*npoints`. That layout is preserved exactly.
 
-Derived from the [Rodinia benchmark suite](https://rodinia.cs.virginia.edu/).
+## Provenance & fidelity
+
+Derived from the [Rodinia benchmark suite](http://lava.cs.virginia.edu/Rodinia/) — the `kmeans` workload. Independent reimplementation, spot-verified to reproduce Rodinia's algorithm faithfully. (One portability substitution — texture fetch → `__ldg` — is documented below; the faithful feature-major data layout is unchanged.)
 
 ## Portability substitution (texture → `__ldg`)
 

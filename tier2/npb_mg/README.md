@@ -2,6 +2,14 @@
 
 Benchmarks a V-cycle multigrid solver from the NAS Parallel Benchmarks. Solves a 3D Poisson-like equation on a synthetic grid using Jacobi smoothing with restriction and prolongation operators. The solve runs exactly once per execution and emits per-kernel GPU/host times; throughput (Mcells/sec) is derived downstream.
 
+## Provenance & fidelity
+
+Derived from the [NAS Parallel Benchmarks](https://www.nas.nasa.gov/software/npb.html) — the `MG` (Multi-Grid) kernel. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- Simple 7-point geometric multigrid vs NPB MG's 4-coefficient stencil V-cycle. (A residual-sign bug that prevented convergence has been fixed.)
+
+Read this as "a multigrid benchmark in the spirit of NPB," not NPB's `MG`.
+
 ## Algorithm
 
 - **N×N×N** 3D grid (default: 64³) with Dirichlet boundary conditions

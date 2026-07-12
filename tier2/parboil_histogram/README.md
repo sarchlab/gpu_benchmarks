@@ -5,6 +5,10 @@ original (`parboil/benchmarks/histo/src/cuda/`), the host driver reproduces the
 original `main.cu` geometry. Only the host driver is restructured for the
 single-run timing harness and JSON output.
 
+## Provenance & fidelity
+
+Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parboil/) — the `histo` workload. Independent reimplementation, spot-verified to reproduce Parboil's algorithm faithfully (includes 8-bit saturation + overflow buffer).
+
 ## Algorithm (4-kernel privatized pipeline — the faithful part)
 
 Builds a `histo_width × histo_height` 2D histogram with **8-bit saturating** bins:

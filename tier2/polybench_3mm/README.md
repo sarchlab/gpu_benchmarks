@@ -10,7 +10,9 @@ G = E * F
 
 All matrices are square N×N single-precision floats (default N=256). The 3mm pass runs exactly once per execution and emits one time record per kernel; GFLOPS is derived downstream.
 
-Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) 3mm workload.
+## Provenance & fidelity
+
+Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) — the `3mm` workload. Independent reimplementation, spot-verified to reproduce PolyBench's algorithm faithfully.
 
 ## Algorithm
 

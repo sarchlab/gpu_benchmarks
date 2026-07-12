@@ -5,6 +5,10 @@ the **original** Rodinia 3.1 CUDA source
 (`cuda/backprop/backprop_cuda_kernel.cu`); only the host driver is restructured
 for single-pass timing.
 
+## Provenance & fidelity
+
+Derived from the [Rodinia benchmark suite](http://lava.cs.virginia.edu/Rodinia/) — the `backprop` workload. Independent reimplementation, spot-verified to reproduce Rodinia's algorithm faithfully.
+
 ## Algorithm
 
 The original benchmark trains the input→hidden layer of a 3-layer neural net for

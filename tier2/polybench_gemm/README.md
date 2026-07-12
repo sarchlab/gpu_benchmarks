@@ -2,7 +2,13 @@
 
 Benchmarks dense matrix multiplication: **C = α·A·B + β·C** for square N×N single-precision matrices. The kernel runs exactly once per execution and the raw GPU time is emitted; compute throughput (GFLOPS) is derived downstream.
 
-Modeled on the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) GEMM workload; the kernel is a generic tiled shared-memory GEMM reimplementation, not the upstream naive kernel.
+## Provenance & fidelity
+
+Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) — the `gemm` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- Tiled but math-canonical GEMM (generic tiled shared-memory kernel, not the upstream naive kernel; the arithmetic result is unchanged).
+
+Read this as "a GEMM benchmark in the spirit of PolyBench," not PolyBench's `gemm`.
 
 ## Algorithm
 

@@ -2,7 +2,13 @@
 
 Benchmarks a Lattice Boltzmann Method (LBM) fluid simulation using the D3Q19 velocity set on a regular 3D grid. Each GPU thread processes one lattice node, performing a fused collide-stream operation with the BGK collision operator and bounce-back boundary conditions. Emits the run's kernel time; throughput in MLUPS (million lattice updates per second) is derived downstream.
 
-Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parboil/parboil.aspx) LBM workload. **Note:** this is a generic D3Q19 implementation with an SoA (structure-of-arrays) distribution layout and double-buffered ping-pong streaming — it does *not* reproduce the upstream Parboil cell layout (margin cells, per-cell flags, obstacle geometry).
+## Provenance & fidelity
+
+Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parboil/) — the `lbm` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- Generic D3Q19 lid/channel LBM with link bounce-back; no obstacles and not Parboil's memory layout. (A prior write-write race at domain faces has been fixed.) It uses an SoA (structure-of-arrays) distribution layout with double-buffered ping-pong streaming, and does *not* reproduce the upstream Parboil cell layout (margin cells, per-cell flags, obstacle geometry).
+
+Read this as "an LBM benchmark in the spirit of Parboil," not Parboil's `lbm`.
 
 ## Algorithm
 

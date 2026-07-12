@@ -2,7 +2,9 @@
 
 Benchmarks the Black-Scholes closed-form pricing of European call and put options. Emits one raw kernel time per execution; throughput (M options/sec) is derived downstream.
 
-Derived from the [Tango benchmark suite](https://github.com/AkshayUsha/Tango) Black-Scholes workload.
+## Provenance & fidelity
+
+Faithful reproduction of the [Tango benchmark suite](https://gitlab.com/Tango-DNNbench/Tango) Black-Scholes workload: the closed-form European pricing with the Abramowitz & Stegun cumulative-normal constants is verified against the reference.
 
 ## Algorithm
 

@@ -2,10 +2,13 @@
 
 3D stencil thermal simulation extending the classic 2D HotSpot benchmark to three dimensions. Each cell's temperature is updated based on its six neighbors (±x, ±y, ±z), local power density, and thermal resistances in an N×N×N grid.
 
-Derived from the [Rodinia benchmark suite](https://rodinia.cs.virginia.edu/)
-HotSpot3D workload. The kernel is **not** the upstream Rodinia 3D kernel: it
-is a naive one-thread-per-cell rewrite that reads all six neighbors from
-global memory (no tiling), computing the same stencil.
+## Provenance & fidelity
+
+Derived from the [Rodinia benchmark suite](http://lava.cs.virginia.edu/Rodinia/) — the `hotspot3D` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- Naive one-thread-per-cell kernel vs Rodinia's z-marching register-reuse kernel. It reads all six neighbors from global memory (no tiling), computing the same stencil.
+
+Read this as "a 3D thermal stencil benchmark in the spirit of Rodinia," not Rodinia's `hotspot3D`.
 
 ## Algorithm
 

@@ -79,10 +79,6 @@ __global__ void lbm_collide_stream_kernel(
     int iy = (idx / Nx) % Ny;
     int ix = idx % Nx;
 
-    bool is_boundary = (ix == 0 || ix == Nx-1 ||
-                        iy == 0 || iy == Ny-1 ||
-                        iz == 0 || iz == Nz-1);
-
     float f[Q];
     for (int q = 0; q < Q; ++q) {
         f[q] = f_src[q * N + idx];
@@ -109,14 +105,23 @@ __global__ void lbm_collide_stream_kernel(
         f_post[q] = f[q] + omega * (f_eq - f[q]);
     }
 
+    // Push streaming with link bounce-back. Boundary handling is decided
+    // per-link by whether the *destination* leaves the domain — NOT by whether
+    // the current cell is on a face. That distinction is what makes it correct:
+    //   - each in-domain stream slot f_dst[q*N + nidx] has exactly one writer,
+    //     the unique upwind neighbor along q;
+    //   - a bounce-back write f_dst[d_opp[q]*N + idx] targets precisely the slot
+    //     the (absent) out-of-domain neighbor would have streamed into.
+    // So every f_dst slot is written exactly once — no write-write race at the
+    // faces and no slot left stale. (The previous `is_boundary` branch made a
+    // boundary cell bounce back on *every* link, racing with interior neighbors
+    // streaming into it and starving the slots those neighbors should receive.)
     for (int q = 0; q < Q; ++q) {
         int nx = ix + d_ex[q];
         int ny = iy + d_ey[q];
         int nz = iz + d_ez[q];
 
-        if (is_boundary) {
-            f_dst[d_opp[q] * N + idx] = f_post[q];
-        } else if (nx >= 0 && nx < Nx && ny >= 0 && ny < Ny && nz >= 0 && nz < Nz) {
+        if (nx >= 0 && nx < Nx && ny >= 0 && ny < Ny && nz >= 0 && nz < Nz) {
             int nidx = nz * Nx * Ny + ny * Nx + nx;
             f_dst[q * N + nidx] = f_post[q];
         } else {

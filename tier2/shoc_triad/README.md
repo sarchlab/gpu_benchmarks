@@ -10,6 +10,14 @@ a[i] = b[i] + scalar * c[i]
 
 This pattern reads two arrays (`b`, `c`) and writes one (`a`), for a total of **3 × N × 4 bytes** of memory traffic.  It is derived from the [SHOC benchmark suite](https://github.com/vetter/shoc).
 
+## Provenance & fidelity
+
+Derived from the SHOC benchmark suite (https://github.com/vetter/shoc) — the `Triad` workload. This is an independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction of the upstream kernel. It differs from SHOC's version as follows:
+
+- Device-resident triad; drops SHOC's PCIe streaming/overlap pipeline.
+
+Read this as "a Stream-Triad benchmark in the spirit of SHOC," not as SHOC's `Triad`.
+
 ## Measurement protocol
 
 The triad kernel is launched and timed **exactly once** per execution — there

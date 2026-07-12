@@ -1,5 +1,13 @@
 # altis_gups — GUPS (Giga Updates Per Second)
 
+## Provenance & fidelity
+
+Derived from the [Altis benchmark suite](https://github.com/utcs-scea/altis) — the `gups` (HPCC RandomAccess) workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- Uses `atomicXor` vs HPCC RandomAccess's racy (non-atomic) stores; this measures the atomic pipeline rather than the specified racy-update semantics. (Disclosed.)
+
+Read this as "a random-access benchmark in the spirit of Altis/HPCC," not the HPCC RandomAccess spec.
+
 ## Algorithm
 
 Measures random memory access throughput on GPU by performing random

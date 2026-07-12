@@ -153,12 +153,17 @@ __global__ void residual_kernel(
         return;
     }
 
-    float laplacian = -6.0f * u[idx]
-                    + u[idx3d(x-1,y,z,N)] + u[idx3d(x+1,y,z,N)]
-                    + u[idx3d(x,y-1,z,N)] + u[idx3d(x,y+1,z,N)]
-                    + u[idx3d(x,y,z-1,N)] + u[idx3d(x,y,z+1,N)];
+    // Operator the smoother inverts: A*u = 6u - Σ(neighbors). Its fixed point
+    // satisfies 6u - Σnb = weight*rhs (weight=1), i.e. A*u = rhs, so the residual
+    // is r = rhs - A*u. The previous form computed rhs + A*u, which at the
+    // smoother's fixed point equals 2*rhs and never decreases — the V-cycle was
+    // not reducing its own error measure (not a functioning multigrid).
+    float Au = 6.0f * u[idx]
+             - u[idx3d(x-1,y,z,N)] - u[idx3d(x+1,y,z,N)]
+             - u[idx3d(x,y-1,z,N)] - u[idx3d(x,y+1,z,N)]
+             - u[idx3d(x,y,z-1,N)] - u[idx3d(x,y,z+1,N)];
 
-    r[idx] = rhs[idx] - laplacian;
+    r[idx] = rhs[idx] - Au;
 }
 
 // ---------------------------------------------------------------------------

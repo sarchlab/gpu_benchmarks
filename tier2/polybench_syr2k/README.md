@@ -4,7 +4,13 @@ Benchmarks the rank-2k matrix operation: **C = α·A·Bᵀ + α·B·Aᵀ + β·C
 
 Note: C is initialized with random (non-symmetric) values and the kernel updates the **full** N×N matrix, so unlike BLAS SYR2K the stored C is not symmetric — the α·(A·Bᵀ + B·Aᵀ) update term itself is symmetric, but the β·C term is not.
 
-Modeled on the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) SYR2K workload (BLAS Level 3); the kernel is a tiled shared-memory reimplementation.
+## Provenance & fidelity
+
+Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) — the `syr2k` workload (BLAS Level 3). Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- Tiled but math-canonical SYR2K (tiled shared-memory kernel; as noted above the full non-symmetric C is updated).
+
+Read this as "a SYR2K benchmark in the spirit of PolyBench," not PolyBench's `syr2k`.
 
 ## Algorithm
 

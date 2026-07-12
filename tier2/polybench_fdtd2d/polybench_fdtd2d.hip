@@ -3,21 +3,17 @@
 // 2D Finite Difference Time Domain electromagnetic simulation.
 // Three field arrays: ex[NX][NY], ey[NX][NY], hz[NX][NY]
 //
-// Per time step update equations (as implemented here):
-//   ex[0][j]  = 0                                         (boundary)
-//   ex[i][j] += 0.5*(hz[i][j] - hz[i-1][j])  for i >= 1
-//   ey[i][0]  = 0                                         (boundary)
-//   ey[i][j] += 0.5*(hz[i][j] - hz[i][j-1])  for j >= 1
+// Per time step update equations (canonical PolyBench FDTD-2D):
+//   ey[0][j]  = _fict_[t]   with _fict_[t] = t              (time source row)
+//   ey[i][j] -= 0.5*(hz[i][j] - hz[i-1][j])  for i >= 1
+//   ex[i][j] -= 0.5*(hz[i][j] - hz[i][j-1])  for j >= 1
 //   hz[i][j] -= 0.7*(ex[i][j+1]-ex[i][j] + ey[i+1][j]-ey[i][j])
 //                                              for i < NX-1, j < NY-1
 //
-// NOTE: this recurrence diverges from canonical PolyBench FDTD-2D, which
-// computes ey[i][j] -= 0.5*(hz[i][j]-hz[i-1][j]) and
-// ex[i][j] -= 0.5*(hz[i][j]-hz[i][j-1]) and drives the ey[0][j] boundary
-// from a _fict_[t] time source. Here the difference axes of ex/ey are
-// swapped, the E-field updates add rather than subtract, and the boundary
-// rows are zeroed instead of sourced. The memory-access pattern and
-// per-step traffic match the original; the field values do not.
+// This matches the canonical PolyBench FDTD-2D recurrence: ey carries the
+// i-difference and the _fict_[t] source row, ex carries the j-difference, and
+// the E-field updates subtract. (An earlier version had the ex/ey difference
+// axes swapped, added instead of subtracted, and dropped the source.)
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
@@ -59,9 +55,8 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
 // FDTD-2D kernels
 // ---------------------------------------------------------------------------
 
-// Kernel 1: Update ex
-//   ex[0][j]  = 0                              for all j
-//   ex[i][j] += 0.5*(hz[i][j] - hz[i-1][j])   for i >= 1, all j
+// Kernel 1: Update ex  (canonical PolyBench fdtd-2d)
+//   ex[i][j] -= 0.5*(hz[i][j] - hz[i][j-1])   for j >= 1  (ex[i][0] unchanged)
 __global__ void fdtd_update_ex(float* __restrict__ ex,
                                 const float* __restrict__ hz,
                                 int NX, int NY) {
@@ -70,28 +65,26 @@ __global__ void fdtd_update_ex(float* __restrict__ ex,
 
     if (i >= NX || j >= NY) return;
 
-    if (i == 0) {
-        ex[0 * NY + j] = 0.0f;
-    } else {
-        ex[i * NY + j] += 0.5f * (hz[i * NY + j] - hz[(i - 1) * NY + j]);
+    if (j >= 1) {
+        ex[i * NY + j] -= 0.5f * (hz[i * NY + j] - hz[i * NY + (j - 1)]);
     }
 }
 
-// Kernel 2: Update ey
-//   ey[i][0]  = 0                              for all i
-//   ey[i][j] += 0.5*(hz[i][j] - hz[i][j-1])   for all i, j >= 1
+// Kernel 2: Update ey  (canonical PolyBench fdtd-2d)
+//   ey[0][j]  = _fict_[t]                       (time-varying source row)
+//   ey[i][j] -= 0.5*(hz[i][j] - hz[i-1][j])     for i >= 1, all j
 __global__ void fdtd_update_ey(float* __restrict__ ey,
                                 const float* __restrict__ hz,
-                                int NX, int NY) {
+                                int NX, int NY, float fict_t) {
     int j = blockIdx.x * blockDim.x + threadIdx.x;
     int i = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (i >= NX || j >= NY) return;
 
-    if (j == 0) {
-        ey[i * NY + 0] = 0.0f;
+    if (i == 0) {
+        ey[0 * NY + j] = fict_t;
     } else {
-        ey[i * NY + j] += 0.5f * (hz[i * NY + j] - hz[i * NY + (j - 1)]);
+        ey[i * NY + j] -= 0.5f * (hz[i * NY + j] - hz[(i - 1) * NY + j]);
     }
 }
 
@@ -192,7 +185,8 @@ int main(int argc, char** argv) {
                 fdtd_update_ex<<<grid2d, block>>>(d_ex, d_hz, NX, NY);
             }));
             bench_lap_add(&acc_ey, bench_time_op(&timer, [&]() {
-                fdtd_update_ey<<<grid2d, block>>>(d_ey, d_hz, NX, NY);
+                // _fict_[t] = (float)t, the PolyBench time-varying source.
+                fdtd_update_ey<<<grid2d, block>>>(d_ey, d_hz, NX, NY, (float)t);
             }));
             bench_lap_add(&acc_hz, bench_time_op(&timer, [&]() {
                 fdtd_update_hz<<<grid2d, block>>>(d_ex, d_ey, d_hz, NX, NY);

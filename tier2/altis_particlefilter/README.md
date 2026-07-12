@@ -2,7 +2,13 @@
 
 Benchmarks a Sequential Importance Resampling (SIR) particle filter for Monte Carlo localization on a 2D grid. Tracks a moving target over multiple time steps using particles with position updates, weight computation, and resampling. The full 10-step filter runs exactly once per execution; raw per-kernel times are emitted and throughput (particles/sec) is derived downstream.
 
-Derived from the [Altis benchmark suite](https://github.com/utcs-scea/altis) Particle Filter workload.
+## Provenance & fidelity
+
+Derived from the [Altis benchmark suite](https://github.com/utcs-scea/altis) — the `particlefilter` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- Closed-form Gaussian likelihood vs Altis's video-frame gather; the inter-block scan runs on the host mid-algorithm. (A missing `__syncthreads` in the prefix-sum kernel has been fixed.)
+
+Read this as "a particle-filter benchmark in the spirit of Altis," not Altis's `particlefilter`.
 
 ## Algorithm
 

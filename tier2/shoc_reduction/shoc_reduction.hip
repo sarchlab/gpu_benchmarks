@@ -108,8 +108,15 @@ static void gpu_reduce(const float* d_input, float* d_partial, float* d_temp,
         return;
     }
 
+    // Ping-pong between d_partial and d_temp so a level never reads and writes
+    // the same buffer: reduce_kernel has each block read a strided span of `src`,
+    // so an in-place launch (src==dst) with >1 output block would let block 0
+    // read d_temp[1] while block 1 writes it. Both buffers hold the largest
+    // intermediate this level or later needs (d_partial: num_blocks;
+    // d_temp: the second-level count), and outputs only shrink, so capacity holds.
     int remaining = num_blocks;
     float* d_src  = d_partial;
+    float* d_dst  = d_temp;
 
     while (remaining > 1) {
         int next_blocks  = (remaining + elems_per_block - 1) / elems_per_block;
@@ -118,9 +125,9 @@ static void gpu_reduce(const float* d_input, float* d_partial, float* d_temp,
             timed_launch(1, d_src, d_result, remaining);
             remaining = 1;
         } else {
-            timed_launch(next_blocks, d_src, d_temp, remaining);
-            d_src     = d_temp;
-            remaining = next_blocks;
+            timed_launch(next_blocks, d_src, d_dst, remaining);
+            float* tmp = d_src; d_src = d_dst; d_dst = tmp;
+            remaining  = next_blocks;
         }
     }
 }

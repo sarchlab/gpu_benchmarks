@@ -5,6 +5,10 @@ Faithful port of the Parboil **CUTCP** benchmark: the device kernel
 the original (`parboil/benchmarks/cutcp/src/cuda/cutoff6overlap.cu`). Only the
 host driver is restructured for the single-run timing harness and JSON output.
 
+## Provenance & fidelity
+
+Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parboil/) — the `cutcp` workload. Independent reimplementation, spot-verified to reproduce Parboil's algorithm faithfully (verbatim binning reproduced). See "What changed vs. upstream" below for harness-level differences and the bin-capacity limitation.
+
 ## Algorithm (cutoff binning — the faithful part)
 
 - Atoms are geometrically hashed into a **4 Å lattice of bins**, `BIN_DEPTH=8`

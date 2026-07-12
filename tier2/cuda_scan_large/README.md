@@ -2,7 +2,13 @@
 
 Benchmarks a **work-efficient parallel exclusive prefix sum** (Blelloch scan) on a large array of unsigned integers. Emits one kernel-time record per kernel; GB/s is derived downstream.
 
-Derived from the [CUDA SDK scanLargeArray](https://github.com/NVIDIA/cuda-samples) sample. **Note:** unlike the upstream sample, this implementation omits the `CONFLICT_FREE_OFFSET` shared-memory padding — results are identical, but the shared-memory bank-conflict behavior differs from the named upstream.
+## Provenance & fidelity
+
+Derived from the [CUDA SDK samples](https://github.com/NVIDIA/cuda-samples) — the `scanLargeArray` sample. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- Omits the `CONFLICT_FREE_OFFSET` bank-conflict padding (correct results, but different shared-memory bank-conflict behavior) vs the CUDA SDK scan sample.
+
+Read this as "a large-array scan benchmark in the spirit of the CUDA SDK sample," not the `scanLargeArray` sample itself.
 
 ## Algorithm
 

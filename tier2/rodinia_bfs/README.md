@@ -4,11 +4,13 @@ Iterative BFS on a randomly-generated CSR (Compressed Sparse Row) graph.
 Two GPU kernels are launched per BFS level, iterated until the traversal
 completes. Measures effective memory bandwidth of irregular graph traversal.
 
-Derived from the [Rodinia benchmark suite](https://rodinia.cs.virginia.edu/)
-BFS workload. The kernels follow the Rodinia two-pass structure but are not
-verbatim: this port eliminates the upstream `g_updating_graph_mask` array
-(pass 2 detects newly-discovered nodes from `cost ≥ 0 && !visited` instead)
-and uses `int` masks rather than the original `bool` arrays.
+## Provenance & fidelity
+
+Derived from the [Rodinia benchmark suite](http://lava.cs.virginia.edu/Rodinia/) — the `bfs` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+
+- Mask arrays eliminated, frontier cleared differently, int vs bool masks (~4× mask traffic) vs Rodinia BFS. Concretely, this port eliminates the upstream `g_updating_graph_mask` array (pass 2 detects newly-discovered nodes from `cost ≥ 0 && !visited` instead) and uses `int` masks rather than the original `bool` arrays.
+
+Read this as "a BFS benchmark in the spirit of Rodinia," not Rodinia's `bfs`.
 
 ## Algorithm
 

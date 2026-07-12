@@ -10,6 +10,14 @@ The **Reduction** benchmark performs a parallel sum reduction over a large float
 
 This benchmark is derived from the [SHOC benchmark suite](https://github.com/vetter/shoc).
 
+## Provenance & fidelity
+
+Derived from the SHOC benchmark suite (https://github.com/vetter/shoc) — the `Reduction` workload. This is an independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction of the upstream kernel. It differs from SHOC's version as follows:
+
+- Simplified tree reduction vs SHOC's unrolled/vec4 multi-pass reduction.
+
+Read this as "a sum-reduction benchmark in the spirit of SHOC," not as SHOC's `Reduction`.
+
 ## Measurement protocol
 
 The full multi-level reduction runs **exactly once** per execution — there is

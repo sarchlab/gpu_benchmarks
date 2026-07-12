@@ -6,6 +6,13 @@ driver builds the original **JDS (Jagged Diagonal Storage)** layout with a port
 of Parboil's `coo_to_jds` converter (`common_src/convert-dataset/convert_dataset.c`).
 Only the host driver is restructured for the single-run timing harness.
 
+## Provenance & fidelity
+
+Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parboil/) — the `spmv` workload. Independent reimplementation, spot-verified to reproduce Parboil's algorithm faithfully (JDS format), with two caveats:
+
+- One portability substitution — the dense-vector texture fetch → `__ldg` — documented below; the JDS data layout is preserved verbatim.
+- A known edge case where the ported `coo_to_jds` corrupts the matrix when the last row has exactly one nonzero.
+
 ## Algorithm (JDS — the faithful part)
 
 - Rows are sorted by **descending non-zero count** (jagged / Fubini transpose)

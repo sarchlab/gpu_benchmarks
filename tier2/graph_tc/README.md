@@ -2,7 +2,9 @@
 
 Counts the number of triangles in an undirected graph using GPU-accelerated sorted adjacency list intersection. Each GPU thread processes one edge and counts common neighbors via a merge-based intersection of sorted neighbor lists.
 
-Derived from common graph analytics triangle counting workloads.
+## Provenance & fidelity
+
+Not named after a specific upstream suite — derived from common graph-analytics triangle-counting workloads. Faithful to the algorithm it claims: sorted-adjacency-list (merge) intersection triangle counting.
 
 ## Algorithm
 

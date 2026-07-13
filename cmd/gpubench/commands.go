@@ -950,15 +950,13 @@ func cmdRun(args runArgs) int {
 			traceOutput = "./traces"
 		}
 		// Benchmarks run with cwd = benchmark dir, so any relative path handed
-		// to the child (the LD_PRELOAD tracer, TRACES_FOLDER via traceOutput, the
-		// post-process binary) would resolve against the wrong directory — and
-		// resume/post-processing on the parent side would look elsewhere.
-		// Anchor them to absolute paths before launch.
+		// to the child (the LD_PRELOAD tracer, and TRACES_FOLDER via traceOutput)
+		// would resolve against the wrong directory — and resume on the parent
+		// side would look elsewhere. Anchor those to absolute paths before
+		// launch. --post-process is NOT normalized: it runs in the parent cwd,
+		// so absolutizing it would break bare command names resolved via $PATH.
 		traceOutput = absPath(traceOutput)
 		args.collectTrace = absPath(args.collectTrace)
-		if args.postProcess != "" {
-			args.postProcess = absPath(args.postProcess)
-		}
 		// Use trace-specific timeout unless user explicitly set --timeout
 		if args.timeout == "" {
 			timeoutSecs = DefaultTraceTimeout

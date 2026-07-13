@@ -39,12 +39,20 @@ func setupInterruptHandler() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGINT)
 	go func() {
-		<-c
-		interruptOnce.Do(func() {
-			interrupted = true
-			close(interruptCh)
-			eprint("\n⚠  Interrupted — finishing current run, then saving partial results...")
-		})
+		for range c {
+			if interrupted {
+				// Second Ctrl+C: the graceful path is already in progress but
+				// the current run may be long (up to the trace timeout) — force
+				// an immediate exit instead of swallowing the signal.
+				eprint("\n⚠  Force quit (second interrupt) — exiting now; current run not saved.")
+				os.Exit(ExitInt)
+			}
+			interruptOnce.Do(func() {
+				interrupted = true
+				close(interruptCh)
+				eprint("\n⚠  Interrupted — finishing current run, then saving partial results... (Ctrl+C again to force quit)")
+			})
+		}
 	}()
 }
 

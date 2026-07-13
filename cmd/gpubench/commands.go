@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -228,6 +229,64 @@ func cmdInfo(jsonOut bool) int {
 
 var identRE = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
+// validParamTypes are the type strings params.json may declare (see
+// docs/params_format.md "Type Rules").
+var validParamTypes = map[string]bool{
+	"int": true, "float": true, "string": true, "enum": true,
+}
+
+// valueMatchesType reports whether a JSON-decoded value is compatible with a
+// declared params.json type. JSON numbers decode to float64, so "int" requires
+// an integral float64.
+func valueMatchesType(v interface{}, typ string) bool {
+	switch typ {
+	case "int":
+		f, ok := v.(float64)
+		return ok && f == float64(int64(f))
+	case "float":
+		_, ok := v.(float64)
+		return ok
+	case "string", "enum":
+		_, ok := v.(string)
+		return ok
+	default:
+		// Unknown type: reported separately, don't double-flag every value.
+		return true
+	}
+}
+
+// checkValueTypes appends an error for each value in vals that does not match
+// the declared type. prefix labels the offending field (e.g. "scaling_param").
+func checkValueTypes(vals []interface{}, typ, prefix string) []string {
+	var out []string
+	if !validParamTypes[typ] {
+		return out
+	}
+	for i, v := range vals {
+		if !valueMatchesType(v, typ) {
+			vJSON, _ := json.Marshal(v)
+			out = append(out, fmt.Sprintf("%s value[%d] %s is not a valid %s", prefix, i, string(vJSON), typ))
+		}
+	}
+	return out
+}
+
+// checkDuplicateValues appends an error if vals contains repeated entries
+// (comparison by JSON encoding, so 256 and 256.0 collide as expected for a
+// swept axis).
+func checkDuplicateValues(vals []interface{}, prefix string) []string {
+	var out []string
+	seen := make(map[string]bool, len(vals))
+	for _, v := range vals {
+		key, _ := json.Marshal(v)
+		if seen[string(key)] {
+			out = append(out, fmt.Sprintf("%s has duplicate value %s", prefix, string(key)))
+		}
+		seen[string(key)] = true
+	}
+	return out
+}
+
 func validateParams(params map[string]interface{}, paramsPath string) (errs, warns []string) {
 	bdir := filepath.Dir(paramsPath)
 	dirName := filepath.Base(bdir)
@@ -274,12 +333,18 @@ func validateParams(params map[string]interface{}, paramsPath string) (errs, war
 				errs = append(errs, fmt.Sprintf("scaling_param name '%s' not a valid identifier", name))
 			}
 		}
+		spType, _ := sp["type"].(string)
+		if spType != "" && !validParamTypes[spType] {
+			errs = append(errs, fmt.Sprintf("scaling_param type '%s' not one of int/float/string/enum", spType))
+		}
 		if values, ok := sp["values"].([]interface{}); ok {
 			if len(values) < 10 {
 				// Value counts are empirical guidance (see docs/params_format.md),
 				// not hard requirements — surface as a warning, not an error.
 				warns = append(warns, fmt.Sprintf("scaling_param has %d values (recommended >= 10, typically 20-30)", len(values)))
 			}
+			errs = append(errs, checkValueTypes(values, spType, "scaling_param")...)
+			errs = append(errs, checkDuplicateValues(values, "scaling_param")...)
 		}
 	}
 
@@ -310,6 +375,20 @@ func validateParams(params map[string]interface{}, paramsPath string) (errs, war
 			}
 			allNames = append(allNames, name)
 		}
+		nspType, _ := nsp["type"].(string)
+		if nspType != "" && !validParamTypes[nspType] {
+			errs = append(errs, fmt.Sprintf("%s type '%s' not one of int/float/string/enum", pfx, nspType))
+		}
+		if values, ok := nsp["values"].([]interface{}); ok {
+			errs = append(errs, checkValueTypes(values, nspType, pfx)...)
+			errs = append(errs, checkDuplicateValues(values, pfx)...)
+		}
+		if defVal, hasDef := nsp["default"]; hasDef && validParamTypes[nspType] {
+			if !valueMatchesType(defVal, nspType) {
+				defJSON, _ := json.Marshal(defVal)
+				errs = append(errs, fmt.Sprintf("%s default %s is not a valid %s", pfx, string(defJSON), nspType))
+			}
+		}
 		// Check default in values
 		if defVal, hasDef := nsp["default"]; hasDef {
 			if values, hasVals := nsp["values"].([]interface{}); hasVals {
@@ -337,6 +416,29 @@ func validateParams(params map[string]interface{}, paramsPath string) (errs, war
 			errs = append(errs, fmt.Sprintf("Duplicate parameter name: '%s'", n))
 		}
 		seen[n] = true
+	}
+
+	// kernels: must be an array of non-empty, unique kernel-name strings. An
+	// empty list is allowed (benchmarks with no kernel-level timing).
+	if kernelsRaw, ok := params["kernels"].([]interface{}); ok {
+		seenKernel := make(map[string]bool, len(kernelsRaw))
+		for i, kRaw := range kernelsRaw {
+			k, ok := kRaw.(string)
+			if !ok {
+				errs = append(errs, fmt.Sprintf("kernels[%d] is not a string", i))
+				continue
+			}
+			if strings.TrimSpace(k) == "" {
+				errs = append(errs, fmt.Sprintf("kernels[%d] is empty", i))
+				continue
+			}
+			if seenKernel[k] {
+				errs = append(errs, fmt.Sprintf("Duplicate kernel name: '%s'", k))
+			}
+			seenKernel[k] = true
+		}
+	} else if _, present := params["kernels"]; present {
+		errs = append(errs, "kernels must be an array")
 	}
 
 	return errs, warns
@@ -422,12 +524,35 @@ func getBenchCommand(params *BenchmarkParams) []string {
 	return []string{filepath.Join(params.Dir, params.Benchmark)}
 }
 
-func runBenchmarkProc(cmd []string, env []string, timeoutSecs int, verbose bool) (exitCode int, stdout, stderr string, timedOut bool) {
+func runBenchmarkProc(cmd []string, env []string, timeoutSecs int, verbose bool, workDir string) (exitCode int, stdout, stderr string, timedOut bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSecs)*time.Second)
 	defer cancel()
 
 	proc := exec.CommandContext(ctx, cmd[0], cmd[1:]...)
 	proc.Env = env
+	// Run from the benchmark's own directory (docs/cli_design.md shows manual
+	// invocation as `cd <bench_dir> && ./<bench>`), so relative caches written
+	// by tier4/5 scripts (Triton/torch.compile, __pycache__) land beside the
+	// benchmark rather than in gpubench's cwd.
+	proc.Dir = workDir
+
+	// Run the benchmark in its own process group so a timeout kills the whole
+	// tree, not just the direct child. Benchmarks that spawn subprocesses
+	// (e.g. tier5 llamacpp) would otherwise keep the GPU busy and hold the
+	// stdout pipe open past the timeout. Cancel SIGKILLs the group (negative
+	// PID), and WaitDelay bounds how long Wait blocks on inherited pipes after
+	// the process itself has exited.
+	proc.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	proc.Cancel = func() error {
+		if proc.Process != nil {
+			// Kill the whole process group; fall back to the process on error.
+			if err := syscall.Kill(-proc.Process.Pid, syscall.SIGKILL); err != nil {
+				return proc.Process.Kill()
+			}
+		}
+		return nil
+	}
+	proc.WaitDelay = 5 * time.Second
 
 	var stdoutBuf, stderrBuf strings.Builder
 	proc.Stdout = &stdoutBuf
@@ -649,11 +774,16 @@ type runArgs struct {
 func cmdRun(args runArgs) int {
 	repoRoot := findRepoRoot()
 	tier := parseTier(args.tier)
+	// Reject invalid --reps rather than silently falling back to the default
+	// (a silent fallback on e.g. `--reps 0` used to run 0 runs and exit 0).
 	reps := DefaultReps
 	if args.reps != "" {
-		if r, err := strconv.Atoi(args.reps); err == nil {
-			reps = r
+		r, err := strconv.Atoi(args.reps)
+		if err != nil || r < 1 {
+			eprintf("Invalid --reps %q (want a positive integer)\n", args.reps)
+			return ExitUsage
 		}
+		reps = r
 	}
 	dbPath := args.db
 	if dbPath == "" {
@@ -665,23 +795,48 @@ func cmdRun(args runArgs) int {
 	}
 	timeoutSecs := DefaultTimeout
 	if args.timeout != "" {
-		if t, err := strconv.Atoi(args.timeout); err == nil {
-			timeoutSecs = t
+		t, err := strconv.Atoi(args.timeout)
+		if err != nil || t < 1 {
+			eprintf("Invalid --timeout %q (want a positive integer of seconds)\n", args.timeout)
+			return ExitUsage
 		}
+		timeoutSecs = t
 	}
 
-	// Parse scaling override values
+	// Parse scaling override values. --scaling-values replaces every selected
+	// benchmark's axis, so it only makes sense against a single benchmark;
+	// require --benchmark to avoid silently rewriting the whole suite's sweep.
 	var scalingOverride []interface{}
 	if args.scalingValues != "" {
+		if args.benchmark == "" {
+			eprintf("--scaling-values requires --benchmark (it overrides one benchmark's scaling axis)\n")
+			return ExitUsage
+		}
+		seenSV := map[string]bool{}
 		for _, v := range strings.Split(args.scalingValues, ",") {
 			v = strings.TrimSpace(v)
-			if i, err := strconv.Atoi(v); err == nil {
-				scalingOverride = append(scalingOverride, float64(i))
-			} else if f, err := strconv.ParseFloat(v, 64); err == nil {
-				scalingOverride = append(scalingOverride, f)
-			} else {
-				scalingOverride = append(scalingOverride, v)
+			if v == "" {
+				continue
 			}
+			var val interface{}
+			if i, err := strconv.Atoi(v); err == nil {
+				val = float64(i)
+			} else if f, err := strconv.ParseFloat(v, 64); err == nil {
+				val = f
+			} else {
+				val = v
+			}
+			// Drop duplicates so a config isn't swept (and stored) twice.
+			key := formatValue(val)
+			if seenSV[key] {
+				continue
+			}
+			seenSV[key] = true
+			scalingOverride = append(scalingOverride, val)
+		}
+		if len(scalingOverride) == 0 {
+			eprintf("--scaling-values %q contained no usable values\n", args.scalingValues)
+			return ExitUsage
 		}
 	}
 
@@ -773,6 +928,17 @@ func cmdRun(args runArgs) int {
 		// Use trace-specific timeout unless user explicitly set --timeout
 		if args.timeout == "" {
 			timeoutSecs = DefaultTraceTimeout
+		}
+
+		// NVBit instruction traces are deterministic per config, and every rep
+		// overwrites the same TRACES_FOLDER — so N reps cost N× the 100-1000×
+		// tracing overhead for identical output. Collect each config exactly
+		// once regardless of --reps.
+		if reps != 1 {
+			if args.reps != "" {
+				eprintf("Note: --reps %d ignored in trace mode; collecting each config once.\n", reps)
+			}
+			reps = 1
 		}
 
 		// Open DB read-only to discover which configs have successful runs.
@@ -929,7 +1095,7 @@ func cmdRun(args runArgs) int {
 					eprintf("    %s rep %d/%d  ", cfgLabel, rep, reps)
 
 					ec, _, stderrStr, timedOut := runBenchmarkProc(
-						cmd, env, timeoutSecs, args.verbose)
+						cmd, env, timeoutSecs, args.verbose, b.Dir)
 
 					var status string
 					if timedOut {
@@ -1069,6 +1235,7 @@ func cmdRun(args runArgs) int {
 			spName, len(configs), reps, len(configs)*reps)
 
 		bp, bf := 0, 0
+		kernelNamesWarned := false
 		cmd := getBenchCommand(b)
 
 		for _, cfg := range configs {
@@ -1083,24 +1250,62 @@ func cmdRun(args runArgs) int {
 				eprintf("    %s=%-12s rep %d/%d  ",
 					spName, formatValue(cfg.ScalingValue), rep, reps)
 
+				startedAt := time.Now().UTC().Format("2006-01-02 15:04:05")
 				ec, stdoutStr, stderrStr, timedOut := runBenchmarkProc(
-					cmd, env, timeoutSecs, args.verbose)
+					cmd, env, timeoutSecs, args.verbose, b.Dir)
 
 				kernels, summary, protoErrors := parseOutput(stdoutStr)
 
+				// Non-fatal warning events would be lost on a successful run;
+				// surface them and keep them for the run's error_message.
+				var protoWarnings []string
+				for _, pe := range protoErrors {
+					if pe.IsWarning() && pe.Message != "" {
+						protoWarnings = append(protoWarnings, pe.Message)
+						eprintf("      [warning] %s\n", pe.Message)
+					}
+				}
+
+				// Warn once per benchmark if it emits a kernel name absent from
+				// its declared params.json kernels list (a coverage gap between
+				// the manifest and the actual output).
+				if !kernelNamesWarned && len(b.Kernels) > 0 {
+					declared := make(map[string]bool, len(b.Kernels))
+					for _, k := range b.Kernels {
+						declared[k] = true
+					}
+					for _, kr := range kernels {
+						if kr.Name != "unknown" && !declared[kr.Name] {
+							eprintf("      [warning] %s emits kernel %q not in params.json kernels list\n",
+								b.Benchmark, kr.Name)
+							kernelNamesWarned = true
+							break
+						}
+					}
+				}
+
 				var status, errMsg string
-				if timedOut {
+				switch {
+				case timedOut:
 					status = "timeout"
 					errMsg = fmt.Sprintf("Timed out after %ds", timeoutSecs)
-				} else if ec != 0 {
+				case ec != 0:
 					status = "error"
-					if len(protoErrors) > 0 && protoErrors[0].Message != "" {
-						errMsg = protoErrors[0].Message
-					} else {
+					errMsg = firstFatalMessage(protoErrors)
+					if errMsg == "" {
 						errMsg = fmt.Sprintf("Exit code %d", ec)
 					}
-				} else {
+				case len(kernels) == 0 && summary == nil:
+					// Exit 0 but zero measurement data: a benchmark that
+					// produces no kernel or summary output is a failed run, not
+					// a silent pass with empty results.
+					status = "error"
+					errMsg = "benchmark exited 0 but produced no kernel or summary output"
+				default:
 					status = "ok"
+					if len(protoWarnings) > 0 {
+						errMsg = "warnings: " + strings.Join(protoWarnings, "; ")
+					}
 				}
 
 				if (status != "ok" || args.verbose) && stderrStr != "" {
@@ -1135,33 +1340,34 @@ func cmdRun(args runArgs) int {
 					totalTime = sql.NullFloat64{Float64: *summary.TotalTimeMS, Valid: true}
 				}
 
-				func() {
+				storeErr := func() error {
 					// One transaction per run: per-iteration timing writes
 					// 7-28 kernel rows per run, and per-row autocommit would
 					// fsync the WAL for each.
 					tx, err := db.Begin()
 					if err != nil {
-						eprintf("DB error: %v\n", err)
-						return
+						return fmt.Errorf("begin: %w", err)
 					}
 					defer func() { _ = tx.Rollback() }()
 					res, err := tx.Exec(
 						"INSERT INTO runs (session_id,tier,suite,benchmark,"+
 							"scaling_param_name,scaling_param_value,"+
 							"non_scaling_params_json,repetition,status,"+
-							"error_message,total_time_ms,exit_code,finished_at) "+
-							"VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))",
+							"error_message,total_time_ms,exit_code,started_at,finished_at) "+
+							"VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))",
 						sessionID, b.Tier, b.Suite, b.Benchmark,
 						spName, formatValue(cfg.ScalingValue),
 						toJSONString(cfg.NSDict), rep,
 						status, nullString(errMsg),
-						totalTime, ec,
+						totalTime, ec, startedAt,
 					)
 					if err != nil {
-						eprintf("DB error: %v\n", err)
-						return
+						return fmt.Errorf("insert run: %w", err)
 					}
-					runID, _ := res.LastInsertId()
+					runID, err := res.LastInsertId()
+					if err != nil {
+						return fmt.Errorf("last insert id: %w", err)
+					}
 					for _, kr := range kernels {
 						var hostTime sql.NullFloat64
 						if kr.HostTimeMS != nil {
@@ -1171,27 +1377,39 @@ func cmdRun(args runArgs) int {
 						if kr.Iteration != nil {
 							iteration = sql.NullInt64{Int64: int64(*kr.Iteration), Valid: true}
 						}
-						_, _ = tx.Exec(
+						if _, err := tx.Exec(
 							"INSERT INTO kernel_results (run_id,kernel_name,time_ms,ordinal,"+
-								"host_time_ms,iteration) VALUES (?,?,?,?,?,?)",
+								"host_time_ms,iteration,params_json) VALUES (?,?,?,?,?,?,?)",
 							runID, kr.Name, kr.TimeMS, kr.Ordinal, hostTime, iteration,
-						)
+							nullString(kr.Params),
+						); err != nil {
+							return fmt.Errorf("insert kernel_results: %w", err)
+						}
 					}
 					if summary != nil {
 						for _, m := range summary.Metrics {
-							_, _ = tx.Exec(
+							if _, err := tx.Exec(
 								"INSERT INTO metrics (run_id,metric_name,metric_value) "+
 									"VALUES (?,?,?)",
 								runID, m.Name, m.Value,
-							)
+							); err != nil {
+								return fmt.Errorf("insert metrics: %w", err)
+							}
 						}
 					}
 					if err := tx.Commit(); err != nil {
-						eprintf("DB error: %v\n", err)
+						return fmt.Errorf("commit: %w", err)
 					}
+					return nil
 				}()
 
-				if status == "ok" {
+				// A run that executed fine but could not be stored is data loss,
+				// not a pass: count it as a failure so the summary and exit code
+				// (ExitSomeFailed) reflect it rather than reporting "all passed".
+				if storeErr != nil {
+					eprintf("FAIL (db: %v — result not stored)\n", storeErr)
+					bf++
+				} else if status == "ok" {
 					if totalTime.Valid {
 						eprintf("%.3fms  ok\n", totalTime.Float64)
 					} else {
@@ -1210,7 +1428,7 @@ func cmdRun(args runArgs) int {
 					bf++
 				}
 
-				if !args.continueOnError && bf > 0 && status != "ok" {
+				if !args.continueOnError && bf > 0 && (status != "ok" || storeErr != nil) {
 					break
 				}
 			}
@@ -1309,6 +1527,23 @@ func nullString(s string) sql.NullString {
 		return sql.NullString{}
 	}
 	return sql.NullString{String: s, Valid: true}
+}
+
+// firstFatalMessage returns the message of the first fatal (non-warning) error
+// event, falling back to the first non-empty message of any severity. Empty if
+// there are no usable messages.
+func firstFatalMessage(errs []ErrorResult) string {
+	for _, e := range errs {
+		if !e.IsWarning() && e.Message != "" {
+			return e.Message
+		}
+	}
+	for _, e := range errs {
+		if e.Message != "" {
+			return e.Message
+		}
+	}
+	return ""
 }
 
 // loadSuccessfulConfigs queries the DB for all (benchmark, scaling_value)

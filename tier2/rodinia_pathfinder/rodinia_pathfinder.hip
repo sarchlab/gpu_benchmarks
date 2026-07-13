@@ -125,7 +125,10 @@ __global__ void dynproc_kernel(
                   int right = prev[E];
                   int shortest = MIN(left, up);
                   shortest = MIN(shortest, right);
-                  int index = cols*(startStep+i)+xidx;
+                  // 64-bit index: cols*(startStep+i) overflows int once cols is
+                  // large (e.g. cols=5,000,000 overflows at row ~430), causing
+                  // an illegal access. The host reference already uses long long.
+                  long long index = (long long)cols*(startStep+i)+xidx;
                   result[tx] = shortest + gpuWall[index];
 
             }
@@ -203,13 +206,33 @@ int main(int argc, char** argv) {
     long long total_cells = (long long)rows * cols;
     long long grid_bytes  = total_cells * (long long)sizeof(int);
 
-    // Reject oversized configs BEFORE allocating. Under Linux memory
-    // overcommit, malloc for a 200 GB grid (e.g. cols=5,000,000 x rows=10,000)
-    // can return non-NULL and only OOM-kill the process (SIGKILL) once the init
-    // loop faults the pages in — so a post-malloc NULL check is not enough.
-    // Refuse if the grid would exceed HALF of physical RAM: the process also
-    // needs the OS, other processes, and page tables, so a grid near total RAM
-    // OOM-kills even though it "fits" (e.g. a 200 GB grid on a 251 GB host).
+    // Preflight BOTH allocations before touching a single byte, so an oversized
+    // config fails fast and cleanly instead of OOM-killing the process/runner.
+    //
+    // (1) Device memory is the binding limit. The device holds
+    //     gpuWall + gpuResult[0] + gpuResult[1] = wall_bytes + 2*row_bytes, and
+    //     the cold-cache warmer needs ~768 MB more. No real GPU has ~200 GB, so
+    //     the 5,000,000 x 10,000 grid is impossible on-device regardless of host
+    //     RAM — check this FIRST, before initializing ~200 GB of host memory
+    //     only to fail at hipMalloc.
+    long long row_bytes_ll  = (long long)cols * (long long)sizeof(int);
+    long long wall_bytes_ll = (total_cells - cols) * (long long)sizeof(int);
+    long long dev_needed    = wall_bytes_ll + 2 * row_bytes_ll;
+    const long long warmer_reserve = 1LL << 30;  // ~1 GB for the warmer + overhead
+    if (dev_needed + warmer_reserve > (long long)prop.totalGlobalMem) {
+        fprintf(stderr,
+                "ERROR: device buffers need %.1f GB but %s has %.1f GB "
+                "(rows=%d x cols=%d). Reduce rows and/or cols.\n",
+                (double)dev_needed / 1e9, prop.name,
+                (double)prop.totalGlobalMem / 1e9, rows, cols);
+        return EXIT_FAILURE;
+    }
+
+    // (2) Host cost grid `data`. Under Linux memory overcommit, malloc for a
+    //     huge grid can return non-NULL and only OOM-kill the process once the
+    //     init loop faults the pages in — so a post-malloc NULL check is not
+    //     enough. Refuse if it would exceed HALF of physical RAM (the OS, other
+    //     processes, and page tables also need room).
     long phys_pages = sysconf(_SC_PHYS_PAGES);
     long page_size  = sysconf(_SC_PAGE_SIZE);
     if (phys_pages > 0 && page_size > 0) {

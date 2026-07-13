@@ -53,7 +53,8 @@ CREATE TABLE IF NOT EXISTS kernel_results (
     kernel_name TEXT NOT NULL, time_ms REAL NOT NULL,
     ordinal INTEGER NOT NULL DEFAULT 0,
     host_time_ms REAL,
-    iteration INTEGER
+    iteration INTEGER,
+    params_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_kernel_run ON kernel_results(run_id);
 CREATE INDEX IF NOT EXISTS idx_kernel_name ON kernel_results(kernel_name);

@@ -261,9 +261,12 @@ For each run, the CLI:
 1. Sets `BENCH_PARAM_*` environment variables
 2. Starts the process with `exec.Command` (stdout and stderr piped)
 3. Reads stdout line-by-line, parsing JSON events
-4. Enforces `--timeout` via `context.WithTimeout` and process kill
+4. Enforces `--timeout` via `context.WithTimeout`; on expiry it SIGKILLs the
+   benchmark's entire process group (so subprocesses die too) and bounds the
+   post-kill wait with `WaitDelay`
 5. Captures exit code
-6. Writes results to database within a transaction
+6. Writes results to database within a transaction; a transaction that fails to
+   commit marks the run **failed** (data loss is not reported as a pass)
 
 ## Parameter Sweeping
 

@@ -28,6 +28,7 @@ func openDatabase(dbPath string) *sql.DB {
 	for _, mig := range []string{
 		"ALTER TABLE kernel_results ADD COLUMN host_time_ms REAL",
 		"ALTER TABLE kernel_results ADD COLUMN iteration INTEGER",
+		"ALTER TABLE kernel_results ADD COLUMN params_json TEXT",
 	} {
 		if _, err := db.Exec(mig); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {

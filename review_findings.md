@@ -534,6 +534,26 @@ Beyond S1 (clock boost) and the stale comments (S3):
 
 ## Part E — Harness (`cmd/gpubench`)
 
+> **RESOLVED 2026-07-13** (all in-scope items). Critical + majors: DB write failures now
+> propagate to run status and exit code (a run that can't be stored is counted failed, not a
+> silent pass); timeout SIGKILLs the whole process group with a `WaitDelay` bound; trace mode
+> forces `reps=1` (deterministic collection, no more N× NVBit overhead); validator gained
+> type/duplicate-value/kernel-name checks (still 126/126, 0 errors). Minors: invalid
+> `--reps`/`--timeout` now error instead of silently defaulting; `--scaling-values` requires
+> `--benchmark` and de-dupes; empty-stdout-exit-0 recorded as `error` not `ok`; protocol `params`
+> parsed and stored (new `kernel_results.params_json` column + migration); `error` severity
+> parsed, non-fatal warnings surfaced/stored on success; missing `time_ms` flagged; non-JSON
+> stdout warned; per-run `started_at` captured at launch; child cwd set to the benchmark dir;
+> second Ctrl+C force-quits; measurement-param overrides coerced to declared type. Tests added
+> for `parseOutput`, `buildEnv`, `validateParams`, `generateConfigs`, `coerceParamValue`.
+> Already-resolved cross-refs verified: default timeout (S8), doc rot (S8), platform metadata (S7).
+> `info` events remain unstored (needs a schema table; deliberately deferred).
+> PR-review follow-ups (all fixed): trace paths (LD_PRELOAD/TRACES_FOLDER/post-process) anchored
+> absolute since the child now runs in the benchmark dir; a kernel event missing `time_ms` rejects
+> the run instead of storing 0.0; `interrupted` is an `atomic.Bool` (no data race); trace `reps=1`
+> normalization moved before run-counting/header/`--dry-run`; validator now flags a `type` that is
+> present but non-string/empty, not just an invalid string.
+
 Build/vet/tests all pass. Harness rules 1–5 are structurally compliant (no measurement math
 anywhere; reps = fresh processes; `vector_add_warmup` excluded from sweeps, recorded per run,
 forced `false` in trace mode with last-duplicate-wins verified). Findings:

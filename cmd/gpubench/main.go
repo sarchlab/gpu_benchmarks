@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"sync"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -28,23 +28,27 @@ const (
 	DefaultTraceTimeout = 3600
 )
 
-// Global interrupt flag.
-var (
-	interrupted   bool
-	interruptOnce sync.Once
-	interruptCh   = make(chan struct{})
-)
+// Global interrupt flag. Written by the signal-handler goroutine and read by
+// the execution loops, so it must be accessed atomically.
+var interrupted atomic.Bool
 
 func setupInterruptHandler() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGINT)
 	go func() {
-		<-c
-		interruptOnce.Do(func() {
-			interrupted = true
-			close(interruptCh)
-			eprint("\n⚠  Interrupted — finishing current run, then saving partial results...")
-		})
+		// Single goroutine drains c, so the Load-then-Store below is race-free
+		// here; the atomic exists for the readers in the run loops.
+		for range c {
+			if interrupted.Load() {
+				// Second Ctrl+C: the graceful path is already in progress but
+				// the current run may be long (up to the trace timeout) — force
+				// an immediate exit instead of swallowing the signal.
+				eprint("\n⚠  Force quit (second interrupt) — exiting now; current run not saved.")
+				os.Exit(ExitInt)
+			}
+			interrupted.Store(true)
+			eprint("\n⚠  Interrupted — finishing current run, then saving partial results... (Ctrl+C again to force quit)")
+		}
 	}()
 }
 

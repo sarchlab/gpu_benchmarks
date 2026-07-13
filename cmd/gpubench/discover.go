@@ -167,7 +167,12 @@ func generateConfigs(params *BenchmarkParams, sweepNS bool, scalingOverride []in
 	for _, p := range params.NonScalingParams {
 		if measurementParams[p.Name] {
 			if ov, ok := overrides[p.Name]; ok {
-				fixed[p.Name] = ov
+				// Coerce the CLI string to the param's declared type so the
+				// value stored in non_scaling_params_json matches the type used
+				// when the default is applied (e.g. a bool, not the string
+				// "true") — otherwise the same param has two JSON types across
+				// sessions.
+				fixed[p.Name] = coerceParamValue(ov, p.Type)
 			} else {
 				fixed[p.Name] = p.Default
 			}
@@ -221,6 +226,20 @@ func generateConfigs(params *BenchmarkParams, sweepNS bool, scalingOverride []in
 		}
 	}
 	return configs
+}
+
+// coerceParamValue converts a CLI-provided string to the JSON-native type a
+// param declares, so the value recorded in non_scaling_params_json has the same
+// type whether it came from the flag or from the declared default. Unparseable
+// values (or string/enum types) are kept as the raw string.
+func coerceParamValue(s, typ string) interface{} {
+	switch typ {
+	case "int", "float":
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			return f
+		}
+	}
+	return s
 }
 
 // cartesianProduct computes the cartesian product of multiple value lists.

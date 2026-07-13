@@ -105,7 +105,8 @@ CREATE TABLE IF NOT EXISTS kernel_results (
     time_ms      REAL    NOT NULL,           -- GPU event time in milliseconds
     ordinal      INTEGER NOT NULL DEFAULT 0, -- order of emission (0-based)
     host_time_ms REAL,                       -- host wall-clock for the same iteration (launch + completion)
-    iteration    INTEGER                     -- 0-based in-program iteration index, NULL if not emitted
+    iteration    INTEGER,                    -- 0-based in-program iteration index, NULL if not emitted
+    params_json  TEXT                        -- raw JSON of the event's "params" object (actual values used), NULL if not emitted
 );
 
 CREATE INDEX IF NOT EXISTS idx_kernel_run  ON kernel_results(run_id);

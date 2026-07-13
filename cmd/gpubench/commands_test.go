@@ -360,6 +360,29 @@ func TestValidateParamsChecks(t *testing.T) {
 		}
 	})
 
+	t.Run("non-string scaling type errors", func(t *testing.T) {
+		p := baseValidParams("mybench")
+		p["scaling_param"].(map[string]interface{})["type"] = float64(5)
+		errs, _ := validateParamsJSON(t, "mybench", p)
+		if !hasErrContaining(errs, "not one of int/float/string/enum") {
+			t.Fatalf("expected non-string type error, got: %v", errs)
+		}
+	})
+
+	t.Run("non-string non-scaling type errors", func(t *testing.T) {
+		p := baseValidParams("mybench")
+		p["non_scaling_params"] = []interface{}{
+			map[string]interface{}{
+				"name": "algo", "description": "d", "type": float64(1),
+				"default": "naive", "values": []interface{}{"naive"},
+			},
+		}
+		errs, _ := validateParamsJSON(t, "mybench", p)
+		if !hasErrContaining(errs, "not one of int/float/string/enum") {
+			t.Fatalf("expected non-string nsp type error, got: %v", errs)
+		}
+	})
+
 	t.Run("non-scaling default type mismatch errors", func(t *testing.T) {
 		p := baseValidParams("mybench")
 		p["non_scaling_params"] = []interface{}{

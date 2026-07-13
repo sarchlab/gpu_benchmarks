@@ -334,8 +334,11 @@ func validateParams(params map[string]interface{}, paramsPath string) (errs, war
 			}
 		}
 		spType, _ := sp["type"].(string)
-		if spType != "" && !validParamTypes[spType] {
-			errs = append(errs, fmt.Sprintf("scaling_param type '%s' not one of int/float/string/enum", spType))
+		// Flag a type that is present but not a valid type string (empty,
+		// non-string, or an unrecognized value). Absence is already reported by
+		// the required-field check above.
+		if typeRaw, has := sp["type"]; has && !validParamTypes[spType] {
+			errs = append(errs, fmt.Sprintf("scaling_param type %v not one of int/float/string/enum", typeRaw))
 		}
 		if values, ok := sp["values"].([]interface{}); ok {
 			if len(values) < 10 {
@@ -376,8 +379,8 @@ func validateParams(params map[string]interface{}, paramsPath string) (errs, war
 			allNames = append(allNames, name)
 		}
 		nspType, _ := nsp["type"].(string)
-		if nspType != "" && !validParamTypes[nspType] {
-			errs = append(errs, fmt.Sprintf("%s type '%s' not one of int/float/string/enum", pfx, nspType))
+		if typeRaw, has := nsp["type"]; has && !validParamTypes[nspType] {
+			errs = append(errs, fmt.Sprintf("%s type %v not one of int/float/string/enum", pfx, typeRaw))
 		}
 		if values, ok := nsp["values"].([]interface{}); ok {
 			errs = append(errs, checkValueTypes(values, nspType, pfx)...)
@@ -570,6 +573,15 @@ func runBenchmarkProc(cmd []string, env []string, timeoutSecs int, verbose bool,
 		return 1, "", err.Error(), false
 	}
 	return 0, stdoutBuf.String(), stderrBuf.String(), false
+}
+
+// absPath resolves p against the current working directory, returning the
+// original value if resolution fails (so callers still get a usable path).
+func absPath(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return p
 }
 
 func formatDuration(s float64) string {
@@ -854,6 +866,18 @@ func cmdRun(args runArgs) int {
 		}
 	}
 
+	// NVBit instruction traces are deterministic per config, and every rep
+	// overwrites the same TRACES_FOLDER — so N reps cost N× the 100-1000×
+	// tracing overhead for identical output. Collect each config exactly once.
+	// Normalized here (before run counting, the header, and --dry-run) so those
+	// all report the real trace-mode run count rather than reps× too many.
+	if args.collectTrace != "" && reps != 1 {
+		if args.reps != "" {
+			eprintf("Note: --reps %d ignored in trace mode; collecting each config once.\n", reps)
+		}
+		reps = 1
+	}
+
 	benchmarks := discoverBenchmarks(repoRoot, tier, args.suite, args.benchmark)
 	if len(benchmarks) == 0 {
 		eprint("No benchmarks found matching filters.")
@@ -925,20 +949,19 @@ func cmdRun(args runArgs) int {
 		if traceOutput == "" {
 			traceOutput = "./traces"
 		}
+		// Benchmarks run with cwd = benchmark dir, so any relative path handed
+		// to the child (the LD_PRELOAD tracer, TRACES_FOLDER via traceOutput, the
+		// post-process binary) would resolve against the wrong directory — and
+		// resume/post-processing on the parent side would look elsewhere.
+		// Anchor them to absolute paths before launch.
+		traceOutput = absPath(traceOutput)
+		args.collectTrace = absPath(args.collectTrace)
+		if args.postProcess != "" {
+			args.postProcess = absPath(args.postProcess)
+		}
 		// Use trace-specific timeout unless user explicitly set --timeout
 		if args.timeout == "" {
 			timeoutSecs = DefaultTraceTimeout
-		}
-
-		// NVBit instruction traces are deterministic per config, and every rep
-		// overwrites the same TRACES_FOLDER — so N reps cost N× the 100-1000×
-		// tracing overhead for identical output. Collect each config exactly
-		// once regardless of --reps.
-		if reps != 1 {
-			if args.reps != "" {
-				eprintf("Note: --reps %d ignored in trace mode; collecting each config once.\n", reps)
-			}
-			reps = 1
 		}
 
 		// Open DB read-only to discover which configs have successful runs.
@@ -983,7 +1006,7 @@ func cmdRun(args runArgs) int {
 		startTime := time.Now()
 
 		for idx, b := range benchmarks {
-			if interrupted {
+			if interrupted.Load() {
 				break
 			}
 			spName := b.ScalingParam.Name
@@ -1026,7 +1049,7 @@ func cmdRun(args runArgs) int {
 			cmd := getBenchCommand(b)
 
 			for _, cfg := range configs {
-				if interrupted {
+				if interrupted.Load() {
 					break
 				}
 
@@ -1075,7 +1098,7 @@ func cmdRun(args runArgs) int {
 				cfgCaptured := false
 				cfgTimedOut := false
 				for rep := 1; rep <= reps; rep++ {
-					if interrupted {
+					if interrupted.Load() {
 						break
 					}
 					env := buildEnv(spName, cfg.ScalingValue, cfg.NSDict)
@@ -1187,7 +1210,7 @@ func cmdRun(args runArgs) int {
 		eprintf("  Time:    %s\n", formatDuration(time.Since(startTime).Seconds()))
 		eprintf("  Output:  %s\n", traceOutput)
 
-		if interrupted {
+		if interrupted.Load() {
 			return ExitInt
 		}
 		if totalFailed > 0 {
@@ -1210,7 +1233,7 @@ func cmdRun(args runArgs) int {
 
 	defer func() {
 		ss := "completed"
-		if interrupted {
+		if interrupted.Load() {
 			ss = "interrupted"
 		} else if totalFailed > 0 {
 			ss = "failed"
@@ -1225,7 +1248,7 @@ func cmdRun(args runArgs) int {
 	}()
 
 	for idx, b := range benchmarks {
-		if interrupted {
+		if interrupted.Load() {
 			break
 		}
 		spName := b.ScalingParam.Name
@@ -1239,11 +1262,11 @@ func cmdRun(args runArgs) int {
 		cmd := getBenchCommand(b)
 
 		for _, cfg := range configs {
-			if interrupted {
+			if interrupted.Load() {
 				break
 			}
 			for rep := 1; rep <= reps; rep++ {
-				if interrupted {
+				if interrupted.Load() {
 					break
 				}
 				env := buildEnv(spName, cfg.ScalingValue, cfg.NSDict)
@@ -1284,6 +1307,16 @@ func cmdRun(args runArgs) int {
 					}
 				}
 
+				// A kernel event without the required time_ms field carries no
+				// usable measurement; its stored 0.0 would silently skew averages.
+				missingKernelTime := false
+				for _, kr := range kernels {
+					if !kr.HasTime {
+						missingKernelTime = true
+						break
+					}
+				}
+
 				var status, errMsg string
 				switch {
 				case timedOut:
@@ -1301,6 +1334,11 @@ func cmdRun(args runArgs) int {
 					// a silent pass with empty results.
 					status = "error"
 					errMsg = "benchmark exited 0 but produced no kernel or summary output"
+				case missingKernelTime:
+					// Exit 0 but a kernel event lacked the required time_ms:
+					// reject rather than record a bogus 0 ms measurement.
+					status = "error"
+					errMsg = "kernel event missing required time_ms field"
 				default:
 					status = "ok"
 					if len(protoWarnings) > 0 {
@@ -1446,7 +1484,7 @@ func cmdRun(args runArgs) int {
 		eprintf("  [%s] %d/%d passed (%d failed)\n\n", sym, bp, bp+bf, bf)
 	}
 
-	if interrupted {
+	if interrupted.Load() {
 		return ExitInt
 	}
 	if totalFailed > 0 {

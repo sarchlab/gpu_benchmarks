@@ -548,6 +548,11 @@ Beyond S1 (clock boost) and the stale comments (S3):
 > for `parseOutput`, `buildEnv`, `validateParams`, `generateConfigs`, `coerceParamValue`.
 > Already-resolved cross-refs verified: default timeout (S8), doc rot (S8), platform metadata (S7).
 > `info` events remain unstored (needs a schema table; deliberately deferred).
+> PR-review follow-ups (all fixed): trace paths (LD_PRELOAD/TRACES_FOLDER/post-process) anchored
+> absolute since the child now runs in the benchmark dir; a kernel event missing `time_ms` rejects
+> the run instead of storing 0.0; `interrupted` is an `atomic.Bool` (no data race); trace `reps=1`
+> normalization moved before run-counting/header/`--dry-run`; validator now flags a `type` that is
+> present but non-string/empty, not just an invalid string.
 
 Build/vet/tests all pass. Harness rules 1–5 are structurally compliant (no measurement math
 anywhere; reps = fresh processes; `vector_add_warmup` excluded from sweeps, recorded per run,

@@ -304,12 +304,13 @@ int main(int argc, char** argv) {
     // prolong), reused across V-cycles within one MG pass.
     bench_timer_t timer;
     bench_timer_create(&timer);
-    bench_lap_t acc_smooth, acc_restrict, acc_prolong;
+    bench_lap_t acc_smooth, acc_restrict, acc_prolong, acc_residual, acc_zero;
 
-    // One V-cycle. When `timed` is true, every emitted kernel launch is
-    // individually bracketed and accumulated. residual_kernel is auxiliary
-    // work inside the pass; as in the original benchmark it is neither
-    // timed nor emitted, so it stays outside the timed brackets.
+    // One V-cycle. When `timed` is true, every kernel launch is individually
+    // bracketed and accumulated. residual_kernel is a real part of the V-cycle
+    // (it forms the residual that drives restriction), so its GPU time is
+    // bracketed and emitted like the other kernels — leaving it out dropped an
+    // entire kernel's time (~10–15%) from total_time_ms.
     auto run_vcycle = [&](bool timed) {
         for (int lv = 0; lv < num_levels - 1; ++lv) {
             int sz = levels[lv];
@@ -327,7 +328,13 @@ int main(int argc, char** argv) {
                 float* tmp = d_u[lv]; d_u[lv] = d_temp[lv]; d_temp[lv] = tmp;
             }
 
-            residual_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_r[lv], sz);
+            if (timed) {
+                bench_lap_add(&acc_residual, bench_time_op(&timer, [&]() {
+                    residual_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_r[lv], sz);
+                }));
+            } else {
+                residual_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_r[lv], sz);
+            }
 
             int csz = levels[lv + 1];
             int ctotal = csz * csz * csz;
@@ -340,7 +347,17 @@ int main(int argc, char** argv) {
                 restrict_kernel<<<cgrid, block_size>>>(d_r[lv], d_rhs[lv + 1], sz, csz);
             }
 
-            HIP_CHECK(hipMemset(d_u[lv + 1], 0, level_bytes[lv + 1]));
+            // Zero the coarse-grid correction before coarse smoothing. This is
+            // required device work inside the timed V-cycle, so it is bracketed
+            // and emitted (as coarse_zero) — otherwise total_time_ms would
+            // understate the algorithm.
+            if (timed) {
+                bench_lap_add(&acc_zero, bench_time_op(&timer, [&]() {
+                    HIP_CHECK(hipMemsetAsync(d_u[lv + 1], 0, level_bytes[lv + 1], 0));
+                }));
+            } else {
+                HIP_CHECK(hipMemset(d_u[lv + 1], 0, level_bytes[lv + 1]));
+            }
         }
 
         {
@@ -396,6 +413,8 @@ int main(int argc, char** argv) {
             bench_lap_reset(&acc_smooth);
             bench_lap_reset(&acc_restrict);
             bench_lap_reset(&acc_prolong);
+            bench_lap_reset(&acc_residual);
+            bench_lap_reset(&acc_zero);
         }
         for (int lv = 0; lv < num_levels; ++lv)
             HIP_CHECK(hipMemset(d_u[lv], 0, level_bytes[lv]));
@@ -411,19 +430,26 @@ int main(int argc, char** argv) {
     bench_emit_iter("smooth_kernel",   0, &acc_smooth,   params);
     bench_emit_iter("restrict_kernel", 0, &acc_restrict, params);
     bench_emit_iter("prolong_kernel",  0, &acc_prolong,  params);
-    total_gpu_ms += acc_smooth.gpu_ms + acc_restrict.gpu_ms + acc_prolong.gpu_ms;
+    bench_emit_iter("residual_kernel", 0, &acc_residual, params);
+    bench_emit_iter("coarse_zero",     0, &acc_zero,     params);
+    total_gpu_ms += acc_smooth.gpu_ms + acc_restrict.gpu_ms +
+                    acc_prolong.gpu_ms + acc_residual.gpu_ms + acc_zero.gpu_ms;
     fprintf(stderr, "smooth gpu = %.3f ms, restrict gpu = %.3f ms, "
-            "prolong gpu = %.3f ms\n",
-            acc_smooth.gpu_ms, acc_restrict.gpu_ms, acc_prolong.gpu_ms);
+            "prolong gpu = %.3f ms, residual gpu = %.3f ms, "
+            "coarse_zero gpu = %.3f ms\n",
+            acc_smooth.gpu_ms, acc_restrict.gpu_ms,
+            acc_prolong.gpu_ms, acc_residual.gpu_ms, acc_zero.gpu_ms);
 
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
-    // Verification
+    // Verification. The timed pass already left the solution in d_u[0], so we
+    // check its residual directly — no second run_mg_pass() (which would re-run
+    // every V-cycle and fire a second untimed warmer). Repetition across
+    // processes is the harness's job.
     bool verify_ok = true;
     {
-        run_mg_pass(false);
         HIP_CHECK(hipDeviceSynchronize());
 
         int total = N * N * N;

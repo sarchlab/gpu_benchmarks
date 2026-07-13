@@ -7,13 +7,16 @@
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
 // Usage:
-//   ./tango_binomial_options [--options N] [--steps S]
+//   ./tango_binomial_options [--options N]
 //
 //   --options N      Number of options (default: 512)
-//   --steps S        Steps per option (default: 1024)
+//
+// The binomial-tree resolution is fixed at the canonical 1024 steps (not a
+// parameter) — it enters the work as steps^2, so sweeping it only multiplies
+// runtime without adding a distinct workload.
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_options, BENCH_PARAM_steps,
+//   BENCH_PARAM_options,
 //
 // Output (stdout): one {"type":"kernel",...} JSON line for the single timed
 // launch carrying the GPU event time and host wall-clock time, then a summary
@@ -178,24 +181,22 @@ int main(int argc, char** argv) {
 
     // Defaults from params.json
     int numOptions = 512;
-    int numSteps   = 1024;
+
+    // Binomial-tree resolution is fixed at the canonical CRR value and is NOT a
+    // swept parameter: it enters the work as steps^2 (per-node powf induction),
+    // so sweeping it would multiply runtime into timeout territory while telling
+    // us nothing the `options` scaling axis doesn't. The kernel emits it so the
+    // tree depth stays visible in the record. 2*(numSteps+1)*4 B ≈ 8 KB shared,
+    // well under the 48 KB default.
+    const int numSteps = 1024;
 
     // Command-line fallback
     numOptions = parseIntParam(argc, argv, "--options", numOptions);
-    numSteps   = parseIntParam(argc, argv, "--steps",   numSteps);
 
     // Environment variable overrides
     const char* env_val;
     env_val = getenv("BENCH_PARAM_options");
     if (env_val) numOptions = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_steps");
-    if (env_val) numSteps = atoi(env_val);
-    // Shared memory must hold 2*(numSteps+1) floats (double-buffered induction);
-    // clamp so that stays within the 48 KB default (2*4097*4 ≈ 32 KB).
-    if (numSteps > 4096) {
-        fprintf(stderr, "Warning: clamping steps to 4096 (shared memory limit)\n");
-        numSteps = 4096;
-    }
 
     size_t optBytes   = (size_t)numOptions * sizeof(OptionData);
     size_t priceBytes = (size_t)numOptions * sizeof(float);

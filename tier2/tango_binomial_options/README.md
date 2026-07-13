@@ -12,7 +12,7 @@ Read this as "a binomial-options benchmark in the spirit of Tango," not Tango's 
 
 ## Algorithm
 
-- **N** options (default: N=512), each with **S** steps (default: S=1024)
+- **N** options (default: N=512), each with a fixed **S=1024** steps
 - Each threadblock/threadgroup processes one option:
   1. **Terminal payoffs**: compute put payoff max(K − S·u^j·d^(S−j), 0) at each leaf node
   2. **Backward induction**: walk backwards through S tree levels, at each node computing max(discounted continuation value, early exercise value)
@@ -49,16 +49,20 @@ make PLATFORM=rocm
 ## Run
 
 ```bash
-./tango_binomial_options                                  # defaults: 512 options, 1024 steps
-./tango_binomial_options --options 256 --steps 512        # fewer options and steps
+./tango_binomial_options                                  # defaults: 512 options
+./tango_binomial_options --options 256                    # fewer options
 ```
+
+The binomial-tree resolution is fixed at the canonical **1024 steps** and is not
+a parameter: it enters the work as steps², so sweeping it would only multiply
+runtime (into timeout territory at large `options`) without producing a distinct
+workload. It is still emitted in each record as `"steps":1024`.
 
 ### Environment variables (override argv)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BENCH_PARAM_options` | 512 | Number of options |
-| `BENCH_PARAM_steps` | 1024 | Binomial tree steps per option (clamped to 4096) |
 | `BENCH_PARAM_vector_add_warmup` | true | Clock-boost + LLC-evict warmer before the timed run |
 
 ## Output

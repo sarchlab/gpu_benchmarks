@@ -283,6 +283,13 @@ Naming caveat (moot now that dir renames are skipped, kept for the record): de-p
 
 Status: ✅ = fixed (2026-07-11, code committed to worktree); unmarked = open.
 
+> **Update 2026-07-13:** the `methodology` and `sweep` tags below are now RESOLVED
+> for shoc_scan, shoc_stencil2d, parboil_sgemm, polybench_gramschmidt, rodinia_srad,
+> npb_mg, npb_cg, graph_cc, and tango_binomial_options — see the dated banners in
+> "Methodology violations in the timed path" and "Sweep-quality problems". The `rename`
+> tags and non-Part-C items (e.g. particlefilter's host-side scan, parboil_spmv's
+> coo_to_jds bug) are unchanged.
+
 | Dir | → workload | Tags | What the work is |
 |---|---|---|---|
 | cuda_nbody | nbody | ✅ fix-bug | Restored position double buffer (read `posIn` / write `posOut`, ping-pong per step); verification launch + frees updated. |
@@ -398,6 +405,21 @@ Rewrites or material deviations presented under the upstream name (README usuall
   induction (transcendental-heavy — different workload class).
 
 ### Methodology violations in the timed path (rule 4/6/8)
+> **RESOLVED & VERIFIED 2026-07-13** (all but lonestar_bh). Compiled on an NVIDIA
+> H100 PCIe (nvcc 12.9) and smoke-run — all pass. Fixes: shoc_scan / npb_cg /
+> graph_cc / **npb_mg** — verification no longer re-runs the whole workload + a
+> second warmer; it reads the timed output/residual directly. shoc_stencil2d —
+> the 64×64 correctness check moved *after* the timed pass (no I-cache/module
+> pre-warm). parboil_sgemm — verification reuses the timed `d_C` instead of an
+> unbracketed relaunch. npb_mg — ALL device work inside the timed V-cycle is now
+> bracketed and emitted: `residual_kernel` (was ~10-15% of GPU time missing from
+> `total_time_ms`) and `coarse_zero` (the per-V-cycle coarse-grid zeroing that was
+> also untimed); `total_time_ms` now equals the sum of the 5 emitted records.
+> polybench_gramschmidt — dropped the `passes` multiplier so the run is one
+> factorization (rule-4); `passes` removed from params/README. rodinia_srad — the
+> pristine J is uploaded *before* the warmer so the first timed kernel reads cold.
+> lonestar_bh remains deferred (issue #57). npb_is's tiny documented D2D copy is
+> left as-is (negligible). Descriptions below are the original diagnosis.
 - **shoc_scan** (shoc_scan.hip:294): verification re-runs the entire scan (plus a second warmer) —
   algorithm executes twice per process; second pass's launches unrecorded. Pointless (output
   already resident).
@@ -421,6 +443,38 @@ Rewrites or material deviations presented under the upstream name (README usuall
 - **npb_is** (npb_is.hip:271): small untimed mid-algorithm D2D copy (documented, negligible).
 
 ### Sweep-quality problems (sweeping rules 1–4)
+> **RESOLVED 2026-07-13** (in-scope items; ranges deliberately NOT extended).
+> Owner call: the suite targets a cold-cache **simulator**, so pushing working
+> sets past the 256 MB MALL is impractical/unsimulatable — the **LLC-extension
+> group is DROPPED** (shoc_sort/scan_large/fir/hsto/gups/fft ranges unchanged).
+> Fixes applied: **npb_mg** grid_size → [8,16,32,64,128,256,512] (the code rounds
+> N up to a power of 2, so the 22 declared values were 6 distinct + 16 dupes; now
+> 7 distinct, with a small simulator-tractable point at 8). **graph_cc**
+> max_iterations → [100] (solve early-exits at convergence; 20 risked truncating
+> to a wrong result). **pcie** transfer_type → ["all"] (one process emits all
+> three mode records; drops the duplicate). **conv_separable / chai_cedd** — the
+> false "square image" claim removed; `height` kept as an independent axis (owner
+> wants non-square retained). **rodinia_hotspot3d** amb_temp → [80.0] (verified
+> against the kernel: additive term only, performance-invariant). **tango_binomial_options**
+> — `steps` fixed at 1024 and removed as a param (steps² work). The `options`
+> scaling axis is kept: measured on the H100, the top value (1,048,576 options)
+> runs in 3.24 s GPU / ~7 s wall and PASSes (only 10 options CPU-verified), so it
+> is well under any timeout — no trim needed. **rodinia_pathfinder** — oversized
+> configs are now rejected *before* allocation (grid > half of physical RAM →
+> clean exit, not an overcommit OOM-kill; a post-malloc NULL check was
+> insufficient — a 200 GB grid slips under a big-RAM host and SIGKILLs during page
+> fault-in). **heteromark_fir** — num_taps>128 now errors cleanly (was shared-mem
+> OOB). Also: **chai_cedd's**
+> threshold verifier was found **already correct** (canny_cpu uses the swept
+> thresholds). The **"too few scaling values"** items stay guidance-only per the
+> S5 decision (validator warns, not errors). hotspot3d num_iterations, bh
+> timesteps, gups num_updates, raytracing height/spheres kept as legitimate knobs.
+> **STILL OPEN — parboil_cutcp bin saturation:** the params note now documents
+> that at small `lattice_dim` (e.g. 64) the top `num_atoms` values saturate the
+> bins (~46,656 atoms) and do near-identical work (rule-4). This is *documented,
+> not resolved* — a proper fix needs constraining `num_atoms` by `lattice_dim` or
+> trimming those combos. Left open pending an owner call.
+> All changed .hip files compile + smoke-run clean on the H100 (nvcc 12.9).
 - Never crosses the LLC (rule 2): shoc_sort (peak 67 MB), cuda_scan_large (top 32 MB, below its
   own binary default), heteromark_fir (32 MB), chai_hsto (8.4 MB), polybench_gramschmidt
   (n pinned 64 → ≤1.5 MB; dominant kernel launches 1 block at every m), altis_gups (max table

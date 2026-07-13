@@ -17,19 +17,18 @@
 // Compiles with hipcc (AMD ROCm) or nvcc -x cu (CUDA).
 //
 // Usage:
-//   ./polybench_gramschmidt [--m M] [--n N] [--passes P]
+//   ./polybench_gramschmidt [--m M] [--n N]
 //
 //   --m M       Number of rows                          (default: 512)
 //   --n N       Number of columns                       (default: 64)
-//   --passes P  QR factorizations per execution          (default: 3)
 //
 // Environment variables (override argv):
-//   BENCH_PARAM_m, BENCH_PARAM_n, BENCH_PARAM_passes
+//   BENCH_PARAM_m, BENCH_PARAM_n
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per kernel
 // (gram_norm, gram_norm_finish, gram_normalize, gram_project) carrying that
 // kernel's GPU event time (time_ms) and host wall-clock time (host_time_ms)
-// accumulated over all `passes` factorizations of the single run, then a
+// accumulated over all k-columns of the single QR factorization, then a
 // summary whose total_time_ms is the SUM of all recorded GPU event times.
 // GB/s is derived downstream from time_ms and params.
 // Output (stderr): device info, timing details, orthogonality check
@@ -148,15 +147,12 @@ int main(int argc, char** argv)
 
     int M      = parseIntParam(argc, argv, "--m", 512);
     int N      = parseIntParam(argc, argv, "--n", 64);
-    int passes = parseIntParam(argc, argv, "--passes", 3);
 
     const char* env_val;
     env_val = getenv("BENCH_PARAM_m");
     if (env_val) M = atoi(env_val);
     env_val = getenv("BENCH_PARAM_n");
     if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_passes");
-    if (env_val) passes = atoi(env_val);
 
     size_t bytes_A = (size_t)M * N * sizeof(float);
     size_t bytes_Q = (size_t)M * N * sizeof(float);
@@ -169,7 +165,7 @@ int main(int argc, char** argv)
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Matrix: %d×%d  |  Passes: %d\n\n", M, N, passes);
+    fprintf(stderr, "Matrix: %d×%d\n\n", M, N);
 
     // Host allocations
     float* h_A_orig = (float*)malloc(bytes_A);
@@ -197,63 +193,61 @@ int main(int argc, char** argv)
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"m\":%d,\"n\":%d,\"passes\":%d",
-             M, N, passes);
+             "\"m\":%d,\"n\":%d",
+             M, N);
 
-    // Per-kernel accumulators: the single run = `passes` full QR
-    // factorizations; each kernel's GPU/host time is accumulated over all
-    // k-columns and all passes, giving one record per kernel.
+    // Per-kernel accumulators: the single run = one full QR factorization; each
+    // kernel's GPU/host time is accumulated over all k-columns, giving one
+    // record per kernel. Repetition across processes is the harness's job
+    // (gpubench --reps) — the operation runs exactly once here.
     bench_timer_t timer;
     bench_timer_create(&timer);
     bench_lap_t acc_norm, acc_norm_finish, acc_normalize, acc_project;
 
-    // The single recorded run. Gram-Schmidt orthogonalizes A in place, so A
-    // is restored from the pristine host copy (and Q/R zeroed) before every
-    // factorization — otherwise later factorizations would run on an
-    // already-orthogonalized matrix. Resets stay outside timed brackets.
+    // The single recorded run. Gram-Schmidt orthogonalizes A in place, so A is
+    // restored from the pristine host copy (and Q/R zeroed) before the
+    // factorization. Resets stay outside timed brackets.
     auto run_iter = [&]() {
         bench_lap_reset(&acc_norm);
         bench_lap_reset(&acc_norm_finish);
         bench_lap_reset(&acc_normalize);
         bench_lap_reset(&acc_project);
 
-        for (int pass = 0; pass < passes; ++pass) {
-            // Restore A from original, zero Q and R (outside timing)
-            HIP_CHECK(hipMemcpy(d_A, h_A_orig, bytes_A, hipMemcpyHostToDevice));
-            HIP_CHECK(hipMemset(d_Q, 0, bytes_Q));
-            HIP_CHECK(hipMemset(d_R, 0, bytes_R));
-            HIP_CHECK(hipDeviceSynchronize());
+        // Restore A from original, zero Q and R (outside timing)
+        HIP_CHECK(hipMemcpy(d_A, h_A_orig, bytes_A, hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemset(d_Q, 0, bytes_Q));
+        HIP_CHECK(hipMemset(d_R, 0, bytes_R));
+        HIP_CHECK(hipDeviceSynchronize());
 
-            /* Cold-cache calibration: evict the LLC (and hold the clock high) after
-             * the per-pass H2D re-init so the pass's first kernel launch runs cold.
-             * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
-            bench_pass_warm();
+        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
+         * the H2D re-init so the first kernel launch runs cold.
+         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
+        bench_pass_warm();
 
-            for (int k = 0; k < N; ++k) {
-                // Step 1: zero nrm_buf (untimed), then accumulate ||A[:,k]||^2
-                HIP_CHECK(hipMemsetAsync(d_nrm_buf, 0, sizeof(float), 0));
-                bench_lap_add(&acc_norm, bench_time_op(&timer, [&]() {
-                    gram_norm<<<grid_M, block_size>>>(d_A, d_nrm_buf, M, N, k);
+        for (int k = 0; k < N; ++k) {
+            // Step 1: zero nrm_buf (untimed), then accumulate ||A[:,k]||^2
+            HIP_CHECK(hipMemsetAsync(d_nrm_buf, 0, sizeof(float), 0));
+            bench_lap_add(&acc_norm, bench_time_op(&timer, [&]() {
+                gram_norm<<<grid_M, block_size>>>(d_A, d_nrm_buf, M, N, k);
+            }));
+
+            // Step 2: finalize norm → R[k,k]
+            bench_lap_add(&acc_norm_finish, bench_time_op(&timer, [&]() {
+                gram_norm_finish<<<1, 1>>>(d_nrm_buf, d_R, N, k);
+            }));
+
+            // Step 3: normalize column k
+            bench_lap_add(&acc_normalize, bench_time_op(&timer, [&]() {
+                gram_normalize<<<grid_M, block_size>>>(d_A, d_Q, d_nrm_buf, M, N, k);
+            }));
+
+            // Step 4: project remaining columns (if any)
+            if (k + 1 < N) {
+                int remaining   = N - k - 1;
+                int grid_proj   = (remaining + block_size - 1) / block_size;
+                bench_lap_add(&acc_project, bench_time_op(&timer, [&]() {
+                    gram_project<<<grid_proj, block_size>>>(d_A, d_Q, d_R, M, N, k);
                 }));
-
-                // Step 2: finalize norm → R[k,k]
-                bench_lap_add(&acc_norm_finish, bench_time_op(&timer, [&]() {
-                    gram_norm_finish<<<1, 1>>>(d_nrm_buf, d_R, N, k);
-                }));
-
-                // Step 3: normalize column k
-                bench_lap_add(&acc_normalize, bench_time_op(&timer, [&]() {
-                    gram_normalize<<<grid_M, block_size>>>(d_A, d_Q, d_nrm_buf, M, N, k);
-                }));
-
-                // Step 4: project remaining columns (if any)
-                if (k + 1 < N) {
-                    int remaining   = N - k - 1;
-                    int grid_proj   = (remaining + block_size - 1) / block_size;
-                    bench_lap_add(&acc_project, bench_time_op(&timer, [&]() {
-                        gram_project<<<grid_proj, block_size>>>(d_A, d_Q, d_R, M, N, k);
-                    }));
-                }
             }
         }
     };

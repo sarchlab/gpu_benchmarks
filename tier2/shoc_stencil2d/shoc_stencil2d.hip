@@ -196,10 +196,9 @@ int main(int argc, char** argv)
     fprintf(stderr, "Grid: %d×%d  |  Stencil steps/pass: %d\n\n",
             N, N, iters);
 
-    // Correctness check on 64×64 grid
-    bool ok = correctness_check();
-    fprintf(stderr, "Correctness check (64×64, 1 iteration): %s\n\n",
-            ok ? "PASS" : "FAIL");
+    // Correctness check runs AFTER the timed pass (below) — launching the
+    // kernel-under-test on a 64×64 grid here would pre-warm the I-cache/module
+    // state the single cold launch is meant to pay.
 
     // Allocate host and device buffers for full run
     size_t bytes = (size_t)N * N * sizeof(float);
@@ -270,8 +269,12 @@ int main(int argc, char** argv)
     HIP_CHECK(hipFree(d_buf0));
     HIP_CHECK(hipFree(d_buf1));
 
-    // The correctness check ran before the timed run; all JSON records and
-    // the summary line have been emitted by now, so failing here only marks
-    // the run as failed without losing the measurements.
+    // Correctness check on a separate 64×64 grid, AFTER the timed pass so its
+    // kernel launch cannot pre-warm the timed one. All JSON records and the
+    // summary line have been emitted by now, so failing here only marks the run
+    // as failed without losing the measurements.
+    bool ok = correctness_check();
+    fprintf(stderr, "Correctness check (64×64, 1 iteration): %s\n",
+            ok ? "PASS" : "FAIL");
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

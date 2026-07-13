@@ -5,7 +5,7 @@
   "description": "Canny Edge Detection pipeline: Gaussian blur, Sobel gradient, magnitude+direction, non-maximum suppression, hysteresis thresholding. Emits per-pass, per-kernel GPU times; Mpixels/s is derived downstream.",
   "scaling_param": {
     "name": "width",
-    "description": "Image width in pixels (W= parameter, also sets height for square image)",
+    "description": "Image width in pixels (W= parameter). Height is set independently via the `height` parameter (default 2048), so the image is not necessarily square; total pixels = width × height.",
     "type": "int",
     "values": [
       64,

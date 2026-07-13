@@ -71,20 +71,18 @@ make clean
 ## Run
 
 ```bash
-./polybench_gramschmidt                    # default: M=512, N=64, 3 passes
+./polybench_gramschmidt                    # default: M=512, N=64
 ./polybench_gramschmidt --m 1024 --n 64   # larger matrix
-./polybench_gramschmidt --passes 5        # more factorizations per execution
 ```
 
 | Environment variable | Default | Description |
 |----------------------|---------|-------------|
 | `BENCH_PARAM_m` | 512 | Number of rows (overrides `--m`) |
 | `BENCH_PARAM_n` | 64 | Number of columns (overrides `--n`) |
-| `BENCH_PARAM_passes` | 3 | QR factorizations per execution (overrides `--passes`) |
-| `BENCH_PARAM_vector_add_warmup` | true | Vector-add warmer (clock boost + LLC eviction) before each factorization |
+| `BENCH_PARAM_vector_add_warmup` | true | Vector-add warmer (clock boost + LLC eviction) before the factorization |
 
-The run executes once per process: it performs `passes` full QR
-factorizations and emits one record per kernel accumulating all of them.
+The run executes once per process: it performs a single full QR
+factorization and emits one record per kernel accumulating all k-columns.
 Repetition across runs is the harness's job (`gpubench run --reps N`).
 
 ## Output Format
@@ -95,13 +93,13 @@ summary
 **stdout** — JSON lines: one kernel record per kernel
 (`gram_norm`, `gram_norm_finish`, `gram_normalize`, `gram_project`) carrying
 that kernel's GPU event time (`time_ms`) and host wall-clock time
-(`host_time_ms`) accumulated over all `passes` factorizations,
+(`host_time_ms`) accumulated over all k-columns of the factorization,
 then a summary whose `total_time_ms` is the sum of all recorded GPU event
-times. The matrix A is restored (and Q/R zeroed) before every factorization,
+times. The matrix A is restored (and Q/R zeroed) before the factorization,
 outside the timed brackets:
 
 ```
-{"type":"kernel","name":"gram_norm","iter":0,"time_ms":12.345600,"host_time_ms":13.010000,"params":{"m":512,"n":64,"passes":3}}
+{"type":"kernel","name":"gram_norm","iter":0,"time_ms":12.345600,"host_time_ms":13.010000,"params":{"m":512,"n":64}}
 ...
 {"type":"summary","total_time_ms":45.622600}
 ```
@@ -109,7 +107,7 @@ outside the timed brackets:
 ## Performance Metric (derived downstream)
 
 ```
-GB/s = (3 × M × N × sizeof(float) × passes) / (time_s × 10⁹)
+GB/s = (3 × M × N × sizeof(float)) / (time_s × 10⁹)
 ```
 
 The factor of 3 accounts for the dominant memory traffic in the projection

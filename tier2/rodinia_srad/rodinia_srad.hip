@@ -406,6 +406,13 @@ int main(int argc, char** argv) {
         bench_lap_reset(&acc_srad2);
         memcpy(h_J, h_Jini, size_I * sizeof(float));
 
+        /* Upload the pristine J BEFORE the warmer so the warmer's LLC eviction
+         * is the last thing to touch it — otherwise the first iteration's H2D
+         * copy (below) would repopulate the LLC after the warmer and the first
+         * timed kernel would read J warm. Iterations >0 re-upload inside the
+         * loop (mirroring the original host loop). */
+        HIP_CHECK(hipMemcpy(J_cuda, h_J, size_I * sizeof(float), hipMemcpyHostToDevice));
+
         /* Cold-cache calibration: evict the LLC and hold the clock high before
          * the pass's first timed launch, so it runs cold. No-op when
          * BENCH_PARAM_vector_add_warmup is disabled. */
@@ -425,7 +432,11 @@ int main(int argc, char** argv) {
             float varROI  = (sum2 / size_R) - meanROI * meanROI;
             float q0sqr   = varROI / (meanROI * meanROI);
 
-            HIP_CHECK(hipMemcpy(J_cuda, h_J, size_I * sizeof(float), hipMemcpyHostToDevice));
+            // iter 0's J was already uploaded above (before the warmer) so the
+            // first timed kernel reads it cold; later iters re-upload the
+            // CPU-updated J.
+            if (iter > 0)
+                HIP_CHECK(hipMemcpy(J_cuda, h_J, size_I * sizeof(float), hipMemcpyHostToDevice));
 
             bench_lap_add(&acc_srad1, bench_time_op(&timer, [&]() {
                 srad_cuda_1<<<dimGrid, dimBlock>>>(E_C, W_C, N_C, S_C, J_cuda, C_cuda, cols, rows, q0sqr);

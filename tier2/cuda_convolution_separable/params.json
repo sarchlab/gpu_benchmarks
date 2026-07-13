@@ -5,7 +5,7 @@
   "description": "Two-pass separable 2D convolution: row pass + column pass. Emits per-iteration kernel times; throughput (GB/s) is derived downstream.",
   "scaling_param": {
     "name": "width",
-    "description": "Image width in pixels (also sets height when square)",
+    "description": "Image width in pixels. Height is set independently via the `height` parameter (default 4096), so the image is not necessarily square; total pixels = width × height.",
     "type": "int",
     "values": [
       64,

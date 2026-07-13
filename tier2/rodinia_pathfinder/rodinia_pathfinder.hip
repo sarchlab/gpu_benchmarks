@@ -38,6 +38,7 @@
 #include <climits>
 #include <vector>
 #include <algorithm>
+#include <unistd.h>   // sysconf — physical-RAM check before the host malloc
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -200,14 +201,35 @@ int main(int argc, char** argv) {
             rows, cols);
 
     long long total_cells = (long long)rows * cols;
+    long long grid_bytes  = total_cells * (long long)sizeof(int);
+
+    // Reject oversized configs BEFORE allocating. Under Linux memory
+    // overcommit, malloc for a 200 GB grid (e.g. cols=5,000,000 x rows=10,000)
+    // can return non-NULL and only OOM-kill the process (SIGKILL) once the init
+    // loop faults the pages in — so a post-malloc NULL check is not enough.
+    // Refuse if the grid would exceed HALF of physical RAM: the process also
+    // needs the OS, other processes, and page tables, so a grid near total RAM
+    // OOM-kills even though it "fits" (e.g. a 200 GB grid on a 251 GB host).
+    long phys_pages = sysconf(_SC_PHYS_PAGES);
+    long page_size  = sysconf(_SC_PAGE_SIZE);
+    if (phys_pages > 0 && page_size > 0) {
+        long long phys_bytes = (long long)phys_pages * (long long)page_size;
+        if (grid_bytes > phys_bytes / 2) {
+            fprintf(stderr,
+                    "ERROR: cost grid needs %.1f GB, over half of the host's "
+                    "%.1f GB RAM (rows=%d x cols=%d). Reduce rows and/or cols.\n",
+                    (double)grid_bytes / 1e9, (double)phys_bytes / 1e9, rows, cols);
+            return EXIT_FAILURE;
+        }
+    }
 
     // Host allocation + synthetic cost grid (Rodinia uses rand()%10, seed 9).
-    int* data = (int*)malloc((size_t)total_cells * sizeof(int));
+    int* data = (int*)malloc((size_t)grid_bytes);
     if (!data) {
         fprintf(stderr,
                 "ERROR: failed to allocate %.1f GB host cost grid "
                 "(rows=%d x cols=%d). Reduce rows and/or cols.\n",
-                (double)total_cells * sizeof(int) / 1e9, rows, cols);
+                (double)grid_bytes / 1e9, rows, cols);
         return EXIT_FAILURE;
     }
     srand(9);

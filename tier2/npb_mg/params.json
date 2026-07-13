@@ -66,6 +66,7 @@
     "smooth_kernel",
     "restrict_kernel",
     "prolong_kernel",
-    "residual_kernel"
+    "residual_kernel",
+    "coarse_zero"
   ]
 }

@@ -343,10 +343,12 @@ int main(int argc, char** argv) {
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
-    // Verification (run_cg reuses the timer, so destroy it afterwards)
+    // Verification. The timed solve already left the solution in d_x, so we
+    // check its residual directly — no second run_cg() (which would also fire a
+    // second untimed warmer and re-solve). Repetition across processes is the
+    // harness's job.
     bool verify_ok = true;
     {
-        run_cg();
         HIP_CHECK(hipDeviceSynchronize());
 
         spmv_kernel<<<gridSize, block_size>>>(d_row_ptr, d_col_idx, d_values, d_x, d_Ap, N);

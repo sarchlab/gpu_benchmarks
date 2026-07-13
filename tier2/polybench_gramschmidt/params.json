@@ -41,18 +41,6 @@
       ]
     },
     {
-      "name": "passes",
-      "description": "Number of timed passes",
-      "type": "int",
-      "default": 3,
-      "values": [
-        1,
-        3,
-        5,
-        10
-      ]
-    },
-    {
       "name": "vector_add_warmup",
       "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
       "type": "enum",

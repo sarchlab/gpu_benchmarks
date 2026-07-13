@@ -291,11 +291,11 @@ int main(int argc, char** argv) {
     // -------------------------------------------------------------------
     // Verification
     // -------------------------------------------------------------------
+    // The timed pass already left the converged labels in d_labels, so we read
+    // them directly — no second run_cc_gpu() (which would also fire a second
+    // untimed warmer and re-solve). Repetition across processes is the
+    // harness's job.
     {
-        run_cc_gpu(N, max_iterations, block_size,
-                   d_row_offsets, d_col_indices, d_labels, d_labels2,
-                   d_changed, &timer, &acc);
-
         std::vector<int> h_gpu_labels(N);
         HIP_CHECK(hipMemcpy(h_gpu_labels.data(), d_labels, N * sizeof(int), hipMemcpyDeviceToHost));
 

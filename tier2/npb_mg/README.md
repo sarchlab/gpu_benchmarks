@@ -59,15 +59,16 @@ Environment variables:
 
 ## Output
 
-**stdout** — JSON-lines: for the single timed solve, one `{"type":"kernel",...}` record per kernel (`smooth_kernel`, `restrict_kernel`, `prolong_kernel`) carrying that kernel's GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`) accumulated over the solve, then a summary whose `total_time_ms` is the sum of all recorded GPU event times:
+**stdout** — JSON-lines: for the single timed solve, one `{"type":"kernel",...}` record per kernel (`smooth_kernel`, `restrict_kernel`, `prolong_kernel`, `residual_kernel`) carrying that kernel's GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`) accumulated over the solve, then a summary whose `total_time_ms` is the sum of all recorded GPU event times:
 ```json
 {"type":"kernel","name":"smooth_kernel","iter":0,"time_ms":5.234,"host_time_ms":5.401,"params":{"grid_size":64,...}}
 {"type":"kernel","name":"restrict_kernel","iter":0,"time_ms":0.412,"host_time_ms":0.498,"params":{...}}
 {"type":"kernel","name":"prolong_kernel","iter":0,"time_ms":0.377,"host_time_ms":0.451,"params":{...}}
+{"type":"kernel","name":"residual_kernel","iter":0,"time_ms":1.902,"host_time_ms":1.977,"params":{...}}
 {"type":"summary","total_time_ms":42.161}
 ```
 
-Derived metrics such as Mcells/sec are computed downstream from `time_ms` and params. Note: the `residual_kernel` runs inside each V-cycle but is currently **not timed or emitted** — a known open finding, since the residual computation is part of the V-cycle's GPU work (upstream NPB MG times it).
+Derived metrics such as Mcells/sec are computed downstream from `time_ms` and params. The `residual_kernel` runs inside each V-cycle (it forms the residual that drives restriction) and is timed and emitted like the other kernels, so its GPU time is included in `total_time_ms` (matching upstream NPB MG, which times it).
 
 **stderr** — human-readable timing and verification
 

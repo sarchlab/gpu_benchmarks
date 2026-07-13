@@ -136,6 +136,16 @@ int main(int argc, char** argv) {
     int N     = size;
     int taps  = num_taps;
 
+    // The kernel stages coefficients into s_coeff[NUM_TAPS]; more taps than that
+    // would overflow shared memory. Fail cleanly rather than corrupt memory.
+    if (taps < 1 || taps > NUM_TAPS) {
+        fprintf(stderr,
+                "ERROR: num_taps=%d out of range (1..%d = shared-memory "
+                "capacity NUM_TAPS). Rebuild with a larger NUM_TAPS to exceed it.\n",
+                taps, NUM_TAPS);
+        return EXIT_FAILURE;
+    }
+
     size_t input_bytes  = (size_t)N * sizeof(float);
     size_t output_bytes = (size_t)N * sizeof(float);
     size_t coeff_bytes  = (size_t)taps * sizeof(float);

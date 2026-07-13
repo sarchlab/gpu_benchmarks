@@ -47,13 +47,11 @@
     },
     {
       "name": "max_iterations",
-      "description": "Maximum label propagation iterations per run",
+      "description": "Safety cap on label-propagation iterations; the solve early-exits at convergence (a few iterations), so this only bounds the worst case. Fixed at a value comfortably above convergence for all declared graph sizes — sweeping it would just produce identical runs (or, if set below convergence, a wrong result).",
       "type": "int",
       "default": 100,
       "values": [
-        20,
-        100,
-        500
+        100
       ]
     },
     {

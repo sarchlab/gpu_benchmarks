@@ -5,7 +5,7 @@
   "description": "Coulombic potential with distance cutoff (CUTCP), cutoff-binning implementation. Atoms are geometrically hashed into a 4 A lattice of bins; the potential lattice is computed in 8^3-point regions where each thread block walks only neighboring bins within the cutoff (constant-memory NbrList stencil) staging bins through shared memory. Faithful port of the Parboil cuda kernel cuda_cutoff_potential_lattice6overlap; emits per-iteration kernel times.",
   "scaling_param": {
     "name": "num_atoms",
-    "description": "Number of charged atoms hashed into the bin lattice",
+    "description": "Number of charged atoms hashed into the bin lattice. Note: bins have a fixed capacity, so total atom capacity scales with lattice volume; at small lattice_dim (e.g. 64) the lattice saturates around ~46,656 atoms and higher num_atoms values silently drop the excess (near-identical work). The default lattice_dim=144 has ~11x more capacity and does not saturate within this range.",
     "type": "int",
     "values": [
       5000,

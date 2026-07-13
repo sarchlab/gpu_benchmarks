@@ -203,6 +203,13 @@ int main(int argc, char** argv) {
 
     // Host allocation + synthetic cost grid (Rodinia uses rand()%10, seed 9).
     int* data = (int*)malloc((size_t)total_cells * sizeof(int));
+    if (!data) {
+        fprintf(stderr,
+                "ERROR: failed to allocate %.1f GB host cost grid "
+                "(rows=%d x cols=%d). Reduce rows and/or cols.\n",
+                (double)total_cells * sizeof(int) / 1e9, rows, cols);
+        return EXIT_FAILURE;
+    }
     srand(9);
     for (long long i = 0; i < total_cells; i++) data[i] = rand() % 10;
 

@@ -55,13 +55,11 @@
     },
     {
       "name": "amb_temp",
-      "description": "Ambient temperature (\u00b0C)",
+      "description": "Ambient temperature (\u00b0C). Enters the stencil only as an additive term, so it shifts result values but has no effect on control flow, memory pattern, or timing. Fixed at one value \u2014 sweeping it would produce performance-identical runs.",
       "type": "float",
       "default": 80.0,
       "values": [
-        60.0,
-        80.0,
-        100.0
+        80.0
       ]
     },
     {

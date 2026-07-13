@@ -269,7 +269,10 @@ int main(int argc, char** argv) {
     // ---------------------------------------------------------------------------
     // Verification
     // ---------------------------------------------------------------------------
-    run_scan_pass();
+    // The timed pass already left the full scan result in d_output (the scan is
+    // a pure function of the never-modified d_input), so verification reads it
+    // directly — no second scan pass (which would also fire a second untimed
+    // warmer). Repetition across processes is the harness's job.
     bench_timer_destroy(&timer);
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipMemcpy(h_output, d_output, bytes_orig, hipMemcpyDeviceToHost));

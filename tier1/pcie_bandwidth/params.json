@@ -35,13 +35,10 @@
   "non_scaling_params": [
     {
       "name": "transfer_type",
-      "description": "Transfer mode: unidirectional H2D, D2H, or bidirectional",
+      "description": "Transfer mode. Fixed at 'all': a single run measures H2D, D2H, and bidirectional and emits one record per mode (memcpy_h2d, memcpy_d2h, memcpy_bidir), so downstream distinguishes them by kernel name. The individual modes h2d/d2h/bidir remain selectable via BENCH_PARAM_transfer_type but are omitted from the sweep, where 'all' would otherwise duplicate the three singles.",
       "type": "enum",
       "default": "all",
       "values": [
-        "h2d",
-        "d2h",
-        "bidir",
         "all"
       ]
     },

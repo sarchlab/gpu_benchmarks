@@ -181,10 +181,10 @@ int main(int argc, char** argv)
     // Correctness check (only for small N to keep runtime short)
     bool verify_ok = true;
     if (N <= 256) {
-        // The timed launch updated C in place; redo a single application
-        // from the pristine C for verification.
-        HIP_CHECK(hipMemcpy(d_C, h_C, bytes, hipMemcpyHostToDevice));
-        sgemm_kernel<<<grid, block>>>(d_A, d_B, d_C, N, alpha, beta);
+        // The single timed launch already computed C = alpha*A*B + beta*C from
+        // the pristine C; h_ref started as that same pristine C, so the CPU
+        // reference reproduces exactly what d_C now holds. Read it back and
+        // compare — no untimed relaunch of the kernel-under-test.
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipMemcpy(h_C, d_C, bytes, hipMemcpyDeviceToHost));
         sgemm_cpu(h_A, h_B, h_ref, N, alpha, beta);

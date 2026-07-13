@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -14,7 +15,6 @@ import (
 type ExportOutput struct {
 	ExportVersion string          `json:"export_version"`
 	ExportedAt    string          `json:"exported_at"`
-	Platform      ExportPlatform  `json:"platform"`
 	Sessions      []ExportSession `json:"sessions"`
 }
 
@@ -28,35 +28,50 @@ type ExportPlatform struct {
 	PlatformType  string   `json:"platform_type"`
 }
 
-// ExportSession holds a single session's data.
+// ExportSession holds a single session's data. The platform is embedded per
+// session so that an export spanning multiple platforms remains faithful:
+// each session carries the platform it actually ran on.
 type ExportSession struct {
-	ID          int64       `json:"id"`
-	StartedAt   string      `json:"started_at"`
-	FinishedAt  *string     `json:"finished_at"`
-	Status      string      `json:"status"`
-	Repetitions int         `json:"repetitions"`
-	Runs        []ExportRun `json:"runs"`
+	ID          int64          `json:"id"`
+	StartedAt   string         `json:"started_at"`
+	FinishedAt  *string        `json:"finished_at"`
+	Status      string         `json:"status"`
+	Repetitions int            `json:"repetitions"`
+	Platform    ExportPlatform `json:"platform"`
+	Runs        []ExportRun    `json:"runs"`
+
+	// platformID resolves the per-session platform; unexported so it is not
+	// emitted in the JSON output.
+	platformID int64
 }
 
-// ExportRun holds a single benchmark run.
+// ExportRun holds a single benchmark run. A run corresponds to one process
+// execution (one repetition); scaling and non-scaling parameters plus the
+// repetition index are carried so that runs differing only by non-scaling
+// parameters or repetition remain distinguishable and tier-1 metrics can be
+// derived downstream from the exported times and parameters.
 type ExportRun struct {
-	Benchmark         string         `json:"benchmark"`
-	Tier              int            `json:"tier"`
-	Suite             string         `json:"suite"`
-	ScalingParamValue string         `json:"scaling_param_value"`
-	Status            string         `json:"status"`
-	Kernels           []ExportKernel `json:"kernels"`
-	Metrics           []ExportMetric `json:"metrics"`
+	Benchmark         string          `json:"benchmark"`
+	Tier              int             `json:"tier"`
+	Suite             string          `json:"suite"`
+	ScalingParamName  string          `json:"scaling_param_name"`
+	ScalingParamValue string          `json:"scaling_param_value"`
+	NonScalingParams  json.RawMessage `json:"non_scaling_params"`
+	Repetition        int             `json:"repetition"`
+	Status            string          `json:"status"`
+	Kernels           []ExportKernel  `json:"kernels"`
+	Metrics           []ExportMetric  `json:"metrics"`
 }
 
-// ExportKernel holds kernel timing data. Benchmarks with in-program
-// measurement loops export one entry per timed iteration, distinguished
-// by the iteration index and carrying the host wall-clock time.
+// ExportKernel holds kernel timing data. Each timed launch is one entry,
+// carrying the GPU event time, the host wall-clock time, the iteration index
+// reported by the benchmark, and the kernel's parameters.
 type ExportKernel struct {
-	Name       string   `json:"name"`
-	TimeMS     float64  `json:"time_ms"`
-	HostTimeMS *float64 `json:"host_time_ms,omitempty"`
-	Iteration  *int64   `json:"iteration,omitempty"`
+	Name       string          `json:"name"`
+	TimeMS     float64         `json:"time_ms"`
+	HostTimeMS *float64        `json:"host_time_ms,omitempty"`
+	Iteration  *int64          `json:"iteration,omitempty"`
+	Params     json.RawMessage `json:"params,omitempty"`
 }
 
 // ExportMetric holds a named metric value.
@@ -73,6 +88,15 @@ func cmdExport(dbPath, format, session string) int {
 		return ExitUsage
 	}
 
+	// A session filter, when given, must be a valid integer ID. Reject
+	// nonnumeric values up front rather than silently returning no sessions.
+	if session != "" {
+		if _, err := strconv.ParseInt(session, 10, 64); err != nil {
+			eprintf("Invalid session ID: %q (must be an integer)\n", session)
+			return ExitUsage
+		}
+	}
+
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		eprintf("Database file not found: %s\n", dbPath)
 		return ExitDB
@@ -85,13 +109,6 @@ func cmdExport(dbPath, format, session string) int {
 	}
 	defer db.Close()
 
-	// Read platform info (use first platform row)
-	platform, err := queryPlatform(db)
-	if err != nil {
-		eprintf("Error reading platform data: %v\n", err)
-		return ExitDB
-	}
-
 	// Read sessions
 	sessions, err := querySessions(db, session)
 	if err != nil {
@@ -99,8 +116,22 @@ func cmdExport(dbPath, format, session string) int {
 		return ExitDB
 	}
 
-	// Build runs for each session
+	// A specific session ID that matches nothing is a caller error, not an
+	// empty success: report it and exit non-zero.
+	if session != "" && len(sessions) == 0 {
+		eprintf("Session not found: %s\n", session)
+		return ExitDB
+	}
+
+	// Build platform and runs for each session
 	for i := range sessions {
+		platform, err := queryPlatform(db, sessions[i].platformID)
+		if err != nil {
+			eprintf("Error reading platform for session %d: %v\n", sessions[i].ID, err)
+			return ExitDB
+		}
+		sessions[i].Platform = platform
+
 		runs, err := queryRuns(db, sessions[i].ID)
 		if err != nil {
 			eprintf("Error reading runs for session %d: %v\n", sessions[i].ID, err)
@@ -110,9 +141,8 @@ func cmdExport(dbPath, format, session string) int {
 	}
 
 	output := ExportOutput{
-		ExportVersion: "1.0",
+		ExportVersion: "1.1",
 		ExportedAt:    time.Now().UTC().Format(time.RFC3339),
-		Platform:      platform,
 		Sessions:      sessions,
 	}
 
@@ -128,17 +158,18 @@ func cmdExport(dbPath, format, session string) int {
 
 // ── Database query helpers for export ─────────────────────────────────────
 
-func queryPlatform(db *sql.DB) (ExportPlatform, error) {
+func queryPlatform(db *sql.DB, platformID int64) (ExportPlatform, error) {
 	var p ExportPlatform
 	var gpuVram sql.NullFloat64
 	var driverVersion sql.NullString
 
 	err := db.QueryRow(
-		"SELECT hostname, os, gpu_model, gpu_vram_gb, driver_version, platform_type " +
-			"FROM platforms ORDER BY id LIMIT 1",
+		"SELECT hostname, os, gpu_model, gpu_vram_gb, driver_version, platform_type "+
+			"FROM platforms WHERE id = ?",
+		platformID,
 	).Scan(&p.Hostname, &p.OS, &p.GPUModel, &gpuVram, &driverVersion, &p.PlatformType)
 	if err != nil {
-		return p, fmt.Errorf("no platform data found: %w", err)
+		return p, fmt.Errorf("no platform data found for id %d: %w", platformID, err)
 	}
 
 	if gpuVram.Valid {
@@ -152,7 +183,7 @@ func queryPlatform(db *sql.DB) (ExportPlatform, error) {
 }
 
 func querySessions(db *sql.DB, sessionFilter string) ([]ExportSession, error) {
-	query := "SELECT id, started_at, finished_at, status, repetitions FROM sessions"
+	query := "SELECT id, platform_id, started_at, finished_at, status, repetitions FROM sessions"
 	var args []interface{}
 
 	if sessionFilter != "" {
@@ -171,7 +202,7 @@ func querySessions(db *sql.DB, sessionFilter string) ([]ExportSession, error) {
 	for rows.Next() {
 		var s ExportSession
 		var finishedAt sql.NullString
-		err := rows.Scan(&s.ID, &s.StartedAt, &finishedAt, &s.Status, &s.Repetitions)
+		err := rows.Scan(&s.ID, &s.platformID, &s.StartedAt, &finishedAt, &s.Status, &s.Repetitions)
 		if err != nil {
 			return nil, err
 		}
@@ -190,7 +221,8 @@ func querySessions(db *sql.DB, sessionFilter string) ([]ExportSession, error) {
 
 func queryRuns(db *sql.DB, sessionID int64) ([]ExportRun, error) {
 	rows, err := db.Query(
-		"SELECT id, benchmark, tier, suite, scaling_param_value, status "+
+		"SELECT id, benchmark, tier, suite, scaling_param_name, scaling_param_value, "+
+			"non_scaling_params_json, repetition, status "+
 			"FROM runs WHERE session_id = ? ORDER BY id",
 		sessionID,
 	)
@@ -203,11 +235,14 @@ func queryRuns(db *sql.DB, sessionID int64) ([]ExportRun, error) {
 	for rows.Next() {
 		var r ExportRun
 		var runID int64
+		var nonScaling string
 		err := rows.Scan(&runID, &r.Benchmark, &r.Tier, &r.Suite,
-			&r.ScalingParamValue, &r.Status)
+			&r.ScalingParamName, &r.ScalingParamValue, &nonScaling,
+			&r.Repetition, &r.Status)
 		if err != nil {
 			return nil, err
 		}
+		r.NonScalingParams = jsonObjectOrEmpty(nonScaling)
 
 		// Query kernels for this run
 		kernels, err := queryKernels(db, runID)
@@ -234,7 +269,7 @@ func queryRuns(db *sql.DB, sessionID int64) ([]ExportRun, error) {
 
 func queryKernels(db *sql.DB, runID int64) ([]ExportKernel, error) {
 	rows, err := db.Query(
-		"SELECT kernel_name, time_ms, host_time_ms, iteration "+
+		"SELECT kernel_name, time_ms, host_time_ms, iteration, params_json "+
 			"FROM kernel_results WHERE run_id = ? ORDER BY ordinal",
 		runID,
 	)
@@ -248,7 +283,8 @@ func queryKernels(db *sql.DB, runID int64) ([]ExportKernel, error) {
 		var k ExportKernel
 		var hostTime sql.NullFloat64
 		var iteration sql.NullInt64
-		if err := rows.Scan(&k.Name, &k.TimeMS, &hostTime, &iteration); err != nil {
+		var params sql.NullString
+		if err := rows.Scan(&k.Name, &k.TimeMS, &hostTime, &iteration, &params); err != nil {
 			return nil, err
 		}
 		if hostTime.Valid {
@@ -256,6 +292,9 @@ func queryKernels(db *sql.DB, runID int64) ([]ExportKernel, error) {
 		}
 		if iteration.Valid {
 			k.Iteration = &iteration.Int64
+		}
+		if params.Valid && json.Valid([]byte(params.String)) {
+			k.Params = json.RawMessage(params.String)
 		}
 		kernels = append(kernels, k)
 	}
@@ -289,4 +328,14 @@ func queryMetrics(db *sql.DB, runID int64) ([]ExportMetric, error) {
 		metrics = []ExportMetric{}
 	}
 	return metrics, rows.Err()
+}
+
+// jsonObjectOrEmpty returns s as raw JSON when it is a valid JSON document,
+// falling back to an empty object for empty or malformed stored values so the
+// export is always well-formed JSON.
+func jsonObjectOrEmpty(s string) json.RawMessage {
+	if s != "" && json.Valid([]byte(s)) {
+		return json.RawMessage(s)
+	}
+	return json.RawMessage("{}")
 }

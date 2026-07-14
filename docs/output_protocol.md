@@ -40,7 +40,7 @@ Emitted once per kernel invocation that is timed. This is the primary data recor
 | `params` | object | **yes** | All parameter values used for this invocation (scaling + non-scaling) |
 
 **Notes:**
-- If a benchmark launches the same kernel multiple times (e.g., across iterations), it should emit one `kernel` event per timed invocation, or a single `kernel` event with the average time. The recommended approach is one event with the **averaged** time across internal iterations.
+- Emit **exactly one** `kernel` event per kernel per run. If a benchmark launches the same kernel multiple times (e.g., an iterative algorithm), it must accumulate the launch times and emit a single record with the summed time; the CLI rejects duplicate records for the same kernel name.
 - `params` must include **all** parameters (both the scaling param and all non-scaling params with their current values).
 
 ### 2. `summary` — Run Summary
@@ -139,12 +139,24 @@ The CLI records these but does not require any specific fields.
 
 1. Read stdout line by line
 2. Skip empty lines (shouldn't occur, but be lenient)
-3. Parse each line as JSON; if parse fails, log warning and skip
+3. Parse each line as JSON; a line that fails to parse is a **protocol violation**
 4. Dispatch on `type` field
-5. If `type` is unknown, log warning and skip (forward compatibility)
+5. An unknown `type`, or an event missing a required field, is a **protocol violation**
 6. After the process exits, check exit code:
-   - Exit 0: success (all `kernel` + `summary` events are valid)
    - Exit non-zero: failure (record any `error` events; mark run as failed)
+   - Exit 0: the run is marked `ok` only if the output passes full validation (below); any violation marks the run as failed, and the violations are recorded in its `error_message`
+
+### Validation Rules (exit 0)
+
+A run with exit code 0 is accepted only when all of the following hold:
+
+1. No protocol violations from parsing (rules 3 and 5)
+2. At least one `kernel` event with exactly one record per kernel name, and **exactly one** `summary` event with a numeric `total_time_ms`
+3. All `time_ms`, `host_time_ms`, and `total_time_ms` values are finite and non-negative
+4. Every `kernel` event's `name` appears in the benchmark's declared `kernels` list (params.json)
+5. Every `kernel` event carries a `params` object whose values match the requested configuration (the scaling param and all non-scaling params, excluding harness measurement controls such as `vector_add_warmup`)
+6. `total_time_ms` equals the sum of all `kernel` event `time_ms` values, within a small floating-point tolerance
+7. No fatal `error` event was emitted (a fatal error with exit 0 is a contradiction)
 
 ### Emission Rules (Benchmark side)
 

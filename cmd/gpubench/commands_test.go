@@ -79,13 +79,14 @@ func TestParseOutput(t *testing.T) {
 	stdout := strings.Join([]string{
 		`{"type":"kernel","name":"vector_add","time_ms":1.5,"host_time_ms":2.0,"iter":0}`,
 		`{"type":"kernel","name":"vector_add","iter":1}`, // missing time_ms -> 0.0
-		`not json, ignored`,
+		`not json, recorded as violation`,
 		`{"type":"summary","total_time_ms":3.5,"metrics":[{"name":"GFLOPS","value":42.0}]}`,
 		`{"type":"error","message":"boom"}`,
 		``,
 	}, "\n")
 
-	kernels, summary, errs := parseOutput(stdout)
+	out := parseOutput(stdout)
+	kernels, summary, errs := out.Kernels, out.Summary, out.Errors
 
 	if len(kernels) != 2 {
 		t.Fatalf("got %d kernels, want 2", len(kernels))
@@ -108,6 +109,13 @@ func TestParseOutput(t *testing.T) {
 	if len(errs) != 1 || errs[0].Message != "boom" {
 		t.Fatalf("errors = %+v", errs)
 	}
+	if out.SummaryCount != 1 {
+		t.Fatalf("SummaryCount = %d, want 1", out.SummaryCount)
+	}
+	// The non-JSON line and the missing time_ms are both protocol violations.
+	if len(out.Violations) != 2 {
+		t.Fatalf("violations = %+v, want 2", out.Violations)
+	}
 }
 
 func TestParseOutputProtocolFields(t *testing.T) {
@@ -117,7 +125,8 @@ func TestParseOutputProtocolFields(t *testing.T) {
 			`{"type":"error","severity":"warning","message":"one value OOM, skipped"}`,
 			`{"type":"error","severity":"fatal","message":"driver crash"}`,
 		}, "\n")
-		kernels, _, errs := parseOutput(stdout)
+		out := parseOutput(stdout)
+		kernels, errs := out.Kernels, out.Errors
 		if len(kernels) != 1 || kernels[0].Params == "" {
 			t.Fatalf("kernel params not captured: %+v", kernels)
 		}
@@ -136,9 +145,13 @@ func TestParseOutputProtocolFields(t *testing.T) {
 	})
 
 	t.Run("missing time_ms flagged via HasTime", func(t *testing.T) {
-		kernels, _, _ := parseOutput(`{"type":"kernel","name":"k"}`)
+		out := parseOutput(`{"type":"kernel","name":"k"}`)
+		kernels := out.Kernels
 		if len(kernels) != 1 || kernels[0].HasTime || kernels[0].TimeMS != 0.0 {
 			t.Fatalf("missing time_ms handling wrong: %+v", kernels)
+		}
+		if len(out.Violations) != 1 {
+			t.Fatalf("missing time_ms should be a violation: %+v", out.Violations)
 		}
 	})
 }

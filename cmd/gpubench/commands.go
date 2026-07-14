@@ -1256,7 +1256,6 @@ func cmdRun(args runArgs) int {
 			spName, len(configs), reps, len(configs)*reps)
 
 		bp, bf := 0, 0
-		kernelNamesWarned := false
 		cmd := getBenchCommand(b)
 
 		for _, cfg := range configs {
@@ -1275,7 +1274,8 @@ func cmdRun(args runArgs) int {
 				ec, stdoutStr, stderrStr, timedOut := runBenchmarkProc(
 					cmd, env, timeoutSecs, args.verbose, b.Dir)
 
-				kernels, summary, protoErrors := parseOutput(stdoutStr)
+				parsed := parseOutput(stdoutStr)
+				kernels, summary, protoErrors := parsed.Kernels, parsed.Summary, parsed.Errors
 
 				// Non-fatal warning events would be lost on a successful run;
 				// surface them and keep them for the run's error_message.
@@ -1284,34 +1284,6 @@ func cmdRun(args runArgs) int {
 					if pe.IsWarning() && pe.Message != "" {
 						protoWarnings = append(protoWarnings, pe.Message)
 						eprintf("      [warning] %s\n", pe.Message)
-					}
-				}
-
-				// Warn once per benchmark if it emits a kernel name absent from
-				// its declared params.json kernels list (a coverage gap between
-				// the manifest and the actual output).
-				if !kernelNamesWarned && len(b.Kernels) > 0 {
-					declared := make(map[string]bool, len(b.Kernels))
-					for _, k := range b.Kernels {
-						declared[k] = true
-					}
-					for _, kr := range kernels {
-						if kr.Name != "unknown" && !declared[kr.Name] {
-							eprintf("      [warning] %s emits kernel %q not in params.json kernels list\n",
-								b.Benchmark, kr.Name)
-							kernelNamesWarned = true
-							break
-						}
-					}
-				}
-
-				// A kernel event without the required time_ms field carries no
-				// usable measurement; its stored 0.0 would silently skew averages.
-				missingKernelTime := false
-				for _, kr := range kernels {
-					if !kr.HasTime {
-						missingKernelTime = true
-						break
 					}
 				}
 
@@ -1326,21 +1298,21 @@ func cmdRun(args runArgs) int {
 					if errMsg == "" {
 						errMsg = fmt.Sprintf("Exit code %d", ec)
 					}
-				case len(kernels) == 0 && summary == nil:
-					// Exit 0 but zero measurement data: a benchmark that
-					// produces no kernel or summary output is a failed run, not
-					// a silent pass with empty results.
-					status = "error"
-					errMsg = "benchmark exited 0 but produced no kernel or summary output"
-				case missingKernelTime:
-					// Exit 0 but a kernel event lacked the required time_ms:
-					// reject rather than record a bogus 0 ms measurement.
-					status = "error"
-					errMsg = "kernel event missing required time_ms field"
 				default:
-					status = "ok"
-					if len(protoWarnings) > 0 {
-						errMsg = "warnings: " + strings.Join(protoWarnings, "; ")
+					// Exit 0 alone is not success: enforce the full output
+					// protocol (exactly one summary matching the kernel-time
+					// sum, declared kernel names, echoed params equal to the
+					// requested config, no fatal events, no malformed lines)
+					// so invalid measurements never enter the DB as ok.
+					expected := expectedRunParams(spName, cfg.ScalingValue, cfg.NSDict)
+					if violations := validateRun(parsed, b.Kernels, expected); len(violations) > 0 {
+						status = "error"
+						errMsg = "output protocol violation: " + joinLimited(violations, 8)
+					} else {
+						status = "ok"
+						if len(protoWarnings) > 0 {
+							errMsg = "warnings: " + strings.Join(protoWarnings, "; ")
+						}
 					}
 				}
 

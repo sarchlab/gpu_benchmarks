@@ -147,6 +147,35 @@ func TestValidateRunRejections(t *testing.T) {
 				`{"type":"summary","total_time_ms":1.0}`,
 			"kernel event missing required name",
 		},
+		{
+			"non-numeric host_time_ms",
+			`{"type":"kernel","name":"k1","time_ms":1.0,"host_time_ms":"invalid","params":{"size":256,"block_size":16}}` + "\n" +
+				`{"type":"summary","total_time_ms":1.0}`,
+			"host_time_ms is not a number",
+		},
+		{
+			"non-numeric iter",
+			`{"type":"kernel","name":"k1","iter":"zero","time_ms":1.0,"params":{"size":256,"block_size":16}}` + "\n" +
+				`{"type":"summary","total_time_ms":1.0}`,
+			"iter is not a number",
+		},
+		{
+			"non-numeric total_time_ms",
+			`{"type":"kernel","name":"k1","time_ms":1.0,"params":{"size":256,"block_size":16}}` + "\n" +
+				`{"type":"summary","total_time_ms":"1.0"}`,
+			"total_time_ms is not a number",
+		},
+		{
+			"non-array metrics",
+			`{"type":"kernel","name":"k1","time_ms":1.0,"params":{"size":256,"block_size":16}}` + "\n" +
+				`{"type":"summary","total_time_ms":1.0,"metrics":{"name":"GFLOPS"}}`,
+			"metrics is not an array",
+		},
+		{
+			"non-string severity",
+			validOutput + `{"type":"error","severity":1,"message":"boom"}`,
+			"severity is not a string",
+		},
 	}
 
 	for _, tc := range cases {
@@ -169,15 +198,14 @@ func TestValidateRunWarningErrorAllowed(t *testing.T) {
 	}
 }
 
-func TestValidateRunPerIterationSum(t *testing.T) {
-	// Per-iteration benchmarks emit one kernel event per timed iteration;
-	// the summary is the sum over all of them.
+func TestValidateRunRejectsDuplicateKernelRecords(t *testing.T) {
+	// The methodology requires one record per kernel: multiple launches of
+	// the same kernel must be accumulated by the benchmark, not emitted as
+	// separate records.
 	stdout := `{"type":"kernel","name":"k1","iter":0,"time_ms":1.0,"params":{"size":256,"block_size":16}}
 {"type":"kernel","name":"k1","iter":1,"time_ms":1.25,"params":{"size":256,"block_size":16}}
 {"type":"summary","total_time_ms":2.25}`
-	if v := validateStdout(stdout); len(v) != 0 {
-		t.Fatalf("per-iteration output rejected: %v", v)
-	}
+	requireViolation(t, validateStdout(stdout), `multiple records for kernel "k1"`)
 }
 
 func TestValidateRunSummaryTolerance(t *testing.T) {
@@ -187,6 +215,13 @@ func TestValidateRunSummaryTolerance(t *testing.T) {
 	if v := validateStdout(stdout); len(v) != 0 {
 		t.Fatalf("within-tolerance summary rejected: %v", v)
 	}
+
+	// The tolerance scales with the six-decimal output precision, so a
+	// discrepancy that is large relative to a short kernel is rejected even
+	// though it is small in absolute terms.
+	stdout = `{"type":"kernel","name":"k1","time_ms":0.004320,"params":{"size":256,"block_size":16}}
+{"type":"summary","total_time_ms":0.005320}`
+	requireViolation(t, validateStdout(stdout), "sum of kernel times")
 }
 
 func TestValidateRunDedupesRepeatedViolations(t *testing.T) {

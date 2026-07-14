@@ -8,10 +8,10 @@ import (
 	"strings"
 )
 
-// KernelResult represents a parsed kernel event. Benchmarks that loop the
-// measurement in-program emit one kernel event per timed iteration, carrying
-// the iteration index and the host-side wall-clock time alongside the GPU
-// event time.
+// KernelResult represents a parsed kernel event. The methodology requires one
+// record per kernel per run (multiple launches of the same kernel accumulate
+// into one record); Iteration carries the event's "iter" index, kept for the
+// kernel_results.iteration column.
 type KernelResult struct {
 	Name       string   `json:"name"`
 	TimeMS     float64  `json:"time_ms"`
@@ -123,12 +123,22 @@ func parseOutput(stdoutData string) ParsedOutput {
 				Ordinal: ordinal,
 				HasTime: hasTime,
 			}
-			if h, ok := obj["host_time_ms"].(float64); ok {
-				kr.HostTimeMS = &h
+			if h, ok := obj["host_time_ms"]; ok {
+				if hf, ok := h.(float64); ok {
+					kr.HostTimeMS = &hf
+				} else {
+					out.Violations = append(out.Violations,
+						fmt.Sprintf("kernel event %q host_time_ms is not a number", name))
+				}
 			}
-			if it, ok := obj["iter"].(float64); ok {
-				i := int(it)
-				kr.Iteration = &i
+			if it, ok := obj["iter"]; ok {
+				if itf, ok := it.(float64); ok {
+					i := int(itf)
+					kr.Iteration = &i
+				} else {
+					out.Violations = append(out.Violations,
+						fmt.Sprintf("kernel event %q iter is not a number", name))
+				}
 			}
 			if p, ok := obj["params"]; ok {
 				if pMap, ok := p.(map[string]interface{}); ok {
@@ -148,11 +158,21 @@ func parseOutput(stdoutData string) ParsedOutput {
 		case "summary":
 			out.SummaryCount++
 			s := &SummaryResult{}
-			if t, ok := obj["total_time_ms"].(float64); ok {
-				s.TotalTimeMS = &t
+			if t, ok := obj["total_time_ms"]; ok {
+				if tf, ok := t.(float64); ok {
+					s.TotalTimeMS = &tf
+				} else {
+					out.Violations = append(out.Violations,
+						"summary total_time_ms is not a number")
+				}
 			}
-			if metricsRaw, ok := obj["metrics"].([]interface{}); ok {
-				for _, m := range metricsRaw {
+			if metricsRaw, ok := obj["metrics"]; ok {
+				metricsList, ok := metricsRaw.([]interface{})
+				if !ok {
+					out.Violations = append(out.Violations,
+						"summary metrics is not an array")
+				}
+				for _, m := range metricsList {
 					mObj, ok := m.(map[string]interface{})
 					if !ok {
 						out.Violations = append(out.Violations,
@@ -182,10 +202,19 @@ func parseOutput(stdoutData string) ParsedOutput {
 
 		case "error":
 			msg, _ := obj["message"].(string)
-			sev, _ := obj["severity"].(string)
 			if msg == "" {
 				out.Violations = append(out.Violations,
 					"error event missing required message")
+			}
+			sev := ""
+			if sv, ok := obj["severity"]; ok {
+				if svs, ok := sv.(string); ok {
+					sev = svs
+				} else {
+					// Wrong-typed severity falls back to fatal (empty).
+					out.Violations = append(out.Violations,
+						"error event severity is not a string")
+				}
 			}
 			out.Errors = append(out.Errors, ErrorResult{Message: msg, Severity: sev})
 
@@ -246,20 +275,23 @@ func paramAsFloat(v interface{}) (float64, bool) {
 	return 0, false
 }
 
-// summaryTolerance is the allowed |total_time_ms - Σ kernel time_ms| slack:
-// an absolute floor for %.6f decimal round-tripping of each emitted record
-// plus a small relative term for accumulation order.
+// summaryTolerance is the allowed |total_time_ms - Σ kernel time_ms| slack.
+// Every emitted value is printed with six decimals (%.6f), so each of the
+// nKernels records plus the total carries at most 5e-7 ms of rounding error;
+// the relative term covers accumulation-order differences.
 func summaryTolerance(sum float64, nKernels int) float64 {
-	return 1e-3 + 1e-6*math.Abs(sum) + 1e-6*float64(nKernels)
+	return 1e-6*float64(nKernels+1) + 1e-9*math.Abs(sum)
 }
 
 // validateRun checks an exit-zero run against the full output protocol
 // (docs/output_protocol.md, methodology rules 7-8): exactly one summary with a
 // finite non-negative total_time_ms that matches the sum of kernel times, at
-// least one kernel event, finite non-negative times, only declared kernel
-// names, params present on every kernel event and equal to the requested
-// configuration, no fatal error event, and no malformed or unknown stdout
-// lines. Returns the list of violations; empty means the run is acceptable.
+// least one kernel event with exactly one record per kernel name (multiple
+// launches must be accumulated into one record), finite non-negative times,
+// only declared kernel names, params present on every kernel event and equal
+// to the requested configuration, no fatal error event, and no malformed or
+// unknown stdout lines. Returns the list of violations; empty means the run
+// is acceptable.
 func validateRun(out ParsedOutput, declaredKernels []string,
 	expected map[string]interface{}) []string {
 	violations := append([]string{}, out.Violations...)
@@ -308,7 +340,14 @@ func validateRun(out ParsedOutput, declaredKernels []string,
 
 	timesValid := true
 	kernelSum := 0.0
+	nameSeen := map[string]bool{}
 	for _, kr := range out.Kernels {
+		// One record per kernel: multiple launches of the same kernel must be
+		// accumulated into a single record by the benchmark.
+		if nameSeen[kr.Name] {
+			addOnce("multiple records for kernel %q (want one record per kernel)", kr.Name)
+		}
+		nameSeen[kr.Name] = true
 		if kr.HasTime {
 			if math.IsNaN(kr.TimeMS) || math.IsInf(kr.TimeMS, 0) || kr.TimeMS < 0 {
 				addOnce("kernel %q has invalid time_ms %v", kr.Name, kr.TimeMS)

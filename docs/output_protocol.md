@@ -40,7 +40,7 @@ Emitted once per kernel invocation that is timed. This is the primary data recor
 | `params` | object | **yes** | All parameter values used for this invocation (scaling + non-scaling) |
 
 **Notes:**
-- If a benchmark launches the same kernel multiple times (e.g., across iterations), it should emit one `kernel` event per timed invocation, or a single `kernel` event with the average time. The recommended approach is one event with the **averaged** time across internal iterations.
+- Emit **exactly one** `kernel` event per kernel per run. If a benchmark launches the same kernel multiple times (e.g., an iterative algorithm), it must accumulate the launch times and emit a single record with the summed time; the CLI rejects duplicate records for the same kernel name.
 - `params` must include **all** parameters (both the scaling param and all non-scaling params with their current values).
 
 ### 2. `summary` — Run Summary
@@ -151,7 +151,7 @@ The CLI records these but does not require any specific fields.
 A run with exit code 0 is accepted only when all of the following hold:
 
 1. No protocol violations from parsing (rules 3 and 5)
-2. At least one `kernel` event, and **exactly one** `summary` event with a numeric `total_time_ms`
+2. At least one `kernel` event with exactly one record per kernel name, and **exactly one** `summary` event with a numeric `total_time_ms`
 3. All `time_ms`, `host_time_ms`, and `total_time_ms` values are finite and non-negative
 4. Every `kernel` event's `name` appears in the benchmark's declared `kernels` list (params.json)
 5. Every `kernel` event carries a `params` object whose values match the requested configuration (the scaling param and all non-scaling params, excluding harness measurement controls such as `vector_add_warmup`)

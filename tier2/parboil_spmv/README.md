@@ -8,10 +8,18 @@ Only the host driver is restructured for the single-run timing harness.
 
 ## Provenance & fidelity
 
-Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parboil/) — the `spmv` workload. Independent reimplementation, spot-verified to reproduce Parboil's algorithm faithfully (JDS format), with two caveats:
+Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parboil/) — the `spmv` workload. Independent reimplementation, spot-verified to reproduce Parboil's algorithm faithfully (JDS format), with one caveat:
 
 - One portability substitution — the dense-vector texture fetch → `__ldg` — documented below; the JDS data layout is preserved verbatim.
-- A known edge case where the ported `coo_to_jds` corrupts the matrix when the last row has exactly one nonzero.
+
+The `coo_to_jds` converter previously corrupted the matrix when the final row
+held exactly one nonzero (the row-transition and last-element cases were folded
+into one branch, over-counting the previous row and dropping the final row).
+That is fixed (issue #63, C-01): row-transition accounting and final-row
+flushing are now separate. A host-only regression, `./parboil_spmv --selftest`
+(no GPU required), reconstructs `y = A·x` from the JDS arrays exactly as
+`spmv_jds` indexes them and checks it against a direct COO reference on the
+pathological inputs.
 
 ## Algorithm (JDS — the faithful part)
 

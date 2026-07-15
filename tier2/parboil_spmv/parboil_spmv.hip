@@ -192,18 +192,25 @@ static void coo_to_jds_mem(mat_entry* entries, int nz, int rows_input,
     *data_row_map = (int*)calloc(rows, sizeof(int));
     irow = entries[0].row;
 
+    // Count nonzeros per row. Row-transition accounting and final-element
+    // flushing must stay separate: folding them together (the old
+    // `... || i == nz - 1` branch) double-counts the current nonzero into the
+    // previous row and never records the final row when that final row holds
+    // exactly one nonzero, corrupting the JDS structure (issue #63, C-01).
     for (i = 0; i < nz; i++) {
-        if (entries[i].row != irow || i == nz - 1) {
-            if (i == nz - 1) icol++;
+        if (entries[i].row != irow) {       // row transition: flush previous row
             stats[irow].size = icol;
-            stats[irow].index = entries[i - 1].row;
+            stats[irow].index = irow;
             stats[irow].start = istart;
             icol = 0;
             irow = entries[i].row;
             istart = i;
         }
-        icol++;
+        icol++;                             // this nonzero belongs to the current row
     }
+    stats[irow].size = icol;                // flush the final row exactly once
+    stats[irow].index = irow;
+    stats[irow].start = istart;
 
     *nz_count_len = rows / warp_size + rows % warp_size;
     *nz_count = (int*)malloc(*nz_count_len * sizeof(int));
@@ -299,9 +306,127 @@ static mat_entry* generate_coo(int num_rows, int avg_nnz, int seed, int* nz_out)
     return entries;
 }
 
+// ---------------------------------------------------------------------------
+// Host-only regression for coo_to_jds_mem (issue #63, C-01). Runs the COO->JDS
+// conversion on hand-picked matrices, then reconstructs y = A*x from the JDS
+// arrays using exactly the spmv_jds indexing (jds_ptr[k] + ix over the group's
+// nz_count, permuted through data_row_map) and compares against a direct COO
+// reference. No GPU is required. The pathological case is a final row holding
+// exactly one nonzero, which the old combined transition/last-element branch
+// mis-counted (over-counting the previous row and dropping the final row).
+// Invoked with `--selftest`; returns 0 on success.
+// ---------------------------------------------------------------------------
+static int jds_reconstruct_matches(mat_entry* coo, int nz, int num_rows)
+{
+    // Sort a private copy first: coo_to_jds_mem sorts in place and the COO
+    // reference below is order-independent, but we keep the caller's array intact.
+    mat_entry* entries = (mat_entry*)malloc((size_t)nz * sizeof(mat_entry));
+    memcpy(entries, coo, (size_t)nz * sizeof(mat_entry));
+
+    float* data;   int* ptr;   int* nzcnt;   int* indices;   int* perm;
+    int col_count, dim, len, nzcnt_len, depth;
+    coo_to_jds_mem(entries, nz, num_rows,
+                   1 /*pad_rows*/, WARP_SIZE /*warp_size*/, 1 /*pack_size*/,
+                   &data, &ptr, &nzcnt, &indices, &perm,
+                   &col_count, &dim, &len, &nzcnt_len, &depth);
+
+    // Deterministic dense vector x.
+    float* x = (float*)malloc((size_t)dim * sizeof(float));
+    for (int i = 0; i < dim; ++i) x[i] = 0.5f + 0.25f * (float)(i % 7);
+
+    // Direct COO reference.
+    float* ref = (float*)calloc((size_t)dim, sizeof(float));
+    for (int k = 0; k < nz; ++k)
+        ref[coo[k].row] += coo[k].val * x[coo[k].col];
+
+    // Reconstruct exactly as spmv_jds does (host mirror of the kernel).
+    float* got = (float*)calloc((size_t)dim, sizeof(float));
+    for (int ix = 0; ix < dim; ++ix) {
+        int bound = nzcnt[ix >> WARP_BITS];
+        float sum = 0.f;
+        for (int k = 0; k < bound; ++k) {
+            int j = ptr[k] + ix;
+            sum += data[j] * x[indices[j]];
+        }
+        got[perm[ix]] = sum;
+    }
+
+    int ok = 1;
+    for (int r = 0; r < dim && ok; ++r) {
+        float thresh = 1e-4f * fabsf(ref[r]) + 1e-5f;
+        if (fabsf(got[r] - ref[r]) > thresh) {
+            fprintf(stderr, "  row %d: got %.6f expected %.6f\n", r, got[r], ref[r]);
+            ok = 0;
+        }
+    }
+
+    free(entries); free(data); free(ptr); free(nzcnt); free(indices); free(perm);
+    free(x); free(ref); free(got);
+    return ok;
+}
+
+static int run_jds_selftest(void)
+{
+    int failures = 0;
+
+    // Case 1 — the C-01 trigger: last row (3) has exactly one nonzero.
+    {
+        mat_entry m[] = {
+            {0,0,1.f}, {0,2,2.f}, {0,3,3.f},   // row 0: 3 nnz
+            {1,1,4.f}, {1,2,5.f},              // row 1: 2 nnz
+            {2,0,6.f}, {2,3,7.f},              // row 2: 2 nnz
+            {3,2,8.f},                          // row 3: 1 nnz  (final, single)
+        };
+        int ok = jds_reconstruct_matches(m, (int)(sizeof m / sizeof m[0]), 4);
+        fprintf(stderr, "selftest final-single-nonzero row: %s\n", ok ? "PASS" : "FAIL");
+        failures += !ok;
+    }
+
+    // Case 2 — every row a single nonzero (repeated final-single transitions).
+    {
+        mat_entry m[] = { {0,1,1.f}, {1,0,2.f}, {2,2,3.f} };
+        int ok = jds_reconstruct_matches(m, 3, 3);
+        fprintf(stderr, "selftest all-single-nonzero rows:  %s\n", ok ? "PASS" : "FAIL");
+        failures += !ok;
+    }
+
+    // Case 3 — single total nonzero (old code indexed entries[-1] here).
+    {
+        mat_entry m[] = { {0,0,3.5f} };
+        int ok = jds_reconstruct_matches(m, 1, 1);
+        fprintf(stderr, "selftest single total nonzero:     %s\n", ok ? "PASS" : "FAIL");
+        failures += !ok;
+    }
+
+    // Case 4 — final row multi-nonzero (guards against a regression in the
+    // common path the old code handled correctly).
+    {
+        mat_entry m[] = {
+            {0,0,1.f},
+            {1,1,2.f}, {1,2,3.f},
+            {2,0,4.f}, {2,1,5.f}, {2,3,6.f},   // final row: 3 nnz
+        };
+        int ok = jds_reconstruct_matches(m, 6, 3);
+        fprintf(stderr, "selftest final-multi-nonzero row:  %s\n", ok ? "PASS" : "FAIL");
+        failures += !ok;
+    }
+
+    if (failures)
+        fprintf(stderr, "SELFTEST FAIL: %d case(s)\n", failures);
+    else
+        fprintf(stderr, "SELFTEST PASS\n");
+    return failures ? EXIT_FAILURE : EXIT_SUCCESS;
+}
+
 int main(int argc, char** argv)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Host-only regression for the COO->JDS conversion (issue #63, C-01). Runs
+    // without a GPU and exits; keep before any device initialization.
+    for (int i = 1; i < argc; ++i)
+        if (strcmp(argv[i], "--selftest") == 0)
+            return run_jds_selftest();
 
     // Defaults sized to a Parboil-scale sparse matrix (Dubcova3/mixtank are tens
     // of thousands of rows). Constant-memory tables cap rows/32 and JDS columns

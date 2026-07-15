@@ -64,15 +64,20 @@ static const int DEFAULT_NUM_BLOCKS = 1;
 // INT32 MAD kernel
 // ---------------------------------------------------------------------------
 
-__global__ void int32_mad_kernel(int *out, int mads_per_thread)
+// mul/add arrive as runtime kernel arguments (not compile-time constants) on
+// purpose: a constant multiplier lets the optimizer strength-reduce the
+// multiply to shifts/adds and even algebraically collapse the constant
+// recurrence a <- a*mul+add into fewer instructions (nvcc folds four
+// `a*3+1` steps into a single a*81+40 IMAD), which would report far more MADs
+// than the hardware executes. The arithmetic is unsigned so overflow wraps
+// (well-defined) rather than being signed-overflow UB.
+__global__ void int32_mad_kernel(unsigned *out, int mads_per_thread,
+                                 unsigned mul, unsigned add)
 {
-    int a0 = 1 + static_cast<int>(threadIdx.x);
-    int a1 = a0 + 111;
-    int a2 = a0 + 222;
-    int a3 = a0 + 333;
-
-    const int mul = 3;
-    const int add = 1;
+    unsigned a0 = 1u + threadIdx.x;
+    unsigned a1 = a0 + 111u;
+    unsigned a2 = a0 + 222u;
+    unsigned a3 = a0 + 333u;
 
     for (int i = 0; i < mads_per_thread; i += 4) {
         a0 = a0 * mul + add;
@@ -81,9 +86,14 @@ __global__ void int32_mad_kernel(int *out, int mads_per_thread)
         a3 = a3 * mul + add;
     }
 
-    if (blockIdx.x == 0 && threadIdx.x == 0) {
-        *out = a0 + a1 + a2 + a3;
-    }
+    // Store one checksum per global thread (not just thread 0) so every
+    // launched thread's MAD chain is observable. A single guarded write would
+    // let the optimizer treat the other threads' recurrences as dead and
+    // eliminate them, undercounting the work the grid reports. The write is a
+    // single store after the timed loop, negligible next to the per-thread MAD
+    // chain.
+    const unsigned tid = blockIdx.x * blockDim.x + threadIdx.x;
+    out[tid] = a0 + a1 + a2 + a3;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,8 +140,15 @@ int main(int argc, char *argv[])
            num_blocks * threads_per_block);
     fprintf(stderr, "MADs / thread   : %d\n\n", mads_per_thread);
 
-    int *d_out = nullptr;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(int)));
+    const size_t total_threads =
+        static_cast<size_t>(num_blocks) * threads_per_block;
+    unsigned *d_out = nullptr;
+    HIP_CHECK(hipMalloc(&d_out, total_threads * sizeof(unsigned)));
+
+    // Numerical Recipes LCG constants, supplied at runtime so the multiply is a
+    // genuine hardware IMAD (see kernel comment).
+    const unsigned mad_mul = 1664525u;
+    const unsigned mad_add = 1013904223u;
 
     char params[160];
     snprintf(params, sizeof(params),
@@ -141,7 +158,7 @@ int main(int argc, char *argv[])
     double total_gpu_ms =
         bench_run_once("int32_mad_kernel", params, [&]() {
             int32_mad_kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(
-                d_out, mads_per_thread);
+                d_out, mads_per_thread, mad_mul, mad_add);
         });
 
     bench_emit_summary(total_gpu_ms);

@@ -12,9 +12,9 @@ Supports **NVIDIA (CUDA)** and **AMD ROCm/HIP** targets.
 
 The benchmark saturates an SM/CU's FP16 arithmetic pipelines by executing a
 dense loop of **packed fused multiply-add (FMA)** instructions.  All operands
-live in registers — there is no memory traffic beyond a single small write at
-the end — so the result reflects raw arithmetic throughput rather than memory
-bandwidth.
+live in registers — there is no memory traffic beyond one small per-thread
+write at the end — so the result reflects raw arithmetic throughput rather than
+memory bandwidth.
 
 | Platform | Type | Intrinsic / Built-in |
 |---|---|---|

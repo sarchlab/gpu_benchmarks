@@ -144,7 +144,7 @@ rewritten to match, the root methodology.
 
 ## B. Tier 1 benchmark findings
 
-### B-01 — Critical — `fp16_throughput` does not reliably force FP16 FMA on AMD
+### B-01 — Critical — `fp16_throughput` does not reliably force FP16 FMA on AMD — RESOLVED (PR #66)
 
 `tier1/fp16_throughput/fp16_throughput.hip:74-90` converts `1.0000001f` to FP16. That value rounds
 to exactly `1.0` in FP16. NVIDIA's explicit `__hfma2` intrinsic is normally protected by inline
@@ -154,7 +154,16 @@ can therefore count packed FMAs while executing packed adds.
 Use a representable FP16 multiplier different from one, such as `1.001953125`, and inspect the
 generated ISA on both toolchains.
 
-### B-02 — Critical — `int32_throughput` relies on signed-overflow undefined behavior
+> **Resolved (PR #66).** The multiplier is now `mul = 1 - 2^-10 (0.9990234375)` with
+> `add = 2^-10`, both exactly representable, chosen so the recurrence contracts toward the fixed
+> point 1.0 and the accumulators stay bounded across the whole sweep (no overflow to `inf`, no
+> subnormal flush). Every launched thread now stores its own checksum, so no thread's chain can be
+> eliminated as dead. Verified on nvcc 12.9 / `sm_90` / H100: the loop body emits `HFMA2` against a
+> `0.9990234375` multiplier (previously foldable `1.0`). AMD ISA not re-checked (no ROCm host
+> available); the fix removes the `mul == 1.0` degeneracy that the finding hinges on for any
+> toolchain.
+
+### B-02 — Critical — `int32_throughput` relies on signed-overflow undefined behavior — RESOLVED (PR #66)
 
 `tier1/int32_throughput/int32_throughput.hip:67-86` repeatedly evaluates `a = a * 3 + 1` on signed
 `int`. Overflow is guaranteed at the declared iteration counts and is undefined in C++. Constant
@@ -163,6 +172,14 @@ integer MAD operation mix is compiler-dependent.
 
 Use unsigned arithmetic and a runtime-loaded or otherwise instruction-forced multiplier, then
 verify the emitted ISA.
+
+> **Resolved (PR #66).** Accumulators are now `unsigned` (defined wraparound) and the
+> multiplier/addend are passed as runtime kernel arguments, so the multiply cannot be
+> strength-reduced or the recurrence algebraically collapsed. Every launched thread stores its own
+> checksum. Verified on nvcc 12.9 / `sm_90` / H100: the loop body is now `IMAD Rd, Rd, UR4, R4`
+> against the runtime operand — the previous constant-folded `a*81+40` collapse (four `a*3+1` steps
+> fused into one IMAD, running ~1/4 of the reported MADs) is gone. At `mads_per_thread=262144`
+> kernel time rises from ~0.24 ms to ~0.70 ms, confirming the full work now executes.
 
 ### B-03 — Critical — `cache_latency` evicts its own primer before timing
 
@@ -538,7 +555,7 @@ actual windows, actual grid dimensions, and platform-specific feature availabili
 
 1. Enforce the complete output protocol and summary/kernel/parameter invariants in `gpubench`.
 2. Make unsupported tensor-core configurations fail and correct the ROCm launch model.
-3. Fix FP16 and integer throughput instruction semantics and validate generated ISA.
+3. ~~Fix FP16 and integer throughput instruction semantics and validate generated ISA.~~ **Done (PR #66, B-01/B-02).**
 4. Repair the Parboil SpMV final-row conversion defect.
 5. Remove CUTCP's silent atom dropping or constrain the sweep to accepted work.
 

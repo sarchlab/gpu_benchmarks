@@ -126,5 +126,13 @@ lines — one record for the single timed launch plus a final summary:
   the throughput path of modern GPU integer pipelines.
 - `mads_per_thread` is rounded down to the nearest multiple of 4 at runtime to
   match the unrolled loop structure.
-- Integer overflow is expected and harmless — the goal is to exercise the
-  integer ALU, not produce meaningful results.
+- The accumulators are **unsigned**, so overflow wraps with well-defined
+  semantics (signed overflow would be undefined behavior). The goal is to
+  exercise the integer ALU, not to produce meaningful results.
+- The multiplier and addend are passed as **runtime kernel arguments** rather
+  than compile-time constants. With constant operands the compiler
+  strength-reduces the multiply to shifts/adds and can algebraically collapse
+  the `a = a*mul + add` recurrence into fewer instructions (e.g. folding four
+  `a*3+1` steps into a single `a*81+40`), which would report more MADs than the
+  hardware actually executes. Runtime operands force one genuine integer
+  multiply-add per iteration.

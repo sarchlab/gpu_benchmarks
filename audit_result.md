@@ -73,7 +73,7 @@ The main remaining risks are:
 | Sweep rule 1: exactly one scaling axis | Pass structurally | Every manifest has one scaling object. |
 | Sweep rule 2: dense range through relevant capacity regimes | **Partial** | Three Tier 1/Tier 2 manifests are short; several ranges deliberately do not cross the stated LLC target. |
 | Sweep rule 3: non-scaling knobs change how, not how much | **Fail** | At least 22 knobs in 19 benchmarks change total work. |
-| Sweep rule 4: every value/combination matters and works | **Fail** | Unsupported TF32, saturated CUTCP work, oversized Pathfinder configurations, and duplicate variants remain. |
+| Sweep rule 4: every value/combination matters and works | **Fail** | Oversized Pathfinder configurations and duplicate variants remain (unsupported TF32 removed with the benchmark; CUTCP saturation resolved — overflow configs now fail before measurement and the sweep is constrained to the zero-overflow envelope). |
 | Sweep rule 5: controls are not swept | Pass | `vector_add_warmup` is fixed by the harness. |
 | Harness rule 1: orchestration only | Pass | No timing mathematics is performed in the runner. |
 | Harness rule 2: repetitions are fresh processes | Pass | One process is launched for each repetition. |
@@ -287,6 +287,13 @@ and verification can fail for a deterministic subset of declared configurations.
 Separate final-element flushing from row-transition accounting and add a regression case whose
 last row has exactly one nonzero.
 
+> **Resolved (2026-07-15):** the row-count loop now flushes the previous row only on a real row
+> transition and flushes the final row exactly once afterward, so a final single-nonzero row is
+> recorded correctly (and a latent `entries[-1]` read on single-nonzero input is gone). A host-only
+> regression (`./parboil_spmv --selftest`) reconstructs `y = A·x` from the JDS arrays exactly as
+> `spmv_jds` indexes them and checks it against a direct COO reference on the pathological inputs;
+> the old loop fails those cases, the new one passes (issue #63, C-01).
+
 ### C-02 — Critical — `parboil_cutcp` silently drops work as the sweep grows
 
 `tier2/parboil_cutcp/parboil_cutcp.hip:365-390` drops atoms after a fixed per-bin `BIN_DEPTH` is
@@ -296,6 +303,15 @@ near the bin capacity and perform near-identical effective work.
 
 This remains explicitly open in the prior review. Constrain `num_atoms` by `lattice_dim`, make bin
 storage dynamic, or report and scale on the accepted atom count rather than the requested count.
+
+> **Resolved (2026-07-15):** atoms are no longer dropped silently. Any bin overflow now fails
+> before measurement (diagnostic on stderr, non-zero exit, no `summary` emitted), so a truncated
+> problem can never be stored or "verified." `BIN_DEPTH` is raised 8→16 (the original spilled the
+> Poisson tail of the ~7 atoms/bin design density to a CPU pass this port omits), and the kernel's
+> shared-memory cache-fill is generalized from a hardcoded 32-float copy to `BIN_SIZE` floats so all
+> 16 atoms/bin are staged. The manifest is constrained to configs that fit: `num_atoms` 5,000–45,000
+> and `lattice_dim ≥ 144`, verified zero-overflow across every `num_atoms × lattice_dim` combination.
+> Verified on an H100 (issue #63, C-02 / D-02(b)).
 
 ### C-03 — Major — `npb_mg` verification is too weak
 
@@ -408,7 +424,10 @@ them. Either introduce a schema for multiple work dimensions or pin them and lea
 
 - `tensor_core_throughput precision=tf32` performs no kernel on unsupported platforms and exits
   successfully.
-- `parboil_cutcp` upper `num_atoms` values saturate bin capacity at small lattice sizes.
+- ~~`parboil_cutcp` upper `num_atoms` values saturate bin capacity at small lattice sizes.~~
+  **Resolved (2026-07-15, issue #63 C-02 / D-02(b)):** overflow configs fail before measurement,
+  and the manifest is constrained to the zero-overflow envelope (`num_atoms` 5,000–45,000,
+  `lattice_dim ≥ 144`) so every declared combination executes the full requested atom set.
 - `rodinia_pathfinder` declares grids up to 5,000,000 × 10,000 integers, approximately 200 GB for
   one grid. The source now rejects oversized allocations cleanly, but sweep rule 4 requires every
   declared combination to work; clean rejection does not make the combination valid.
@@ -556,8 +575,8 @@ actual windows, actual grid dimensions, and platform-specific feature availabili
 1. Enforce the complete output protocol and summary/kernel/parameter invariants in `gpubench`.
 2. Make unsupported tensor-core configurations fail and correct the ROCm launch model.
 3. ~~Fix FP16 and integer throughput instruction semantics and validate generated ISA.~~ **Done (PR #66, B-01/B-02).**
-4. Repair the Parboil SpMV final-row conversion defect.
-5. Remove CUTCP's silent atom dropping or constrain the sweep to accepted work.
+4. ~~Repair the Parboil SpMV final-row conversion defect.~~ **Done (PR #67, C-01).**
+5. ~~Remove CUTCP's silent atom dropping or constrain the sweep to accepted work.~~ **Done (PR #67, C-02/D-02(b)).**
 
 ### P1 — Restore methodology fidelity
 

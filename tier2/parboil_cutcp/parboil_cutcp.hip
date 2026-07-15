@@ -74,9 +74,18 @@ typedef float ener_t;
 typedef int ener_t;
 #endif
 
-#define BIN_DEPTH         8  /* max number of atoms per bin */
-#define BIN_SIZE         32  /* size of bin in floats */
-#define BIN_SHIFT         5  /* # of bits to shift for mul/div by BIN_SIZE */
+// BIN_DEPTH is the fixed per-bin atom capacity. The original Parboil ran at
+// BIN_DEPTH=8 and spilled the (Poisson) tail of over-full bins to a separate
+// CPU pass. This port does not reproduce that CPU spill pass, so bins must be
+// deep enough to hold the tail at the design density (~7 atoms/bin): a Poisson
+// mean of ~7 reaches ~15 in the tail, so depth 8 would drop ~13% of atoms at
+// the default config. Depth 16 holds the full design-density problem without
+// dropping any atom; any config that still overflows is rejected before
+// measurement (see the binning loop). BIN_SIZE = BIN_DEPTH*4 floats/bin and
+// BIN_SHIFT = log2(BIN_SIZE) must track BIN_DEPTH (issue #63, C-02 / D-02(b)).
+#define BIN_DEPTH        16  /* max number of atoms per bin */
+#define BIN_SIZE         64  /* size of bin in floats (BIN_DEPTH * 4) */
+#define BIN_SHIFT         6  /* # of bits to shift for mul/div by BIN_SIZE */
 #define BIN_CACHE_MAXLEN 32  /* max number of atom bins to cache */
 
 #define BIN_LENGTH      4.f  /* spatial length in Angstroms */
@@ -164,8 +173,12 @@ __global__ static void cuda_cutoff_potential_lattice6overlap(
       int binIndex = startoff + (bincnt << (3 + BIN_SHIFT));
       int tidmask = tid & 15;
 
-      AtomBinCache[binIndex + tidmask   ] = p_global[tidmask   ];
-      AtomBinCache[binIndex + tidmask+16] = p_global[tidmask+16];
+      /* A half-warp (16 lanes) stages the whole bin: BIN_SIZE floats total, so
+       * BIN_SIZE/16 floats per lane. The original hardcoded two copies (32
+       * floats = BIN_DEPTH 8); this loop tracks BIN_SIZE so deeper bins
+       * (BIN_DEPTH 16 -> 64 floats) are fully staged (issue #63, C-02). */
+      for (int f = tidmask; f < BIN_SIZE; f += 16)
+        AtomBinCache[binIndex + f] = p_global[f];
     }
     __syncthreads();
 
@@ -263,8 +276,10 @@ int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     // Defaults: ~40000 atoms on a 144^3 lattice at 0.5 A spacing (watbox.sl40
-    // scale, ~1 atom / 10 A^3 => ~7 atoms/bin, near the design point). Spacing
-    // 0.5 keeps BIN_LENGTH/(8h)=1 so the first neighbor-list branch applies.
+    // scale, ~1 atom / 10 A^3 => ~7 atoms/bin, near the design point; its
+    // Poisson tail peaks near 15/bin, within BIN_DEPTH=16 so nothing overflows).
+    // Spacing 0.5 keeps BIN_LENGTH/(8h)=1 so the first neighbor-list branch
+    // applies. The scaling sweep is capped so peak occupancy stays <= BIN_DEPTH.
     int   num_atoms    = 40000;
     int   lattice_dim  = 144;     // nx = ny = nz (multiple of 8)
     float grid_spacing = 0.5f;    // h
@@ -383,13 +398,18 @@ int main(int argc, char** argv) {
                 bin[bindex] = p;
                 bincntZeroAddr[index]++;
             } else {
-                // bin overflow: original spills these to a CPU pass. Here they
-                // are dropped and excluded from the CPU reference so the GPU
-                // result (bins only) still verifies. Keep density near ~7/bin
-                // to keep this small.
+                // Bin at capacity. The original spilled such atoms to a CPU
+                // pass; this port has no spill pass, so an overflow means the
+                // requested problem does not fit the fixed-capacity bins. We do
+                // NOT drop it silently (that would make the GPU compute — and
+                // the bins-only CPU reference verify — a smaller problem than
+                // requested; issue #63, C-02). Overflow is counted and the run
+                // is rejected before any measurement below.
                 num_overflow++;
             }
         } else {
+            // q==0 or geometrically outside the lattice: legitimately not part
+            // of the problem in the original algorithm either (not a drop).
             num_excluded++;
         }
     }
@@ -400,6 +420,25 @@ int main(int argc, char** argv) {
             num_atoms, lattice_dim, h, cutoff,
             binDim.x, binDim.y, binDim.z, BIN_DEPTH, nbrlistlen, num_overflow, num_excluded,
             xRegionDim, yRegionDim, zRegionDim, zRegionDim);
+
+    // Reject before measurement: an overflow means bins cannot hold every
+    // requested atom, so the GPU would compute a silently-truncated problem
+    // that the bins-only reference would still "verify" (issue #63, C-02 /
+    // D-02(b)). Fail loudly instead of recording an invalid measurement.
+    if (num_overflow > 0) {
+        int accepted = num_atoms - num_overflow - num_excluded;
+        fprintf(stderr,
+                "ERROR: %d of %d atoms overflow their bins (BIN_DEPTH=%d; only "
+                "%d accepted). num_atoms=%d is too large for lattice_dim=%d at "
+                "this density. Reduce num_atoms or increase lattice_dim so the "
+                "peak bin occupancy stays <= %d, then re-run.\n",
+                num_overflow, num_atoms, BIN_DEPTH, accepted,
+                num_atoms, lattice_dim, BIN_DEPTH);
+        free(regionZeroAddr);
+        free(binBaseAddr);
+        free(bincntBaseAddr);
+        return EXIT_FAILURE;
+    }
 
     // ---- CUDA kernel launch geometry (verbatim) ----
     dim3 gridDim(xRegionDim, yRegionDim, 1);
@@ -479,7 +518,10 @@ int main(int argc, char** argv) {
         }
     }
 
-    // ---- verification: CPU reference over the atoms actually binned ----
+    // ---- verification: CPU reference over the binned atoms. With the
+    // overflow rejection above, every requested atom (barring q==0/out-of-range
+    // exclusions) is binned, so this reference covers the full problem the GPU
+    // computed — not a silently-truncated subset. ----
     std::vector<float4> binned;
     binned.reserve(num_atoms);
     for (long b = 0; b < nbins * BIN_DEPTH; ++b)

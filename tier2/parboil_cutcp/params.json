@@ -5,34 +5,32 @@
   "description": "Coulombic potential with distance cutoff (CUTCP), cutoff-binning implementation. Atoms are geometrically hashed into a 4 A lattice of bins; the potential lattice is computed in 8^3-point regions where each thread block walks only neighboring bins within the cutoff (constant-memory NbrList stencil) staging bins through shared memory. Faithful port of the Parboil cuda kernel cuda_cutoff_potential_lattice6overlap; emits per-iteration kernel times.",
   "scaling_param": {
     "name": "num_atoms",
-    "description": "Number of charged atoms hashed into the bin lattice. Note: bins have a fixed capacity, so total atom capacity scales with lattice volume; at small lattice_dim (e.g. 64) the lattice saturates around ~46,656 atoms and higher num_atoms values silently drop the excess (near-identical work). The default lattice_dim=144 has ~11x more capacity and does not saturate within this range.",
+    "description": "Number of charged atoms hashed into the fixed-capacity (BIN_DEPTH=16) bin lattice. Bins have a fixed depth, so peak per-bin occupancy must stay <= BIN_DEPTH or the run is rejected before measurement (an overflow would otherwise compute and verify a silently-truncated problem). Values are capped so every point scales real work at the default lattice_dim=144 (peak occupancy stays within BIN_DEPTH across the full range, ~1..8 atoms/bin mean); larger lattice_dim values raise the ceiling. See issue #63 C-02/D-02(b).",
     "type": "int",
     "values": [
       5000,
-      10000,
-      15000,
+      8000,
+      12000,
+      16000,
       20000,
+      25000,
       30000,
+      35000,
       40000,
-      50000,
-      75000,
-      100000,
-      150000,
-      200000
+      45000
     ]
   },
   "non_scaling_params": [
     {
       "name": "lattice_dim",
-      "description": "Potential-lattice side length (nx=ny=nz, multiple of 8)",
+      "description": "Potential-lattice side length (nx=ny=nz, multiple of 8). Larger dims spread the fixed atom count over more bins, lowering peak occupancy. Values are constrained to >=144 so the full num_atoms sweep (up to 45000) stays within the fixed BIN_DEPTH at every lattice_dim; smaller lattices (64/96/128) overflow at these atom counts and are excluded (issue #63, D-02(b)).",
       "type": "int",
       "default": 144,
       "values": [
-        64,
-        96,
-        128,
         144,
-        192
+        160,
+        192,
+        256
       ]
     },
     {

@@ -200,6 +200,11 @@ latency-limited issue stream rather than peak device tensor throughput.
 Unsupported combinations must fail before measurement or be removed conditionally from the
 sweep. Platform-correct wave size, accumulator type, and throughput semantics should be explicit.
 
+> **Resolved (2026-07-14):** the `tensor_core_throughput` benchmark was removed from the suite
+> entirely (issue #63, B-05 / D-02(a)). The unsupported-config and wave-size problems no longer
+> apply. A future tensor/matrix-throughput benchmark, if added, must handle wave32/wave64
+> populations and fail unsupported precisions before measurement.
+
 ### B-06 — Major — Atomic cases primarily measure failed or compiler-transformed paths
 
 `tier1/atomic_operations/atomic_operations.hip:67-86` resets the counter to zero before

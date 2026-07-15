@@ -13,7 +13,6 @@ tier1/memory_bandwidth/memory_bandwidth
 tier1/mixbench/mixbench
 tier1/pcie_bandwidth/pcie_bandwidth
 tier1/shared_mem_bandwidth/shared_mem_bandwidth
-tier1/tensor_core_throughput/tensor_core_throughput
 tier1/warp_shuffle/warp_shuffle
 tier2/*/*
 !tier2/*/Makefile

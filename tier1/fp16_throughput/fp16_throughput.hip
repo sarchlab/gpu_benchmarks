@@ -79,8 +79,16 @@ __global__ void fp16_fma_kernel(__half2 *out, int fmas_per_thread)
     __half2 a2 = __float2half2_rn(base + 0.2f);
     __half2 a3 = __float2half2_rn(base + 0.3f);
 
-    const __half2 mul = __float2half2_rn(1.0000001f);
-    const __half2 add = __float2half2_rn(0.0000001f);
+    // The multiplier must be a representable FP16 value != 1.0. 1.0000001f
+    // rounds to exactly 1.0 in FP16 (the ULP near 1.0 is 2^-10 ~= 9.8e-4), so
+    // a*mul+add would fold to `a` and the optimizer could delete the whole
+    // loop. mul = 1 - 2^-10 and add = 2^-10 are both exactly representable and
+    // make a <- mul*a + add a contraction toward the fixed point
+    // add/(1-mul) = 1.0: the accumulators stay bounded for any sweep length
+    // (no overflow to inf, no subnormal flush) while every iteration still
+    // issues a genuine __hfma2.
+    const __half2 mul = __float2half2_rn(0.9990234375f);  // 1 - 2^-10
+    const __half2 add = __float2half2_rn(0.0009765625f);  // 2^-10
 
     for (int i = 0; i < fmas_per_thread; i += 4) {
         a0 = __hfma2(a0, mul, add);

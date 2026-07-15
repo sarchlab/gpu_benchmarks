@@ -86,9 +86,14 @@ __global__ void int32_mad_kernel(unsigned *out, int mads_per_thread,
         a3 = a3 * mul + add;
     }
 
-    if (blockIdx.x == 0 && threadIdx.x == 0) {
-        *out = a0 + a1 + a2 + a3;
-    }
+    // Store one checksum per global thread (not just thread 0) so every
+    // launched thread's MAD chain is observable. A single guarded write would
+    // let the optimizer treat the other threads' recurrences as dead and
+    // eliminate them, undercounting the work the grid reports. The write is a
+    // single store after the timed loop, negligible next to the per-thread MAD
+    // chain.
+    const unsigned tid = blockIdx.x * blockDim.x + threadIdx.x;
+    out[tid] = a0 + a1 + a2 + a3;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,8 +140,10 @@ int main(int argc, char *argv[])
            num_blocks * threads_per_block);
     fprintf(stderr, "MADs / thread   : %d\n\n", mads_per_thread);
 
+    const size_t total_threads =
+        static_cast<size_t>(num_blocks) * threads_per_block;
     unsigned *d_out = nullptr;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(unsigned)));
+    HIP_CHECK(hipMalloc(&d_out, total_threads * sizeof(unsigned)));
 
     // Numerical Recipes LCG constants, supplied at runtime so the multiply is a
     // genuine hardware IMAD (see kernel comment).

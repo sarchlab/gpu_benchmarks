@@ -97,9 +97,14 @@ __global__ void fp16_fma_kernel(__half2 *out, int fmas_per_thread)
         a3 = __hfma2(a3, mul, add);
     }
 
-    if (blockIdx.x == 0 && threadIdx.x == 0) {
-        *out = __hadd2(__hadd2(a0, a1), __hadd2(a2, a3));
-    }
+    // Store one checksum per global thread (not just thread 0) so every
+    // launched thread's accumulator chain is observable. A single guarded
+    // write would let the optimizer treat the other threads' recurrences as
+    // dead and eliminate them, undercounting the work the grid reports. The
+    // write is a single store after the timed loop, negligible next to the
+    // per-thread FMA chain.
+    const unsigned tid = blockIdx.x * blockDim.x + threadIdx.x;
+    out[tid] = __hadd2(__hadd2(a0, a1), __hadd2(a2, a3));
 }
 
 // ---------------------------------------------------------------------------
@@ -145,8 +150,10 @@ int main(int argc, char *argv[])
            num_blocks * threads_per_block);
     fprintf(stderr, "FMAs / thread   : %d  (__hfma2, 4 FLOPs each)\n\n", fmas_per_thread);
 
+    const size_t total_threads =
+        static_cast<size_t>(num_blocks) * threads_per_block;
     __half2 *d_out = nullptr;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(__half2)));
+    HIP_CHECK(hipMalloc(&d_out, total_threads * sizeof(__half2)));
 
     char params[160];
     snprintf(params, sizeof(params),

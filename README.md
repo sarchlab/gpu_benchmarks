@@ -18,7 +18,7 @@ The suite is designed to cover the widest possible diversity of GPU compute and 
 
 ## Overview
 
-This suite contains **126 benchmarks across five tiers** of increasing complexity and scope, allowing researchers and engineers to evaluate GPU hardware and software stacks at every level — from raw memory bandwidth to end-to-end ML training throughput.
+This suite contains **125 benchmarks across five tiers** of increasing complexity and scope, allowing researchers and engineers to evaluate GPU hardware and software stacks at every level — from raw memory bandwidth to end-to-end ML training throughput.
 
 ---
 
@@ -109,7 +109,7 @@ Each benchmark declares its parameters in `params.json`; the sweep is structured
 gpu_benchmarks/
 ├── Makefile                        # Root build file
 ├── README.md                       # This file
-├── tier1/                          # Microbenchmarks (14)
+├── tier1/                          # Microbenchmarks (13)
 │   ├── Makefile
 │   ├── memory_bandwidth/
 │   ├── fp32_throughput/
@@ -119,7 +119,6 @@ gpu_benchmarks/
 │   ├── cache_latency/
 │   ├── cache_bandwidth/
 │   ├── pcie_bandwidth/
-│   ├── tensor_core_throughput/
 │   ├── mixbench/
 │   ├── shared_mem_bandwidth/
 │   ├── atomic_operations/
@@ -267,7 +266,6 @@ gpu_benchmarks/
 | `int32_throughput` | GIOPS | Integer INT32 multiply-add throughput (single SM/CU) |
 | `cache_latency` | ns | L1/L2/global cache latency via pointer-chasing |
 | `pcie_bandwidth` | GB/s | PCIe/Thunderbolt host-device transfer bandwidth |
-| `tensor_core_throughput` | TFLOPS | Tensor core / matrix FMA throughput |
 | `mixbench` | GFLOPS/GB/s | Compute-memory roofline sweep |
 | `shared_mem_bandwidth` | GB/s | Shared/threadgroup memory bandwidth (single SM/CU) |
 | `atomic_operations` | Gops/s | Atomic operation throughput (Add/CAS/Min) |

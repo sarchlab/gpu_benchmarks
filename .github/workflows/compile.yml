@@ -9,8 +9,15 @@ on:
 jobs:
   compile-cuda:
     name: Compile (CUDA)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     container: nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04
+    env:
+      # The shared runner has no GPU, so nvcc's `-arch=native` cannot detect a
+      # card and falls back to a default arch below sm_53, where FP16 intrinsics
+      # like __hfma2 are undefined. Pin to sm_90 (H100) — the arch `native`
+      # resolves to on the self-hosted GPU runner — so the compile check matches
+      # the real target. Every benchmark Makefile honors CUDA_ARCH (?= native).
+      CUDA_ARCH: sm_90
     steps:
       - name: Install dependencies
         run: |

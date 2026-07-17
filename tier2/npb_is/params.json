@@ -2,7 +2,7 @@
   "benchmark": "npb_is",
   "tier": 2,
   "suite": "npb",
-  "description": "NAS Parallel Benchmarks Integer Sort: parallel bucket sort of N random integers. Three-phase: histogram, prefix-sum scan, scatter. NUM_BUCKETS=1024.",
+  "description": "NAS Parallel Benchmarks Integer Sort (faithful port): 10 rank() iterations over near-gaussian randlc keys; each iteration perturbs two keys, histograms the full [0,MAX_KEY) range, and computes ranks with an inclusive scan. Class sizes S/W/A/B/C use published MAX_KEY and verification tables; other sizes use MAX_KEY=size/16. Default size is Class A.",
   "scaling_param": {
     "name": "size",
     "description": "Number of integer keys to sort",
@@ -59,8 +59,11 @@
     }
   ],
   "kernels": [
+    "modify_keys_kernel",
+    "clear_kernel",
     "histogram_kernel",
-    "prefix_sum_kernel",
-    "scatter_kernel"
+    "scan_blocks_kernel",
+    "scan_sums_kernel",
+    "scan_add_kernel"
   ]
 }

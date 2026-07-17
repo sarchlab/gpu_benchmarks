@@ -1,30 +1,68 @@
 # tier2/npb_is — Integer Sort (NAS IS)
 
-Benchmarks a **parallel bucket sort** of N random integers in range [0, 2¹⁹). The sort runs exactly once per execution and emits raw per-kernel times; throughput (Mkeys/sec) is derived downstream.
+Faithful GPU port of the **NAS Parallel Benchmarks IS** (Integer Sort) kernel:
+ten `rank()` iterations over near-gaussian keys, computing the rank of every
+key with a full-key-range counting sort. The workload runs exactly once per
+execution and emits raw per-kernel times accumulated across the ten
+iterations; keys-ranked/sec is derived downstream.
 
 ## Provenance & fidelity
 
-Derived from the [NAS Parallel Benchmarks](https://www.nas.nasa.gov/software/npb.html) — the `IS` (Integer Sort) kernel. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+Ported from the [NAS Parallel Benchmarks](https://www.nas.nasa.gov/software/npb.html)
+IS benchmark; reference source is the NPB 2.3/3.0 serial C `is.c`
+(M. Yarrow, OpenMP C version S. Satoh), non-bucket variant. The upstream
+algorithm is preserved exactly:
 
-- Generic one-pass bucket sort vs NPB IS's 10 ranking iterations over gaussian-distributed keys.
+- **Key model**: keys generated with NPB's 46-bit `randlc` LCG
+  (seed 314159265, multiplier 1220703125); each key is `MAX_KEY/4` times the
+  sum of four uniform draws — the benchmark's defining near-gaussian
+  distribution.
+- **Iteration structure**: 10 timed `rank(iteration)` calls; each first sets
+  `key_array[iteration] = iteration` and
+  `key_array[iteration+10] = MAX_KEY - iteration`, then re-ranks all keys.
+- **Ranking**: clear the `MAX_KEY`-wide work array, histogram every key over
+  the full `[0, MAX_KEY)` range (copying the keys into `key_buff2` in the
+  same pass, as upstream does), then an inclusive prefix sum yields each
+  key's rank.
+- **Verification**: per-iteration partial verification of five test-key
+  ranks, and an untimed `full_verify` (rank-directed permutation +
+  sortedness check) after the timed loop. One untimed `rank(1)` precedes the
+  timed loop (upstream's "free" iteration).
 
-Read this as "an integer-sort benchmark in the spirit of NPB," not NPB's `IS`.
+GPU-mapping departures (re-parallelizations of the same algorithm, permitted
+under methodology Rule 1):
 
-## Algorithm
+- The `MAX_KEY`-wide inclusive scan is decomposed into three kernels
+  (per-block Blelloch scan → block-sum scan → offset add).
+- The per-iteration two-key perturbation is a one-thread kernel.
+- Partial-verify comparisons run on the host (five 4-byte device-to-host
+  reads per iteration, untimed).
+- Upstream's optional `USE_BUCKETS` cache optimization is not used (matching
+  the reference's default).
 
-- **N** random integer keys (default: N=8,388,608 = 2²³) in range [0, 524,288 = 2¹⁹)
-- **NUM_BUCKETS** = 1,024 (2¹⁰), each covering a range of 512 key values
-- Three phases:
-  1. **Histogram** — count keys per bucket (atomic increments)
-  2. **Prefix sum** — exclusive scan on the histogram (Blelloch algorithm, single threadgroup)
-  3. **Scatter** — place each key at its sorted position (atomic offset increment)
-- Result: keys sorted by bucket (bucket-level ordering)
+## Problem sizes
+
+`size` (the number of keys, N) is the scaling parameter. The NPB class sizes
+map exactly to published configurations:
+
+| Class | size (N) | MAX_KEY |
+|-------|----------|---------|
+| S | 65,536 = 2¹⁶ | 2¹¹ |
+| W | 1,048,576 = 2²⁰ | 2¹⁶ |
+| A | 8,388,608 = 2²³ (default) | 2¹⁹ |
+| B | 33,554,432 = 2²⁵ | 2²¹ |
+| C | 134,217,728 = 2²⁷ | 2²³ |
+
+At class sizes the published partial-verification tables are checked in
+addition to the host mirror. Non-class sizes use `MAX_KEY = N/16` (the
+W/A/B/C ratio) with test positions derived from the Class A indices modulo
+N; expected ranks then come from the host mirror alone.
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `npb_is.hip` | HIP source — histogram, prefix sum, and scatter kernels |
+| `npb_is.hip` | HIP source — rank kernels + host mirror/verification |
 | `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
 | `params.json` | Parameter specification |
 
@@ -39,51 +77,70 @@ make PLATFORM=rocm
 ## Run
 
 ```bash
-./npb_is                              # defaults: N=8388608
-./npb_is --size 1048576               # smaller workload
+./npb_is                              # default: Class A (N=8388608)
+./npb_is --size 1048576               # Class W
 BENCH_PARAM_size=1048576 ./npb_is     # env vars override argv
 ```
 
-Environment variables: `BENCH_PARAM_size` (default 8388608), `BENCH_PARAM_block_size`
-(default 256), and `BENCH_PARAM_vector_add_warmup` (default true — cold-cache
-calibration: boosts the clock and evicts the LLC before the timed sort).
+Environment variables: `BENCH_PARAM_size` (default 8388608),
+`BENCH_PARAM_block_size` (default 256; must be a power of two ≥ 32), and
+`BENCH_PARAM_vector_add_warmup` (default true — cold-cache calibration:
+boosts the clock and evicts the LLC after the untimed `rank(1)` and before
+the timed loop).
 
-`BENCH_PARAM_verify=false` (also `0`/`skip`) skips CPU verification — an
-undeclared debug knob, not a sweep parameter in `params.json`.
+`BENCH_PARAM_verify=false` (also `0`/`skip`) skips all verification (the
+host mirror, per-iteration partial verify, and `full_verify`) — an
+undeclared debug knob, not a sweep parameter in `params.json`. The GPU work
+is identical either way.
 
 ## Output
 
-**stdout** — JSON lines: for the single timed sort, one kernel record per phase
-(histogram, prefix sum, scatter) with that phase's GPU event time
-(`time_ms`) and host wall-clock time (`host_time_ms`), then a summary whose
-`total_time_ms` is the sum of the three GPU event times. The histogram reset
-and the 4 KB device-to-device offset copy are untimed:
+**stdout** — JSON lines: one kernel record per rank-phase kernel
+(`modify_keys_kernel`, `clear_kernel`, `histogram_kernel`,
+`scan_blocks_kernel`, `scan_sums_kernel`, `scan_add_kernel`), each carrying
+that kernel's GPU event time (`time_ms`) and host time (`host_time_ms`)
+**accumulated across the 10 timed rank iterations**, then a summary whose
+`total_time_ms` is the sum of the six accumulated GPU event times:
 ```
-{"type":"kernel","name":"histogram_kernel","iter":0,"time_ms":1.523400,"host_time_ms":1.580000,"params":{"size":8388608,"block_size":256}}
-{"type":"kernel","name":"prefix_sum_kernel","iter":0,"time_ms":0.041200,"host_time_ms":0.058000,"params":{...}}
-{"type":"kernel","name":"scatter_kernel","iter":0,"time_ms":3.558800,"host_time_ms":3.610000,"params":{...}}
-{"type":"summary","total_time_ms":5.123400}
+{"type":"kernel","name":"modify_keys_kernel","iter":0,"time_ms":0.021,"host_time_ms":0.19,"params":{"size":8388608,"block_size":256}}
+{"type":"kernel","name":"clear_kernel","iter":0,"time_ms":0.11,"host_time_ms":0.24,"params":{...}}
+{"type":"kernel","name":"histogram_kernel","iter":0,"time_ms":14.9,"host_time_ms":15.1,"params":{...}}
+{"type":"kernel","name":"scan_blocks_kernel","iter":0,"time_ms":0.33,"host_time_ms":0.45,"params":{...}}
+{"type":"kernel","name":"scan_sums_kernel","iter":0,"time_ms":0.09,"host_time_ms":0.21,"params":{...}}
+{"type":"kernel","name":"scan_add_kernel","iter":0,"time_ms":0.18,"host_time_ms":0.30,"params":{...}}
+{"type":"summary","total_time_ms":15.63}
 ```
 
-Derived metrics such as Mkeys/sec are computed downstream from `time_ms` and
-the params.
+Derived metrics such as Mkeys-ranked/sec (upstream reports
+`MAX_ITERATIONS * N / time`) are computed downstream from `time_ms` and the
+params.
 
 **stderr** — human-readable results:
 ```
-Device: AMD Radeon RX 7900 XTX (id=0)
-IS keys: 8388608 (2^23)  |  Buckets: 1024
+Device: NVIDIA H100 (id=0)
+NAS IS: 8388608 keys (2^23), MAX_KEY=524288, 10 iterations  [Class A]
 
-histogram gpu = 1.523 ms, prefix_sum gpu = 0.041 ms, scatter gpu = 3.559 ms
-Total GPU time: 5.123 ms
-PASS
+modify gpu = 0.021 ms, clear gpu = 0.110 ms, histogram gpu = 14.900 ms,
+scan_blocks gpu = 0.330 ms, scan_sums gpu = 0.090 ms, scan_add gpu = 0.180 ms
+Total GPU time: 15.631 ms
+Verification: 50/50 partial + full_verify ok + rank array ok => PASS
 ```
 
 ## Verification
 
-- Checks that the sorted output is non-decreasing at bucket boundaries (bucket-ordered)
-- Each key's bucket index = key / (MAX_KEY / NUM_BUCKETS); consecutive elements must have non-decreasing bucket indices
-- On FAIL the binary exits with a non-zero status
+- **Partial verify** (per timed iteration): the ranks of five test keys are
+  read back and compared against a bit-exact host mirror of the upstream
+  serial algorithm; at class sizes the mirror is additionally cross-checked
+  against the published NPB `test_rank_array` tables (with the upstream
+  per-class iteration shifts).
+- **full_verify** (untimed, after the timed loop): the device's rank array
+  permutes the device's key copy exactly as upstream
+  (`key_array[--rank[key]] = key`); the result must be fully sorted. The
+  device rank array is also compared bit-for-bit against the host mirror.
+- Upstream's acceptance criterion (5 × 10 partial verifications + full
+  verify all passing) must hold; on failure the binary exits non-zero.
 
 ## Platform Notes
 
-- **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `npb_is.hip`; three kernel launches per sort (histogram + prefix sum + scatter)
+- **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `npb_is.hip`; six kernel
+  launches per rank iteration, 10 timed iterations per run.

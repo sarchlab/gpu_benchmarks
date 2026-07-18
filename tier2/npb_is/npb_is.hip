@@ -28,9 +28,11 @@
 //   - The MAX_KEY-wide inclusive scan is decomposed into three kernels
 //     (per-block scan, block-sum scan, offset add).
 //   - The per-iteration key perturbation is a 1-thread kernel.
-//   - Partial-verify comparisons run on the host (five 4-byte D2H reads per
-//     iteration, untimed); upstream's USE_BUCKETS cache optimization is not
-//     used (matching the reference's default).
+//   - Partial-verify expected ranks are precomputed on the host before the
+//     timed loop; each iteration's five device ranks are captured by a tiny
+//     untimed kernel and compared on the host after the loop, so no host
+//     work separates the measured kernels. Upstream's USE_BUCKETS cache
+//     optimization is not used (matching the reference's default).
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
@@ -320,6 +322,26 @@ __global__ void scan_add_kernel(int* data, const int* block_sums, int n) {
 }
 
 // ---------------------------------------------------------------------------
+// Kernel: capture the current iteration's test-key ranks into a device
+// buffer. Verification-only; runs untimed inside the timed loop (a handful
+// of device reads, so it keeps the GPU busy rather than pausing it) so the
+// comparison can happen on the host after the timed section without letting
+// the device clock drop between measured iterations. cap_idx[slot] is the
+// rank-array index to sample, or -1 for an out-of-range test key.
+// ---------------------------------------------------------------------------
+
+__global__ void capture_ranks_kernel(const int* __restrict__ key_buff1,
+                                     const int* __restrict__ cap_idx,
+                                     int* __restrict__ cap_out,
+                                     int base, int count) {
+    int i = threadIdx.x;
+    if (i < count) {
+        int idx = cap_idx[base + i];
+        cap_out[base + i] = (idx >= 0) ? key_buff1[idx] : 0;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Host mirror of upstream serial rank(): perturb keys, capture the test
 // values, histogram, inclusive scan. Used as the verification reference for
 // every size (and cross-checked against the published tables at class sizes).
@@ -439,6 +461,23 @@ int main(int argc, char** argv) {
 
     HIP_CHECK(hipMemcpy(d_key_array, h_keys, keysBytes, hipMemcpyHostToDevice));
 
+    // Verification capture buffers. The partial-verification expected ranks
+    // and the device-array indices to sample are computed up front (below,
+    // before the timed loop); during the timed loop a tiny untimed kernel
+    // copies each iteration's five device ranks into d_capture, and the
+    // host/device comparison runs only after the timed section. This keeps
+    // all O(N + MAX_KEY) host mirror work and every synchronizing readback
+    // out of the measured run, so the timed kernels are never separated by a
+    // host pause that could let the device clock droop.
+    const int NCAP = MAX_ITERATIONS * TEST_ARRAY_SIZE;   // 50
+    int* cap_idx_host  = (int*)malloc(NCAP * sizeof(int));  // rank index or -1
+    int* cap_expected  = (int*)malloc(NCAP * sizeof(int));  // host-mirror rank
+    int* cap_host      = (int*)malloc(NCAP * sizeof(int));  // device readback
+    int* d_cap_idx;
+    int* d_capture;
+    HIP_CHECK(hipMalloc(&d_cap_idx,  NCAP * sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_capture,  NCAP * sizeof(int)));
+
     char params[128];
     snprintf(params, sizeof(params),
              "\"size\":%d,\"block_size\":%d", N, block_size);
@@ -495,50 +534,65 @@ int main(int argc, char** argv) {
     run_rank(1, false);
     HIP_CHECK(hipDeviceSynchronize());
 
+    // Precompute partial-verification data BEFORE the timed loop (all host
+    // work, outside the measured run). Running the host mirror for each
+    // iteration in sequence tracks the same cumulative key perturbation the
+    // device performs, so ref_buff/h_keys are left in the iteration-10 state
+    // that full_verify below expects. For each of the 50 test keys we store
+    // the rank-array index to sample on the device (or -1 when out of
+    // upstream's range guard) and the expected rank; class sizes also
+    // cross-check the mirror against the published NPB tables here.
+    int pv_attempted = 0, pv_passed = 0;
+    bool tables_ok = true;
+    int pv_vals[TEST_ARRAY_SIZE];
+    if (do_verify) {
+        for (int iteration = 1; iteration <= MAX_ITERATIONS; ++iteration) {
+            ref_rank(h_keys, ref_buff, N, max_key, iteration, test_index,
+                     pv_vals);
+            for (int i = 0; i < TEST_ARRAY_SIZE; ++i) {
+                int slot = (iteration - 1) * TEST_ARRAY_SIZE + i;
+                int k = pv_vals[i];
+                if (!(0 < k && k <= N - 1)) {   // upstream range guard
+                    cap_idx_host[slot] = -1;
+                    cap_expected[slot] = 0;
+                    continue;
+                }
+                cap_idx_host[slot] = k - 1;
+                cap_expected[slot] = ref_buff[k - 1];
+                pv_attempted++;
+                if (klass) {
+                    int pub = published_expected(klass->cls, i, iteration,
+                                                 klass->test_rank[i]);
+                    if (cap_expected[slot] != pub) {
+                        fprintf(stderr,
+                                "Published-table mismatch: iteration %d, test "
+                                "key %d (mirror %d, published %d)\n",
+                                iteration, i, cap_expected[slot], pub);
+                        tables_ok = false;
+                    }
+                }
+            }
+        }
+        HIP_CHECK(hipMemcpy(d_cap_idx, cap_idx_host, NCAP * sizeof(int),
+                            hipMemcpyHostToDevice));
+    }
+
     /* Cold-cache calibration: evict the LLC (and hold the clock high) so the
      * timed run's first kernel launch runs cold. No-op when
      * BENCH_PARAM_vector_add_warmup is disabled. */
     bench_pass_warm();
 
-    // Timed main loop: 10 rank iterations (upstream's timed section).
-    // Partial verification per iteration runs on the host, untimed, against
-    // the bit-exact host mirror (and published NPB tables at class sizes);
-    // it reads back five 4-byte rank values per iteration.
-    int pv_attempted = 0, pv_passed = 0;
-    bool tables_ok = true;
-    int pv_vals[TEST_ARRAY_SIZE];
+    // Timed main loop: 10 rank iterations (upstream's timed section). When
+    // verifying, each iteration's five device ranks are captured by a tiny
+    // untimed kernel (no host work between timed kernels); the readback and
+    // comparison happen once, after the loop.
     for (int iteration = 1; iteration <= MAX_ITERATIONS; ++iteration) {
         run_rank(iteration, true);
-
-        if (!do_verify) continue;
-        ref_rank(h_keys, ref_buff, N, max_key, iteration, test_index, pv_vals);
-        for (int i = 0; i < TEST_ARRAY_SIZE; ++i) {
-            int k = pv_vals[i];
-            if (!(0 < k && k <= N - 1)) continue;   // upstream range guard
-            pv_attempted++;
-            int dev_rank;
-            HIP_CHECK(hipMemcpy(&dev_rank, d_key_buff1 + (k - 1), sizeof(int),
-                                hipMemcpyDeviceToHost));
-            int expected = ref_buff[k - 1];
-            if (dev_rank == expected) {
-                pv_passed++;
-            } else {
-                fprintf(stderr,
-                        "Failed partial verification: iteration %d, test key "
-                        "%d (got %d, want %d)\n",
-                        iteration, i, dev_rank, expected);
-            }
-            if (klass) {
-                int pub = published_expected(klass->cls, i, iteration,
-                                             klass->test_rank[i]);
-                if (expected != pub) {
-                    fprintf(stderr,
-                            "Published-table mismatch: iteration %d, test key "
-                            "%d (mirror %d, published %d)\n",
-                            iteration, i, expected, pub);
-                    tables_ok = false;
-                }
-            }
+        if (do_verify) {
+            int base = (iteration - 1) * TEST_ARRAY_SIZE;
+            capture_ranks_kernel<<<dim3(1), dim3(TEST_ARRAY_SIZE)>>>(
+                d_key_buff1, d_cap_idx, d_capture, base, TEST_ARRAY_SIZE);
+            HIP_CHECK(hipGetLastError());
         }
     }
 
@@ -569,6 +623,24 @@ int main(int argc, char** argv) {
     // -------------------------------------------------------------------
     bool verify_ok = true;
     if (do_verify) {
+        // Partial verification: compare the captured device ranks against the
+        // precomputed host-mirror expectations (readback happens here, after
+        // the timed loop, not between measured iterations).
+        HIP_CHECK(hipMemcpy(cap_host, d_capture, NCAP * sizeof(int),
+                            hipMemcpyDeviceToHost));
+        for (int slot = 0; slot < NCAP; ++slot) {
+            if (cap_idx_host[slot] < 0) continue;   // out-of-range test key
+            if (cap_host[slot] == cap_expected[slot]) {
+                pv_passed++;
+            } else {
+                fprintf(stderr,
+                        "Failed partial verification: iteration %d, test key "
+                        "%d (got %d, want %d)\n",
+                        slot / TEST_ARRAY_SIZE + 1, slot % TEST_ARRAY_SIZE,
+                        cap_host[slot], cap_expected[slot]);
+            }
+        }
+
         int* h_rank   = (int*)malloc(rankBytes);
         int* h_kb2    = (int*)malloc(keysBytes);
         int* h_sorted = (int*)malloc(keysBytes);
@@ -613,8 +685,13 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipFree(d_key_buff1));
     HIP_CHECK(hipFree(d_key_buff2));
     HIP_CHECK(hipFree(d_block_sums));
+    HIP_CHECK(hipFree(d_cap_idx));
+    HIP_CHECK(hipFree(d_capture));
     free(h_keys);
     free(ref_buff);
+    free(cap_idx_host);
+    free(cap_expected);
+    free(cap_host);
 
     return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -35,8 +35,11 @@ under methodology Rule 1):
 - The `MAX_KEY`-wide inclusive scan is decomposed into three kernels
   (per-block Blelloch scan → block-sum scan → offset add).
 - The per-iteration two-key perturbation is a one-thread kernel.
-- Partial-verify comparisons run on the host (five 4-byte device-to-host
-  reads per iteration, untimed).
+- Partial-verify expected ranks are precomputed on the host before the timed
+  loop; each iteration's five device ranks are captured by a tiny untimed
+  kernel and compared on the host after the loop. No host work runs between
+  the measured kernels, so verification does not perturb the timing (see
+  Verification below).
 - Upstream's optional `USE_BUCKETS` cache optimization is not used (matching
   the reference's default).
 
@@ -89,9 +92,12 @@ boosts the clock and evicts the LLC after the untimed `rank(1)` and before
 the timed loop).
 
 `BENCH_PARAM_verify=false` (also `0`/`skip`) skips all verification (the
-host mirror, per-iteration partial verify, and `full_verify`) — an
-undeclared debug knob, not a sweep parameter in `params.json`. The GPU work
-is identical either way.
+host mirror, partial verify, and `full_verify`) — an undeclared debug knob,
+not a sweep parameter in `params.json`. The six measured kernels and the
+work between them are unchanged either way: with verification on, the only
+in-loop addition is a tiny untimed capture kernel per iteration (device-side,
+so it never pauses the measured kernels), and all host comparison happens
+before and after the timed loop.
 
 ## Output
 
@@ -128,11 +134,15 @@ Verification: 50/50 partial + full_verify ok + rank array ok => PASS
 
 ## Verification
 
-- **Partial verify** (per timed iteration): the ranks of five test keys are
-  read back and compared against a bit-exact host mirror of the upstream
-  serial algorithm; at class sizes the mirror is additionally cross-checked
-  against the published NPB `test_rank_array` tables (with the upstream
-  per-class iteration shifts).
+- **Partial verify** (five test keys × 10 iterations): expected ranks come
+  from a bit-exact host mirror of the upstream serial algorithm, computed
+  before the timed loop; the device ranks are captured during the loop by an
+  untimed kernel and compared after it. At class sizes the mirror is
+  additionally cross-checked against the published NPB `test_rank_array`
+  tables (with the upstream per-class iteration shifts). Because the
+  expensive host mirror and all readbacks sit outside the timed section, the
+  measured kernels are never separated by a host pause that could let the GPU
+  clock droop.
 - **full_verify** (untimed, after the timed loop): the device's rank array
   permutes the device's key copy exactly as upstream
   (`key_array[--rank[key]] = key`); the result must be fully sorted. The

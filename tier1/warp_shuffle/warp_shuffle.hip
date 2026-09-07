@@ -139,12 +139,13 @@ typedef void (*KernelFunc)(int *, int);
 static double run_benchmark(const char *kernel_name,
                             KernelFunc kernel, int *d_out,
                             int ops_per_thread, int num_blocks,
-                            int threads_per_block)
+                            int threads_per_block, const char *shuffle_variant)
 {
     char params[160];
     snprintf(params, sizeof(params),
-             "\"ops_per_thread\":%d,\"num_blocks\":%d,\"threads_per_block\":%d",
-             ops_per_thread, num_blocks, threads_per_block);
+             "\"ops_per_thread\":%d,\"num_blocks\":%d,\"threads_per_block\":%d,"
+             "\"shuffle_variant\":\"%s\"",
+             ops_per_thread, num_blocks, threads_per_block, shuffle_variant);
 
     return bench_run_once(kernel_name, params, [&]() {
         kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(d_out,
@@ -217,25 +218,29 @@ int main(int argc, char *argv[])
     if (run_xor) {
         total_gpu_ms += run_benchmark("shfl_xor_kernel",
                                       (KernelFunc)shfl_xor_kernel, d_out,
-                                      ops_per_thread, num_blocks, threads_per_block);
+                                      ops_per_thread, num_blocks, threads_per_block,
+                                      shuffle_variant);
     }
 
     if (run_basic) {
         total_gpu_ms += run_benchmark("shfl_kernel",
                                       (KernelFunc)shfl_kernel, d_out,
-                                      ops_per_thread, num_blocks, threads_per_block);
+                                      ops_per_thread, num_blocks, threads_per_block,
+                                      shuffle_variant);
     }
 
     if (run_up) {
         total_gpu_ms += run_benchmark("shfl_up_kernel",
                                       (KernelFunc)shfl_up_kernel, d_out,
-                                      ops_per_thread, num_blocks, threads_per_block);
+                                      ops_per_thread, num_blocks, threads_per_block,
+                                      shuffle_variant);
     }
 
     if (run_down) {
         total_gpu_ms += run_benchmark("shfl_down_kernel",
                                       (KernelFunc)shfl_down_kernel, d_out,
-                                      ops_per_thread, num_blocks, threads_per_block);
+                                      ops_per_thread, num_blocks, threads_per_block,
+                                      shuffle_variant);
     }
 
     bench_emit_summary(total_gpu_ms);

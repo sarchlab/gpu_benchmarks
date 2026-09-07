@@ -98,7 +98,7 @@ Human-readable progress goes to stderr; stdout carries JSON lines — one
 record per selected variant (each timed once), plus a final summary:
 
 ```
-{"type":"kernel","name":"shfl_xor_kernel","iter":0,"time_ms":2.469123,"host_time_ms":2.561234,"params":{"ops_per_thread":4096,"num_blocks":1,"threads_per_block":256}}
+{"type":"kernel","name":"shfl_xor_kernel","iter":0,"time_ms":2.469123,"host_time_ms":2.561234,"params":{"ops_per_thread":4096,"num_blocks":1,"threads_per_block":256,"shuffle_variant":"all"}}
 {"type":"kernel","name":"shfl_kernel","iter":0,"time_ms":2.513456,"host_time_ms":2.601234,"params":{...}}
 {"type":"kernel","name":"shfl_up_kernel","iter":0,"time_ms":2.578901,"host_time_ms":2.671234,"params":{...}}
 {"type":"kernel","name":"shfl_down_kernel","iter":0,"time_ms":2.491234,"host_time_ms":2.581234,"params":{...}}
@@ -106,6 +106,9 @@ record per selected variant (each timed once), plus a final summary:
 ```
 
 - Each variant that runs emits exactly one record.
+- Every record echoes the requested `shuffle_variant`. For an `all` request,
+  all four records retain `"shuffle_variant":"all"`; the kernel name identifies
+  the operation within that request.
 - `time_ms` is the GPU event time for that launch; `host_time_ms` is the
   host wall-clock around launch + sync.
 - `total_time_ms` is the sum of the emitted records' GPU event times across
@@ -113,6 +116,19 @@ record per selected variant (each timed once), plus a final summary:
 - Gops/s is not printed; it is derived downstream from `time_ms` and params.
 
 ## Parameters
+
+The GPU integration test checks every variant (including `all`) and block size
+at the smallest and largest declared operation counts through the production
+output validator. From the repository root, after building:
+
+```bash
+GPUBENCH_WARP_SHUFFLE_BINARY="$PWD/tier1/warp_shuffle/warp_shuffle" \
+  go test ./cmd/gpubench -run '^TestWarpShuffleOutput$' -count=1
+# Add GPUBENCH_GPU_SWEEP=1 to check every declared operation count.
+```
+
+The test works with CUDA or ROCm binaries and disables the warmer because it
+checks output acceptance, not performance.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|

@@ -1043,14 +1043,11 @@ func cmdRun(args runArgs) int {
 			timeoutSecs = DefaultTraceTimeout
 		}
 
-		// Open DB read-only to discover which configs have successful runs.
-		var dbConfigs map[string]map[string]bool // benchmark -> set of scaling_param_values
-		if _, err := os.Stat(dbPath); err == nil {
-			db, err := sql.Open("sqlite3", dbPath+"?mode=ro")
-			if err == nil {
-				defer db.Close()
-				dbConfigs = loadSuccessfulConfigs(db)
-			}
+		// Read complete successful configurations from the selected dataset.
+		dbConfigs, err := loadTraceGuidance(dbPath)
+		if err != nil {
+			eprintf("Cannot load trace guidance from %s: %v\n", dbPath, err)
+			return ExitDB
 		}
 
 		eprint("=== Trace Collection Mode ===")
@@ -1091,22 +1088,23 @@ func cmdRun(args runArgs) int {
 			spName := b.ScalingParam.Name
 			configs := generateConfigs(b, args.sweepNonScaling, scalingOverride, measurementOverrides)
 
-			// Filter configs to only those with successful DB runs
+			// A success for one variant must not admit another at the same size.
 			if dbConfigs != nil {
-				if benchSet, ok := dbConfigs[b.Benchmark]; ok {
-					var filtered []configPair
-					for _, cfg := range configs {
-						if benchSet[formatValue(cfg.ScalingValue)] {
-							filtered = append(filtered, cfg)
-						}
+				var filtered []configPair
+				for _, cfg := range configs {
+					key, err := requestedTraceConfig(b, cfg)
+					if err != nil {
+						eprintf("Invalid trace configuration for %s: %v\n", b.Benchmark, err)
+						return ExitUsage
 					}
-					skipped := len(configs) - len(filtered)
-					totalDBSkipped += skipped
-					configs = filtered
-				} else {
-					// No successful runs for this benchmark at all
-					totalDBSkipped += len(configs)
-					eprintf("[%3d/%d] tier%d/%s — skipped (no successful runs in DB)\n",
+					if _, ok := dbConfigs[key]; ok {
+						filtered = append(filtered, cfg)
+					}
+				}
+				totalDBSkipped += len(configs) - len(filtered)
+				configs = filtered
+				if len(configs) == 0 {
+					eprintf("[%3d/%d] tier%d/%s — skipped (no matching successful configurations in DB)\n",
 						idx+1, len(benchmarks), b.Tier, b.Benchmark)
 					continue
 				}
@@ -1135,6 +1133,13 @@ func cmdRun(args runArgs) int {
 				configDir := traceConfigDir(spName, cfg.ScalingValue, cfg.NSDict)
 				cfgLabel := filepath.Join(b.Benchmark, configDir)
 				cfgTraceDir := filepath.Join(traceOutput, b.Benchmark, configDir)
+				if dbConfigs != nil {
+					// Key validity and membership were checked before selection.
+					key, _ := requestedTraceConfig(b, cfg)
+					source := dbConfigs[key]
+					eprintf("    %s DB source: session %d, run %d\n",
+						cfgLabel, source.SessionID, source.RunID)
+				}
 
 				retryDetail := ""
 				if args.resumeTrace {
@@ -1633,34 +1638,4 @@ func firstFatalMessage(errs []ErrorResult) string {
 		}
 	}
 	return ""
-}
-
-// loadSuccessfulConfigs queries the DB for all (benchmark, scaling_value)
-// pairs that have at least one successful run. Returns a map of
-// benchmark -> set of scaling_param_value strings.
-func loadSuccessfulConfigs(db *sql.DB) map[string]map[string]bool {
-	rows, err := db.Query(
-		`SELECT DISTINCT benchmark, scaling_param_value
-		 FROM runs WHERE status = 'ok'`)
-	if err != nil {
-		eprintf("Warning: could not query DB for successful configs: %v\n", err)
-		return nil
-	}
-	defer rows.Close()
-
-	result := make(map[string]map[string]bool)
-	count := 0
-	for rows.Next() {
-		var bench, spVal string
-		if err := rows.Scan(&bench, &spVal); err != nil {
-			continue
-		}
-		if result[bench] == nil {
-			result[bench] = make(map[string]bool)
-		}
-		result[bench][spVal] = true
-		count++
-	}
-	eprintf("  Loaded %d successful data points across %d benchmarks from DB\n", count, len(result))
-	return result
 }

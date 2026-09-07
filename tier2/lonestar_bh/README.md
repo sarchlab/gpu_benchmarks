@@ -50,7 +50,47 @@ Environment variables (`BENCH_PARAM_bodies`, `BENCH_PARAM_timesteps`,
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BENCH_PARAM_vector_add_warmup` | true | Cold-cache calibration: boost the clock and evict the LLC before the timed run; set `false` to time as-is |
+| `BENCH_PARAM_vector_add_warmup` | true | Optional clock/cache warmer after initial tree construction/uploads and before the first force kernel; `false` runs as-is |
+
+## Entry policy for the accepted hybrid subset
+
+The initial body uploads, position downloads, CPU quadtree construction and
+flattened-tree uploads complete before the optional warmer. At timestep zero,
+the warmer then runs immediately before the first measured force kernel. This
+conditions entry to one complete simulation. It aims to raise clocks and evict
+the last-level cache; its achieved state requires target qualification.
+
+There is no warmer between force and integration or before later timesteps.
+Later CPU tree builds and transfers can change cache residency and clocks, and
+those gaps remain part of this hybrid execution. They are outside the reported
+GPU event sums. Consequently, later force kernels do not each have a promised
+cold-cache entry, and the summed GPU time is not end-to-end simulation time.
+Within-run reuse is preserved wherever the accepted algorithm allows it.
+
+The accepted identity remains CPU-built 2D quadtree plus GPU force traversal and
+integration. GPU tree construction remains owner-deferred in
+[issue #57](https://github.com/sarchlab/gpu_benchmarks/issues/57); this repair does
+not claim full upstream GPU Barnes–Hut fidelity. The existing separate initial
+force verification remains unchanged (actual measured-trajectory verification
+is R-13). Raw traces include that extra verification force launch; region and
+artifact/replay qualification remain R-23/R-24.
+
+The NVIDIA-only ordering regression uses actual Nsight CUDA timelines:
+
+```sh
+# From the repository root, after building the benchmark:
+python3 tests/bh_entry_order.py --binary tier2/lonestar_bh/lonestar_bh \
+  --work-dir /tmp/bh-entry-check
+```
+
+It requires an NVIDIA GPU, `nsys`, and a new output directory. Four captures cover
+one/multiple timesteps and warmer on/off. The check requires initial body/tree
+copies before the warmer, all timed force/integration launches in order, the
+existing separate verifier launch, and matching event brackets/output records.
+Run with assertions enabled; `-O`/`PYTHONOPTIMIZE` is rejected. Profiler and
+capture failures are recorded; a timeout aborts and can leave a partial report.
+CI does not execute this GPU check. Profiled times do not constitute performance
+results. AMD execution and physical clock/cache qualification remain R-19.
 
 ## Build
 

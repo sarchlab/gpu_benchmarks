@@ -441,11 +441,6 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(d_vy, vy.data(), N * sizeof(float), hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_mass, h_mass.data(), N * sizeof(float), hipMemcpyHostToDevice));
 
-        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
-         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
-         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
-        bench_pass_warm();
-
         for (int t = 0; t < timesteps; ++t) {
             // Copy positions back to CPU for tree build
             HIP_CHECK(hipMemcpy(px.data(), d_px, N * sizeof(float), hipMemcpyDeviceToHost));
@@ -455,6 +450,11 @@ int main(int argc, char** argv) {
             tree.build(N, px.data(), py.data(), h_mass.data());
             int num_nodes = 0;
             upload_tree(tree, &d_tcx, &d_tcy, &d_tmass, &d_tbw, &d_tchild, num_nodes);
+
+            // Condition entry only after the initial CPU tree and uploads are
+            // complete. Later hybrid stages are part of this same simulation;
+            // do not recondition between force/integration kernels or steps.
+            if (t == 0) bench_pass_warm();
 
             // Compute forces on GPU
             bench_lap_add(&acc_force, bench_time_op(&timer, [&]() {

@@ -85,3 +85,12 @@ run `bench_output_test --rank-one N` for an individual declared size. CI compile
 the test; GPU runtime qualification is separate. This checks the restored R-09
 expression and does not claim that ordinary timing runs perform verification
 (R-13).
+
+`bh_entry_order.py` checks actual Barnes–Hut CUDA timelines: initial body/tree
+transfers before the warmer, all force/integration timestep launches with their
+event brackets, and the existing separate verification launch. It requires an
+NVIDIA GPU, `nsys`, a built binary and a new directory. Run
+`python3 tests/bh_entry_order.py --binary tier2/lonestar_bh/lonestar_bh --work-dir /tmp/bh-entry`.
+Assertions must be enabled; optimized Python is rejected. Captures and reports
+are retained; timeouts abort and may leave a partial report. CI does not run this
+functional GPU check, and its profiled timings are not performance results.

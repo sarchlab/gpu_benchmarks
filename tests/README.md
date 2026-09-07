@@ -67,3 +67,11 @@ partial report. CI does not run this GPU check. Profiled times establish orderin
 not performance or a physical cache hit rate. See
 [the benchmark documentation](../tier1/cache_latency/README.md) for interpretation
 and trace-replay requirements.
+
+`shuffle_output_test.hip` checks every output lane of the production Tier 1
+shuffle kernels against closed-form lane origins, including odd/even operation
+counts, both wave boundaries, multiple blocks and guarded output allocations.
+Run `make -C tier1/warp_shuffle PLATFORM=cuda test` (or `PLATFORM=rocm`) on a
+compatible GPU. It uses the selected device's native width. CI compiles the test;
+CUDA and AMD native wave32/wave64 runtime qualification must be recorded
+separately. Correct outputs do not replace target instruction-count checks.

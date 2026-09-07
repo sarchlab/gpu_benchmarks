@@ -1,165 +1,122 @@
-# warp_shuffle — Tier 1 Microbenchmark
+# warp_shuffle — dependent native-wave shuffle chains
 
-## Overview
+Each thread starts with its global integer thread ID and executes
+`ops_per_thread` dependent shuffles. Every thread stores its final value in a
+separate output element. One selected variant runs once per process, producing
+one GPU event time and host launch/synchronization time. Repetitions are fresh
+processes (`gpubench run --reps N`).
 
-`warp_shuffle` measures warp/wave/SIMD shuffle instruction throughput by
-executing a tight chain of shuffle operations on every GPU thread.
+| Variant | Intrinsic | Source lane on each iteration |
+|---------|-----------|-------------------------------|
+| `shfl_xor` | `__shfl_xor(val, 1, warpSize)` | Lane XOR 1 |
+| `shfl` | `__shfl(val, (threadIdx.x ^ 1) % warpSize, warpSize)` | Same pair exchange, using the indexed intrinsic |
+| `shfl_up` | `__shfl_up(val, 1, warpSize)` | Previous lane; lane 0 retains its value |
+| `shfl_down` | `__shfl_down(val, 1, warpSize)` | Next lane; the last lane retains its value |
 
-Each thread performs `ops_per_thread` shuffle operations in a dependency
-chain (each shuffle uses the result of the previous one). The binary emits
-raw kernel times; the shuffle rate in Giga-Operations per second is derived
-downstream from each record's `time_ms` and params:
+XOR and indexed cases have the same data dependency but exercise different
+intrinsics. Up/down values propagate toward a boundary and eventually become
+uniform within a wave. A boundary lane returning its own value still invokes
+the intrinsic; a counted shuffle does not imply a distinct useful exchange.
+The generated instruction sequence and active-lane counts require qualification
+for each compiler/target. A source dependency alone is not proof that every
+instruction survives optimization.
 
-```
-Gops = (num_threads × ops_per_thread) / elapsed_seconds / 1e9
-```
+## Build and run
 
-(Optionally, an effective data-movement rate can be derived by multiplying
-by `sizeof(int)` = 4 bytes per shuffle.)
-
-Four shuffle variants are benchmarked:
-
-| Variant | HIP Intrinsic | Description |
-|---------|--------------|-------------|
-| `shfl_xor` | `__shfl_xor` | Butterfly / XOR shuffle |
-| `shfl` | `__shfl` | Indexed (direct) shuffle |
-| `shfl_up` | `__shfl_up` | Shift up by delta |
-| `shfl_down` | `__shfl_down` | Shift down by delta |
-
-## Platform Support
-
-| Platform | Source file | Compiler |
-|----------|-------------|---------|
-| NVIDIA CUDA | `warp_shuffle.hip` | `nvcc -x cu` |
-| AMD ROCm/HIP | `warp_shuffle.hip` | `hipcc` |
-
-## What It Measures
-
-- **Warp/SIMD shuffle throughput** — the rate at which lanes can exchange data
-  via hardware shuffle instructions without going through shared memory or
-  global memory.
-- Shuffles are a fundamental building block for reductions, scans, transposes,
-  and other warp-level primitives.
-- The benchmark creates a dependency chain to prevent compiler elimination
-  while reflecting the hardware's true shuffle throughput.
-
-## Build
-
-The directory is **self-contained** — no CMake or external dependencies.
-
-### Auto-detect platform
-
-```bash
+```sh
 cd tier1/warp_shuffle
-make
-```
-
-The Makefile auto-detects the platform:
-- Linux with `/opt/rocm` → ROCm/HIP
-- Otherwise → CUDA
-
-### Explicit platform
-
-```bash
-# NVIDIA CUDA
-make PLATFORM=cuda
-
-# AMD ROCm/HIP
-make PLATFORM=rocm
-```
-
-### Clean
-
-```bash
-make clean
-```
-
-## Run
-
-```bash
-# Default 4096 shuffle ops per thread
-./warp_shuffle
-
-# Custom ops count per thread
+make PLATFORM=cuda       # nvcc -x cu; default architecture: native
+# make PLATFORM=rocm     # hipcc; native runtime wave width
+./warp_shuffle          # 4096 operations, one block, 256 threads, shfl_xor
 ./warp_shuffle 8192
+BENCH_PARAM_shuffle_variant=all ./warp_shuffle
 ```
 
-Each execution launches and times each selected variant's kernel **exactly
-once** — there is no in-program warmup or iteration loop. Unless
-`BENCH_PARAM_vector_add_warmup` is set to `false` (default `true`), a
-vector-add warmer runs ~100 ms of sustained load immediately before each
-timed launch, boosting the GPU clock from idle and evicting the last-level
-cache, so the kernel is measured cold-cache at a boosted clock. Repeat
-measurements come from fresh process re-executions: `gpubench run --reps N`.
+The Makefile can auto-detect ROCm from `/opt/rocm`, otherwise CUDA. Both builds
+use shared headers from `../../common`.
 
-## Output Format
+| Parameter | Default | Meaning |
+|-----------|---------|---------|
+| `BENCH_PARAM_ops_per_thread` (or argv[1]) | 4096 | Positive number of intrinsic invocations per thread |
+| `BENCH_PARAM_num_blocks` | 1 | Grid blocks |
+| `BENCH_PARAM_threads_per_block` | 256 | Threads per block; complete native waves only |
+| `BENCH_PARAM_shuffle_variant` | `shfl_xor` | One table variant, or manual `all` |
+| `BENCH_PARAM_vector_add_warmup` | `true` | Optional clock/cache warmer before each timed variant |
 
-Human-readable progress goes to stderr; stdout carries JSON lines — one
-record per selected variant (each timed once), plus a final summary:
+The Cartesian manifest includes only the four individual variants: 29 operation
+counts × four block sizes × four variants = 464 configurations. `all` remains
+available directly in the binary for a four-variant run; it is excluded from the
+sweep because those launches would duplicate the individual cases. The default
+variant is now `shfl_xor`, matching the manifest. Measurement controls are fixed
+per collection session, not extra Cartesian axes.
 
+The warmer aims to raise clocks and evict the last-level cache; its achieved
+state needs target verification. Setting it to `false` runs each variant as-is.
+There are no untimed shuffle launches. The per-thread final stores are part of
+the timed kernel; allocation and test verification are outside that interval.
+
+## Native width and supported geometry
+
+Kernels use the device `warpSize` builtin, and output records contain the selected
+device's `warp_size` property. Code does not assume a width based on vendor:
+NVIDIA uses 32 lanes; AMD's native runtime width depends on architecture
+(for example, gfx9 uses 64 and gfx10+ uses 32). This follows the
+[HIP porting guidance](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_porting_guide.html).
+
+The binary admits native width 32 or 64, positive dimensions within device limits,
+and a block size divisible by that width. This ensures all source lanes are
+active, including the full-mask CUDA compatibility intrinsics. It rejects
+incomplete waves, invalid variants, and dimensions that cannot represent the
+per-thread allocation or signed integer IDs before allocating or timing work.
+It does not round dimensions or silently select another variant.
+
+Do not force an alternate wave width unsupported by the HIP runtime. In
+particular, AMD documents that RDNA `-mwavefrontsize64` is unsupported by HIP;
+see [HIP language extensions](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_cpp_language_extensions.html).
+A CUDA run does not qualify AMD wave32 or wave64 execution. Those native targets
+must separately pass output and instruction checks under R-19 before admission
+to a reference campaign.
+
+## Output and interpretation
+
+A default run emits two JSON lines (times below are illustrative):
+
+```json
+{"type":"kernel","name":"shfl_xor_kernel","iter":0,"time_ms":0.02,"host_time_ms":0.04,"params":{"ops_per_thread":4096,"num_blocks":1,"threads_per_block":256,"shuffle_variant":"shfl_xor","warp_size":32}}
+{"type":"summary","total_time_ms":0.02}
 ```
-{"type":"kernel","name":"shfl_xor_kernel","iter":0,"time_ms":2.469123,"host_time_ms":2.561234,"params":{"ops_per_thread":4096,"num_blocks":1,"threads_per_block":256,"shuffle_variant":"all"}}
-{"type":"kernel","name":"shfl_kernel","iter":0,"time_ms":2.513456,"host_time_ms":2.601234,"params":{...}}
-{"type":"kernel","name":"shfl_up_kernel","iter":0,"time_ms":2.578901,"host_time_ms":2.671234,"params":{...}}
-{"type":"kernel","name":"shfl_down_kernel","iter":0,"time_ms":2.491234,"host_time_ms":2.581234,"params":{...}}
-{"type":"summary","total_time_ms":10.052714}
-```
 
-- Each variant that runs emits exactly one record.
-- Every record echoes the requested `shuffle_variant`. For an `all` request,
-  all four records retain `"shuffle_variant":"all"`; the kernel name identifies
-  the operation within that request.
-- `time_ms` is the GPU event time for that launch; `host_time_ms` is the
-  host wall-clock around launch + sync.
-- `total_time_ms` is the sum of the emitted records' GPU event times across
-  every variant that ran.
-- Gops/s is not printed; it is derived downstream from `time_ms` and params.
+Each manual `all` record retains `"shuffle_variant":"all"`; its kernel name
+identifies the intrinsic. The summary sums the selected launches' GPU times.
+For each individual record, the downstream logical rate is
+`num_blocks * threads_per_block * ops_per_thread / (time_ms * 1e-3)`.
+Multiplying by four bytes describes logical register-value movement, not memory
+bandwidth or a measured physical link rate.
 
-## Parameters
+The dependent chain is a latency-sensitive workload. Its event interval also
+includes launch/event overhead, loop instructions, and one final store per
+thread. Multiple waves may hide dependency latency. Neither event time divided
+by operation count nor the aggregate logical rate isolates an instruction's
+latency or establishes peak shuffle throughput. The default one-block rate
+cannot establish a device peak by multiplication with SM/CU count. See the
+[measurement interpretation guide](../../docs/measurement_interpretation.md).
 
-The GPU integration test checks every variant (including `all`) and block size
-at the smallest and largest declared operation counts through the production
-output validator. From the repository root, after building:
+## Functional qualification
 
-```bash
+```sh
+make PLATFORM=cuda test  # or PLATFORM=rocm; requires a compatible GPU
+# From the repository root, using the production parser/acceptance gate:
 GPUBENCH_WARP_SHUFFLE_BINARY="$PWD/tier1/warp_shuffle/warp_shuffle" \
   go test ./cmd/gpubench -run '^TestWarpShuffleOutput$' -count=1
-# Add GPUBENCH_GPU_SWEEP=1 to check every declared operation count.
+# Add GPUBENCH_GPU_SWEEP=1 for every declared operation count.
 ```
 
-The test works with CUDA or ROCm binaries and disables the warmer because it
-checks output acceptance, not performance.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `BENCH_PARAM_ops_per_thread` (or argv[1]) | 4096 | Shuffle iterations per thread |
-| `BENCH_PARAM_threads_per_block` | 256 | Threads per block / threadgroup |
-| `BENCH_PARAM_num_blocks` | 1 | Number of blocks in the dispatch grid (default 1 = single-SM/CU, latency-bound measurement) |
-| `BENCH_PARAM_shuffle_variant` | all | Variant(s) to run (`shfl_xor`, `shfl`, `shfl_up`, `shfl_down`, `all`) |
-| `BENCH_PARAM_vector_add_warmup` | true | Run the vector-add warmer (clock boost + LLC eviction) before each timed launch; set `false` to time the kernels as-is |
-
-> **Single-SM, latency-bound measurement.** The default grid is one block,
-> and each thread's shuffles form a serial dependent chain, so the reported
-> rate is the dependent-shuffle issue rate of one SM (latency-bound) — not
-> peak shuffle throughput, and multiplying by SM count does not give a
-> device peak. Raising `BENCH_PARAM_num_blocks` or `threads_per_block` adds
-> warp-level parallelism, but the per-thread chain remains dependent by
-> design.
-
-## Notes
-
-- Gops/s (10⁹ shuffle operations per second) is derived downstream from the
-  recorded times; the binary itself only emits raw times. An effective
-  data-movement rate can optionally be derived by multiplying by 4 bytes
-  per shuffle.
-- The vector-add warmer (on by default) boosts the GPU clock and evicts the
-  last-level cache before each timed launch; there are no untimed warm-up
-  launches of the benchmark kernels themselves.
-- **CUDA/HIP**: HIP events (`hipEvent_t`) are used for high-resolution
-  GPU-side timing. HIP shuffle intrinsics (`__shfl_xor`, etc.) do not require
-  the `_sync` suffix — they operate on the full warp/wavefront.
-- The warp size is 64 on AMD GCN/CDNA GPUs and 32 on NVIDIA GPUs. The HIP
-  code automatically selects the correct size at compile time.
-- A dependency chain ensures the compiler cannot optimize away the shuffle
-  operations; only thread 0 of block 0 writes the final result to prevent
-  memory traffic from dominating the measurement.
+The output test invokes the production kernels and checks every thread against
+closed-form lane origins, with allocation guards. Odd/even and minimum/maximum
+counts cover pair swapping, up/down boundaries and complete native waves across
+multiple blocks. CI compiles this GPU test; it cannot run it without a GPU.
+The Go check covers the four sweep variants plus the manual `all` compatibility
+path, every declared block size, and records the native width. Both are
+functional checks with no performance claim. Inspect target instructions and
+active-lane counts separately; correct final values alone cannot prove how much
+work the compiler emitted.

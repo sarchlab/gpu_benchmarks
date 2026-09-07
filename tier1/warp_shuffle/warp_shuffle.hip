@@ -4,7 +4,7 @@
  * HIP port of the warp_shuffle microbenchmark.
  * Compiles for both AMD (ROCm hipcc) and NVIDIA (nvcc -x cu) targets.
  *
- * Microbenchmark for warp/wave shuffle throughput measuring four variants:
+ * Dependent warp/wave shuffle experiment measuring four variants:
  *   - __shfl_xor   (butterfly / XOR shuffle)
  *   - __shfl       (indexed shuffle)
  *   - __shfl_up    (shift up)
@@ -12,14 +12,10 @@
  *
  * Strategy:
  *   Each thread performs N shuffle operations in a tight loop, passing an
- *   integer value between lanes.  The kernel is free of memory traffic, so
- *   the measured time reflects shuffle throughput.  The achieved rate in
- *   Giga-Operations/s is:
- *
- *       Gops = (num_threads * ops_per_thread) / elapsed_seconds / 1e9
- *
- *   (Optionally, an effective data-movement rate can be derived by
- *   multiplying by sizeof(int) = 4 bytes per shuffle.)
+ *   integer value between lanes. Every thread stores its final value. The
+ *   event interval includes the dependent chain, loop/launch overhead and this
+ *   one store; it is not an isolated instruction latency or peak throughput.
+ *   Downstream logical shuffle rate = threads * ops_per_thread / GPU seconds.
  *
  * Usage:
  *   ./warp_shuffle [ops_per_thread]
@@ -47,6 +43,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 
 #include "../../common/bench_timing.h"
 
@@ -62,19 +59,9 @@
 
 static const int DEFAULT_OPS_PER_THREAD  = 4096;
 static const int DEFAULT_THREADS_PER_BLK = 256;
-// Default 1 block = single-SM/CU, latency-bound measurement: each thread's
-// shuffles form a serial dependent chain, so the result is the dependent-
-// shuffle issue rate of one SM, not peak shuffle throughput.  Raising
-// BENCH_PARAM_num_blocks adds warp-level parallelism but the per-thread
-// chain remains dependent by design.
+// A single block measures dependent chains with the selected warp-level
+// parallelism. Multiplying its rate by SM/CU count does not establish a peak.
 static const int DEFAULT_NUM_BLOCKS      = 1;
-
-/** Warp size (64 on AMD GCN/CDNA, 32 on NVIDIA). */
-#ifdef __HIP_PLATFORM_AMD__
-static const int WARP_SIZE = 64;
-#else
-static const int WARP_SIZE = 32;
-#endif
 
 // ---------------------------------------------------------------------------
 // Shuffle kernels
@@ -84,45 +71,37 @@ __global__ void shfl_xor_kernel(int *out, int ops_per_thread)
 {
     int val = static_cast<int>(threadIdx.x + blockIdx.x * blockDim.x);
     for (int i = 0; i < ops_per_thread; ++i) {
-        val = __shfl_xor(val, 1, WARP_SIZE);
+        val = __shfl_xor(val, 1, warpSize);
     }
-    if (blockIdx.x == 0 && threadIdx.x == 0) {
-        *out = val;
-    }
+    out[static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x] = val;
 }
 
 __global__ void shfl_kernel(int *out, int ops_per_thread)
 {
     int val = static_cast<int>(threadIdx.x + blockIdx.x * blockDim.x);
-    int src_lane = (threadIdx.x ^ 1) % WARP_SIZE;
+    int src_lane = (threadIdx.x ^ 1) % warpSize;
     for (int i = 0; i < ops_per_thread; ++i) {
-        val = __shfl(val, src_lane, WARP_SIZE);
+        val = __shfl(val, src_lane, warpSize);
     }
-    if (blockIdx.x == 0 && threadIdx.x == 0) {
-        *out = val;
-    }
+    out[static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x] = val;
 }
 
 __global__ void shfl_up_kernel(int *out, int ops_per_thread)
 {
     int val = static_cast<int>(threadIdx.x + blockIdx.x * blockDim.x);
     for (int i = 0; i < ops_per_thread; ++i) {
-        val = __shfl_up(val, 1, WARP_SIZE);
+        val = __shfl_up(val, 1, warpSize);
     }
-    if (blockIdx.x == 0 && threadIdx.x == 0) {
-        *out = val;
-    }
+    out[static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x] = val;
 }
 
 __global__ void shfl_down_kernel(int *out, int ops_per_thread)
 {
     int val = static_cast<int>(threadIdx.x + blockIdx.x * blockDim.x);
     for (int i = 0; i < ops_per_thread; ++i) {
-        val = __shfl_down(val, 1, WARP_SIZE);
+        val = __shfl_down(val, 1, warpSize);
     }
-    if (blockIdx.x == 0 && threadIdx.x == 0) {
-        *out = val;
-    }
+    out[static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x] = val;
 }
 
 // ---------------------------------------------------------------------------
@@ -139,13 +118,14 @@ typedef void (*KernelFunc)(int *, int);
 static double run_benchmark(const char *kernel_name,
                             KernelFunc kernel, int *d_out,
                             int ops_per_thread, int num_blocks,
-                            int threads_per_block, const char *shuffle_variant)
+                            int threads_per_block, const char *shuffle_variant,
+                            int warp_size)
 {
-    char params[160];
+    char params[256];
     snprintf(params, sizeof(params),
              "\"ops_per_thread\":%d,\"num_blocks\":%d,\"threads_per_block\":%d,"
-             "\"shuffle_variant\":\"%s\"",
-             ops_per_thread, num_blocks, threads_per_block, shuffle_variant);
+             "\"shuffle_variant\":\"%s\",\"warp_size\":%d",
+             ops_per_thread, num_blocks, threads_per_block, shuffle_variant, warp_size);
 
     return bench_run_once(kernel_name, params, [&]() {
         kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(d_out,
@@ -185,9 +165,19 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_threads_per_block");
     if (env_val) threads_per_block = atoi(env_val);
 
-    const char* shuffle_variant = "all";
+    const char* shuffle_variant = "shfl_xor";
     env_val = getenv("BENCH_PARAM_shuffle_variant");
     if (env_val) shuffle_variant = env_val;
+
+    bool run_xor  = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "shfl_xor") == 0);
+    bool run_basic = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "shfl") == 0);
+    bool run_up   = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "shfl_up") == 0);
+    bool run_down = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "shfl_down") == 0);
+
+    if (!run_xor && !run_basic && !run_up && !run_down) {
+        fprintf(stderr, "Invalid shuffle_variant\n");
+        return EXIT_FAILURE;
+    }
 
     /* Print device information to stderr. */
     int device_id = 0;
@@ -195,23 +185,35 @@ int main(int argc, char *argv[])
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
 
+    // Full native waves keep every source lane active for all four intrinsics.
+    // Bound both allocation arithmetic and the initial signed integer IDs.
+    if ((prop.warpSize != 32 && prop.warpSize != 64) || num_blocks <= 0 ||
+        num_blocks > prop.maxGridSize[0] || threads_per_block <= 0 ||
+        threads_per_block > prop.maxThreadsPerBlock ||
+        threads_per_block > prop.maxThreadsDim[0] ||
+        threads_per_block % prop.warpSize != 0 ||
+        static_cast<size_t>(num_blocks) >
+            std::numeric_limits<size_t>::max() / sizeof(int) /
+                static_cast<size_t>(threads_per_block) ||
+        num_blocks > std::numeric_limits<int>::max() / threads_per_block) {
+        fprintf(stderr, "Invalid launch geometry: require complete native waves "
+                        "and representable per-thread output\n");
+        return EXIT_FAILURE;
+    }
+    const size_t total_threads = static_cast<size_t>(num_blocks) * threads_per_block;
+
     fprintf(stderr, "Device          : %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "CUs             : %d\n", prop.multiProcessorCount);
-    fprintf(stderr, "Grid            : %d blocks × %d threads = %d total threads\n",
+    fprintf(stderr, "Grid            : %d blocks × %d threads = %zu total threads\n",
             num_blocks, threads_per_block,
-            num_blocks * threads_per_block);
-    fprintf(stderr, "Warp size       : %d\n", WARP_SIZE);
+            total_threads);
+    fprintf(stderr, "Warp size       : %d\n", prop.warpSize);
     fprintf(stderr, "Ops / thread    : %d\n", ops_per_thread);
     fprintf(stderr, "Shuffle variant : %s\n\n", shuffle_variant);
 
-    /* Allocate a single int on the device to receive the checksum. */
+    /* One observable result for every launched thread. */
     int *d_out = nullptr;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(int)));
-
-    bool run_xor  = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "shfl_xor") == 0);
-    bool run_basic = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "shfl") == 0);
-    bool run_up   = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "shfl_up") == 0);
-    bool run_down = (strcmp(shuffle_variant, "all") == 0 || strcmp(shuffle_variant, "shfl_down") == 0);
+    HIP_CHECK(hipMalloc(&d_out, total_threads * sizeof(int)));
 
     double total_gpu_ms = 0.0;
 
@@ -219,28 +221,28 @@ int main(int argc, char *argv[])
         total_gpu_ms += run_benchmark("shfl_xor_kernel",
                                       (KernelFunc)shfl_xor_kernel, d_out,
                                       ops_per_thread, num_blocks, threads_per_block,
-                                      shuffle_variant);
+                                      shuffle_variant, prop.warpSize);
     }
 
     if (run_basic) {
         total_gpu_ms += run_benchmark("shfl_kernel",
                                       (KernelFunc)shfl_kernel, d_out,
                                       ops_per_thread, num_blocks, threads_per_block,
-                                      shuffle_variant);
+                                      shuffle_variant, prop.warpSize);
     }
 
     if (run_up) {
         total_gpu_ms += run_benchmark("shfl_up_kernel",
                                       (KernelFunc)shfl_up_kernel, d_out,
                                       ops_per_thread, num_blocks, threads_per_block,
-                                      shuffle_variant);
+                                      shuffle_variant, prop.warpSize);
     }
 
     if (run_down) {
         total_gpu_ms += run_benchmark("shfl_down_kernel",
                                       (KernelFunc)shfl_down_kernel, d_out,
                                       ops_per_thread, num_blocks, threads_per_block,
-                                      shuffle_variant);
+                                      shuffle_variant, prop.warpSize);
     }
 
     bench_emit_summary(total_gpu_ms);

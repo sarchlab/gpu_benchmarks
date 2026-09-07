@@ -1,139 +1,119 @@
-# shared_mem_bandwidth — Tier 1 Microbenchmark
+# shared_mem_bandwidth — Tier 1 microbenchmark
 
-## Overview
+This benchmark times dependent shared-memory read/update/write traffic with two
+address layouts. Each selected kernel runs once per process. Results are raw GPU
+and host times; derive logical bandwidth downstream after qualifying the compiled
+work and the target's bank behavior.
 
-`shared_mem_bandwidth` measures GPU shared memory (SMEM / LDS / threadgroup
-memory) bandwidth under two access patterns:
+| Pattern | Addresses within each logical group of 32 lanes |
+|---|---|
+| `no_conflict` | Consecutive four-byte words |
+| `conflict` | Distinct four-byte words, 32 words (128 bytes) apart |
 
-| Test | Description |
-|------|-------------|
-| **no_conflict** | Each thread in a warp/SIMD-group accesses a different bank (stride-1, sequential) — maximum throughput |
-| **conflict** | All threads in a warp/SIMD-group access the same bank (stride-32 between lanes) — 32-way bank conflict |
+Both patterns visit every element of the 48 KiB shared array exactly once per
+inner iteration. The conflict layout transposes each 32×32 tile: for logical
+index `i`, its physical index is
+`(i / 1024) * 1024 + (i % 32) * 32 + (i % 1024) / 32`.
+This permutation gives every element one owning thread. Sharing a bank therefore
+does not mean sharing an address or introducing a data race.
 
-The benchmark stresses the shared memory subsystem with a high inner-loop
-iteration count (1000) to amortize kernel launch overhead and produce stable
-bandwidth numbers.
+## Work and timing
 
-## Platform Support
+Both kernels use the same dependent recurrence, starting with `acc = 0` and
+shared elements equal to one:
 
-| Platform | Source file | Compiler |
-|----------|-------------|---------|
-| NVIDIA CUDA | `shared_mem_bandwidth.hip` | `nvcc` |
-| AMD ROCm/HIP | `shared_mem_bandwidth.hip` | `hipcc` |
-
-## What It Measures
-
-- **no_conflict bandwidth** — achievable shared memory throughput when bank
-  conflicts are avoided.  Consecutive threads in a warp access consecutive
-  addresses, spreading load across all 32 banks.
-- **conflict bandwidth** — degraded throughput when every thread in a warp
-  maps to the same bank.  The 32-way bank conflict serialises accesses,
-  reducing effective bandwidth significantly.
-
-The ratio `no_conflict / conflict` indicates how much performance is lost
-due to bank conflicts on the target hardware.
-
-## Build
-
-The directory is **self-contained** — no CMake or external dependencies.
-
-### Auto-detect platform
-
-```bash
-cd tier1/shared_mem_bandwidth
-make
+```cpp
+acc = 0.5f * (acc + smem[index]);
+smem[index] = acc;
 ```
 
-The Makefile auto-detects the platform:
-- Linux with `/opt/rocm` → ROCm/HIP
-- Otherwise → CUDA
+Values remain in `[0,1]` throughout the sweep. Volatile shared accesses preserve
+the requested loads and stores; every thread writes one final global checksum.
+The timed kernel includes shared initialization, two barriers, indexing and
+arithmetic, and final stores. It is a dependent traffic experiment; the result
+does not establish peak shared-memory throughput.
 
-### Explicit platform
+The inner-loop logical traffic is
+`2 * 12288 * 4 * inner_iters * num_blocks` bytes. Divide by recorded seconds and
+`1e9` for logical GB/s. This count excludes the initialization stores and final
+global stores even though their time is included. Overhead matters at small
+iteration counts. Physical transactions and serialization require target evidence.
+
+The vector-add warmer runs outside timing when enabled, with the intent of
+raising clocks and disturbing cache state. Qualify that state on the target.
+Allocation and test verification remain outside benchmark timing. Repeat runs
+use fresh processes (`gpubench run --reps N`).
+
+Earlier kernels used an unbounded sum and only retained one output per block;
+the earlier conflict mapping also aliased addresses. These results describe a
+changed experiment. Recollect measurements and keep revision/build provenance
+when comparing with historical results.
+
+## Bank interpretation
+
+For NVIDIA's 32-bank, four-byte-word layout, consecutive words use different
+banks; the conflict pattern places 32 distinct words in the same bank within
+one warp. These are the assumptions behind the historical pattern names.
+[NVIDIA's shared-memory guide](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#shared-memory-and-memory-banks)
+describes that mapping.
+
+AMD architectures can have 32 or 64 four-byte LDS banks, and instruction width
+and service phases determine which lanes contend together. With 64 banks, the
+same logical group maps to two banks with 16 distinct addresses each. This is
+an address-layout statement, not a universal serialization factor. Keep the
+logical workload fixed and qualify its effective behavior on the target.
+[AMD's hardware overview](https://rocm.docs.amd.com/projects/HIP/en/latest/understand/hardware_implementation.html)
+and [LDS bank-conflict guide](https://rocm.docs.amd.com/projects/composable_kernel/en/7.13.0-preview/conceptual/ck_tile/hardware/lds_bank_conflicts.html)
+describe the bank and phase differences.
+
+Every kernel record includes the actual device `warp_size` and the fixed layout
+and footprint descriptors. A 64-lane wave contains two logical 32-lane groups;
+the code does not infer a hardware bank count from wave size. AMD runtime/ISA
+qualification remains part of the target campaign.
+
+## Build and validate
 
 ```bash
-# NVIDIA CUDA
-make PLATFORM=cuda
-
-# AMD ROCm/HIP
-make PLATFORM=rocm
-```
-
-### Clean
-
-```bash
+make PLATFORM=cuda       # nvcc; use PLATFORM=rocm for hipcc
+make test-pattern        # CPU-only ownership and bank-model checks
+make test PLATFORM=cuda  # also run the production-kernel GPU output test
 make clean
 ```
 
-## Run
+The device needs at least 48 KiB of shared memory per block. The CPU test checks
+complete unique ownership for every 32-thread multiple through 1024 and the
+32/64-bank address models. The GPU test checks both patterns, every declared
+block size, an uneven 160-thread distribution, the minimum/maximum declared
+iteration counts, and one/two blocks.
+It verifies every finite output and both buffer guards. Tests run separately
+and add no verification launch to the measurement executable. CI runs the CPU
+test and compiles the GPU test; actual GPU execution is a separate check.
 
-```bash
-./shared_mem_bandwidth
+## Parameters and output
+
+| Environment parameter | Default | Meaning |
+|---|---|---|
+| `BENCH_PARAM_inner_iters` | 1000 | Positive inner-loop iteration count |
+| `BENCH_PARAM_block_size` | 256 | Positive multiple of 32 within the device limit |
+| `BENCH_PARAM_num_blocks` | 1 | Positive number of blocks |
+| `BENCH_PARAM_access_pattern` | `no_conflict` | `no_conflict`, `conflict`, or standalone `both` |
+| `BENCH_PARAM_vector_add_warmup` | `true` | Enable the untimed warmer |
+
+The declared sweep keeps one block. A device-wide claim needs a separately
+qualified grid and measurement; multiplying by SM/CU count is an extrapolation.
+See [measurement interpretation](../../docs/measurement_interpretation.md).
+
+Run `./shared_mem_bandwidth` with these environment overrides. Progress goes to
+stderr; stdout contains one kernel record per selected pattern and one summary.
+For `both`, each record retains the requested `access_pattern=both`, with its
+own kernel name and lane stride. Illustrative single-pattern output:
+
+```json
+{"type":"kernel","name":"smem_bw_conflict","iter":0,"time_ms":0.42,"host_time_ms":0.5,"params":{"inner_iters":64,"block_size":256,"num_blocks":1,"access_pattern":"conflict","shared_memory_bytes":49152,"word_bytes":4,"logical_lane_group_size":32,"lane_stride_bytes":128,"warp_size":32}}
+{"type":"summary","total_time_ms":0.42}
 ```
 
-No command-line arguments are needed.  Parameters are set via
-`BENCH_PARAM_*` environment variables (see below).
-
-## Measurement Protocol
-
-Each selected pattern is launched **exactly once** per process execution and
-timed with GPU events; there is no in-program warmup or iteration loop. Unless
-`BENCH_PARAM_vector_add_warmup=false`, a vector-add warmer runs immediately
-before the timed launch to boost the GPU clock and evict the last-level cache,
-so the kernel is measured cold-cache at a boosted clock. Repetition is done by
-re-running the process (`gpubench run --reps N`).
-
-## Example Output
-
-Progress and device info go to stderr; stdout carries JSON lines — one record
-per selected pattern, plus a final summary (shown here for
-`access_pattern=both`):
-
-```
-{"type":"kernel","name":"smem_bw_no_conflict","iter":0,"time_ms":5.432101,"host_time_ms":5.541234,"params":{"inner_iters":1000,"block_size":256,"num_blocks":1,"access_pattern":"both"}}
-{"type":"kernel","name":"smem_bw_conflict","iter":0,"time_ms":78.901234,"host_time_ms":79.012345,"params":{"inner_iters":1000,"block_size":256,"num_blocks":1,"access_pattern":"both"}}
-{"type":"summary","total_time_ms":84.333335}
-```
-
-- Each selected pattern emits one record — the kernel runs once, no averaging.
-- `time_ms` is the GPU event time for that launch; `host_time_ms` is the
-  host wall-clock around launch + sync.
-- `total_time_ms` is the sum of the emitted records' GPU event times across
-  every pattern that ran.
-- GB/s is not printed; it is derived downstream from `time_ms` and the
-  params in each record.
-
-## Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `BENCH_PARAM_block_size` | 256 | Threads per block / threadgroup |
-| `BENCH_PARAM_num_blocks` | 1 | Number of blocks / threadgroups (default 1 = single-SM/CU measurement) |
-| `BENCH_PARAM_inner_iters` | 1000 | Inner-loop iterations per kernel launch |
-| `BENCH_PARAM_access_pattern` | no_conflict | Pattern(s) to run (`no_conflict`, `conflict`, `both`) |
-| `BENCH_PARAM_vector_add_warmup` | true | Run the cold-cache clock warmer before the timed launch (`false` to disable) |
-| `SMEM_FLOATS` (compile-time) | 12288 | Shared memory array size in floats (48 KB) |
-
-> **Single-SM/CU measurement.** The default grid is one block
-> (`num_blocks = 1`), so the benchmark measures a single SM/CU at boost
-> clock. Because shared memory (LDS) is a per-SM resource with no cross-SM
-> interaction, whole-device peak bandwidth can be estimated as the per-SM
-> value × the GPU's SM/CU count. Treat that as an upper bound: an all-SM
-> workload is power/thermal-limited and typically sustains a lower clock
-> than a single busy SM. For a device-wide run, set
-> `BENCH_PARAM_num_blocks` manually (e.g. ≥ 8 × SM count).
-
-## Notes
-
-- Bandwidth in SI gigabytes per second (1 GB = 10⁹ bytes) is derived
-  downstream from the recorded times, accounting for both reads and writes:
-  `GB/s = 2 × SMEM_FLOATS × 4 × inner_iters × num_blocks / time_s / 1e9`
-  (with the default `num_blocks = 1` this is the bandwidth of a single
-  SM/CU).
-- The **no_conflict** kernel uses a simple stride-`blockDim.x` loop where
-  consecutive threads access consecutive shared memory addresses.
-- The **conflict** kernel remaps indices so that within each warp, all 32
-  lanes access an address that maps to the same bank (stride-32 between
-  lanes), causing maximum serialisation.
-- Both kernels perform the same total number of reads and writes, making
-  the bandwidth numbers directly comparable.
-- **CUDA/HIP**: CUDA/HIP events are used for high-resolution GPU-side timing.
+`time_ms` covers the one kernel launch with GPU events. `host_time_ms` covers the
+host bracket around event recording, submission, error checking and completion.
+The summary is the sum of all emitted kernel GPU times. The extra footprint and
+layout descriptors are measured/derived output metadata, not environment controls.

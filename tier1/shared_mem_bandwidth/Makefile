@@ -45,12 +45,25 @@ endif
 # ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
-.PHONY: all clean
+.PHONY: all clean test test-pattern
 
 all: $(TARGET)
 
-$(TARGET): $(SRC)
+$(TARGET): $(SRC) shared_mem_pattern.h ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
 	$(CC) $(CFLAGS) $< -o $@
 
+HOST_CXX ?= c++
+bench_pattern_test: ../../tests/shared_mem_pattern_test.cpp shared_mem_pattern.h
+	$(HOST_CXX) -O2 -std=c++14 $< -o $@
+
+test-pattern: bench_pattern_test
+	./bench_pattern_test
+
+bench_output_test: ../../tests/shared_mem_output_test.hip $(SRC) shared_mem_pattern.h ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
+	$(CC) $(CFLAGS) $< -o $@
+
+test: test-pattern bench_output_test
+	./bench_output_test
+
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) bench_pattern_test bench_output_test

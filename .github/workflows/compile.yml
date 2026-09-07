@@ -86,6 +86,11 @@ jobs:
           make -C tier1/fp32_throughput PLATFORM=cuda bench_output_test
           make -C tier1/fp64_throughput PLATFORM=cuda bench_output_test
 
+      - name: Check shared-memory ownership and compile GPU output test
+        run: |
+          make -C tier1/shared_mem_bandwidth test-pattern
+          make -C tier1/shared_mem_bandwidth PLATFORM=cuda bench_output_test
+
       - name: Compile Tier 2 (CUDA)
         run: ./gpubench compile --tier 2 --platform cuda
 

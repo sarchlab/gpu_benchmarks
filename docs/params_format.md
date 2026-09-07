@@ -54,7 +54,7 @@ The scaling parameter is the single parameter that controls the "size" of the be
 | `name` | string | **yes** | Parameter name, used as CLI flag and in output protocol |
 | `description` | string | **yes** | Human-readable description |
 | `type` | string | **yes** | One of: `"int"`, `"float"`, `"string"`, `"enum"` |
-| `values` | array | **yes** | Ordered list of values to sweep. Should contain 20–30 values for scaling params |
+| `values` | array | **yes** | Nonempty ordered list of distinct values to sweep. Numeric values must increase; categorical values retain their declared order. Typically 20–30 values |
 
 For **Tier 1 and Tier 2 non-ML benchmarks**, choose scaling values that give good
 coverage of the workload's behavior. There is no restriction on alignment or
@@ -109,6 +109,17 @@ Describes the derived metrics the benchmark computes.
 - `"float"`: values must be JSON numbers (integer or decimal)
 - `"string"`: values must be JSON strings
 - `"enum"`: values must be JSON strings; semantically a fixed set of choices
+
+`gpubench validate` checks manifest structure as well as value types. Wrong
+container or field types, non-object parameter/metric entries, empty scaling
+sweeps, and descending numeric scaling values are errors. A short, nonempty
+sweep remains valid with an advisory warning.
+
+Validation scans manifest files directly so malformed JSON and structures are
+reported even when normal benchmark discovery cannot load them. Tier and
+benchmark filters select directories. A valid suite field can exclude another
+suite; files whose suite cannot be read are retained for diagnostics within
+the selected directories.
 
 ## Parameter Passing Convention
 

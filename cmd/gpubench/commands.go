@@ -302,6 +302,17 @@ func validateParams(params map[string]interface{}, paramsPath string) (errs, war
 	if len(errs) > 0 {
 		return errs, warns
 	}
+	checkString := func(obj map[string]interface{}, field, label string) {
+		if _, ok := obj[field].(string); !ok {
+			errs = append(errs, label+" must be a string")
+		}
+	}
+	for _, field := range []string{"benchmark", "suite", "description"} {
+		checkString(params, field, field)
+	}
+	if language, present := params["language"]; present && language != "cpp" && language != "python" {
+		errs = append(errs, "language must be cpp or python")
+	}
 
 	// benchmark vs directory name
 	benchName, _ := params["benchmark"].(string)
@@ -311,6 +322,9 @@ func validateParams(params map[string]interface{}, paramsPath string) (errs, war
 
 	// tier vs parent dir
 	tierNum, _ := params["tier"].(float64) // JSON numbers are float64
+	if !valueMatchesType(params["tier"], "int") || tierNum < 1 || tierNum > 5 {
+		errs = append(errs, "tier must be an integer from 1 to 5")
+	}
 	tierDirStr := strings.TrimPrefix(tierDir, "tier")
 	if tn, err := strconv.Atoi(tierDirStr); err == nil {
 		if int(tierNum) != tn {
@@ -328,6 +342,8 @@ func validateParams(params map[string]interface{}, paramsPath string) (errs, war
 				errs = append(errs, fmt.Sprintf("scaling_param missing '%s'", f))
 			}
 		}
+		checkString(sp, "name", "scaling_param name")
+		checkString(sp, "description", "scaling_param description")
 		if name, ok := sp["name"].(string); ok {
 			if !identRE.MatchString(name) {
 				errs = append(errs, fmt.Sprintf("scaling_param name '%s' not a valid identifier", name))
@@ -341,6 +357,9 @@ func validateParams(params map[string]interface{}, paramsPath string) (errs, war
 			errs = append(errs, fmt.Sprintf("scaling_param type %v not one of int/float/string/enum", typeRaw))
 		}
 		if values, ok := sp["values"].([]interface{}); ok {
+			if len(values) == 0 {
+				errs = append(errs, "scaling_param values must not be empty")
+			}
 			if len(values) < 10 {
 				// Value counts are empirical guidance (see docs/params_format.md),
 				// not hard requirements — surface as a warning, not an error.
@@ -348,7 +367,21 @@ func validateParams(params map[string]interface{}, paramsPath string) (errs, war
 			}
 			errs = append(errs, checkValueTypes(values, spType, "scaling_param")...)
 			errs = append(errs, checkDuplicateValues(values, "scaling_param")...)
+			if spType == "int" || spType == "float" {
+				for i := 1; i < len(values); i++ {
+					previous, prevOK := values[i-1].(float64)
+					current, currOK := values[i].(float64)
+					if prevOK && currOK && current < previous {
+						errs = append(errs, "scaling_param numeric values must be in increasing order")
+						break
+					}
+				}
+			}
+		} else {
+			errs = append(errs, "scaling_param values must be an array")
 		}
+	} else {
+		errs = append(errs, "scaling_param must be an object")
 	}
 
 	// Collect all param names for duplicate check
@@ -360,13 +393,19 @@ func validateParams(params map[string]interface{}, paramsPath string) (errs, war
 	}
 
 	// non_scaling_params checks
-	nspList, _ := params["non_scaling_params"].([]interface{})
+	nspList, isArray := params["non_scaling_params"].([]interface{})
+	if !isArray {
+		errs = append(errs, "non_scaling_params must be an array")
+	}
 	for idx, nspRaw := range nspList {
 		pfx := fmt.Sprintf("non_scaling_params[%d]", idx)
 		nsp, ok := nspRaw.(map[string]interface{})
 		if !ok {
+			errs = append(errs, pfx+" must be an object")
 			continue
 		}
+		checkString(nsp, "name", pfx+" name")
+		checkString(nsp, "description", pfx+" description")
 		for _, f := range []string{"name", "description", "type", "default", "values"} {
 			if _, ok := nsp[f]; !ok {
 				errs = append(errs, fmt.Sprintf("%s missing '%s'", pfx, f))
@@ -385,6 +424,8 @@ func validateParams(params map[string]interface{}, paramsPath string) (errs, war
 		if values, ok := nsp["values"].([]interface{}); ok {
 			errs = append(errs, checkValueTypes(values, nspType, pfx)...)
 			errs = append(errs, checkDuplicateValues(values, pfx)...)
+		} else {
+			errs = append(errs, pfx+" values must be an array")
 		}
 		if defVal, hasDef := nsp["default"]; hasDef && validParamTypes[nspType] {
 			if !valueMatchesType(defVal, nspType) {
@@ -443,22 +484,48 @@ func validateParams(params map[string]interface{}, paramsPath string) (errs, war
 	} else if _, present := params["kernels"]; present {
 		errs = append(errs, "kernels must be an array")
 	}
+	if metrics, present := params["metrics"]; present {
+		list, ok := metrics.([]interface{})
+		if !ok {
+			errs = append(errs, "metrics must be an array")
+		}
+		for i, raw := range list {
+			label := fmt.Sprintf("metrics[%d]", i)
+			metric, ok := raw.(map[string]interface{})
+			if !ok {
+				errs = append(errs, label+" must be an object")
+				continue
+			}
+			checkString(metric, "name", label+" name")
+			checkString(metric, "description", label+" description")
+		}
+	}
 
 	return errs, warns
 }
 
 func cmdValidate(tierStr, suite, benchmark string) int {
-	repoRoot := findRepoRoot()
-	tier := parseTier(tierStr)
-	benchmarks := discoverBenchmarks(repoRoot, tier, suite, benchmark)
-	if len(benchmarks) == 0 {
-		eprint("No benchmarks found matching filters.")
-		return ExitNoBench
+	return validateManifestFiles(findRepoRoot(), parseTier(tierStr), suite, benchmark)
+}
+
+func validateManifestFiles(repoRoot string, tier *int, suite, benchmark string) int {
+	// Validation must inspect malformed manifests too. Typed benchmark discovery
+	// skips files it cannot decode, which would hide their errors in a mixed tree.
+	paths, err := filepath.Glob(filepath.Join(repoRoot, "tier*", "*", "params.json"))
+	if err != nil {
+		eprint("Cannot find manifests: " + err.Error())
+		return ExitSomeFailed
 	}
 
-	totalErrors, totalWarnings, valid := 0, 0, 0
-	for _, b := range benchmarks {
-		pp := b.ParamsPath
+	totalErrors, totalWarnings, valid, selected := 0, 0, 0, 0
+	for _, pp := range paths {
+		bdir := filepath.Dir(pp)
+		if benchmark != "" && filepath.Base(bdir) != benchmark {
+			continue
+		}
+		if tier != nil && filepath.Base(filepath.Dir(bdir)) != fmt.Sprintf("tier%d", *tier) {
+			continue
+		}
 		rel, _ := filepath.Rel(repoRoot, pp)
 		if rel == "" {
 			rel = pp
@@ -466,6 +533,7 @@ func cmdValidate(tierStr, suite, benchmark string) int {
 
 		data, err := os.ReadFile(pp)
 		if err != nil {
+			selected++
 			fmt.Printf("✗ %s — Invalid JSON: %v\n", rel, err)
 			totalErrors++
 			continue
@@ -473,10 +541,19 @@ func cmdValidate(tierStr, suite, benchmark string) int {
 
 		var params map[string]interface{}
 		if err := json.Unmarshal(data, &params); err != nil {
+			selected++
 			fmt.Printf("✗ %s — Invalid JSON: %v\n", rel, err)
 			totalErrors++
 			continue
 		}
+		// An unreadable/malformed suite cannot safely establish a mismatch;
+		// retain it for diagnostics even when a suite filter was requested.
+		if suite != "" {
+			if declaredSuite, ok := params["suite"].(string); ok && declaredSuite != suite {
+				continue
+			}
+		}
+		selected++
 
 		es, ws := validateParams(params, pp)
 		if len(es) > 0 {
@@ -497,9 +574,13 @@ func cmdValidate(tierStr, suite, benchmark string) int {
 			totalWarnings++
 		}
 	}
+	if selected == 0 {
+		eprint("No benchmarks found matching filters.")
+		return ExitNoBench
+	}
 
 	fmt.Printf("\n=== Validation Summary ===\n")
-	fmt.Printf("  Valid:  %d/%d\n", valid, len(benchmarks))
+	fmt.Printf("  Valid:  %d/%d\n", valid, selected)
 	fmt.Printf("  Errors: %d  Warnings: %d\n", totalErrors, totalWarnings)
 
 	if totalErrors > 0 {

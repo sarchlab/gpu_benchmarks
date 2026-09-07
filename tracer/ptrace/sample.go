@@ -24,7 +24,8 @@ import (
 	"fmt"
 )
 
-const dynVersionSampled = 4
+const dynVersionSampledLegacy = 4
+const dynVersionSampled = 6
 
 // samplePlan records, for one invocation, which blocks are stored verbatim and
 // which are synthesized, plus which recorded block is the synthesis template.
@@ -150,7 +151,7 @@ func blockEqual(a, b Block) bool {
 	return true
 }
 
-// ── sampled columnar payload (dyn version 4) ──────────────────────────────────
+// ── sampled columnar payload (dyn version 6; reads legacy 4) ──────────────────────────────────
 
 // encodeDynSampled serializes only the recorded blocks (verbatim, every memory
 // instruction stored as a residual) plus the recipes and the block plan. A
@@ -293,7 +294,7 @@ func decodeDynSampled(data []byte, t ISATable) ([]Block, error) {
 				}
 				d := DynInst{Pc: t.Pcs[id], Mask: binary.LittleEndian.Uint32(mb)}
 				if isa[d.Pc].IsMem {
-					mode, payload, err := decodeResidual(cAddr, d.Mask)
+					mode, payload, err := decodeResidual(cAddr, d.Mask, data[0] == dynVersionSampled)
 					if err != nil {
 						return nil, err
 					}

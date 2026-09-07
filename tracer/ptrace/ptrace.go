@@ -105,7 +105,8 @@ func putVarint(buf []byte, v int64) []byte {
 	return append(buf, tmp[:n]...)
 }
 
-const dynVersion = 3
+const dynVersionLegacy = 3
+const dynVersion = 5
 
 // Coverage summarizes how much of an invocation's memory traffic is modeled.
 // TotalBlocks/RecordedBlocks are set only in sampled (P3) mode: the recorded
@@ -216,12 +217,12 @@ func decodeDyn(data []byte, t ISATable) ([]Block, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("empty dyn payload")
 	}
-	if data[0] == dynVersionSampled {
+	if data[0] == dynVersionSampled || data[0] == dynVersionSampledLegacy {
 		return decodeDynSampled(data, t)
 	}
 	isa := t.toMap()
-	if data[0] != dynVersion {
-		return nil, fmt.Errorf("unsupported dyn version")
+	if data[0] != dynVersion && data[0] != dynVersionLegacy {
+		return nil, fmt.Errorf("unsupported dyn version %d", data[0])
 	}
 	top := &cursor{b: data, pos: 1}
 	sec := make([]*cursor, 6)
@@ -294,7 +295,7 @@ func decodeDyn(data []byte, t ISATable) ([]Block, error) {
 						d.Mode = cls.Mode
 						d.Payload = cls.payloadFor(blk.X, blk.Y, blk.Z, int(wi), o)
 					} else {
-						mode, payload, err := decodeResidual(cAddr, d.Mask)
+						mode, payload, err := decodeResidual(cAddr, d.Mask, data[0] == dynVersion)
 						if err != nil {
 							return nil, err
 						}

@@ -2,7 +2,7 @@
   "benchmark": "shared_mem_bandwidth",
   "tier": 1,
   "suite": "microbench",
-  "description": "Measures GPU shared memory (LDS/SMEM) bandwidth with two access patterns: no-conflict (stride-1, zero bank conflicts) and conflict (all warp lanes access the same bank, 32-way bank conflict). Emits per-iteration GPU event time and host time records (total = sum of kernel times); bandwidth in GB/s is derived downstream.",
+  "description": "Times dependent shared-memory read/update/write traffic over a 48 KiB array with unique per-thread ownership. Patterns use consecutive words or stride-32 words within logical 32-lane groups; effective bank behavior depends on the target. Emits raw times and layout descriptors.",
   "scaling_param": {
     "name": "inner_iters",
     "description": "Number of inner-loop iterations per kernel launch; controls total shared memory traffic",
@@ -24,7 +24,7 @@
   "non_scaling_params": [
     {
       "name": "block_size",
-      "description": "Number of threads per block",
+      "description": "Threads per block; a positive multiple of 32 within the device limit",
       "type": "int",
       "default": 256,
       "values": [
@@ -36,7 +36,7 @@
     },
     {
       "name": "num_blocks",
-      "description": "Number of thread blocks (default 1 = single-SM/CU measurement; device peak is derived as per-SM value × SM count)",
+      "description": "Number of blocks; the declared sweep uses one block. Multiplication by SM/CU count is an extrapolation, not a measured device-wide rate.",
       "type": "int",
       "default": 1,
       "values": [
@@ -45,7 +45,7 @@
     },
     {
       "name": "access_pattern",
-      "description": "Shared memory access pattern: no_conflict (stride-1) or conflict (same bank)",
+      "description": "Logical 32-lane address layout: consecutive four-byte words or distinct words with stride 32; qualify effective bank behavior on the target",
       "type": "enum",
       "default": "no_conflict",
       "values": [
@@ -55,7 +55,7 @@
     },
     {
       "name": "vector_add_warmup",
-      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "description": "When true, run the untimed vector-add warmer to raise clocks and disturb cache state; qualify its effect on the target. False disables it without promising a particular cache state.",
       "type": "enum",
       "default": "true",
       "values": [

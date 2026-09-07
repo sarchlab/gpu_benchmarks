@@ -67,9 +67,36 @@ For each benchmark and parameter configuration, `gpubench`:
 3. Runs the benchmark normally (with LD_PRELOAD active, NVBit intercepts kernel launches)
 4. If `--post-process` is set, runs `<post-process> <trace-output>/<benchmark>/<config>/traces/kernelslist`
 
-> **Note:** When `--collect-trace` is set, **no timing data is written to SQLite**.
-> The `--db` flag is ignored. This is by design — NVBit instrumentation adds
-> overhead that invalidates timing measurements.
+> **Note:** When `--collect-trace` is set, **no timing data is written to SQLite**:
+> NVBit instrumentation adds overhead that invalidates performance timings.
+> An existing `--db` file (default `results.db`) is read-only eligibility guidance.
+
+### Selecting previously successful configurations
+
+If the selected database exists, a trace configuration must match a run with
+`status='ok'` on its tier, suite, benchmark, scaling parameter name/value, and
+complete non-scaling parameter object. JSON key order, whitespace, and equivalent
+numeric spellings do not change identity; scalar types and distinct numeric values
+remain distinct. A successful block size or algorithm variant does not admit a
+failed or untested variant at the same scaling point.
+
+The scope is all sessions in the selected database, preserving the existing
+any-success policy. A later failed repetition does not erase an earlier success
+of the same full configuration. The CLI reports the matching source session and
+run IDs (the earliest matching successful run) with each selected configuration.
+Choose the input database for the dataset you intend to trace; this match alone
+does not establish binary, device, or input provenance equivalence.
+
+The requested `vector_add_warmup` setting participates in eligibility, as recorded
+in the timing run. After selection, trace execution still forces the warmer off
+to exclude it from capture. For example, default `true` selection can use matching
+`true` timing runs even though the trace process receives `false`.
+
+An existing but unreadable database, invalid schema, or malformed successful row
+is an error; the CLI does not fall back to unfiltered tracing. An empty valid
+database admits no configurations. If the database file is absent, tracing remains
+unfiltered and the CLI reports that no database guidance is available. Trace
+artifact validation is separate from this eligibility check.
 
 ### Resuming Interrupted Trace Collection
 

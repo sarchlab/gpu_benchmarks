@@ -1,8 +1,8 @@
 # fp64_throughput
 
-Microbenchmark that measures the peak **double-precision (FP64) floating-point
-compute throughput** of a GPU in GFLOPS (10⁹ floating-point operations per
-second).
+Microbenchmark that times **FP64 FMA work** at the selected grid geometry. The
+declared grid is one block; GFLOPS is derived downstream after qualifying that
+the compiled kernel preserves the counted work.
 
 Supported platforms: **NVIDIA CUDA** and **AMD ROCm/HIP**.
 
@@ -10,32 +10,28 @@ Supported platforms: **NVIDIA CUDA** and **AMD ROCm/HIP**.
 
 ## What it measures
 
-The benchmark saturates an SM/CU's FP64 arithmetic pipelines by executing a
+The benchmark exercises FP64 arithmetic with a
 dense loop of **fused multiply-add (FMA)** instructions:
 
 ```c
 a = fma(a, multiplier, addend);   // 2 FLOPs: 1 multiply + 1 add
 ```
 
-All operands live in registers — there is no memory traffic beyond a single
-write at the end — so the result reflects raw arithmetic throughput rather than
-memory bandwidth.
+The source uses register operands with a final result store. Counted-work
+preservation must be established in the compiled binary before deriving
+arithmetic throughput (R-02 in the readiness tracker).
 
-Four independent accumulators are used per thread so the compiler can
-interleave FMA instructions and hide the FP64 pipeline latency, achieving
-full issue-rate throughput.
+Four independent accumulators expose instruction-level parallelism. The achieved
+rate depends on occupancy, instruction issue, and clock state; full issue rate
+is a measurement result rather than a property guaranteed by the source pattern.
 
 ---
 
-## FP64 vs FP32 throughput (CUDA/HIP platforms)
+## FP64 versus FP32 comparisons
 
-FP64 throughput varies significantly by GPU class:
-
-| GPU class | FP64 : FP32 ratio |
-|---|---|
-| Consumer (GeForce RTX) | 1:32 or 1:64 |
-| Professional (Quadro / RTX A-series) | 1:16 or 1:32 |
-| Datacenter / HPC (V100, A100, H100, MI250X) | ~1:2 |
+The supported arithmetic rates depend on the exact GPU model and instruction
+path. Compare matched, qualified configurations; a broad product-class ratio
+cannot substitute for the measured FP64 and FP32 results.
 
 ---
 
@@ -44,10 +40,12 @@ FP64 throughput varies significantly by GPU class:
 | Quantity | Value |
 |---|---|
 | FLOPs per FMA | **2** (1 multiply + 1 add) |
-| GFLOPS formula | `(threads × fmas_per_thread × 2) / elapsed_s / 1e9` |
+| GFLOPS formula | `(num_blocks × threads_per_block × fmas_per_thread × 2) / elapsed_s / 1e9` |
 
 The binary does not print GFLOPS; it is derived downstream from the
-recorded `time_ms` and params using the formula above.
+recorded `time_ms` and effective params using the formula above after work-count
+qualification. Positive FMA requests are rounded down to a multiple of four,
+with a minimum of four; all declared values already satisfy this constraint.
 
 ---
 
@@ -81,7 +79,7 @@ Requirements by platform:
 
 | Argument | Default | Description |
 |---|---|---|
-| `fmas_per_thread` | `4096` | Number of FMA iterations per thread. Increase on HPC GPUs where FP64 is fast (kernel should run ≥5 ms for a stable measurement). Decrease on consumer GPUs where FP64 is rate-limited. |
+| `fmas_per_thread` | `4096` | FMA calls per thread; choose a declared work count within the target timing and runtime budgets. |
 
 Parameters can also be set via environment variables
 (`BENCH_PARAM_fmas_per_thread`, `BENCH_PARAM_num_blocks`,
@@ -89,27 +87,25 @@ Parameters can also be set via environment variables
 
 | Env var | Default | Description |
 |---|---|---|
-| `BENCH_PARAM_vector_add_warmup` | `true` | Run the vector-add warmer (~100 ms of sustained load boosting the clock and evicting the last-level cache) before the timed launch; set `false` to time the kernel as-is |
+| `BENCH_PARAM_vector_add_warmup` | `true` | Run the vector-add warmer (~100 ms of sustained load) before the timed launch; qualify clock/cache effects on the target |
 
 Each execution launches and times the kernel **exactly once** — there is no
 in-program warmup or iteration loop. Repeat measurements come from fresh
 process re-executions: `gpubench run --reps N`.
 
-> **Single-SM/CU measurement.** The default grid is one block
-> (`num_blocks = 1`), so the benchmark measures a single SM/CU at boost
-> clock. Because FMA pipes are per-SM resources with no cross-SM
-> interaction, whole-device peak GFLOPS can be estimated as the per-SM
-> value × the GPU's SM/CU count. Treat that as an upper bound: an all-SM
-> workload is power/thermal-limited and typically sustains a lower clock
-> than a single busy SM. For a device-wide run, set
-> `BENCH_PARAM_num_blocks` manually (e.g. ≥ 8 × SM count).
+> **Single-block measurement.** The manifest fixes `num_blocks=1`. Report the
+> selected block size and work count; one block does not establish SM/CU or
+> whole-device saturation. Multiplying this rate by SM/CU count is an
+> extrapolation model, without a demonstrated upper-bound guarantee. A
+> device-wide claim needs its own declared grid configuration and measured
+> result. See [measurement interpretation](../../docs/measurement_interpretation.md) for counting and qualification limits.
 
 ---
 
 ## Example output
 
 Progress and device info go to stderr; stdout carries JSON lines — one record
-for the single timed launch plus a final summary:
+for the single timed launch plus a final summary. Illustrative timings:
 
 ```
 {"type":"kernel","name":"fp64_fma_kernel","iter":0,"time_ms":11.987120,"host_time_ms":12.104532,"params":{"fmas_per_thread":4096,"num_blocks":1,"threads_per_block":256}}
@@ -120,10 +116,6 @@ for the single timed launch plus a final summary:
 the host wall-clock around launch + sync, and `total_time_ms` equals the
 single launch's GPU event time. No GFLOPS figure is printed — it is derived
 downstream.
-
-> **Note:** On consumer GPUs, FP64 throughput is severely limited by hardware.
-> Consider reducing `fmas_per_thread` (e.g. to 256 or 512) to keep the
-> benchmark runtime reasonable.
 
 ---
 

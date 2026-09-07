@@ -1,8 +1,8 @@
 # fp16_throughput
 
-Microbenchmark that measures the peak **half-precision (FP16) floating-point
-compute throughput** of a GPU in GFLOPS (10⁹ floating-point operations per
-second).
+Microbenchmark that times **packed FP16 FMA work** at the selected grid geometry.
+The declared grid is one block; GFLOPS is derived downstream from qualified work
+counts and the raw GPU time.
 
 Supports **NVIDIA (CUDA)** and **AMD ROCm/HIP** targets.
 
@@ -10,11 +10,10 @@ Supports **NVIDIA (CUDA)** and **AMD ROCm/HIP** targets.
 
 ## What it measures
 
-The benchmark saturates an SM/CU's FP16 arithmetic pipelines by executing a
-dense loop of **packed fused multiply-add (FMA)** instructions.  All operands
-live in registers — there is no memory traffic beyond one small per-thread
-write at the end — so the result reflects raw arithmetic throughput rather than
-memory bandwidth.
+The benchmark exercises FP16 arithmetic with a
+dense loop of **packed fused multiply-add (FMA)** instructions. The source uses
+register operands and writes one result per thread; compiled work and any
+register spills still need target qualification.
 
 | Platform | Type | Intrinsic / Built-in |
 |---|---|---|
@@ -27,8 +26,8 @@ Each packed FP16 FMA operates on two `half` values simultaneously:
 FLOPs per packed FMA call = 2 (packed elements) × 2 (mul + add) = 4
 ```
 
-Four independent accumulators are used per thread to hide the FP16 pipeline
-latency and achieve full issue-rate throughput.
+Four independent accumulators expose instruction-level parallelism. Full issue
+rate depends on the target and block occupancy and must be established by measurement.
 
 ---
 
@@ -39,10 +38,12 @@ latency and achieve full issue-rate throughput.
 | Packed elements per call | **2** |
 | FLOPs per FMA (1 multiply + 1 add) | **2** |
 | FLOPs per packed FMA call | **4** |
-| GFLOPS formula | `(threads × fmas_per_thread × 4) / elapsed_s / 1e9` |
+| GFLOPS formula | `(num_blocks × threads_per_block × fmas_per_thread × 4) / elapsed_s / 1e9` |
 
 The binary does not print GFLOPS; it is derived downstream from the
-recorded `time_ms` and params using the formula above.
+recorded `time_ms` and effective params using the formula above after work-count
+qualification. Positive FMA requests are rounded down to a multiple of four,
+with a minimum of four; all declared values already satisfy this constraint.
 
 ---
 
@@ -74,7 +75,7 @@ make clean
 
 | Argument | Default | Description |
 |---|---|---|
-| `fmas_per_thread` | `4096` | Number of packed FMA iterations per thread. Increase on very fast GPUs so the kernel runs for at least ~5 ms. |
+| `fmas_per_thread` | `4096` | Packed FMA calls per thread; choose a declared work count with a resolvable event interval. |
 
 Parameters can also be set via environment variables
 (`BENCH_PARAM_fmas_per_thread`, `BENCH_PARAM_num_blocks`,
@@ -82,27 +83,25 @@ Parameters can also be set via environment variables
 
 | Env var | Default | Description |
 |---|---|---|
-| `BENCH_PARAM_vector_add_warmup` | `true` | Run the vector-add warmer (~100 ms of sustained load boosting the clock and evicting the last-level cache) before the timed launch; set `false` to time the kernel as-is |
+| `BENCH_PARAM_vector_add_warmup` | `true` | Run the vector-add warmer (~100 ms of sustained load) before the timed launch; qualify clock/cache effects on the target |
 
 Each execution launches and times the kernel **exactly once** — there is no
 in-program warmup or iteration loop. Repeat measurements come from fresh
 process re-executions: `gpubench run --reps N`.
 
-> **Single-SM/CU measurement.** The default grid is one block
-> (`num_blocks = 1`), so the benchmark measures a single SM/CU at boost
-> clock. Because FMA pipes are per-SM resources with no cross-SM
-> interaction, whole-device peak GFLOPS can be estimated as the per-SM
-> value × the GPU's SM/CU count. Treat that as an upper bound: an all-SM
-> workload is power/thermal-limited and typically sustains a lower clock
-> than a single busy SM. For a device-wide run, set
-> `BENCH_PARAM_num_blocks` manually (e.g. ≥ 8 × SM count).
+> **Single-block measurement.** The manifest fixes `num_blocks=1`. Report the
+> selected block size and work count; one block does not establish SM/CU or
+> whole-device saturation. Multiplying this rate by SM/CU count is an
+> extrapolation model, without a demonstrated upper-bound guarantee. A
+> device-wide claim needs its own declared grid configuration and measured
+> result. See [measurement interpretation](../../docs/measurement_interpretation.md) for counting and qualification limits.
 
 ---
 
 ## Example output
 
 Progress and device info go to stderr; stdout carries JSON lines — one record
-for the single timed launch plus a final summary:
+for the single timed launch plus a final summary. Illustrative timings:
 
 ```
 {"type":"kernel","name":"fp16_fma_kernel","iter":0,"time_ms":2.811214,"host_time_ms":2.902341,"params":{"fmas_per_thread":4096,"num_blocks":1,"threads_per_block":256}}

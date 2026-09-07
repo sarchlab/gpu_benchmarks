@@ -2,7 +2,7 @@
   "benchmark": "empty_kernel",
   "tier": 1,
   "suite": "microbench",
-  "description": "Measures the time to launch a single empty kernel (no work), so the time is pure dispatch / grid-scheduling / completion cost. Sweeping num_blocks shows how overhead grows with grid size; block_size is swept as a non-scaling parameter. Emits one record per timed launch with the GPU event time (time_ms) and the host wall-clock launch+synchronize time (host_time_ms) \u2014 no averaging; the summary total is the sum of the per-launch GPU event times.",
+  "description": "Times the GPU event interval for one empty dispatch and the host bracket around event recording, launch, and synchronization. Neither interval isolates host launch-call latency. Sweep grid geometry; interpret very short times against the target timer resolution.",
   "scaling_param": {
     "name": "num_blocks",
     "description": "Number of thread blocks in the (empty) grid; primary axis for launch/scheduling overhead",
@@ -36,7 +36,7 @@
     },
     {
       "name": "vector_add_warmup",
-      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "description": "When true, run the untimed vector-add warmer before each timed operation to raise clocks and disturb cache state; qualify the resulting state on the target. False disables the warmer without promising a particular cache state.",
       "type": "enum",
       "default": "true",
       "values": [

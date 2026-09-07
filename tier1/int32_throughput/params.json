@@ -2,7 +2,7 @@
   "benchmark": "int32_throughput",
   "tier": 1,
   "suite": "microbench",
-  "description": "Measures peak 32-bit integer (INT32) compute throughput using a long chain of integer multiply-add (MAD) instructions. All values live in registers. Emits per-iteration GPU event time and host time records (total = sum of kernel times); GIOPS is derived downstream.",
+  "description": "Times INT32 multiply-add work at the recorded grid geometry. The declared sweep uses one block. Emits raw GPU time and workload descriptors; qualified integer-operation throughput is derived downstream and is not a measured whole-device peak.",
   "scaling_param": {
     "name": "mads_per_thread",
     "description": "Number of integer MAD operations per thread per kernel invocation; controls total compute work",
@@ -48,7 +48,7 @@
     },
     {
       "name": "vector_add_warmup",
-      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "description": "When true, run the untimed vector-add warmer before each timed operation to raise clocks and disturb cache state; qualify the resulting state on the target. False disables the warmer without promising a particular cache state.",
       "type": "enum",
       "default": "true",
       "values": [

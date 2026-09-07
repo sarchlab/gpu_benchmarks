@@ -257,21 +257,23 @@ gpu_benchmarks/
 
 ## Tier 1 — Microbenchmarks
 
+The metric column names downstream quantities. See [measurement interpretation](docs/measurement_interpretation.md) for work-count qualification, single-block versus device-wide results, timing resolution, and transfer semantics.
+
 | Benchmark | Metric | Description |
 |-----------|--------|-------------|
 | `memory_bandwidth` | GB/s | Global memory bandwidth (H2D, D2H, D2D) |
-| `fp32_throughput` | GFLOPS | Single-precision FP32 FMA throughput (single SM/CU) |
-| `fp64_throughput` | GFLOPS | Double-precision FP64 FMA throughput (single SM/CU) |
-| `fp16_throughput` | GFLOPS | Half-precision FP16 FMA throughput (single SM/CU) |
-| `int32_throughput` | GIOPS | Integer INT32 multiply-add throughput (single SM/CU) |
+| `fp32_throughput` | GFLOPS | Single-precision FP32 FMA throughput (declared grid: one block) |
+| `fp64_throughput` | GFLOPS | Double-precision FP64 FMA throughput (declared grid: one block) |
+| `fp16_throughput` | GFLOPS | Half-precision FP16 FMA throughput (declared grid: one block) |
+| `int32_throughput` | GIOPS | Integer INT32 multiply-add throughput (declared grid: one block) |
 | `cache_latency` | ns | L1/L2/global cache latency via pointer-chasing |
 | `pcie_bandwidth` | GB/s | PCIe/Thunderbolt host-device transfer bandwidth |
-| `mixbench` | GFLOPS/GB/s | Compute-memory roofline sweep |
+| `mixbench` | GFLOPS/GB/s | Nominal compute/logical-byte intensity sweep |
 | `shared_mem_bandwidth` | GB/s | Shared/threadgroup memory bandwidth (single SM/CU) |
 | `atomic_operations` | Gops/s | Atomic operation throughput (Add/CAS/Min) |
 | `warp_shuffle` | Gops/s | Warp/SIMD shuffle issue rate (single SM/CU, dependent chain) |
 | `cache_bandwidth` | GB/s | Cache-hierarchy bandwidth vs working-set size (shared/private modes) |
-| `empty_kernel` | µs | Kernel dispatch time and launch/sync overhead (single empty launch) |
+| `empty_kernel` | µs | Empty-dispatch GPU event interval and host bracket time |
 
 ---
 

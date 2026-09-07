@@ -2,17 +2,18 @@
 
 ## Overview
 
-`pcie_bandwidth` measures PCIe (or equivalent memory-fabric) transfer bandwidth
-between the host (CPU) and the GPU.  Three tests are run in sequence:
+`pcie_bandwidth` records transfer times between host memory and GPU memory.
+Three tests run in sequence by default; derive payload rates for each mode:
 
 | Test | Description |
 |------|-------------|
-| **H2D (unidirectional)** | Pinned host memory → GPU global memory |
-| **D2H (unidirectional)** | GPU global memory → pinned host memory |
-| **Bidirectional** | Concurrent H2D and D2H; measures aggregate throughput |
+| **H2D (unidirectional)** | Host memory → GPU global memory |
+| **D2H (unidirectional)** | GPU global memory → host memory |
+| **Bidirectional** | H2D and D2H submitted on two streams; aggregate payload rate |
 
-Pinned (page-locked) host memory is used for H2D and D2H tests to eliminate
-paging overhead and obtain the best possible transfer throughput.
+The manifest sweeps pinned (page-locked) and pageable host allocations. Keep
+these cases separate: allocation type affects staging, synchronization, and
+whether the submitted transfers can overlap.
 
 ## Platform Support
 
@@ -23,11 +24,18 @@ paging overhead and obtain the best possible transfer throughput.
 
 ## What It Measures
 
-- **Unidirectional H2D / D2H** — peak transfer bandwidth in a single direction.
-  Typical values are ~16 GB/s on PCIe 4.0 x16 and ~32 GB/s on PCIe 5.0 x16.
-- **Bidirectional** — aggregate throughput when both transfer directions are
-  active simultaneously.  On links that support full-duplex operation the
-  aggregate can approach 2× the unidirectional value.
+- **Unidirectional H2D / D2H** — payload rate for the selected direction,
+  allocation type, and buffer size: `B / (time_ms * 1e6)` SI GB/s, where
+  `B = buffer_size_mb * 1024 * 1024`.
+- **Bidirectional** — aggregate payload rate `2 * B / (time_ms * 1e6)` for the
+  submitted pair. The event bracket relies on legacy default-stream ordering
+  with two blocking copy streams; qualify completion ordering on the runtime
+  and build used for collection. Submission on two streams does not prove
+  overlap, especially with pageable memory.
+
+These rates do not measure every bus transaction or staging copy. See
+[transfer interpretation](../../docs/measurement_interpretation.md#transfer-payload-host-allocation-and-overlap)
+for the CUDA/HIP synchronization references and qualification requirements.
 
 ## Build
 
@@ -75,14 +83,14 @@ make clean
 Each selected test is run **exactly once** per process execution and timed with
 GPU events; there is no in-program warmup or iteration loop. Unless
 `BENCH_PARAM_vector_add_warmup=false`, a vector-add warmer runs immediately
-before the timed transfer to boost the GPU clock and evict the last-level
-cache, so the transfer is measured cold-cache at a boosted clock. Repetition is
+before each timed transfer, intended to raise clocks and disturb cache state.
+Qualify the resulting clock/cache state on the target GPU. Repetition is
 done by re-running the process (`gpubench run --reps N`).
 
 ## Example Output
 
 Progress and device info go to stderr; stdout carries JSON lines — one record
-per selected test, plus a final summary (shown here for `transfer_type=all`):
+per selected test, plus a final summary (illustrative timings for `transfer_type=all`):
 
 ```
 {"type":"kernel","name":"memcpy_h2d","iter":0,"time_ms":10.482133,"host_time_ms":10.598210,"params":{"buffer_size_mb":256,"transfer_type":"all","use_pinned_memory":"true"}}
@@ -112,10 +120,8 @@ per selected test, plus a final summary (shown here for `transfer_type=all`):
 
 - Bandwidth in SI GB/s (1 GB = 10⁹ bytes) is derived downstream from the
   recorded times.
-- **CUDA**: CUDA events provide GPU-side timing with microsecond resolution.
-  Pinned host memory is allocated with `cudaMallocHost()`.
-- **HIP**: HIP events provide GPU-side timing with microsecond resolution.
-  Pinned host memory is allocated with `hipHostMalloc()`.
-- **CUDA/HIP bidirectional**: H2D and D2H transfers are issued on two
-  independent async streams, allowing the GPU DMA engine to overlap them
-  where the hardware supports full-duplex operation.
+- Pinned buffers use `hipHostMalloc()` (mapped to CUDA host allocation in the
+  CUDA build); pageable buffers use `malloc()`.
+- Pageable async copies may stage or serialize. Pinned allocation alone does
+  not establish full-duplex overlap or a peak PCIe bandwidth claim.
+- Report the actual link/topology and qualify the event timer on each target.

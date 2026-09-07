@@ -2,7 +2,7 @@
   "benchmark": "pcie_bandwidth",
   "tier": 1,
   "suite": "microbench",
-  "description": "Measures PCIe transfer bandwidth between host and device in three modes: unidirectional H2D, unidirectional D2H, and bidirectional (concurrent H2D+D2H on two streams). Uses pinned host memory for maximum throughput. Emits per-iteration GPU event time and host time records (total = sum of transfer times); GB/s is derived downstream.",
+  "description": "Times host-device transfers with pinned or pageable host memory. H2D and D2H report one-direction payload intervals; bidirectional submits both directions on two streams and reports an aggregate interval. Actual overlap requires runtime/device qualification. Emits raw times and transfer descriptors.",
   "scaling_param": {
     "name": "buffer_size_mb",
     "description": "Transfer buffer size in MiB per direction; controls total data volume",
@@ -54,7 +54,7 @@
     },
     {
       "name": "vector_add_warmup",
-      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "description": "When true, run the untimed vector-add warmer before each timed operation to raise clocks and disturb cache state; qualify the resulting state on the target. False disables the warmer without promising a particular cache state.",
       "type": "enum",
       "default": "true",
       "values": [

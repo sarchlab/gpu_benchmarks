@@ -96,7 +96,7 @@ def main():
                 assert export.returncode == 0, (label, export.stderr)
                 result = check_capture(database, run.stdout, array_bytes, warmer)
                 result.update(case=label, passed=True)
-            except (AssertionError, KeyError, sqlite3.Error) as error:
+            except (AssertionError, KeyError, ValueError, IndexError, sqlite3.Error) as error:
                 result = dict(case=label, passed=False, error=str(error))
             results.append(result)
             print(f"{label}: {'PASS' if result['passed'] else 'FAIL ' + result['error']}", flush=True)

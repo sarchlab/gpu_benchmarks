@@ -87,7 +87,7 @@ Each benchmark declares its parameters in `params.json`; the sweep is structured
 
 4. **Store raw, derive downstream.** Every run's parameters, per-kernel times, and summary land in SQLite exactly as emitted; GFLOPS/GB/s/latency are computed later by analysis scripts, never at collection time.
 
-5. **Traces capture only the real kernels.** During NVBit trace collection the harness forces `vector_add_warmup=false` so a trace contains exactly the kernel(s) under test and never the warmer.
+5. **Traces omit the warmer.** During NVBit trace collection the harness forces `vector_add_warmup=false`. The raw capture retains benchmark-launched kernels, including `cache_latency`'s untimed primer. Replay must preserve its primed state while excluding primer work from measured latency; see the [cache-latency replay requirements](tier1/cache_latency/README.md).
 
 ---
 

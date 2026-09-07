@@ -289,7 +289,8 @@ int main(int argc, char** argv) {
     for (int v = 0; v < N; ++v) {
         float diff = fabsf(h_pr[v] - refPr[v]);
         float tol  = 1e-4f * fabsf(refPr[v]) + 1e-7f;
-        if (diff > tol) {
+        if (!std::isfinite(h_pr[v]) || !std::isfinite(refPr[v]) ||
+            diff > tol) {
             if (errors < 10) {
                 fprintf(stderr, "Mismatch at v=%d: GPU=%.8f CPU=%.8f\n",
                         v, h_pr[v], refPr[v]);

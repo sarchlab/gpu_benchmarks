@@ -522,6 +522,7 @@ int main(int argc, char** argv) {
 
         // BH is approximate, so we check relative error
         int errors = 0;
+        int nonfinite = 0;
         float max_rel_err = 0.0f;
         for (int i = 0; i < verify_n; ++i) {
             float ref_mag = sqrtf(ref_ax[i] * ref_ax[i] + ref_ay[i] * ref_ay[i]);
@@ -529,6 +530,17 @@ int main(int argc, char** argv) {
             float diff_mag = sqrtf((gpu_ax[i] - ref_ax[i]) * (gpu_ax[i] - ref_ax[i]) +
                                    (gpu_ay[i] - ref_ay[i]) * (gpu_ay[i] - ref_ay[i]));
             float rel_err = (ref_mag > 1e-10f) ? diff_mag / ref_mag : 0.0f;
+            // Non-finite values are invalid, independently of the allowance
+            // for finite Barnes-Hut approximation errors.
+            if (!std::isfinite(gpu_ax[i]) || !std::isfinite(gpu_ay[i]) ||
+                !std::isfinite(ref_ax[i]) || !std::isfinite(ref_ay[i]) ||
+                !std::isfinite(ref_mag) || !std::isfinite(gpu_mag) ||
+                !std::isfinite(diff_mag) || !std::isfinite(rel_err)) {
+                if (nonfinite < 5)
+                    fprintf(stderr, "Non-finite force/error at body %d\n", i);
+                ++nonfinite;
+                continue;
+            }
             if (rel_err > max_rel_err) max_rel_err = rel_err;
             if (rel_err > 0.5f) { // BH with theta=0.5 can have ~30% error, 50% threshold
                 if (errors < 5)
@@ -538,8 +550,9 @@ int main(int argc, char** argv) {
             }
         }
         fprintf(stderr, "Max relative error: %.4f (over %d bodies)\n", max_rel_err, verify_n);
-        if (errors > verify_n / 4) {
-            fprintf(stderr, "FAIL: %d/%d bodies exceed error threshold\n", errors, verify_n);
+        if (nonfinite != 0 || errors > verify_n / 4) {
+            fprintf(stderr, "FAIL: %d non-finite bodies; %d/%d exceed finite error threshold\n",
+                    nonfinite, errors, verify_n);
             verify_ok = false;
         } else
             fprintf(stderr, "PASS\n");

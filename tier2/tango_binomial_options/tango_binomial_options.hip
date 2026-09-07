@@ -264,7 +264,8 @@ int main(int argc, char** argv) {
     for (int i = 0; i < verifyN; ++i) {
         float ref = binomial_cpu(h_options[i], numSteps);
         float tol = 1e-2f * fabsf(ref) + 1e-4f;
-        if (fabsf(h_prices[i] - ref) > tol) {
+        if (!std::isfinite(h_prices[i]) || !std::isfinite(ref) ||
+            fabsf(h_prices[i] - ref) > tol) {
             fprintf(stderr, "Mismatch at option %d: GPU=%.6f CPU=%.6f (diff=%.6f)\n",
                     i, h_prices[i], ref, fabsf(h_prices[i] - ref));
             errors++;

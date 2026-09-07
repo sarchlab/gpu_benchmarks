@@ -470,7 +470,8 @@ int main(int argc, char** argv) {
         float rel_res = res_norm / fmaxf(rhs_norm, 1e-20f);
         fprintf(stderr, "Residual ||r||/||rhs|| = %.6e\n", rel_res);
 
-        if (rel_res < 10.0f) {
+        if (std::isfinite(res_norm) && std::isfinite(rhs_norm) &&
+            std::isfinite(rel_res) && rel_res < 10.0f) {
             fprintf(stderr, "PASS\n");
         } else {
             fprintf(stderr, "FAIL: relative residual too large\n");

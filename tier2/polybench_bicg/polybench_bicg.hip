@@ -221,7 +221,8 @@ int main(int argc, char** argv) {
     for (int j = 0; j < check_n; ++j) {
         float ref = s_ref[j];
         float rel = fabsf(h_s[j] - ref) / (fabsf(ref) + 1e-6f);
-        if (rel > 1e-4f) {
+        if (!std::isfinite(h_s[j]) || !std::isfinite(ref) || !std::isfinite(rel) ||
+            rel > 1e-4f) {
             fprintf(stderr, "MISMATCH s[%d]: gpu=%.6f cpu=%.6f rel=%.4e\n",
                     j, h_s[j], ref, rel);
             pass = false;
@@ -230,7 +231,8 @@ int main(int argc, char** argv) {
     for (int i = 0; i < check_m; ++i) {
         float ref = q_ref[i];
         float rel = fabsf(h_q[i] - ref) / (fabsf(ref) + 1e-6f);
-        if (rel > 1e-4f) {
+        if (!std::isfinite(h_q[i]) || !std::isfinite(ref) || !std::isfinite(rel) ||
+            rel > 1e-4f) {
             fprintf(stderr, "MISMATCH q[%d]: gpu=%.6f cpu=%.6f rel=%.4e\n",
                     i, h_q[i], ref, rel);
             pass = false;

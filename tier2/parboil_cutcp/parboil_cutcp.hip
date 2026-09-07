@@ -545,7 +545,8 @@ int main(int argc, char** argv) {
         }
         float got = lattice[(size_t)(k * ny + j) * nx + i];
         float tol = 1e-3f * (fabsf(ref) + 1e-4f);
-        if (fabsf(got - ref) > tol) {
+        if (!std::isfinite(got) || !std::isfinite(ref) ||
+            fabsf(got - ref) > tol) {
             if (errors < 5)
                 fprintf(stderr, "Mismatch (%d,%d,%d): got %.5f expected %.5f\n",
                         i, j, k, got, ref);

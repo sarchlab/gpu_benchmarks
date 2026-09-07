@@ -205,7 +205,8 @@ int main(int argc, char** argv) {
     bool pass = true;
     for (int j = 0; j < check_n; ++j) {
         float rel = fabsf(h_y[j] - y_ref[j]) / (fabsf(y_ref[j]) + 1e-6f);
-        if (rel > 1e-3f) {
+        if (!std::isfinite(h_y[j]) || !std::isfinite(y_ref[j]) || !std::isfinite(rel) ||
+            rel > 1e-3f) {
             fprintf(stderr, "MISMATCH at y[%d]: gpu=%.6f cpu=%.6f rel=%.4e\n",
                     j, h_y[j], y_ref[j], rel);
             pass = false;

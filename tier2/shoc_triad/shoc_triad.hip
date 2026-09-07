@@ -141,7 +141,8 @@ int main(int argc, char** argv) {
     int errors = 0;
     for (int i = 0; i < N; ++i) {
         float diff = fabsf(h_a[i] - h_ref[i]);
-        if (diff > 1e-5f * fabsf(h_ref[i]) + 1e-6f) {
+        if (!std::isfinite(h_a[i]) || !std::isfinite(h_ref[i]) ||
+            diff > 1e-5f * fabsf(h_ref[i]) + 1e-6f) {
             if (errors < 10) {
                 fprintf(stderr, "Mismatch at %d: got %.8f, expected %.8f\n",
                         i, h_a[i], h_ref[i]);

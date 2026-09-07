@@ -23,7 +23,7 @@ jobs:
         run: |
           install_ok=0
           for i in 1 2 3; do
-            if apt-get update && apt-get install -y git wget make gcc g++; then
+            if apt-get update && apt-get install -y git wget make gcc g++ python3; then
               install_ok=1
               break
             fi
@@ -93,6 +93,9 @@ jobs:
 
       - name: Compile Tier 2 (CUDA)
         run: ./gpubench compile --tier 2 --platform cuda
+
+      - name: Compile finite-verification fault-injection tests (GPU required to run)
+        run: python3 tests/finite_verification.py --platform cuda --work-dir /tmp/finite-verification --compile-only
 
       - name: Compile Tier 3 (CUDA)
         run: ./gpubench compile --tier 3 --platform cuda

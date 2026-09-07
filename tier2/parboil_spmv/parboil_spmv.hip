@@ -354,7 +354,8 @@ static int jds_reconstruct_matches(mat_entry* coo, int nz, int num_rows)
     int ok = 1;
     for (int r = 0; r < dim && ok; ++r) {
         float thresh = 1e-4f * fabsf(ref[r]) + 1e-5f;
-        if (fabsf(got[r] - ref[r]) > thresh) {
+        if (!std::isfinite(got[r]) || !std::isfinite(ref[r]) ||
+            fabsf(got[r] - ref[r]) > thresh) {
             fprintf(stderr, "  row %d: got %.6f expected %.6f\n", r, got[r], ref[r]);
             ok = 0;
         }
@@ -537,7 +538,8 @@ int main(int argc, char** argv)
     int errors = 0;
     for (int r = 0; r < dim; ++r) {
         float thresh = 1e-3f * fabsf(ref[r]) + 1e-4f;
-        if (fabsf(h_y[r] - ref[r]) > thresh) {
+        if (!std::isfinite(h_y[r]) || !std::isfinite(ref[r]) ||
+            fabsf(h_y[r] - ref[r]) > thresh) {
             if (errors < 5)
                 fprintf(stderr, "Mismatch row %d: got %.6f expected %.6f\n",
                         r, h_y[r], ref[r]);

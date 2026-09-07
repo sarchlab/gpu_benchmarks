@@ -306,7 +306,14 @@ int main(int argc, char** argv) {
             float dy = fabsf(gpuPos[i].y - cpuPos[i].y);
             float dz = fabsf(gpuPos[i].z - cpuPos[i].z);
             float tol = 1e-2f * (fabsf(cpuPos[i].x) + fabsf(cpuPos[i].y) + fabsf(cpuPos[i].z)) + 1e-5f;
-            if (dx > tol || dy > tol || dz > tol) {
+            if (!std::isfinite(gpuPos[i].x) ||
+                !std::isfinite(cpuPos[i].x) ||
+                !std::isfinite(gpuPos[i].y) ||
+                !std::isfinite(cpuPos[i].y) ||
+                !std::isfinite(gpuPos[i].z) ||
+                !std::isfinite(cpuPos[i].z) ||
+                !std::isfinite(tol) ||
+                dx > tol || dy > tol || dz > tol) {
                 if (errors < 10) {
                     fprintf(stderr, "Mismatch at body %d: GPU=(%.6f,%.6f,%.6f) CPU=(%.6f,%.6f,%.6f)\n",
                             i, gpuPos[i].x, gpuPos[i].y, gpuPos[i].z,

@@ -254,7 +254,12 @@ int main(int argc, char** argv) {
     int errors = 0;
     for (int i = 0; i < verifyN; ++i) {
         float tol = 1e-3f * (fabsf(ref_call[i]) + fabsf(ref_put[i])) + 1e-5f;
-        if (fabsf(h_call[i] - ref_call[i]) > tol ||
+        if (!std::isfinite(h_call[i]) ||
+            !std::isfinite(ref_call[i]) ||
+            !std::isfinite(h_put[i]) ||
+            !std::isfinite(ref_put[i]) ||
+            !std::isfinite(tol) ||
+            fabsf(h_call[i] - ref_call[i]) > tol ||
             fabsf(h_put[i]  - ref_put[i])  > tol) {
             if (errors < 10) {
                 fprintf(stderr,

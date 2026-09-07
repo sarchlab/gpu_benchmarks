@@ -382,7 +382,8 @@ int main(int argc, char** argv) {
                 int idx = r * width + c;
                 float diff = fabsf(h_output[idx] - ref[idx]);
                 float tol = 1e-3f * fabsf(ref[idx]) + 1e-5f;
-                if (diff > tol) {
+                if (!std::isfinite(h_output[idx]) || !std::isfinite(ref[idx]) ||
+                    diff > tol) {
                     if (errors < 10) {
                         fprintf(stderr, "Mismatch at (%d,%d): GPU=%.6f CPU=%.6f diff=%.6f\n",
                                 r, c, h_output[idx], ref[idx], diff);

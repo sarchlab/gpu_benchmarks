@@ -233,7 +233,8 @@ int main(int argc, char** argv) {
                 float gpu = gpu_result[i*CN + j];
                 float rel = fabsf(gpu - ref) / (fabsf(ref) + 1e-6f);
                 if (rel > max_rel) max_rel = rel;
-                if (rel > 1e-3f) {
+                if (!std::isfinite(gpu) || !std::isfinite(ref) || !std::isfinite(rel) ||
+                    rel > 1e-3f) {
                     fprintf(stderr, "MISMATCH [%d][%d]: gpu=%.6f cpu=%.6f rel=%.4e\n",
                             i, j, gpu, ref, rel);
                     pass = false;

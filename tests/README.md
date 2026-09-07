@@ -25,7 +25,9 @@ comparisons cover each compared component independently. CG/MG injection targets
 the reduced residual and reference norms that their verifiers actually compare.
 
 Failure requires the hook to have executed, a verification failure diagnostic,
-and exit status 1. A crash, timeout, or missing hook cannot satisfy the test.
+and exit status 1, with no HIP runtime error. A crash, timeout, missing hook,
+or later cleanup error cannot satisfy the test. A timeout aborts the run; the
+last completed benchmark report may therefore be partial.
 Logs and `report.json` retain each result and the original source hash. The
 minimum declared scaling value and existing non-scaling defaults are used, with
 verification enabled and the clock/cache warmer disabled to keep these functional

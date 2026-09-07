@@ -151,7 +151,8 @@ def main():
                         # check: require the selected comparator itself to fail.
                         diagnostic = "Naive mismatch" if injection["R04_SITE"] == "naive" else "Optimized mismatch"
                         rejected = diagnostic in run.stderr
-                    passed = reached and rejected and run.returncode == 1
+                    runtime_error = "HIP error" in run.stderr
+                    passed = reached and rejected and not runtime_error and run.returncode == 1
                 else:
                     passed = run.returncode == 0 and "PASS" in run.stderr
                 results.append(dict(case=case_name, passed=passed, exit=run.returncode, source_sha256=hashlib.sha256(original.encode()).hexdigest()))

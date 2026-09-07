@@ -14,9 +14,9 @@ Every benchmark directory contains a `params.json` file that fully describes the
   "description": "<string>",
   "language": "<string>",
   "scaling_param": { ... },
-  "non_scaling_params": [ ...],
-  "kernels": [ "<string>", ...],
-  "metrics": [ ...]
+  "non_scaling_params": [ ... ],
+  "kernels": [ "<string>", ... ],
+  "metrics": [ ... ]
 }
 ```
 
@@ -94,7 +94,7 @@ Describes metrics emitted by legacy or higher-tier producers. Tier 1/Tier 2 repo
   "metrics": [
     {"name": "GFLOPS", "description": "Billions of floating-point operations per second"},
     {"name": "bandwidth_gbps", "description": "Effective memory bandwidth in GB/s"}
- ]
+  ]
 }
 ```
 
@@ -176,7 +176,7 @@ This example uses the current FP32 workload controls and sweep. Work inside the 
       "default": "true",
       "values": ["true", "false"]
     }
- ],
+  ],
   "kernels": ["fp32_fma_kernel"]
 }
 ```
@@ -219,7 +219,7 @@ This example uses the current FP32 workload controls and sweep. Work inside the 
       "default": "true",
       "values": ["true", "false"]
     }
- ],
+  ],
   "kernels": ["calculate_temp"]
 }
 ```
@@ -263,11 +263,11 @@ This higher-tier example illustrates the optional metric descriptors; it does no
       "default": "fp32",
       "values": ["fp32", "fp16", "bf16"]
     }
- ],
+  ],
   "kernels": ["forward", "backward", "optimizer_step"],
   "metrics": [
     {"name": "images_per_sec", "description": "Training throughput in images/second"}
- ]
+  ]
 }
 ```
 

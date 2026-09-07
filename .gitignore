@@ -25,6 +25,7 @@ tier2/*/*
 !tier2/*/*.metal
 !tier2/*/*.mm
 !tier2/*/params.json
+!tier2/npb_is/test_npb_is.py
 tier3/*/*
 !tier3/*/Makefile
 !tier3/*/README.md

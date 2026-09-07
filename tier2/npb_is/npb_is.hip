@@ -12,9 +12,9 @@
 //     does), and computes key ranks with an inclusive prefix sum over
 //     MAX_KEY entries. Partial verification checks five test-key ranks per
 //     iteration.
-//   - One untimed rank(1) precedes the timed loop (upstream's free
-//     iteration), and full_verify (the actual permutation + sortedness
-//     check) runs untimed after it, exactly as upstream.
+//   - full_verify (the actual permutation + sortedness check) runs untimed
+//     afterward. The upstream free/warmup rank is omitted under the repo's
+//     one-execution policy; rank(1) applies the same key perturbation itself.
 //
 // Problem classes: size (=N, number of keys) is the scaling parameter. The
 // NPB class sizes S/W/A/B/C (2^16/2^20/2^23/2^25/2^27 keys) use the class's
@@ -29,9 +29,10 @@
 //     (per-block scan, block-sum scan, offset add).
 //   - The per-iteration key perturbation is a 1-thread kernel.
 //   - Partial-verify expected ranks are precomputed on the host before the
-//     timed loop; each iteration's five device ranks are captured by a tiny
-//     untimed kernel and compared on the host after the loop, so no host
-//     work separates the measured kernels. Upstream's USE_BUCKETS cache
+//     timed loop; the measured scan-add kernel captures five ranks each
+//     iteration, in both verification modes. Comparison follows the loop,
+//     so no verification-only launches or host work separate the measured
+//     kernels. Upstream's USE_BUCKETS cache
 //     optimization is not used (matching the reference's default).
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
@@ -65,6 +66,7 @@
 
 #define MAX_ITERATIONS  10
 #define TEST_ARRAY_SIZE 5
+#define MIN_TOTAL_KEYS (16 * (MAX_ITERATIONS + 1))
 
 // ---------------------------------------------------------------------------
 // Error-checking macro
@@ -125,9 +127,7 @@ static int published_expected(char cls, int i, int iteration, int base) {
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], name) == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v > 0) return v;
-            break;
+            return atoi(argv[i + 1]);
         }
     }
     return defaultVal;
@@ -311,33 +311,29 @@ __global__ void scan_sums_kernel(int* sums, int nsums) {
     }
 }
 
-// Add each block's scanned offset to its tile.
-__global__ void scan_add_kernel(int* data, const int* block_sums, int n) {
+// Finish each tile and capture its sampled ranks as part of the measured
+// kernel. Each sample has exactly one owning tile. Capturing is unconditional
+// so BENCH_PARAM_verify changes only host work outside the measured run.
+__global__ void scan_add_kernel(int* data, const int* block_sums, int n,
+                                const int* cap_idx, int* cap_out,
+                                int iteration) {
     const int tile = blockDim.x * 2;
     const int base = blockIdx.x * tile;
     const int t = threadIdx.x;
     int off = block_sums[blockIdx.x];
     if (base + 2 * t < n) data[base + 2 * t] += off;
     if (base + 2 * t + 1 < n) data[base + 2 * t + 1] += off;
-}
 
-// ---------------------------------------------------------------------------
-// Kernel: capture the current iteration's test-key ranks into a device
-// buffer. Verification-only; runs untimed inside the timed loop (a handful
-// of device reads, so it keeps the GPU busy rather than pausing it) so the
-// comparison can happen on the host after the timed section without letting
-// the device clock drop between measured iterations. cap_idx[slot] is the
-// rank-array index to sample, or -1 for an out-of-range test key.
-// ---------------------------------------------------------------------------
-
-__global__ void capture_ranks_kernel(const int* __restrict__ key_buff1,
-                                     const int* __restrict__ cap_idx,
-                                     int* __restrict__ cap_out,
-                                     int base, int count) {
-    int i = threadIdx.x;
-    if (i < count) {
-        int idx = cap_idx[base + i];
-        cap_out[base + i] = (idx >= 0) ? key_buff1[idx] : 0;
+    // The sample may have been written by another thread in this block;
+    // make all tile updates visible before its owning block reads it.
+    __syncthreads();
+    if (t < TEST_ARRAY_SIZE) {
+        int slot = (iteration - 1) * TEST_ARRAY_SIZE + t;
+        int idx = cap_idx[slot];
+        if (idx >= base && idx < base + tile && idx < n)
+            cap_out[slot] = data[idx];
+        else if (blockIdx.x == 0 && idx < 0)
+            cap_out[slot] = 0;
     }
 }
 
@@ -347,12 +343,15 @@ __global__ void capture_ranks_kernel(const int* __restrict__ key_buff1,
 // every size (and cross-checked against the published tables at class sizes).
 // ---------------------------------------------------------------------------
 
-static void ref_rank(int* h_key, int* ref_buff, int N, int max_key,
-                     int iteration, const int* test_index, int* pv_vals) {
+static void modify_and_sample_keys(int* h_key, int max_key, int iteration,
+                                   const int* test_index, int* pv_vals) {
     h_key[iteration] = iteration;
     h_key[iteration + MAX_ITERATIONS] = max_key - iteration;
     for (int i = 0; i < TEST_ARRAY_SIZE; ++i)
         pv_vals[i] = h_key[test_index[i]];
+}
+
+static void ref_rank(int* h_key, int* ref_buff, int N, int max_key) {
     memset(ref_buff, 0, (size_t)max_key * sizeof(int));
     for (int i = 0; i < N; ++i)
         ref_buff[h_key[i]]++;
@@ -391,9 +390,12 @@ int main(int argc, char** argv) {
         do_verify = false;
     }
 
-    if (N < 64) {
-        fprintf(stderr, "size must be >= 64 (got %d)\n", N);
-        printf("{\"type\":\"error\",\"message\":\"size must be >= 64\"}\n");
+    // rank(10) writes key value 10. Non-class MAX_KEY=N/16 must therefore
+    // exceed 10 so every perturbed key remains inside the rank array.
+    if (N < MIN_TOTAL_KEYS) {
+        fprintf(stderr, "size must be >= %d (got %d)\n", MIN_TOTAL_KEYS, N);
+        printf("{\"type\":\"error\",\"message\":\"size must be >= %d\"}\n",
+               MIN_TOTAL_KEYS);
         return EXIT_FAILURE;
     }
     if (block_size < 32 || (block_size & (block_size - 1)) != 0) {
@@ -463,8 +465,8 @@ int main(int argc, char** argv) {
 
     // Verification capture buffers. The partial-verification expected ranks
     // and the device-array indices to sample are computed up front (below,
-    // before the timed loop); during the timed loop a tiny untimed kernel
-    // copies each iteration's five device ranks into d_capture, and the
+    // before the timed loop); the measured scan-add kernel copies each
+    // iteration's five device ranks into d_capture in both modes, and the
     // host/device comparison runs only after the timed section. This keeps
     // all O(N + MAX_KEY) host mirror work and every synchronizing readback
     // out of the measured run, so the timed kernels are never separated by a
@@ -494,45 +496,36 @@ int main(int argc, char** argv) {
     bench_lap_reset(&acc_scans);
     bench_lap_reset(&acc_scana);
 
-    // Launch each rank() kernel, timed (accumulating into its lap) or not.
-    auto time_or_run = [&](bench_lap_t* acc, bool timed, auto launch) {
-        if (timed) {
-            bench_lap_add(acc, bench_time_op(&timer, launch));
-        } else {
-            launch();
-            HIP_CHECK(hipGetLastError());
-        }
+    // Every algorithm kernel is measured and accumulated into its record.
+    auto time_kernel = [&](bench_lap_t* acc, auto launch) {
+        bench_lap_add(acc, bench_time_op(&timer, launch));
     };
 
     // One rank(iteration): upstream's timed unit of work.
-    auto run_rank = [&](int iteration, bool timed) {
-        time_or_run(&acc_modify, timed, [&]() {
+    auto run_rank = [&](int iteration) {
+        time_kernel(&acc_modify, [&]() {
             modify_keys_kernel<<<dim3(1), dim3(1)>>>(d_key_array, iteration,
                                                      max_key);
         });
-        time_or_run(&acc_clear, timed, [&]() {
+        time_kernel(&acc_clear, [&]() {
             clear_kernel<<<dim3(gridClear), dim3(bs)>>>(d_key_buff1, max_key);
         });
-        time_or_run(&acc_hist, timed, [&]() {
+        time_kernel(&acc_hist, [&]() {
             histogram_kernel<<<dim3(gridKeys), dim3(bs)>>>(
                 d_key_array, d_key_buff2, d_key_buff1, N);
         });
-        time_or_run(&acc_scanb, timed, [&]() {
+        time_kernel(&acc_scanb, [&]() {
             scan_blocks_kernel<<<dim3(nScan), dim3(bs), shmem>>>(
                 d_key_buff1, d_block_sums, max_key);
         });
-        time_or_run(&acc_scans, timed, [&]() {
+        time_kernel(&acc_scans, [&]() {
             scan_sums_kernel<<<dim3(1), dim3(bs), shmem>>>(d_block_sums, nScan);
         });
-        time_or_run(&acc_scana, timed, [&]() {
+        time_kernel(&acc_scana, [&]() {
             scan_add_kernel<<<dim3(nScan), dim3(bs)>>>(d_key_buff1,
-                                                       d_block_sums, max_key);
+                d_block_sums, max_key, d_cap_idx, d_capture, iteration);
         });
     };
-
-    // Untimed rank(1): upstream's free iteration (warms data/code paths).
-    run_rank(1, false);
-    HIP_CHECK(hipDeviceSynchronize());
 
     // Precompute partial-verification data BEFORE the timed loop (all host
     // work, outside the measured run). Running the host mirror for each
@@ -545,56 +538,47 @@ int main(int argc, char** argv) {
     int pv_attempted = 0, pv_passed = 0;
     bool tables_ok = true;
     int pv_vals[TEST_ARRAY_SIZE];
-    if (do_verify) {
-        for (int iteration = 1; iteration <= MAX_ITERATIONS; ++iteration) {
-            ref_rank(h_keys, ref_buff, N, max_key, iteration, test_index,
-                     pv_vals);
-            for (int i = 0; i < TEST_ARRAY_SIZE; ++i) {
-                int slot = (iteration - 1) * TEST_ARRAY_SIZE + i;
-                int k = pv_vals[i];
-                if (!(0 < k && k <= N - 1)) {   // upstream range guard
-                    cap_idx_host[slot] = -1;
-                    cap_expected[slot] = 0;
-                    continue;
-                }
-                cap_idx_host[slot] = k - 1;
-                cap_expected[slot] = ref_buff[k - 1];
-                pv_attempted++;
-                if (klass) {
-                    int pub = published_expected(klass->cls, i, iteration,
-                                                 klass->test_rank[i]);
-                    if (cap_expected[slot] != pub) {
-                        fprintf(stderr,
-                                "Published-table mismatch: iteration %d, test "
-                                "key %d (mirror %d, published %d)\n",
-                                iteration, i, cap_expected[slot], pub);
-                        tables_ok = false;
-                    }
+    for (int iteration = 1; iteration <= MAX_ITERATIONS; ++iteration) {
+        modify_and_sample_keys(h_keys, max_key, iteration, test_index,
+                               pv_vals);
+        if (do_verify) ref_rank(h_keys, ref_buff, N, max_key);
+        for (int i = 0; i < TEST_ARRAY_SIZE; ++i) {
+            int slot = (iteration - 1) * TEST_ARRAY_SIZE + i;
+            int k = pv_vals[i];
+            if (!(0 < k && k <= N - 1)) {   // upstream range guard
+                cap_idx_host[slot] = -1;
+                cap_expected[slot] = 0;
+                continue;
+            }
+            cap_idx_host[slot] = k - 1;
+            if (!do_verify) continue;
+            cap_expected[slot] = ref_buff[k - 1];
+            pv_attempted++;
+            if (klass) {
+                int pub = published_expected(klass->cls, i, iteration,
+                                             klass->test_rank[i]);
+                if (cap_expected[slot] != pub) {
+                    fprintf(stderr,
+                            "Published-table mismatch: iteration %d, test "
+                            "key %d (mirror %d, published %d)\n",
+                            iteration, i, cap_expected[slot], pub);
+                    tables_ok = false;
                 }
             }
         }
-        HIP_CHECK(hipMemcpy(d_cap_idx, cap_idx_host, NCAP * sizeof(int),
-                            hipMemcpyHostToDevice));
     }
+    HIP_CHECK(hipMemcpy(d_cap_idx, cap_idx_host, NCAP * sizeof(int),
+                        hipMemcpyHostToDevice));
 
     /* Cold-cache calibration: evict the LLC (and hold the clock high) so the
      * timed run's first kernel launch runs cold. No-op when
      * BENCH_PARAM_vector_add_warmup is disabled. */
     bench_pass_warm();
 
-    // Timed main loop: 10 rank iterations (upstream's timed section). When
-    // verifying, each iteration's five device ranks are captured by a tiny
-    // untimed kernel (no host work between timed kernels); the readback and
-    // comparison happen once, after the loop.
-    for (int iteration = 1; iteration <= MAX_ITERATIONS; ++iteration) {
-        run_rank(iteration, true);
-        if (do_verify) {
-            int base = (iteration - 1) * TEST_ARRAY_SIZE;
-            capture_ranks_kernel<<<dim3(1), dim3(TEST_ARRAY_SIZE)>>>(
-                d_key_buff1, d_cap_idx, d_capture, base, TEST_ARRAY_SIZE);
-            HIP_CHECK(hipGetLastError());
-        }
-    }
+    // Exactly ten rank iterations, six measured launches each. Verification
+    // readback and comparison follow the entire run.
+    for (int iteration = 1; iteration <= MAX_ITERATIONS; ++iteration)
+        run_rank(iteration);
 
     double total_gpu_ms = acc_modify.gpu_ms + acc_clear.gpu_ms +
                           acc_hist.gpu_ms + acc_scanb.gpu_ms +

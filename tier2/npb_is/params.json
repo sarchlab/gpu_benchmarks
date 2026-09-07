@@ -49,7 +49,7 @@
     },
     {
       "name": "vector_add_warmup",
-      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "description": "When true, the vector-add warmer boosts the GPU clock and evicts the last-level cache once before the ten-iteration algorithm. When false, run as-is with no GPU primer; trace collection uses this setting.",
       "type": "enum",
       "default": "true",
       "values": [

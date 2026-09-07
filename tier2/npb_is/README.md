@@ -26,8 +26,7 @@ algorithm is preserved exactly:
   key's rank.
 - **Verification**: per-iteration partial verification of five test-key
   ranks, and an untimed `full_verify` (rank-directed permutation +
-  sortedness check) after the timed loop. One untimed `rank(1)` precedes the
-  timed loop (upstream's "free" iteration).
+  sortedness check) after the timed loop.
 
 GPU-mapping departures (re-parallelizations of the same algorithm, permitted
 under methodology Rule 1):
@@ -36,10 +35,12 @@ under methodology Rule 1):
   (per-block Blelloch scan → block-sum scan → offset add).
 - The per-iteration two-key perturbation is a one-thread kernel.
 - Partial-verify expected ranks are precomputed on the host before the timed
-  loop; each iteration's five device ranks are captured by a tiny untimed
-  kernel and compared on the host after the loop. No host work runs between
-  the measured kernels, so verification does not perturb the timing (see
-  Verification below).
+  loop. The measured scan-add kernel captures five ranks per iteration;
+  comparison runs on the host afterward. Capture runs in both verification
+  modes, so they execute identical GPU work with no extra launches.
+- The upstream free/warmup `rank(1)` is omitted under the repository's
+  one-execution measurement policy. Its key perturbations are idempotent
+  with the first measured `rank(1)`, so this preserves the ranked inputs.
 - Upstream's optional `USE_BUCKETS` cache optimization is not used (matching
   the reference's default).
 
@@ -60,6 +61,10 @@ At class sizes the published partial-verification tables are checked in
 addition to the host mirror. Non-class sizes use `MAX_KEY = N/16` (the
 W/A/B/C ratio) with test positions derived from the Class A indices modulo
 N; expected ranks then come from the host mirror alone.
+
+The minimum accepted size is **176**: `MAX_KEY = N/16` must exceed 10,
+the largest key value inserted by the ten ranking iterations. Smaller sizes
+fail before GPU setup with an error record and no timing records.
 
 ## Files
 
@@ -88,16 +93,16 @@ BENCH_PARAM_size=1048576 ./npb_is     # env vars override argv
 Environment variables: `BENCH_PARAM_size` (default 8388608),
 `BENCH_PARAM_block_size` (default 256; must be a power of two ≥ 32), and
 `BENCH_PARAM_vector_add_warmup` (default true — cold-cache calibration:
-boosts the clock and evicts the LLC after the untimed `rank(1)` and before
-the timed loop).
+boosts the clock and evicts the LLC once after setup and before the timed
+loop). When disabled, there is no GPU warmup or primer.
 
-`BENCH_PARAM_verify=false` (also `0`/`skip`) skips all verification (the
-host mirror, partial verify, and `full_verify`) — an undeclared debug knob,
-not a sweep parameter in `params.json`. The six measured kernels and the
-work between them are unchanged either way: with verification on, the only
-in-loop addition is a tiny untimed capture kernel per iteration (device-side,
-so it never pauses the measured kernels), and all host comparison happens
-before and after the timed loop.
+`BENCH_PARAM_verify=false` (also `0`/`skip`) skips the CPU reference and
+result comparisons — an undeclared debug knob, not a sweep parameter in
+`params.json`. Snapshot indices are prepared and the scan-add kernel captures
+the same ranks in both modes; capture cost is included in its event time.
+Every run has exactly 60 measured algorithm launches: six kernels per
+iteration. Trace collection disables the shared warmer and therefore sees
+exactly those launches, with verification either on or off.
 
 ## Output
 
@@ -136,9 +141,11 @@ Verification: 50/50 partial + full_verify ok + rank array ok => PASS
 
 - **Partial verify** (five test keys × 10 iterations): expected ranks come
   from a bit-exact host mirror of the upstream serial algorithm, computed
-  before the timed loop; the device ranks are captured during the loop by an
-  untimed kernel and compared after it. At class sizes the mirror is
-  additionally cross-checked against the published NPB `test_rank_array`
+  before the timed loop; the device ranks are captured by the measured
+  scan-add kernel and compared after the loop. Each sample is read by its
+  owning tile after a block barrier makes that tile's updates visible;
+  there are no cross-block reads or extra capture launches. At class sizes
+  the mirror is additionally cross-checked against the published NPB `test_rank_array`
   tables (with the upstream per-class iteration shifts). Because the
   expensive host mirror and all readbacks sit outside the timed section, the
   measured kernels are never separated by a host pause that could let the GPU
@@ -149,6 +156,22 @@ Verification: 50/50 partial + full_verify ok + rank array ok => PASS
   device rank array is also compared bit-for-bit against the host mirror.
 - Upstream's acceptance criterion (5 × 10 partial verifications + full
   verify all passing) must hold; on failure the binary exits non-zero.
+
+Run behavioral regressions after building:
+
+```bash
+make test PLATFORM=cuda                    # GPU result/protocol and bounds checks
+python3 test_npb_is.py --sweep              # include all 27 declared sizes
+python3 test_npb_is.py --trace              # NVIDIA nsys: assert exact launch sequence
+python3 test_npb_is.py --invalid-only       # early rejection; no GPU needed
+```
+
+The trace check covers verification on/off, the minimum size, and a
+multi-chunk block-sum scan. It exports Nsight Systems CUDA activity to
+SQLite and checks the actual sequence: each of the six kernels exactly
+ten times, with no warmup or verification-only kernels.
+`make test PLATFORM=rocm` uses the same result checks; `--trace` requires
+NVIDIA Nsight Systems. Python 3 is required for these tests.
 
 ## Platform Notes
 

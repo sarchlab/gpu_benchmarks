@@ -75,3 +75,12 @@ Run `make -C tier1/warp_shuffle PLATFORM=cuda test` (or `PLATFORM=rocm`) on a
 compatible GPU. It uses the selected device's native width. CI compiles the test;
 CUDA and AMD native wave32/wave64 runtime qualification must be recorded
 separately. Correct outputs do not replace target instruction-count checks.
+
+`bh_entry_order.py` checks actual Barnes–Hut CUDA timelines: initial body/tree
+transfers before the warmer, all force/integration timestep launches with their
+event brackets, and the existing separate verification launch. It requires an
+NVIDIA GPU, `nsys`, a built binary and a new directory. Run
+`python3 tests/bh_entry_order.py --binary tier2/lonestar_bh/lonestar_bh --work-dir /tmp/bh-entry`.
+Assertions must be enabled; optimized Python is rejected. Captures and reports
+are retained; timeouts abort and may leave a partial report. CI does not run this
+functional GPU check, and its profiled timings are not performance results.

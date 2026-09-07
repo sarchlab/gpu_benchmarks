@@ -112,7 +112,7 @@ tracer/
     tier5.go           residual address column (recorded accesses, base + deltas)
     tier7.go           lossy statistical model for data-dependent gathers
     cache.go           LRU/stack-distance cache model (tier-7 equivalence gate)
-    sample.go          P3 corner sampling, verify-or-fallback plan, sampled codec (v4)
+    sample.go          P3 corner sampling, verify-or-fallback plan, sampled codec (v6; reads v4)
     synth.go           SynthBlock, Holdout measurement, grid extrapolation
     scale.go           scaling extrapolation: detect loop body, replay to a larger size
     convert.go         Accel-Sim traces dir -> .ptrace (Convert / ConvertSampled)
@@ -187,3 +187,13 @@ different binary outright. Two gates turn the README caveat above into checks:
   recorded index column for gather/scatter (store `index[]`, not 32 addresses).
 - **Validate on real traces:** run `ptrace synth` on the H100 P0 traces to turn
   the synthetic scaling above into measured per-kernel numbers.
+
+## Residual encoding compatibility
+
+New conversions write dynamic format v5 (full) or v6 (sampled), preserving exact
+address tokens when they cannot be reconstructed from the active-lane addresses.
+This covers zero-active-lane memory payloads and single-lane stride information.
+Readers still accept v3/v4. Older readers require an update to open new files;
+reconvert original traces to restore tokens lost by an earlier conversion. The
+v3/v4 size tables above describe historical measurements. See
+[the residual format](../docs/ptrace_method.md#5-residual-column-for-unmodeled-accesses-tier5go).

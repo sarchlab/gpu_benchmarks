@@ -83,7 +83,7 @@ relaunch-redundancy axis.
 ## 3. Columnar dynamic payload (`ptrace.go`)
 
 The per-launch dynamic stream is stored column-major, then zstd'd as one window.
-Full mode (`encodeDyn`, dyn version 3) emits six length-prefixed sections:
+Full mode (`encodeDyn`, dyn version 5) emits six length-prefixed sections:
 
 ```
 [A struct][B pc][C mask][R recipes][S selector][D residual]
@@ -143,18 +143,39 @@ those accesses currently land in the residual column, losslessly.
 
 ## 5. Residual column for unmodeled accesses (`tier5.go`)
 
-Unmodeled memory instructions are still stored compactly. `encodeResidual`
-reconstructs the per-active-lane address list (the active-lane count comes from the
-mask, so it is not stored), then writes `[mode byte][uvarint base][zig-zag varint
-deltas…]`. `decodeResidual` regenerates the **exact** original payload tokens for
-the mode, so it remains lossless. This is far smaller than the text payload for the
-bounded indices real gathers touch, but unlike a recipe it does not extrapolate.
+Unmodeled memory instructions use the compact per-active-lane address list only
+when regenerating its payload tokens is byte-identical to the recorded tokens.
+The compact representation remains `[mode byte][uvarint base][zig-zag varint
+deltas…]`; the mask supplies the active-lane count.
+
+The address list alone cannot preserve every recorded payload. For example, a
+zero-active-lane instruction may still carry `0x0 0`, and a single-active-lane
+base-stride instruction may carry a nonzero stride. Noncanonical hexadecimal or
+decimal spelling also carries information needed for an exact text round trip.
+When token regeneration differs, the residual uses a literal escape:
+
+```
+[0xff][mode byte][uvarint token count]
+  [uvarint token byte length][token bytes] ...
+```
+
+Dynamic version **5** (full) and **6** (sampled) introduce this escape. The section
+layouts are otherwise unchanged from versions 3 and 4. The reader still accepts
+legacy versions 3/4; older readers reject the new version instead of silently
+misdecoding the escape. Update readers before consuming new conversions.
+Previously discarded tokens cannot be recovered from old `.ptrace` files;
+reconvert their original `.trace.zst` inputs when exact fidelity is required.
+The performance tables below retain their historical v3/v4 labels.
+
+Like the compact residual, the literal representation records data and does not
+extrapolate it. The writer still uses compact addresses whenever they reproduce
+the exact tokens.
 
 ## 6. Sampled collection + synthesis (`sample.go`, `synth.go`) — P3
 
 This is the part that makes storage (and, with a live driver, collection time)
 decouple from problem size. `ConvertSampled` produces a **sampled** payload
-(dyn version 4):
+(dyn version 6):
 
 1. **Corner sample** (`cornerSample`). Select the blocks whose every coordinate is
    one of the two smallest distinct values on its axis — at most `2×2×2 = 8` blocks

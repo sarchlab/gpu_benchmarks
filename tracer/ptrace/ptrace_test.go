@@ -107,7 +107,7 @@ func TestSampledRoundTripAndSynthesis(t *testing.T) {
 		t.Fatalf("expected 2/8 recorded, got %d/%d", cov.RecordedBlocks, cov.TotalBlocks)
 	}
 
-	dec, err := decodeDyn(enc, table) // routes to the v4 sampled path
+	dec, err := decodeDyn(enc, table) // routes to the sampled path
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestResidualRoundTrip(t *testing.T) {
 			t.Fatalf("mode %d encode: %v", c.mode, err)
 		}
 		cur := &cursor{b: buf}
-		mode, payload, err := decodeResidual(cur, c.mask)
+		mode, payload, err := decodeResidual(cur, c.mask, true)
 		if err != nil {
 			t.Fatalf("mode %d decode: %v", c.mode, err)
 		}

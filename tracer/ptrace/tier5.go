@@ -5,7 +5,8 @@ package ptrace
 // payload (16-hex addresses or decimal deltas, ~6–16 bytes/lane), it reconstructs
 // the per-active-lane address list and stores it as base + zig-zag varint deltas
 // (~1–3 bytes/lane for the bounded indices these kernels actually touch). The
-// exact original payload tokens are regenerated on decode, so it stays lossless.
+// compact form is used only when it regenerates the exact original tokens;
+// otherwise a literal token list preserves information the addresses omit.
 
 import (
 	"fmt"
@@ -75,8 +76,11 @@ func payloadToAddrs(mode int, payload []string, mask uint32) ([]uint64, error) {
 	return nil, fmt.Errorf("unknown mode %d", mode)
 }
 
-// addrsToPayload regenerates the exact tracer payload tokens for the given mode.
+// addrsToPayload emits the canonical tracer spelling for an address list.
 func addrsToPayload(mode int, addrs []uint64) []string {
+	if len(addrs) == 0 {
+		return nil
+	}
 	switch mode {
 	case 0:
 		out := make([]string, len(addrs))
@@ -108,13 +112,30 @@ func parseHexAddr(t string) (uint64, error) {
 	return strconv.ParseUint(t, 16, 64)
 }
 
-// encodeResidual appends one recorded memory instruction to the residual column:
-// [byte mode][uvarint base][zig-zag varint deltas...]. The active-lane count is
-// recovered from the mask on decode, so it is not stored.
+// residualLiteral distinguishes an exact token list from the compact address
+// representation. Dynamic versions 5/6 introduce this tag; versions 3/4 cannot
+// represent payloads that are not recoverable from the active-lane addresses.
+const residualLiteral = 0xff
+
+// encodeResidual uses base + deltas only when regenerating the tokens is exact.
+// Zero active lanes, one active lane with a nonzero stride, and noncanonical
+// address spelling can otherwise discard information from the recorded trace.
 func encodeResidual(buf []byte, mode int, payload []string, mask uint32) ([]byte, error) {
+	if mode < 0 || mode > 2 {
+		return nil, fmt.Errorf("unknown mode %d", mode)
+	}
 	addrs, err := payloadToAddrs(mode, payload, mask)
 	if err != nil {
 		return nil, err
+	}
+	if !eqStr(addrsToPayload(mode, addrs), payload) {
+		buf = append(buf, residualLiteral, byte(mode))
+		buf = putUvarint(buf, uint64(len(payload)))
+		for _, token := range payload {
+			buf = putUvarint(buf, uint64(len(token)))
+			buf = append(buf, token...)
+		}
+		return buf, nil
 	}
 	buf = append(buf, byte(mode))
 	if len(addrs) == 0 {
@@ -131,12 +152,53 @@ func encodeResidual(buf []byte, mode int, payload []string, mask uint32) ([]byte
 
 // decodeResidual reads one recorded memory instruction and regenerates its
 // (mode, payload) using the active mask.
-func decodeResidual(c *cursor, mask uint32) (int, []string, error) {
+func decodeResidual(c *cursor, mask uint32, allowLiteral bool) (int, []string, error) {
 	mb, err := c.bytes(1)
 	if err != nil {
 		return 0, nil, err
 	}
 	mode := int(mb[0])
+	if mode == residualLiteral {
+		if !allowLiteral {
+			return 0, nil, fmt.Errorf("literal residual in legacy dynamic format")
+		}
+		mb, err = c.bytes(1)
+		if err != nil {
+			return 0, nil, err
+		}
+		mode = int(mb[0])
+		if mode > 2 {
+			return 0, nil, fmt.Errorf("unknown literal mode %d", mode)
+		}
+		count, err := c.uvarint()
+		if err != nil {
+			return 0, nil, err
+		}
+		// Every token needs at least its length prefix. Bound lengths against
+		// remaining bytes before allocating or converting them to int.
+		if count > uint64(len(c.b)-c.pos) {
+			return 0, nil, fmt.Errorf("truncated literal token list")
+		}
+		payload := make([]string, int(count))
+		for i := range payload {
+			n, err := c.uvarint()
+			if err != nil {
+				return 0, nil, err
+			}
+			if n > uint64(len(c.b)-c.pos) {
+				return 0, nil, fmt.Errorf("truncated literal token")
+			}
+			b, err := c.bytes(int(n))
+			if err != nil {
+				return 0, nil, err
+			}
+			payload[i] = string(b)
+		}
+		return mode, payload, nil
+	}
+	if mode > 2 {
+		return 0, nil, fmt.Errorf("unknown mode %d", mode)
+	}
 	n := bits.OnesCount32(mask)
 	if n == 0 {
 		return mode, nil, nil

@@ -2,7 +2,7 @@
   "benchmark": "warp_shuffle",
   "tier": 1,
   "suite": "microbench",
-  "description": "Measures warp/wave shuffle instruction throughput for four variants: __shfl_xor (butterfly), __shfl (indexed), __shfl_up (shift up), and __shfl_down (shift down). Each thread performs a dependency chain of shuffle ops. Emits per-iteration GPU event time and host time records (total = sum of kernel times); the effective data movement rate in GB/s is derived downstream.",
+  "description": "Dependent native warp/wave shuffle chains for XOR, indexed, up, and down intrinsics. One final integer store per thread. Emits raw GPU event and host times; logical shuffle rate is derived downstream, not an isolated instruction latency or device peak.",
   "scaling_param": {
     "name": "ops_per_thread",
     "description": "Number of shuffle operations each thread performs per kernel invocation",
@@ -42,7 +42,7 @@
   "non_scaling_params": [
     {
       "name": "num_blocks",
-      "description": "Number of thread blocks (default 1 = single-SM/CU measurement; device peak is derived as per-SM value × SM count)",
+      "description": "Number of thread blocks; default one block measures its dependent chains, without establishing a device peak.",
       "type": "int",
       "default": 1,
       "values": [
@@ -51,7 +51,7 @@
     },
     {
       "name": "threads_per_block",
-      "description": "Number of threads per block",
+      "description": "Threads per block; must be a positive multiple of the selected device native warp/wave width and within its launch limits.",
       "type": "int",
       "default": 256,
       "values": [
@@ -63,20 +63,19 @@
     },
     {
       "name": "shuffle_variant",
-      "description": "Which shuffle instruction variant to benchmark",
+      "description": "One shuffle variant per sweep entry. The binary also accepts all for a manual four-variant run.",
       "type": "enum",
-      "default": "all",
+      "default": "shfl_xor",
       "values": [
         "shfl_xor",
         "shfl",
         "shfl_up",
-        "shfl_down",
-        "all"
+        "shfl_down"
       ]
     },
     {
       "name": "vector_add_warmup",
-      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "description": "Run the clock/cache warmer before each timed launch. Its achieved clock and cache effects require target qualification; false times the kernel as-is.",
       "type": "enum",
       "default": "true",
       "values": [

@@ -36,6 +36,18 @@ func TestWarpShuffleOutput(t *testing.T) {
 	}
 	configs := generateConfigs(&params, true, sizes,
 		map[string]string{"vector_add_warmup": "false"})
+	// Manual "all" remains a compatibility path outside the declared sweep.
+	for _, config := range configs {
+		if config.NSDict["shuffle_variant"] != "shfl_xor" {
+			continue
+		}
+		manual := configPair{ScalingValue: config.ScalingValue, NSDict: make(map[string]interface{})}
+		for key, value := range config.NSDict {
+			manual.NSDict[key] = value
+		}
+		manual.NSDict["shuffle_variant"] = "all"
+		configs = append(configs, manual)
+	}
 	for _, config := range configs {
 		variant := config.NSDict["shuffle_variant"].(string)
 		name := fmt.Sprintf("%v/%v/%s", config.ScalingValue,
@@ -56,6 +68,17 @@ func TestWarpShuffleOutput(t *testing.T) {
 				config.ScalingValue, config.NSDict)
 			if violations := validateRun(out, wantKernels, expected); len(violations) != 0 {
 				t.Fatalf("output rejected: %v\n%s", violations, stdout)
+			}
+			for _, kernel := range out.Kernels {
+				var metadata struct {
+					WarpSize int `json:"warp_size"`
+				}
+				if err := json.Unmarshal([]byte(kernel.Params), &metadata); err != nil {
+					t.Fatal(err)
+				}
+				if metadata.WarpSize != 32 && metadata.WarpSize != 64 {
+					t.Fatalf("missing/unsupported native warp_size: %v", kernel.Params)
+				}
 			}
 			if len(out.Kernels) != len(wantKernels) {
 				t.Fatalf("got %d kernel records, want %d", len(out.Kernels), len(wantKernels))

@@ -49,7 +49,7 @@ endif
 
 all: $(TARGET)
 
-$(TARGET): $(SRC)
+$(TARGET): $(SRC) $(wildcard ../../common/*.h)
 	$(CC) $(CFLAGS) $< -o $@
 
 clean:

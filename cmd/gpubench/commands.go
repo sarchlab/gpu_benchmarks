@@ -1190,10 +1190,9 @@ func cmdRun(args runArgs) int {
 						fmt.Sprintf("LD_PRELOAD=%s", args.collectTrace),
 						"USER_DEFINED_FOLDERS=1",
 						fmt.Sprintf("TRACES_FOLDER=%s", cfgTraceDir),
-						// Trace collection wants exactly the real kernel(s) and
-						// nothing else: vector_add_warmup is forced off so the
-						// warmer kernel never appears in the trace. (Benchmarks
-						// already run their operation once per process.)
+						// Exclude the warmer. Benchmark-launched setup kernels,
+						// including cache_latency's untimed primer, remain in
+						// the raw capture and require correct replay accounting.
 						"BENCH_PARAM_vector_add_warmup=false",
 					)
 					if args.traceSample != "" {

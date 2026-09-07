@@ -68,6 +68,14 @@ not performance or a physical cache hit rate. See
 [the benchmark documentation](../tier1/cache_latency/README.md) for interpretation
 and trace-replay requirements.
 
+`shuffle_output_test.hip` checks every output lane of the production Tier 1
+shuffle kernels against closed-form lane origins, including odd/even operation
+counts, both wave boundaries, multiple blocks and guarded output allocations.
+Run `make -C tier1/warp_shuffle PLATFORM=cuda test` (or `PLATFORM=rocm`) on a
+compatible GPU. It uses the selected device's native width. CI compiles the test;
+CUDA and AMD native wave32/wave64 runtime qualification must be recorded
+separately. Correct outputs do not replace target instruction-count checks.
+
 `two_mm_output_test.hip` calls PolyBench 2MM's complete production pass and checks
 both matrix results against independent double products, pinned upstream square
 inputs, and exact rank-one references through N=4096. Guarded output and a

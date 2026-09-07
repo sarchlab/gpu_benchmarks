@@ -55,6 +55,12 @@ jobs:
       - name: Build gpubench
         run: go build -buildvcs=false -o gpubench ./cmd/gpubench
 
+      - name: Test gpubench
+        run: go test ./cmd/gpubench
+
+      - name: Validate benchmark manifests
+        run: ./gpubench validate
+
       - name: Regression check (cuDNN fallback diagnostics)
         run: |
           conv_out=$(make -C tier3/cudnn_conv PLATFORM=cuda CUDNN_PATH=/tmp/does-not-exist-cudnn clean all 2>&1)

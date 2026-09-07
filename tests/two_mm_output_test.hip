@@ -117,9 +117,11 @@ int main(int argc, char **argv) {
         return run_case(n, 1.5f, 1.2f, RANK_ONE) ? 0 : 1;
     }
     if (argc != 1) return 1;
+    const std::pair<float, float> cases[] = {
+        {1.5f, 1.2f}, {0.0f, -0.75f}, {2.25f, 0.0f}, {-0.5f, 1.25f}
+    };
     for (int n : {1, 2, 15, 16, 17, 31, 32, 33, 64, 65, 96, 128}) {
-        for (auto coefficients : {std::pair<float, float>{1.5f, 1.2f}, {0.0f, -0.75f},
-                                  {2.25f, 0.0f}, {-0.5f, 1.25f}}) {
+        for (const auto &coefficients : cases) {
             if (!run_case(n, coefficients.first, coefficients.second, GENERAL)) return 1;
         }
     }

@@ -67,3 +67,13 @@ partial report. CI does not run this GPU check. Profiled times establish orderin
 not performance or a physical cache hit rate. See
 [the benchmark documentation](../tier1/cache_latency/README.md) for interpretation
 and trace-replay requirements.
+
+`two_mm_output_test.hip` calls PolyBench 2MM's complete production pass and checks
+both matrix results against independent double products, pinned upstream square
+inputs, and exact rank-one references through N=4096. Guarded output and a
+NaN-poisoned initial temporary detect missing writes or an invalid initial
+contribution. Run `make -C tier2/polybench_2mm PLATFORM=cuda test` (or `rocm`), or
+run `bench_output_test --rank-one N` for an individual declared size. CI compiles
+the test; GPU runtime qualification is separate. This checks the restored R-09
+expression and does not claim that ordinary timing runs perform verification
+(R-13).

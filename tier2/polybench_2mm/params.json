@@ -2,7 +2,7 @@
   "benchmark": "polybench_2mm",
   "tier": 2,
   "suite": "polybench",
-  "description": "Two consecutive matrix multiplications: D = alpha*A*B + beta*D, then E = alpha*C*D + beta*E for NxN single-precision matrices. Emits per-pass kernel times; compute throughput (GFLOPS) is derived downstream.",
+  "description": "PolyBench 2MM expression: tmp = alpha*A*B, then D = tmp*C + beta*D for square single-precision matrices. Two dependent tiled products run once. Emits raw per-stage GPU times; leading-order logical work 4*N^3 is derived downstream.",
   "scaling_param": {
     "name": "size",
     "description": "Square matrix dimension N (NxN matrices)",
@@ -37,7 +37,7 @@
   "non_scaling_params": [
     {
       "name": "alpha",
-      "description": "Scaling factor alpha for matrix multiply",
+      "description": "Scaling factor applied once to the first matrix product A*B.",
       "type": "float",
       "default": 1.5,
       "values": [
@@ -46,7 +46,7 @@
     },
     {
       "name": "beta",
-      "description": "Scaling factor beta for accumulation",
+      "description": "Scaling factor for the initial final-output matrix D; no initial temporary contribution.",
       "type": "float",
       "default": 1.2,
       "values": [
@@ -55,7 +55,7 @@
     },
     {
       "name": "vector_add_warmup",
-      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "description": "Run the clock/cache warmer after input uploads and before the complete two-stage pass. No warmer runs between products; achieved clock/cache state requires target qualification.",
       "type": "enum",
       "default": "true",
       "values": [

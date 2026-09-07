@@ -1,6 +1,6 @@
 // polybench_2mm.hip — PolyBench 2MM benchmark: Two Matrix Multiplications (HIP)
 //
-// Computes D = alpha * A * B + beta * D, then E = alpha * C * D + beta * E
+// Computes tmp = alpha * A * B, then D = tmp * C + beta * D
 // for NxN square matrices. Tiled shared-memory implementation.
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
@@ -18,6 +18,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
+#include <limits>
 
 // ---------------------------------------------------------------------------
 // Error-checking macro
@@ -56,6 +58,7 @@ static float parseFloatParam(int argc, char** argv, const char* name, float defa
 
 #define TILE_SIZE 16
 
+template<bool Accumulate>
 __global__ void mm_kernel(const float* __restrict__ P,
                           const float* __restrict__ Q,
                           float* __restrict__ Out,
@@ -86,8 +89,37 @@ __global__ void mm_kernel(const float* __restrict__ P,
     }
 
     if (row < N && col < N) {
-        Out[row * N + col] = alpha * sum + beta * Out[row * N + col];
+        // The temporary has no initial value: stage 1 must never read it.
+        float value = alpha * sum;
+        if (Accumulate) value += beta * Out[row * N + col];
+        Out[row * N + col] = value;
     }
+}
+
+// Both main and the GPU reference test use this complete production pass.
+struct TwoMMLaps {
+    bench_lap_t first;
+    bench_lap_t second;
+};
+
+static TwoMMLaps run_2mm_pass(const float *A, const float *B, const float *C,
+                            float *D, float *tmp, int N, float alpha, float beta) {
+    const dim3 block(TILE_SIZE, TILE_SIZE);
+    const dim3 grid((N + TILE_SIZE - 1) / TILE_SIZE,
+                    (N + TILE_SIZE - 1) / TILE_SIZE);
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_pass_warm();
+    TwoMMLaps laps;
+    // The upstream dependency is (A B) C; no initial temporary contribution.
+    laps.first = bench_time_op(&timer, [&]() {
+        mm_kernel<false><<<grid, block>>>(A, B, tmp, N, alpha, 0.0f);
+    });
+    laps.second = bench_time_op(&timer, [&]() {
+        mm_kernel<true><<<grid, block>>>(tmp, C, D, N, 1.0f, beta);
+    });
+    bench_timer_destroy(&timer);
+    return laps;
 }
 
 // ---------------------------------------------------------------------------
@@ -96,124 +128,78 @@ __global__ void mm_kernel(const float* __restrict__ P,
 
 int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
-
-    int N          = 1024;
-    float alpha    = 1.5f;
-    float beta     = 1.2f;
-
-    N          = parseIntParam(argc, argv, "--size", N);
-    alpha      = parseFloatParam(argc, argv, "--alpha", alpha);
-    beta       = parseFloatParam(argc, argv, "--beta", beta);
-
-    const char* env_val;
-    env_val = getenv("BENCH_PARAM_size");
+    int N = parseIntParam(argc, argv, "--size", 1024);
+    float alpha = parseFloatParam(argc, argv, "--alpha", 1.5f);
+    float beta = parseFloatParam(argc, argv, "--beta", 1.2f);
+    const char *env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
     env_val = getenv("BENCH_PARAM_alpha");
     if (env_val) alpha = (float)atof(env_val);
     env_val = getenv("BENCH_PARAM_beta");
     if (env_val) beta = (float)atof(env_val);
-    size_t bytes = (size_t)N * N * sizeof(float);
+    // Matrix indices in the tiled kernel are signed ints.
+    if (N <= 0 || N > std::numeric_limits<int>::max() / N ||
+        static_cast<size_t>(N) > std::numeric_limits<size_t>::max() / sizeof(float) / N ||
+        !std::isfinite(alpha) || !std::isfinite(beta)) {
+        fprintf(stderr, "Invalid matrix extent or non-finite coefficient\n");
+        return EXIT_FAILURE;
+    }
+    const size_t elements = static_cast<size_t>(N) * N;
+    const size_t bytes = elements * sizeof(float);
 
-    // Print device info
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "2MM: D=alpha*A*B+beta*D, E=alpha*C*D+beta*E  |  N=%d  |  "
-            "alpha=%.1f  beta=%.1f\n\n",
+    fprintf(stderr, "2MM: tmp=alpha*A*B, D=tmp*C+beta*D | N=%d | alpha=%.2f beta=%.2f\n",
             N, alpha, beta);
 
-    // Host allocations
-    float* h_A = (float*)malloc(bytes);
-    float* h_B = (float*)malloc(bytes);
-    float* h_C = (float*)malloc(bytes);
-    float* h_D = (float*)malloc(bytes);
-    float* h_E = (float*)malloc(bytes);
-
+    // Four inputs; the GPU temporary is written completely by the first stage.
+    float *h_A = (float*)malloc(bytes);
+    float *h_B = (float*)malloc(bytes);
+    float *h_C = (float*)malloc(bytes);
+    float *h_D = (float*)malloc(bytes);
+    if (!h_A || !h_B || !h_C || !h_D) {
+        fprintf(stderr, "Host matrix allocation failed\n");
+        free(h_A); free(h_B); free(h_C); free(h_D);
+        return EXIT_FAILURE;
+    }
     srand(42);
-    for (int i = 0; i < N * N; ++i) {
+    for (size_t i = 0; i < elements; ++i) {
         h_A[i] = (float)(rand() % 100) / 10.0f;
         h_B[i] = (float)(rand() % 100) / 10.0f;
         h_C[i] = (float)(rand() % 100) / 10.0f;
         h_D[i] = (float)(rand() % 100) / 10.0f;
-        h_E[i] = (float)(rand() % 100) / 10.0f;
     }
 
-    // Device allocations
-    float *d_A, *d_B, *d_C, *d_D, *d_E;
+    float *d_A, *d_B, *d_C, *d_D, *d_tmp;
     HIP_CHECK(hipMalloc(&d_A, bytes));
     HIP_CHECK(hipMalloc(&d_B, bytes));
     HIP_CHECK(hipMalloc(&d_C, bytes));
     HIP_CHECK(hipMalloc(&d_D, bytes));
-    HIP_CHECK(hipMalloc(&d_E, bytes));
-
+    HIP_CHECK(hipMalloc(&d_tmp, bytes));
     HIP_CHECK(hipMemcpy(d_A, h_A, bytes, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_B, h_B, bytes, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_C, h_C, bytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_D, h_D, bytes, hipMemcpyHostToDevice));
 
-    dim3 block(TILE_SIZE, TILE_SIZE);
-    dim3 grid((N + TILE_SIZE - 1) / TILE_SIZE, (N + TILE_SIZE - 1) / TILE_SIZE);
-
+    TwoMMLaps laps = run_2mm_pass(d_A, d_B, d_C, d_D, d_tmp, N, alpha, beta);
     char params[192];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"alpha\":%.2f,\"beta\":%.2f",
-             N, alpha, beta);
-
-    // Per-kernel accumulators: one launch of each mm_kernel per pass.
-    bench_timer_t timer;
-    bench_timer_create(&timer);
-    bench_lap_t acc_mm1, acc_mm2;
-
-    // One full 2MM pass. D and E are rewritten in place (beta*Out term), so
-    // the pristine inputs are re-uploaded at the start of every pass
-    // (untimed) — the same reset the original code performed.
-    auto run_2mm_pass = [&]() {
-        bench_lap_reset(&acc_mm1);
-        bench_lap_reset(&acc_mm2);
-
-        HIP_CHECK(hipMemcpy(d_D, h_D, bytes, hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(d_E, h_E, bytes, hipMemcpyHostToDevice));
-
-        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
-         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
-         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
-        bench_pass_warm();
-
-        // mm_kernel #1: D = alpha*A*B + beta*D
-        bench_lap_add(&acc_mm1, bench_time_op(&timer, [&]() {
-            mm_kernel<<<grid, block>>>(d_A, d_B, d_D, N, alpha, beta);
-        }));
-
-        // mm_kernel #2: E = alpha*C*D + beta*E
-        bench_lap_add(&acc_mm2, bench_time_op(&timer, [&]() {
-            mm_kernel<<<grid, block>>>(d_C, d_D, d_E, N, alpha, beta);
-        }));
-    };
-
-    run_2mm_pass();
-
-    double total_gpu_ms = 0.0;
-    bench_emit_iter("mm_kernel_1", 0, &acc_mm1, params);
-    bench_emit_iter("mm_kernel_2", 0, &acc_mm2, params);
-    total_gpu_ms += acc_mm1.gpu_ms + acc_mm2.gpu_ms;
-    fprintf(stderr, "mm1 gpu = %.3f ms, mm2 gpu = %.3f ms\n",
-            acc_mm1.gpu_ms, acc_mm2.gpu_ms);
-
-    bench_timer_destroy(&timer);
+             "\"size\":%d,\"alpha\":%.2f,\"beta\":%.2f", N, alpha, beta);
+    bench_emit_iter("mm_kernel_1", 0, &laps.first, params);
+    bench_emit_iter("mm_kernel_2", 0, &laps.second, params);
+    const double total_gpu_ms = laps.first.gpu_ms + laps.second.gpu_ms;
     bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
+    fprintf(stderr, "mm1 gpu = %.3f ms, mm2 gpu = %.3f ms\nTotal GPU time: %.3f ms\n",
+            laps.first.gpu_ms, laps.second.gpu_ms, total_gpu_ms);
 
     HIP_CHECK(hipFree(d_A));
     HIP_CHECK(hipFree(d_B));
     HIP_CHECK(hipFree(d_C));
     HIP_CHECK(hipFree(d_D));
-    HIP_CHECK(hipFree(d_E));
-    free(h_A);
-    free(h_B);
-    free(h_C);
-    free(h_D);
-    free(h_E);
-
-    return 0;
+    HIP_CHECK(hipFree(d_tmp));
+    free(h_A); free(h_B); free(h_C); free(h_D);
+    return EXIT_SUCCESS;
 }

@@ -151,7 +151,7 @@ func blockEqual(a, b Block) bool {
 	return true
 }
 
-// ── sampled columnar payload (dyn version 4) ──────────────────────────────────
+// ── sampled columnar payload (dyn version 6; reads legacy 4) ──────────────────────────────────
 
 // encodeDynSampled serializes only the recorded blocks (verbatim, every memory
 // instruction stored as a residual) plus the recipes and the block plan. A

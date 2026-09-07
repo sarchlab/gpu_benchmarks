@@ -541,44 +541,47 @@ Benchmarks communicate results to the CLI via **JSON-lines on stdout** — one J
 
 | Message type | Purpose |
 |-------------|---------|
-| `kernel` | Per-kernel execution timing (`name`, `time_ms`, `params`) |
-| `summary` | Aggregate metrics emitted at the end (`total_time_ms`, `metrics`) |
+| `kernel` | One accumulated timing record per kernel name (`name`, `time_ms`, `params`) |
+| `summary` | Sum of kernel GPU times (`total_time_ms`); optional `metrics` for legacy/higher-tier producers |
 | `error` | Fatal or warning-level error report |
-| `info` | Optional benchmark metadata |
+| `info` | Optional metadata, accepted but discarded by the parser; not stored or exported |
 
-Example stdout from a benchmark:
+Minimal valid stdout for one complete `polybench_gemm` execution, with illustrative timing values and optional fields omitted (derived metrics are computed downstream):
 
-```
-{"type":"kernel","name":"gemm_kernel","time_ms":0.234,"params":{"matrix_size":256,"block_size":16}}
-{"type":"summary","total_time_ms":0.234,"metrics":[{"name":"GFLOPS","value":143.2}]}
+```jsonl
+{"type":"kernel","name":"polybench_gemm_kernel","time_ms":0.234,"params":{"size":256}}
+{"type":"summary","total_time_ms":0.234}
 ```
 
 ### SQLite Results Database
 
-All run data is stored in `results.db` (override with `--db`). The schema contains five tables:
+Parsed run results are stored in `results.db` (override with `--db`). The schema contains five tables:
 
 | Table | Contents |
 |-------|----------|
 | `platforms` | Hardware/software environment (GPU model, driver, OS, etc.) |
 | `sessions` | One row per `gpubench run` invocation |
 | `runs` | One row per (benchmark × parameter config × repetition) |
-| `kernel_results` | Per-kernel timing from `kernel` events |
-| `metrics` | Derived metrics from `summary` events (GFLOPS, bandwidth, etc.) |
+| `kernel_results` | One accumulated record per kernel name in each successful run |
+| `metrics` | Optional legacy/higher-tier metrics supplied in `summary` events |
 
-Query example — average kernel time across scaling values:
+Query example — minimum total GPU time across fresh-process repetitions, keeping each session and complete configuration separate:
 
 ```sql
-SELECT r.scaling_param_value, AVG(kr.time_ms) AS avg_ms
+SELECT r.session_id, r.scaling_param_name, r.scaling_param_value,
+       r.non_scaling_params_json, MIN(r.total_time_ms) AS min_total_ms
 FROM runs r
-JOIN kernel_results kr ON kr.run_id = r.id
 WHERE r.benchmark = 'polybench_gemm' AND r.status = 'ok'
-GROUP BY r.scaling_param_value
-ORDER BY CAST(r.scaling_param_value AS INTEGER);
+GROUP BY r.session_id, r.scaling_param_name, r.scaling_param_value,
+         r.non_scaling_params_json
+ORDER BY r.session_id, CAST(r.scaling_param_value AS INTEGER);
 ```
+
+Use the selected run’s kernel breakdown when analyzing this minimum; per-kernel minima from different runs do not describe one algorithm execution. See [the schema examples](docs/schema.sql) for selecting the complete run.
 
 ### Parameterization (`params.json`)
 
-Every benchmark directory contains a `params.json` that describes the benchmark identity, its scaling parameter (≥ 10 values), optional non-scaling parameters, and expected kernel names.
+Every benchmark directory contains a `params.json` that describes the benchmark identity, its scaling parameter (a nonempty sweep; ≥ 10 values is advisory), optional non-scaling parameters, and expected kernel names.
 
 The CLI passes parameters to benchmarks via environment variables:
 

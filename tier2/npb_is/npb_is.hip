@@ -636,15 +636,23 @@ int main(int argc, char** argv) {
         bool rank_match = (memcmp(h_rank, ref_buff, rankBytes) == 0);
         if (!rank_match)
             fprintf(stderr, "Device rank array differs from host mirror\n");
+        bool keys_match = (memcmp(h_kb2, h_keys, keysBytes) == 0);
+        if (!keys_match)
+            fprintf(stderr, "Device key copy differs from host mirror\n");
 
-        // upstream full_verify: key_array[--key_buff_ptr[key_buff2[i]]] = key
-        for (int i = 0; i < N; ++i)
-            h_sorted[--h_rank[h_kb2[i]]] = h_kb2[i];
+        // Upstream full_verify uses the device results as host indices.
+        // Only permute once both inputs match the trusted host reference;
+        // otherwise a bad GPU result could cause an out-of-bounds host write.
+        bool full_ok = rank_match && keys_match;
         int out_of_order = 0;
-        for (int i = 1; i < N; ++i)
-            if (h_sorted[i - 1] > h_sorted[i]) out_of_order++;
-        bool full_ok = (out_of_order == 0);
-        if (!full_ok)
+        if (full_ok) {
+            for (int i = 0; i < N; ++i)
+                h_sorted[--h_rank[h_kb2[i]]] = h_kb2[i];
+            for (int i = 1; i < N; ++i)
+                if (h_sorted[i - 1] > h_sorted[i]) out_of_order++;
+            full_ok = (out_of_order == 0);
+        }
+        if (out_of_order)
             fprintf(stderr, "Full_verify: number of keys out of sort: %d\n",
                     out_of_order);
 

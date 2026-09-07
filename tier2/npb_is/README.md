@@ -153,7 +153,8 @@ Verification: 50/50 partial + full_verify ok + rank array ok => PASS
 - **full_verify** (untimed, after the timed loop): the device's rank array
   permutes the device's key copy exactly as upstream
   (`key_array[--rank[key]] = key`); the result must be fully sorted. The
-  device rank array is also compared bit-for-bit against the host mirror.
+  device rank array and key copy must first match the host mirror bit-for-bit;
+  mismatched results fail verification without using corrupt host indices.
 - Upstream's acceptance criterion (5 × 10 partial verifications + full
   verify all passing) must hold; on failure the binary exits non-zero.
 

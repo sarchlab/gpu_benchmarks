@@ -45,12 +45,15 @@ endif
 # ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
-.PHONY: all clean
+.PHONY: all clean test
 
 all: $(TARGET)
 
-$(TARGET): $(SRC)
+$(TARGET): $(SRC) ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
 	$(CC) $(CFLAGS) $< -o $@
+
+test: $(TARGET)
+	python3 test_npb_is.py --binary ./$(TARGET)
 
 clean:
 	rm -f $(TARGET)

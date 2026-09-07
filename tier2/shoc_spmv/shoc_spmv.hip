@@ -177,7 +177,8 @@ int main(int argc, char** argv)
     for (int i = 0; i < check_n && i < num_rows; ++i) {
         float ref = h_y_ref[i];
         float rel = fabsf(h_y[i] - ref) / (fabsf(ref) + 1e-6f);
-        if (rel > 1e-4f) {
+        if (!std::isfinite(h_y[i]) || !std::isfinite(ref) || !std::isfinite(rel) ||
+            rel > 1e-4f) {
             fprintf(stderr, "MISMATCH y[%d]: gpu=%.6f cpu=%.6f rel=%.4e\n",
                     i, h_y[i], ref, rel);
             pass = false;

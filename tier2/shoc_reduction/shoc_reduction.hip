@@ -247,7 +247,9 @@ int main(int argc, char** argv)
     fprintf(stderr, "GPU sum: %f, CPU sum: %f, relative error: %e\n",
             gpu_result, cpu_result, rel_err);
 
-    if (rel_err < 1e-3) {
+    const bool pass = std::isfinite(gpu_result) && std::isfinite(cpu_result) &&
+                      std::isfinite(rel_err) && rel_err < 1e-3;
+    if (pass) {
         fprintf(stderr, "PASS\n");
     } else {
         fprintf(stderr, "FAIL: relative error too large\n");
@@ -260,5 +262,5 @@ int main(int argc, char** argv)
     if (d_temp) HIP_CHECK(hipFree(d_temp));
     free(h_input);
 
-    return (rel_err >= 1e-3) ? 1 : 0;
+    return pass ? 0 : 1;
 }

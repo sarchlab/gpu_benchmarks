@@ -127,7 +127,8 @@ static bool check_orthogonality(const float* Q, int M, int N)
             for (int i = 0; i < M; i++)
                 dot += Q[i * N + ci] * Q[i * N + cj];
             float expected = (ci == cj) ? 1.0f : 0.0f;
-            if (fabsf(dot - expected) > 0.01f) {
+            if (!std::isfinite(dot) || !std::isfinite(expected) ||
+                fabsf(dot - expected) > 0.01f) {
                 fprintf(stderr,
                         "ORTH FAIL: dot(Q[:,%d], Q[:,%d]) = %.6f  (expected %.1f)\n",
                         ci, cj, dot, expected);

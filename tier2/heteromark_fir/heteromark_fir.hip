@@ -227,7 +227,8 @@ int main(int argc, char** argv) {
         for (int i = 0; i < verify_n; ++i) {
             float diff = fabsf(h_output[i] - h_ref[i]);
             float tol = 1e-4f * fabsf(h_ref[i]) + 1e-6f;
-            if (diff > tol) {
+            if (!std::isfinite(h_output[i]) || !std::isfinite(h_ref[i]) ||
+                diff > tol) {
                 if (errors < 10) {
                     fprintf(stderr, "Mismatch at %d: GPU=%.6f CPU=%.6f diff=%.2e\n",
                             i, h_output[i], h_ref[i], diff);

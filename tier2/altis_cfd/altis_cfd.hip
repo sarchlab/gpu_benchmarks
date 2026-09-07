@@ -528,7 +528,12 @@ int main(int argc, char** argv) {
             float diff_rho = fabsf(gpu_flux_rho[i] - cpu_f_rho[i]);
             float diff_mx  = fabsf(gpu_flux_mx[i]  - cpu_f_mx[i]);
             float tol = 1e-3f * (fabsf(cpu_f_rho[i]) + fabsf(cpu_f_mx[i]) + 1e-6f);
-            if (diff_rho > tol || diff_mx > tol) {
+            if (!std::isfinite(gpu_flux_rho[i]) ||
+                !std::isfinite(cpu_f_rho[i]) ||
+                !std::isfinite(gpu_flux_mx[i]) ||
+                !std::isfinite(cpu_f_mx[i]) ||
+                !std::isfinite(tol) ||
+                diff_rho > tol || diff_mx > tol) {
                 if (errors < 10) {
                     fprintf(stderr, "Mismatch at cell %d: "
                             "GPU_rho=%.6f CPU_rho=%.6f  GPU_mx=%.6f CPU_mx=%.6f\n",

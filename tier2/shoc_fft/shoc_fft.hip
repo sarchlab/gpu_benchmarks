@@ -436,19 +436,27 @@ static int runFFT(int n_ffts, const char* precision)
     // normalization) must recover the original samples.
     HIP_CHECK(hipMemcpy(result, work, bytes, hipMemcpyDeviceToHost));
     double max_err = 0.0;
+    size_t nonfinite = 0;
     for (size_t i = 0; i < n_cmplx; ++i) {
         double dx = (double)result[i].x - (double)source[i].x;
         double dy = (double)result[i].y - (double)source[i].y;
         double e = fabs(dx) + fabs(dy);
-        if (e > max_err) max_err = e;
+        if (!std::isfinite(result[i].x) || !std::isfinite(result[i].y) ||
+            !std::isfinite(source[i].x) || !std::isfinite(source[i].y) ||
+            !std::isfinite(e)) {
+            ++nonfinite;
+        } else if (e > max_err) {
+            max_err = e;
+        }
     }
-    fprintf(stderr, "Round-trip max abs error: %.3e -> %s\n",
-            max_err, (max_err < 1e-2) ? "PASS" : "FAIL");
+    const bool pass = nonfinite == 0 && max_err < 1e-2;
+    fprintf(stderr, "Round-trip max finite abs error: %.3e, non-finite samples: %zu -> %s\n",
+            max_err, nonfinite, pass ? "PASS" : "FAIL");
 
     HIP_CHECK(hipFree(work));
     free(source);
     free(result);
-    return (max_err < 1e-2) ? 0 : EXIT_FAILURE;
+    return pass ? 0 : EXIT_FAILURE;
 }
 
 // ---------------------------------------------------------------------------

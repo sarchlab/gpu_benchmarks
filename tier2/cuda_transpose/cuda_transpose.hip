@@ -191,7 +191,8 @@ int main(int argc, char** argv) {
 
     int naive_errors = 0;
     for (int i = 0; i < 1000 && i < (int)num_elems; ++i) {
-        if (fabsf(h_odata[i] - h_ref[i]) > 1e-5f) {
+        if (!std::isfinite(h_odata[i]) || !std::isfinite(h_ref[i]) ||
+            fabsf(h_odata[i] - h_ref[i]) > 1e-5f) {
             if (naive_errors < 5) {
                 fprintf(stderr, "  Naive mismatch at %d: got %f, expected %f\n",
                         i, h_odata[i], h_ref[i]);
@@ -218,7 +219,8 @@ int main(int argc, char** argv) {
 
     int opt_errors = 0;
     for (int i = 0; i < 1000 && i < (int)num_elems; ++i) {
-        if (fabsf(h_odata[i] - h_ref[i]) > 1e-5f) {
+        if (!std::isfinite(h_odata[i]) || !std::isfinite(h_ref[i]) ||
+            fabsf(h_odata[i] - h_ref[i]) > 1e-5f) {
             if (opt_errors < 5) {
                 fprintf(stderr, "  Optimized mismatch at %d: got %f, expected %f\n",
                         i, h_odata[i], h_ref[i]);

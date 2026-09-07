@@ -304,7 +304,8 @@ int main(int argc, char** argv) {
             if (err > max_err) max_err = err;
             float scale = fabsf(h_cpu_rank[i]);
             if (scale < rank_floor) scale = rank_floor;
-            if (err > 1e-7f + 1e-2f * scale) {
+            if (!std::isfinite(h_gpu_rank[i]) || !std::isfinite(h_cpu_rank[i]) ||
+                err > 1e-7f + 1e-2f * scale) {
                 if (errors < 10) {
                     fprintf(stderr, "Mismatch at vertex %d: GPU=%.6f CPU=%.6f (err=%.6f)\n",
                             i, h_gpu_rank[i], h_cpu_rank[i], err);

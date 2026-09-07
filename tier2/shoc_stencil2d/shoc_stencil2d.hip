@@ -155,7 +155,8 @@ static bool correctness_check()
             float ref = h_out_cpu[i * NC + j];
             float gpu = h_out_gpu[i * NC + j];
             float rel = fabsf(gpu - ref) / (fabsf(ref) + 1e-6f);
-            if (rel > 1e-4f) {
+            if (!std::isfinite(gpu) || !std::isfinite(ref) || !std::isfinite(rel) ||
+                rel > 1e-4f) {
                 fprintf(stderr, "MISMATCH at [%d][%d]: gpu=%.6f cpu=%.6f rel=%.4e\n",
                         i, j, gpu, ref, rel);
                 pass = false;

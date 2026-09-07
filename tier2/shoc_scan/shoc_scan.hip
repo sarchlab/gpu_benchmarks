@@ -283,7 +283,8 @@ int main(int argc, char** argv) {
     for (int i = 0; i < N; ++i) {
         float diff = fabsf(h_output[i] - h_ref[i]);
         float tol  = 1e-3f * fabsf(h_ref[i]) + 1e-5f;
-        if (diff > tol) {
+        if (!std::isfinite(h_output[i]) || !std::isfinite(h_ref[i]) ||
+            diff > tol) {
             if (errors < 10) {
                 fprintf(stderr, "Mismatch at %d: got %.6f, expected %.6f\n",
                         i, h_output[i], h_ref[i]);

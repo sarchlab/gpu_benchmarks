@@ -215,13 +215,15 @@ int main(int argc, char** argv) {
     bool pass = true;
     for (int i = 0; i < check_n; ++i) {
         float rel1 = fabsf(h_x1[i] - x1_ref[i]) / (fabsf(x1_ref[i]) + 1e-6f);
-        if (rel1 > 1e-3f) {
+        if (!std::isfinite(h_x1[i]) || !std::isfinite(x1_ref[i]) || !std::isfinite(rel1) ||
+            rel1 > 1e-3f) {
             fprintf(stderr, "MISMATCH x1[%d]: gpu=%.6f cpu=%.6f rel=%.4e\n",
                     i, h_x1[i], x1_ref[i], rel1);
             pass = false;
         }
         float rel2 = fabsf(h_x2[i] - x2_ref[i]) / (fabsf(x2_ref[i]) + 1e-6f);
-        if (rel2 > 1e-3f) {
+        if (!std::isfinite(h_x2[i]) || !std::isfinite(x2_ref[i]) || !std::isfinite(rel2) ||
+            rel2 > 1e-3f) {
             fprintf(stderr, "MISMATCH x2[%d]: gpu=%.6f cpu=%.6f rel=%.4e\n",
                     i, h_x2[i], x2_ref[i], rel2);
             pass = false;

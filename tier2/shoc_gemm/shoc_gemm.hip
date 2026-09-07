@@ -172,7 +172,8 @@ int main(int argc, char** argv) {
         int errors = 0;
         for (int i = 0; i < M * N; ++i) {
             float diff = fabsf(h_C[i] - h_ref[i]);
-            if (diff > 1e-3f * fabsf(h_ref[i]) + 1e-5f) {
+            if (!std::isfinite(h_C[i]) || !std::isfinite(h_ref[i]) ||
+                diff > 1e-3f * fabsf(h_ref[i]) + 1e-5f) {
                 if (errors < 10) {
                     fprintf(stderr, "Mismatch at %d: got %f, expected %f\n",
                             i, h_C[i], h_ref[i]);

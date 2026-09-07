@@ -146,6 +146,11 @@ def main():
                 if injection:
                     reached = f"R04_INJECT {injection['R04_SITE']} {injection['R04_SIDE']} {injection['R04_KIND']}" in run.stderr
                     rejected = any(word in run.stderr.lower() for word in ("fail", "mismatch"))
+                    if name == "cuda_transpose":
+                        # A poisoned naive reference survives into the optimized
+                        # check: require the selected comparator itself to fail.
+                        diagnostic = "Naive mismatch" if injection["R04_SITE"] == "naive" else "Optimized mismatch"
+                        rejected = diagnostic in run.stderr
                     passed = reached and rejected and run.returncode == 1
                 else:
                     passed = run.returncode == 0 and "PASS" in run.stderr

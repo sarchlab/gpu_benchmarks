@@ -70,10 +70,9 @@ make clean
 Each execution launches and times the kernel **exactly once** — there is no
 in-program warmup or iteration loop. Unless `BENCH_PARAM_vector_add_warmup`
 is set to `false` (default `true`), a vector-add warmer runs ~100 ms of
-sustained load immediately before the timed launch, boosting the GPU clock
-from idle and evicting the last-level cache, so the kernel is measured
-cold-cache at a boosted clock. Repeat measurements come from fresh process
-re-executions: `gpubench run --reps N`.
+sustained load immediately before the timed launch, intended to raise clocks
+and disturb cache state. Qualify the resulting state on the target GPU. Repeat
+measurements come from fresh process re-executions: `gpubench run --reps N`.
 
 ## Example Output
 
@@ -86,7 +85,8 @@ for the single timed launch plus a final summary. Illustrative timings:
 ```
 
 - `time_ms` is the GPU event time for the single kernel launch;
-  `host_time_ms` is the host wall-clock around launch + sync.
+  `host_time_ms` is the host bracket around event recording, launch submission,
+  error checking, and synchronization.
 - `total_time_ms` equals the single launch's GPU event time.
 - GFLOPS is not printed; it is derived downstream from `time_ms` and params.
 

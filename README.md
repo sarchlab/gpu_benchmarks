@@ -24,7 +24,7 @@ This suite contains **125 benchmarks across five tiers** of increasing complexit
 
 ## Measurement Methodology
 
-The Tier 1 and Tier 2 benchmarks measure **cold-cache kernel execution time at a boosted GPU clock** — a well-defined, reproducible hardware state, free of the two artifacts that dominate naive GPU timing: an idle GPU's *lowered clock* (making a launch look artificially slow) and a re-run kernel's *cache-resident data* (making memory-bound kernels look artificially fast).
+The default Tier 1 and Tier 2 protocol targets **cold-cache kernel execution at a raised GPU clock**. An untimed vector-add warmer conditions the device before the measured operation. Its intended effects are to raise clocks from idle and evict benchmark data from the last-level cache; the achieved clock/cache state must be qualified on each target. A fixed scratch size and duration do not by themselves prove a reproducible hardware state. See [measurement interpretation](docs/measurement_interpretation.md) for the distinction between the protocol's intent and qualified measurement claims.
 
 The rules split cleanly by implementation language: everything that matters when writing the **C/C++/HIP/CUDA benchmark code** is a *benchmark rule*; everything that matters when writing the **Go runner (`gpubench`)** is a *harness rule*. A benchmark binary is a complete, correct measurement on its own; the harness only decides which binaries to run, with which parameters, how many times, and where the output goes.
 
@@ -42,22 +42,22 @@ The rules split cleanly by implementation language: everything that matters when
 
 4. **One measurement per execution.** A benchmark binary executes its operation **exactly once** and times it — no in-program warmup or iteration loop. The single run is the **full algorithm**: an iterative benchmark still runs its complete algorithm (BFS its whole traversal, k-means its whole `max_iter` refinement, a stencil all its timesteps) — "once" means the algorithm is not *repeated*, not that it is truncated.
 
-5. **Cold cache, warm clock.** Immediately before the timed operation, the benchmark runs the **vector-add warmer** — a grid-stride read-modify-write kernel over a scratch buffer **larger than the last-level cache** (768 MB, above the MI300X 256 MB Infinity/MALL cache and far above any NVIDIA L2), repeated until **~100 ms of sustained load** has executed (one pass is only ~0.5–5 ms, far below the tens of milliseconds DVFS needs to ramp the clock from idle):
+5. **Cold cache, warm clock is the default entry policy.** Immediately before the timed operation, run the **vector-add warmer**: a grid-stride read-modify-write kernel over a 768 MiB scratch buffer, repeated toward a target of **~100 ms of sustained load**.
 
-   - Its sustained ALU + memory traffic **boosts the clock** up from idle.
-   - The final pass over the >LLC buffer **evicts the benchmark's working set** from the last-level cache; because the warmer touches *different data with a different kernel*, it never warms the benchmark's own buffers.
+   - Sustained ALU and memory traffic is intended to raise clocks from idle.
+   - Touching the separate scratch buffer is intended to evict the benchmark's working set from the last-level cache without priming its own buffers.
 
-   The timed operation therefore starts cold-cache at a boosted clock. (There is no vendor cache-flush API — NVIDIA exposes only `cudaCtxResetPersistingL2Cache` and AMD flushes at dispatch coherence boundaries — so the over-sized-buffer eviction is the portable idiom.) The warmer is controlled by one measurement parameter, read by the benchmark from its environment:
+   Verify that the scratch footprint exceeds the relevant cache capacity and qualify clock/cache effects on the target GPU. Benchmarks whose subject requires resident data must document their entry-policy exception. The warmer is controlled by one measurement parameter read from the environment:
 
    | Parameter | Env var | Default | Meaning |
    |-----------|---------|---------|---------|
-   | `vector_add_warmup` | `BENCH_PARAM_vector_add_warmup` | `true` | When on, the vector-add warmer boosts the clock and evicts the LLC just before the timed run. Set `false` to time the operation as-is (warm cache, whatever clock state the GPU is in). |
+   | `vector_add_warmup` | `BENCH_PARAM_vector_add_warmup` | `true` | Run the untimed vector-add warmer before measurement. `false` disables it; it does not promise a particular cache or clock state. |
 
 6. **The timed bracket contains only the operation under test.** Host-side setup, `hipMalloc`, initial Host→Device uploads, and result verification all happen outside the timed region. For most benchmarks that means **we only care about kernel time** — the bracket contains kernel launches and nothing else. The only exception is a few Tier 1 benchmarks whose subject *is* the transfer (`memory_bandwidth`, `pcie_bandwidth`): there the bracket times the memory-copy operations, because copy time/bandwidth is what they measure.
 
 7. **GPU event timing, raw output.** Time is measured with **GPU events** (`hipEvent`/`cudaEvent`) bracketing exactly the enqueued operation — no host wall-clock timing is needed. Benchmarks never compute GFLOPS, GB/s, or latency — they emit the raw time plus the work-descriptor parameters as JSON lines on stdout, and all derived metrics are computed downstream.
 
-8. **Per-kernel records; their sum is the benchmark's execution time.** Each kernel's time is measured and recorded individually (accumulated across that kernel's launches within the run), one record per kernel. The sum of all per-kernel times is emitted as `summary.total_time_ms` — the benchmark's execution time. Data reuse *between* kernels within the run (kernel B reading kernel A's output) is left intact — it is part of the algorithm being measured; only the state *entering* the run is cold.
+8. **Per-kernel records; their sum is the benchmark's execution time.** Each kernel's time is measured and recorded individually (accumulated across that kernel's launches within the run), one record per kernel. The sum of all per-kernel times is emitted as `summary.total_time_ms` — the benchmark's execution time. Data reuse *between* kernels within the run (kernel B reading kernel A's output) is left intact — it is part of the algorithm being measured; only the state *entering* the run is conditioned by the entry policy.
 
 9. **Deterministic, equivalent runs.** Benchmarks that mutate their inputs re-initialize device state before the timed run, so the measured work is identical on every execution.
 

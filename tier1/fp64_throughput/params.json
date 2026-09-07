@@ -26,7 +26,7 @@
   "non_scaling_params": [
     {
       "name": "num_blocks",
-      "description": "Number of thread blocks (default 1 = single-SM/CU measurement; device peak is derived as per-SM value × SM count)",
+      "description": "Number of thread blocks in the grid; the declared sweep uses one block. Multiplying a single-block rate by SM/CU count is an extrapolation model, not a measured device-wide rate.",
       "type": "int",
       "default": 1,
       "values": [

@@ -95,7 +95,8 @@ timed launch plus a final summary. Illustrative timings:
 ```
 
 - `time_ms` is the GPU event time for the single kernel launch;
-  `host_time_ms` is the host wall-clock around launch + sync.
+  `host_time_ms` is the host bracket around event recording, launch submission,
+  error checking, and synchronization.
 - `total_time_ms` equals the single launch's GPU event time.
 - GFLOPS is not printed; it is derived downstream from `time_ms` and the
   params in the record after work-count qualification. Sweep

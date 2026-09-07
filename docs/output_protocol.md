@@ -116,7 +116,9 @@ The parser recognizes `info` and discards its fields. They are not stored in SQL
 
 ## Complete Example Session
 
-### stdout (captured by CLI)
+### stdout (minimal valid example)
+
+The timing values are illustrative. The shared C++ helper also emits the optional `iter` and `host_time_ms` fields, omitted here to show the required timing and workload fields.
 
 ```jsonl
 {"type":"info","benchmark":"polybench_gemm","version":"1.0"}

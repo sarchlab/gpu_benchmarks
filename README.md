@@ -546,7 +546,7 @@ Benchmarks communicate results to the CLI via **JSON-lines on stdout** — one J
 | `error` | Fatal or warning-level error report |
 | `info` | Optional metadata, accepted but discarded by the parser; not stored or exported |
 
-Example stdout from one complete `polybench_gemm` execution (derived metrics are computed downstream):
+Minimal valid stdout for one complete `polybench_gemm` execution, with illustrative timing values and optional fields omitted (derived metrics are computed downstream):
 
 ```jsonl
 {"type":"kernel","name":"polybench_gemm_kernel","time_ms":0.234,"params":{"size":256}}

@@ -14,9 +14,9 @@ Every benchmark directory contains a `params.json` file that fully describes the
   "description": "<string>",
   "language": "<string>",
   "scaling_param": { ... },
-  "non_scaling_params": [ ... ],
-  "kernels": [ "<string>", ... ],
-  "metrics": [ ... ]
+  "non_scaling_params": [ ...],
+  "kernels": [ "<string>", ...],
+  "metrics": [ ...]
 }
 ```
 
@@ -94,7 +94,7 @@ Describes metrics emitted by legacy or higher-tier producers. Tier 1/Tier 2 repo
   "metrics": [
     {"name": "GFLOPS", "description": "Billions of floating-point operations per second"},
     {"name": "bandwidth_gbps", "description": "Effective memory bandwidth in GB/s"}
-  ]
+ ]
 }
 ```
 
@@ -152,7 +152,7 @@ This example uses the current FP32 workload controls and sweep. Work inside the 
     "name": "fmas_per_thread",
     "description": "Number of FMA operations per thread per kernel invocation; controls total compute work",
     "type": "int",
-    "values": [256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576 ]
+    "values": [256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576]
   },
   "non_scaling_params": [
     {
@@ -160,24 +160,24 @@ This example uses the current FP32 workload controls and sweep. Work inside the 
       "description": "Number of thread blocks in the grid",
       "type": "int",
       "default": 1,
-      "values": [1 ]
+      "values": [1]
     },
     {
       "name": "threads_per_block",
       "description": "Number of threads per block",
       "type": "int",
       "default": 256,
-      "values": [1, 32, 64, 256, 1024 ]
+      "values": [1, 32, 64, 256, 1024]
     },
     {
       "name": "vector_add_warmup",
       "description": "Harness measurement control: run the clock/cache warmer once before the complete measured algorithm",
       "type": "enum",
       "default": "true",
-      "values": ["true", "false" ]
+      "values": ["true", "false"]
     }
-  ],
-  "kernels": ["fp32_fma_kernel" ]
+ ],
+  "kernels": ["fp32_fma_kernel"]
 }
 ```
 
@@ -195,7 +195,7 @@ This example uses the current FP32 workload controls and sweep. Work inside the 
     "name": "grid_size",
     "description": "Grid dimension (NxN temperature grid)",
     "type": "int",
-    "values": [64, 128, 192, 256, 384, 512, 640, 768, 1024, 1280, 1536, 2048, 2560, 3072, 3584, 4096, 5120, 6144, 7168, 8192 ]
+    "values": [64, 128, 192, 256, 384, 512, 640, 768, 1024, 1280, 1536, 2048, 2560, 3072, 3584, 4096, 5120, 6144, 7168, 8192]
   },
   "non_scaling_params": [
     {
@@ -203,24 +203,24 @@ This example uses the current FP32 workload controls and sweep. Work inside the 
       "description": "Total thermal time steps simulated per pass",
       "type": "int",
       "default": 360,
-      "values": [360 ]
+      "values": [360]
     },
     {
       "name": "pyramid_height",
       "description": "Time steps advanced per pyramidal launch (must be < BLOCK_SIZE/2 = 8)",
       "type": "int",
       "default": 2,
-      "values": [1, 2, 4 ]
+      "values": [1, 2, 4]
     },
     {
       "name": "vector_add_warmup",
       "description": "Harness measurement control: run the clock/cache warmer once before the complete measured algorithm",
       "type": "enum",
       "default": "true",
-      "values": ["true", "false" ]
+      "values": ["true", "false"]
     }
-  ],
-  "kernels": ["calculate_temp" ]
+ ],
+  "kernels": ["calculate_temp"]
 }
 ```
 
@@ -263,11 +263,11 @@ This higher-tier example illustrates the optional metric descriptors; it does no
       "default": "fp32",
       "values": ["fp32", "fp16", "bf16"]
     }
-  ],
+ ],
   "kernels": ["forward", "backward", "optimizer_step"],
   "metrics": [
     {"name": "images_per_sec", "description": "Training throughput in images/second"}
-  ]
+ ]
 }
 ```
 

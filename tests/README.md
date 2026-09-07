@@ -50,3 +50,20 @@ issues under R-13; this test does not establish their correctness.
 
 CUDA execution and ROCm execution must be reported separately. A CUDA pass or
 ROCm compile alone does not establish AMD runtime qualification (R-19).
+
+`cache_latency_order.py` checks the actual warmer → untimed primer → timed chase
+sequence and CUDA event boundaries using Nsight Systems. It requires an NVIDIA
+GPU, `nsys`, a built `cache_latency` binary, and a new output directory:
+
+```sh
+python3 tests/cache_latency_order.py \
+  --binary tier1/cache_latency/cache_latency --work-dir /tmp/cache-order
+```
+
+The four cases cover warmer on/off, a small chain, and the primer-cap boundary.
+Captures, profiler logs, and `report.json` are retained. A nonzero profiler/export
+exit is recorded as a failed case; a timeout aborts the run and may leave a
+partial report. CI does not run this GPU check. Profiled times establish ordering,
+not performance or a physical cache hit rate. See
+[the benchmark documentation](../tier1/cache_latency/README.md) for interpretation
+and trace-replay requirements.

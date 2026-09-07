@@ -37,6 +37,17 @@ counts describe the `__hfma2` workload, not a matrix/tensor operation. Work
 preservation and target instruction qualification remain R-02/R-19 in
 [the readiness tracker](https://github.com/sarchlab/gpu_benchmarks/issues/71).
 
+## Primed pointer-chase entry
+
+`cache_latency` deliberately primes its chain after the optional clock/cache
+warmer and before its one timed launch. This is the resident-cache exception to
+default cold entry. Keep `cache_entry`, `primer_launches`, `warmup_accesses` and
+`num_accesses` with the result. A capped primer, separate launch placement and
+compiled load policy prevent inferring a guaranteed cache level or hit rate from
+array size alone. A timed launch can still incur an initial L1 fill. See the
+[benchmark methodology](../tier1/cache_latency/README.md) for target limits and
+trace replay: preserve the primer's state, exclude its work from measured latency.
+
 ## Empty dispatch and timing resolution
 
 `empty_kernel.time_ms` is the GPU event interval around one empty dispatch.

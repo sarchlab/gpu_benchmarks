@@ -13,19 +13,18 @@
  *   hardware cannot overlap the loads — this directly exposes round-trip
  *   memory latency rather than bandwidth.
  *
- *   Chasing is done at CACHELINE granularity: only the first word of each
- *   cacheline is a chase node, so consecutive accesses land on distinct
- *   lines (no intra-line spatial hits) while the touched lines still span
- *   the whole array (cache footprint == array_bytes).
+ *   Chase nodes use a configured byte spacing (historically cacheline_bytes).
+ *   Consecutive accesses visit distinct nodes. Physical line/sector sizes and
+ *   the effective cache footprint must be qualified on the target.
  *
- *   To avoid biasing the fast levels, the COLD fill lap is run UNTIMED and
- *   discarded: an untimed warm-up walks one lap (capped at the largest cache
- *   so the DRAM end doesn't pay a huge fill), which both loads the kernel
- *   code object and makes the working set resident; only steady-state laps
- *   are timed. Timed accesses = clamp(measure_laps * lines, MIN, MAX), so
- *   resident sizes measure pure hits (L1/L2/MALL), sizes past the caches
- *   measure all-miss (DRAM) latency, and the count is bounded so every point
- *   runs in seconds regardless of array size.
+ *   Entry policy is primed: optional vector-add clock warmer, then an
+ *   untimed pointer-chase primer, then one timed chase. The primer is capped
+ *   at 256 MiB of configured node spacing. This is an explicit exception to
+ *   the suite's default cold-cache entry. Keep the primer during tracing.
+ *   Priming targets resident-cache measurements; actual hit levels depend on
+ *   capacity, load policy and launch placement. A separate primer does not
+ *   guarantee L1 residency or eliminate all timed misses (see README).
+ *   Timed accesses = clamp(measure_laps * nodes, MIN, MAX).
  *
  * Usage:
  *   ./cache_latency [array_bytes]
@@ -33,7 +32,7 @@
  * Environment variables (override argv):
  *   BENCH_PARAM_array_bytes
  *   BENCH_PARAM_cacheline_bytes   (default 64)
- *   BENCH_PARAM_measure_laps      (default 4 timed laps of steady-state hits)
+ *   BENCH_PARAM_measure_laps      (default 4 requested timed laps after priming)
  *   BENCH_PARAM_num_accesses      (overrides the timed-access count)
  *   BENCH_PARAM_rng_seed
  *
@@ -65,9 +64,9 @@
 // ---------------------------------------------------------------------------
 
 static const size_t   DEFAULT_ARRAY_BYTES     = 2ULL * 1024 * 1024;  // 2 MB
-static const uint32_t DEFAULT_CACHELINE_BYTES = 64u;       // gfx942/MI300X line; one chase node per line
-static const uint32_t DEFAULT_MEASURE_LAPS    = 4u;        // timed laps of steady-state hits (the cold lap is untimed)
-static const size_t   WARMUP_CAP_BYTES        = 256ULL * 1024 * 1024; // cap the untimed fill at the largest cache (MALL); DRAM needs no fill
+static const uint32_t DEFAULT_CACHELINE_BYTES = 64u;       // configured node spacing; qualify physical lines per target
+static const uint32_t DEFAULT_MEASURE_LAPS    = 4u;        // requested timed laps after the untimed primer
+static const size_t   WARMUP_CAP_BYTES        = 256ULL * 1024 * 1024; // bound primer cost; not a discovered cache size
 static const uint64_t MIN_TIMED_ACCESSES      = 131072u;   // floor so tiny resident sizes still get enough samples
 static const uint64_t MAX_TIMED_ACCESSES      = 16000000u; // ceiling so the DRAM end stays bounded (~seconds, fits the harness timeout)
 static const uint32_t DEFAULT_RNG_SEED        = 42u;
@@ -103,14 +102,12 @@ __global__ void pointer_chase_kernel(
 /**
  * build_chain — random Hamiltonian cycle over cacheline-strided nodes.
  *
- * Only the first word of each cacheline is used as a chase node (element
- * indices {0, stride, 2*stride, ...}, stride = cacheline_bytes/4). Consecutive
- * accesses therefore land on distinct cachelines, so every chase step is a
- * fresh line lookup at the targeted level. The touched lines still span the
- * whole array, so the cache footprint == array_bytes.
+ * Node indices are {0, stride, 2*stride, ...}, stride = cacheline_bytes/4.
+ * The configured spacing spans the array; actual line/sector sharing and
+ * cache residency depend on the target and compiled load policy.
  *
  *   arr      : host index array (array_bytes/4 elements; only node slots written)
- *   M        : number of cacheline nodes (== number of touched lines)
+ *   M        : number of configured chase nodes
  *   stride   : element stride between nodes (== cacheline_bytes / 4)
  *   start_idx: out — element index of the first node
  *   seed     : RNG seed
@@ -174,25 +171,25 @@ int main(int argc, char *argv[])
 
     const size_t N = array_bytes / sizeof(uint32_t);
 
-    /* Cacheline-strided pointer chasing: one node per cacheline. */
+    /* Pointer-chase nodes at the configured byte spacing. */
     const uint32_t stride = cacheline_bytes / (uint32_t)sizeof(uint32_t);
     if (stride == 0 || N < (size_t)stride * 2) {
         fprintf(stderr, "array_bytes (%zu) too small for cacheline_bytes (%u); "
                         "need >= 2 cachelines\n", array_bytes, cacheline_bytes);
         return EXIT_FAILURE;
     }
-    const uint32_t M = (uint32_t)(N / stride);   // cacheline nodes == touched lines
+    const uint32_t M = (uint32_t)(N / stride);   // number of configured chase nodes
 
-    /* Untimed warm-up = one lap that makes the set resident (and loads the code
-     * object), capped at the largest cache so the DRAM end skips a huge fill. */
+    /* Prime one lap when within the fixed cap; bound setup cost for larger
+     * chains. This access count does not establish a target's cache capacity. */
     const uint64_t warm_cap = (uint64_t)(WARMUP_CAP_BYTES / cacheline_bytes);
     uint64_t num_warmup = ((uint64_t)M < warm_cap) ? (uint64_t)M : warm_cap;
     if (num_warmup < 1u) num_warmup = 1u;
 
     /* Timed accesses = measure_laps steady-state laps, clamped: a floor so tiny
      * resident sizes still get enough samples, a ceiling so the DRAM end stays
-     * bounded. The cold fill is excluded (run untimed above), so these measure
-     * pure hits for resident sizes and pure misses past the caches. Override wins. */
+     * bounded. Primer work is excluded; per-launch L1 fill or capacity misses
+     * can still occur in the timed chase. Override wins. */
     uint64_t num_timed = (uint64_t)measure_laps * (uint64_t)M;
     if (num_timed < MIN_TIMED_ACCESSES) num_timed = MIN_TIMED_ACCESSES;
     if (num_timed > MAX_TIMED_ACCESSES) num_timed = MAX_TIMED_ACCESSES;
@@ -209,14 +206,14 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Device         : %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Array size     : %zu bytes (%zu KB)\n",
             array_bytes, array_bytes / 1024);
-    fprintf(stderr, "Cacheline      : %u B  (stride %u elems)\n", cacheline_bytes, stride);
-    fprintf(stderr, "Lines (nodes)  : %u\n", M);
-    fprintf(stderr, "Warm-up (cold) : %llu accesses (untimed)\n",
+    fprintf(stderr, "Node spacing   : %u B  (stride %u elems)\n", cacheline_bytes, stride);
+    fprintf(stderr, "Nodes          : %u\n", M);
+    fprintf(stderr, "Primer         : %llu accesses (untimed)\n",
             (unsigned long long)num_warmup);
-    fprintf(stderr, "Timed (steady) : %u laps -> %llu accesses\n",
+    fprintf(stderr, "Timed chase    : %u laps -> %llu accesses\n",
             measure_laps, (unsigned long long)num_timed);
     fprintf(stderr, "RNG seed       : %u\n", rng_seed);
-    fprintf(stderr, "Method         : cacheline-stride pointer chase, cold lap discarded\n\n");
+    fprintf(stderr, "Entry policy   : optional warmer -> untimed primer -> timed chase\n\n");
 
     /* Build chain on host (only the M node slots are written; rest stay 0). */
     std::vector<uint32_t> h_arr(N, 0u);
@@ -233,28 +230,37 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipMemcpy(d_arr, h_arr.data(), array_bytes,
                         hipMemcpyHostToDevice));
 
-    /* One untimed cold-fill lap: makes the working set resident (so the timed
-     * run measures steady-state hits, not the cold fill) and loads the kernel
-     * code object. It chases num_warmup accesses (capped at the largest cache,
-     * so the DRAM end pays only a partial fill). Excluded from timing. */
+    /* Resident-cache entry exception: condition clocks/cache first, then
+     * prime our chain. No cache-evicting work may run after this primer. */
+    bench_pass_warm();
+
+    /* One untimed primer, retained even when the clock warmer is disabled
+     * (including trace collection). Large chains receive a capped prefix. */
     pointer_chase_kernel<<<dim3(1), dim3(1)>>>(d_arr, start_idx, num_warmup, d_result);
     HIP_CHECK(hipDeviceSynchronize());
 
-    char params[256];
+    char params[320];
     snprintf(params, sizeof(params),
              "\"array_bytes\":%zu,\"num_accesses\":%llu,"
              "\"warmup_accesses\":%llu,\"measure_laps\":%u,"
-             "\"cacheline_bytes\":%u,\"rng_seed\":%u",
+             "\"cacheline_bytes\":%u,\"rng_seed\":%u,"
+             "\"cache_entry\":\"primed\",\"primer_launches\":1",
              array_bytes, (unsigned long long)num_timed,
              (unsigned long long)num_warmup, measure_laps,
              cacheline_bytes, rng_seed);
 
-    /* The cold-fill above already made the working set resident, so the single
-     * timed launch chases num_timed accesses at steady state. */
-    double total_gpu_ms =
-        bench_run_once("pointer_chase_kernel", params, [&]() {
-            pointer_chase_kernel<<<dim3(1), dim3(1)>>>(d_arr, start_idx, num_timed, d_result);
-        });
+    /* Use the existing event timer directly so bench_run_once cannot insert
+     * another warmer between the primer and the measured launch. */
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_t lap = bench_time_op(&timer, [&]() {
+        pointer_chase_kernel<<<dim3(1), dim3(1)>>>(d_arr, start_idx, num_timed, d_result);
+    });
+    bench_timer_destroy(&timer);
+    bench_emit_iter("pointer_chase_kernel", 0, &lap, params);
+    double total_gpu_ms = lap.gpu_ms;
+    fprintf(stderr, "pointer_chase_kernel: gpu = %.3f ms, host = %.3f ms\n",
+            lap.gpu_ms, lap.host_ms);
 
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);

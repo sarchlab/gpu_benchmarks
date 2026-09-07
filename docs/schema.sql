@@ -2,7 +2,8 @@
 -- GPU Benchmark Suite — SQLite Results Schema
 -- =============================================================================
 -- This schema stores all benchmark execution results, platform metadata, and
--- derived metrics. Designed for analytical queries across platforms, parameter
+-- optional legacy/higher-tier metrics. Tier 1/Tier 2 store raw GPU times and
+-- workload descriptors; metrics are derived downstream. Queries span platforms, parameter
 -- sweeps, and repetitions.
 --
 -- Usage:
@@ -66,7 +67,8 @@ CREATE INDEX IF NOT EXISTS idx_session_platform ON sessions(platform_id);
 -- runs — One row per (benchmark, parameter_config, repetition)
 -- -----------------------------------------------------------------------------
 -- A "run" is a single execution of one benchmark with one specific set of
--- parameter values and one repetition number.
+-- parameter values and one repetition number. Each repetition starts a fresh
+-- process and executes the complete algorithm once.
 
 CREATE TABLE IF NOT EXISTS runs (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,31 +93,36 @@ CREATE INDEX IF NOT EXISTS idx_run_benchmark  ON runs(tier, suite, benchmark);
 CREATE INDEX IF NOT EXISTS idx_run_scaling    ON runs(benchmark, scaling_param_name, scaling_param_value);
 
 -- -----------------------------------------------------------------------------
--- kernel_results — One row per kernel invocation within a run
+-- kernel_results — One accumulated record per kernel name within a valid run
 -- -----------------------------------------------------------------------------
 -- Stores kernel-level timing from "kernel" events in the output protocol.
--- Benchmarks that loop the measurement in-program (tier1) emit one event per
--- timed iteration, so a run holds num_iters rows per kernel, each with the
--- GPU event time, the matching host wall-clock time, and the iteration index.
+-- Algorithmic loops accumulate all launches of a given kernel into one event.
+-- Duplicate names are rejected by the runner for successful runs (the SQL table
+-- itself does not enforce this, so partial failed runs may contain duplicates).
+-- summary.total_time_ms is the sum of these records, excluding setup/verification.
+-- Optional host_time_ms and iter fields are retained for compatibility; they do
+-- not define repetitions or permit per-launch duplicate records.
+-- Free-form info events are discarded by the parser; there is no info table.
 
 CREATE TABLE IF NOT EXISTS kernel_results (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id       INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
     kernel_name  TEXT    NOT NULL,           -- e.g., "gemm_kernel", "forward", "backward"
-    time_ms      REAL    NOT NULL,           -- GPU event time in milliseconds
+    time_ms      REAL    NOT NULL,           -- accumulated GPU event time in milliseconds (Tier 1/Tier 2)
     ordinal      INTEGER NOT NULL DEFAULT 0, -- order of emission (0-based)
-    host_time_ms REAL,                       -- host wall-clock for the same iteration (launch + completion)
-    iteration    INTEGER,                    -- 0-based in-program iteration index, NULL if not emitted
-    params_json  TEXT                        -- raw JSON of the event's "params" object (actual values used), NULL if not emitted
+    host_time_ms REAL,                       -- optional compatibility timing; excluded from GPU total
+    iteration    INTEGER,                    -- optional legacy event "iter" annotation, NULL if absent
+    params_json  TEXT                        -- JSON of actual workload parameters; NULL if absent in failed/legacy output
 );
 
 CREATE INDEX IF NOT EXISTS idx_kernel_run  ON kernel_results(run_id);
 CREATE INDEX IF NOT EXISTS idx_kernel_name ON kernel_results(kernel_name);
 
 -- -----------------------------------------------------------------------------
--- metrics — Derived metrics from benchmark summary events
+-- metrics — Optional legacy/higher-tier summary metrics
 -- -----------------------------------------------------------------------------
--- Stores computed metrics like GFLOPS, bandwidth, images/sec.
+-- Stores metrics supplied by the producer, such as images/sec. The runner does
+-- not derive them. Tier 1/Tier 2 omit summary metrics and derive them downstream.
 
 CREATE TABLE IF NOT EXISTS metrics (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -140,43 +147,51 @@ CREATE INDEX IF NOT EXISTS idx_metric_name ON metrics(metric_name);
 --      AND r.status = 'ok'
 --    ORDER BY CAST(r.scaling_param_value AS INTEGER), kr.ordinal;
 
--- 2. Compare platform A vs platform B for the same benchmark
+-- 2. Compare the minimum total time for identical configurations by session
+--    Keep sessions separate so builds, measurement controls, and hardware are
+--    not accidentally pooled. Confirm equivalent provenance before comparison.
 --
---    SELECT p.gpu_model, r.scaling_param_value,
---           AVG(kr.time_ms) AS avg_time_ms
+--    SELECT s.id AS session_id, p.gpu_model, r.benchmark,
+--           r.scaling_param_name, r.scaling_param_value,
+--           r.non_scaling_params_json,
+--           MIN(r.total_time_ms) AS min_total_ms, COUNT(*) AS reps
 --    FROM runs r
 --    JOIN sessions s ON s.id = r.session_id
 --    JOIN platforms p ON p.id = s.platform_id
---    JOIN kernel_results kr ON kr.run_id = r.id
---    WHERE r.benchmark = 'shoc_gemm'
---      AND r.status = 'ok'
---    GROUP BY p.gpu_model, r.scaling_param_value
---    ORDER BY CAST(r.scaling_param_value AS INTEGER);
+--    WHERE r.benchmark = 'polybench_gemm' AND r.status = 'ok'
+--    GROUP BY s.id, p.gpu_model, r.benchmark, r.scaling_param_name,
+--             r.scaling_param_value, r.non_scaling_params_json
+--    ORDER BY s.id, CAST(r.scaling_param_value AS INTEGER);
 
--- 3. Get the average execution time across repetitions
+-- 3. Select the least-perturbed complete run and its kernel breakdown
+--    Rank by the total; do not sum minima from different repetitions. A tie
+--    selects the earliest run ID. JSON configuration strings below are those
+--    serialized by gpubench; externally written databases may need normalization.
 --
---    SELECT r.benchmark, r.scaling_param_value,
---           AVG(r.total_time_ms) AS avg_total_ms,
---           MIN(r.total_time_ms) AS min_total_ms,
---           MAX(r.total_time_ms) AS max_total_ms,
---           COUNT(*) AS reps
---    FROM runs r
---    WHERE r.benchmark = 'rodinia_hotspot'
---      AND r.status = 'ok'
---    GROUP BY r.benchmark, r.scaling_param_value
---    ORDER BY CAST(r.scaling_param_value AS INTEGER);
+--    WITH ranked AS (
+--        SELECT r.*, ROW_NUMBER() OVER (
+--            PARTITION BY session_id, tier, suite, benchmark,
+--                         scaling_param_name, scaling_param_value,
+--                         non_scaling_params_json
+--            ORDER BY total_time_ms, id
+--        ) AS sample_rank
+--        FROM runs r WHERE status = 'ok'
+--    )
+--    SELECT r.id, r.session_id, r.benchmark, r.scaling_param_value,
+--           r.non_scaling_params_json, r.total_time_ms,
+--           kr.kernel_name, kr.time_ms
+--    FROM ranked r JOIN kernel_results kr ON kr.run_id = r.id
+--    WHERE r.sample_rank = 1
+--    ORDER BY r.id, kr.ordinal;
 
--- 4. Get GFLOPS for a benchmark across scaling params
+-- 4. Inspect optional higher-tier metrics without pooling configurations
 --
---    SELECT r.scaling_param_value,
---           AVG(m.metric_value) AS avg_gflops
---    FROM runs r
---    JOIN metrics m ON m.run_id = r.id
---    WHERE r.benchmark = 'fp32_throughput'
---      AND m.metric_name = 'GFLOPS'
---      AND r.status = 'ok'
---    GROUP BY r.scaling_param_value
---    ORDER BY CAST(r.scaling_param_value AS INTEGER);
+--    SELECT r.id, r.session_id, r.scaling_param_value,
+--           r.non_scaling_params_json, r.repetition, m.metric_value
+--    FROM runs r JOIN metrics m ON m.run_id = r.id
+--    WHERE r.benchmark = 'resnet50_train'
+--      AND m.metric_name = 'images_per_sec' AND r.status = 'ok'
+--    ORDER BY r.id;
 
 -- 5. List all failed runs with error messages
 --

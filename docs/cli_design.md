@@ -76,7 +76,7 @@ Examples:
 
 ### `gpubench run`
 
-Run benchmarks with parameter sweeping and repetitions. Store results in SQLite.
+Run benchmarks with parameter sweeping and fresh-process repetitions. Store results in SQLite. Tier 1/Tier 2 emit accumulated raw GPU times; downstream analysis takes the minimum successful total time for each fixed configuration and derives throughput or latency from its work descriptors. `info` protocol events are accepted but not stored or exported; CLI-detected platform metadata is separate.
 
 ```
 Usage: gpubench run [--tier T] [--suite S] [--benchmark B]
@@ -122,17 +122,18 @@ gpubench run [options]
   └─ For each benchmark:
        ├─ Read params.json
        ├─ Determine parameter configurations:
-       │    ├─ Default mode: sweep scaling × cartesian(non_scaling values)
+       │    ├─ Default mode: sweep scaling × cartesian(workload non_scaling values)
        │    └─ --sweep-non-scaling=false: sweep scaling_param.values × {non_scaling defaults}
        │
        └─ For each parameter configuration:
             └─ For each repetition (1..N):
                  ├─ Set BENCH_PARAM_* environment variables
-                 ├─ Execute benchmark (with timeout)
+                 ├─ Execute one complete algorithm in a fresh process (with timeout)
                  ├─ Parse stdout JSON-lines (output protocol)
-                 ├─ Record run → runs table
+                 ├─ Validate exit status, output structure, parameters, and timing sum
+                 ├─ Record run and status → runs table
                  ├─ Record kernel results → kernel_results table
-                 └─ Record metrics → metrics table
+                 └─ Record optional legacy/higher-tier metrics → metrics table
 ```
 
 ### `gpubench info`
@@ -236,7 +237,7 @@ make -C tier2/rodinia_hotspot PLATFORM=cuda
 
 # Run with parameters
 cd tier2/rodinia_hotspot
-BENCH_PARAM_grid_size=1024 BENCH_PARAM_block_size=16 BENCH_PARAM_num_iterations=10 \
+BENCH_PARAM_grid_size=1024 BENCH_PARAM_total_iterations=360 BENCH_PARAM_pyramid_height=2 \
     ./rodinia_hotspot
 ```
 
@@ -264,7 +265,7 @@ For each run, the CLI:
 4. Enforces `--timeout` via `context.WithTimeout`; on expiry it SIGKILLs the
    benchmark's entire process group (so subprocesses die too) and bounds the
    post-kill wait with `WaitDelay`
-5. Captures exit code
+5. Captures exit code and validates the output before marking a run successful
 6. Writes results to database within a transaction; a transaction that fails to
    commit marks the run **failed** (data loss is not reported as a pass)
 
@@ -272,7 +273,7 @@ For each run, the CLI:
 
 ### Default Mode (full parameter sweep)
 
-By default, the CLI generates the Cartesian product of all non-scaling parameter values, crossed with all scaling parameter values.
+By default, the CLI generates the Cartesian product of workload non-scaling parameter values, crossed with all scaling parameter values. Harness measurement controls such as `vector_add_warmup` are fixed to their default or CLI override, recorded with each configuration, and never swept.
 
 For a benchmark with:
 - Scaling param: 20 values
@@ -292,8 +293,6 @@ For a benchmark with:
 
 Total runs: **20 × 7 = 140**
 
-Total runs: **20 × 4 × 3 × 7 = 1,680**
-
 **Warning:** Full sweeps can be very large. Use `--dry-run` to preview the execution plan and total run count before starting.
 
 ### Partial Override
@@ -310,7 +309,7 @@ This overrides the values from params.json for the scaling parameter only.
 
 ### Database Creation
 
-On first run (or if the file doesn't exist), the CLI creates the database using the schema from `docs/schema.sql`.
+On first run (or if the file does not exist), the CLI creates the database using `SCHEMA_SQL` in `cmd/gpubench/schema.go`, corresponding to the schema documented in `docs/schema.sql`.
 
 ### Transaction Strategy
 

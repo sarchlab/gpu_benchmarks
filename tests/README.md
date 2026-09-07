@@ -76,6 +76,16 @@ compatible GPU. It uses the selected device's native width. CI compiles the test
 CUDA and AMD native wave32/wave64 runtime qualification must be recorded
 separately. Correct outputs do not replace target instruction-count checks.
 
+`two_mm_output_test.hip` calls PolyBench 2MM's complete production pass and checks
+both matrix results against independent double products, pinned upstream square
+inputs, and exact rank-one references through N=4096. Guarded output and a
+NaN-poisoned initial temporary detect missing writes or an invalid initial
+contribution. Run `make -C tier2/polybench_2mm PLATFORM=cuda test` (or `rocm`), or
+run `bench_output_test --rank-one N` for an individual declared size. CI compiles
+the test; GPU runtime qualification is separate. This checks the restored R-09
+expression and does not claim that ordinary timing runs perform verification
+(R-13).
+
 `bh_entry_order.py` checks actual Barnes–Hut CUDA timelines: initial body/tree
 transfers before the warmer, all force/integration timestep launches with their
 event brackets, and the existing separate verification launch. It requires an

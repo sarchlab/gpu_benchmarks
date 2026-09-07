@@ -85,15 +85,15 @@ def main():
             ], env=case_env, capture_output=True, text=True, timeout=120)
             prefix.with_suffix('.stdout').write_text(run.stdout)
             prefix.with_suffix('.stderr').write_text(run.stderr)
-            assert run.returncode == 0, (label, run.stderr)
-            database = prefix.with_suffix('.sqlite')
-            export = subprocess.run([
-                'nsys', 'export', '--type=sqlite', '--output=' + str(database),
-                str(prefix.with_suffix('.nsys-rep'))
-            ], capture_output=True, text=True, timeout=60)
-            prefix.with_suffix('.export.log').write_text(export.stdout + export.stderr)
-            assert export.returncode == 0, (label, export.stderr)
             try:
+                assert run.returncode == 0, (label, run.stderr)
+                database = prefix.with_suffix('.sqlite')
+                export = subprocess.run([
+                    'nsys', 'export', '--type=sqlite', '--output=' + str(database),
+                    str(prefix.with_suffix('.nsys-rep'))
+                ], capture_output=True, text=True, timeout=60)
+                prefix.with_suffix('.export.log').write_text(export.stdout + export.stderr)
+                assert export.returncode == 0, (label, export.stderr)
                 result = check_capture(database, run.stdout, array_bytes, warmer)
                 result.update(case=label, passed=True)
             except (AssertionError, KeyError, sqlite3.Error) as error:

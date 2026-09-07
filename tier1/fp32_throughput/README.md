@@ -118,3 +118,18 @@ for the single timed launch plus a final summary. Illustrative timings:
   saturation remains a measurement question.
 - `fmas_per_thread` is rounded down to the nearest multiple of 4 at runtime to
   match the unrolled loop structure, with a minimum of four for positive requests.
+
+## Per-thread output validation
+
+Every launched thread stores its four-accumulator checksum to a distinct output
+slot after the FMA loop. Allocation stays outside timing; the final stores are
+part of the measured kernel and can matter at small work counts. This makes
+all threads' source work observable without adding a reduction or atomic.
+Generated instructions and active-lane counts still require target qualification.
+
+On a GPU host, run `make test PLATFORM=cuda` (or `PLATFORM=rocm`). The test
+launches the production kernel with sentinel-filled output, checks every thread
+against a finite CPU FMA reference, and checks both surrounding sentinels. It
+covers the smallest/largest declared FMA counts, every declared block size,
+and one/two blocks. It runs separately from the measurement executable and
+adds no verification work or extra launch to benchmark measurements.

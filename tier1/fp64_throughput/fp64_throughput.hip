@@ -4,7 +4,7 @@
  * HIP port of the fp64_throughput microbenchmark.
  * Compiles for both AMD (ROCm) and NVIDIA (HIP-on-CUDA) targets.
  *
- * Microbenchmark for peak double-precision (FP64) floating-point compute
+ * Microbenchmark for double-precision (FP64) floating-point compute
  * throughput on AMD and NVIDIA GPUs.
  *
  * Strategy:
@@ -15,15 +15,15 @@
  *
  *       GFLOPS = (num_threads × fmas_per_thread × 2) / elapsed_seconds / 1e9
  *
- *   The kernel is intentionally free of memory traffic: all values live in
- *   registers, so the measurement reflects pure FP64 arithmetic throughput
- *   rather than memory bandwidth.
+ *   The FMA loop uses registers. Every thread then stores one checksum, so
+ *   the timed kernel includes a final store per thread as well as arithmetic.
+ *   The store and launch overhead can matter at small work counts.
  *
  * Note on FP64 throughput:
- *   On consumer GPUs, FP64 throughput is typically 1/32 or 1/64 of FP32
- *   throughput.  On datacenter/HPC GPUs (e.g. MI250X, A100, H100) FP64
- *   throughput approaches 1/2 of FP32 throughput.  Results will reflect the
- *   hardware capability of the device under test.
+ *   Relative FP64/FP32 rates depend on the exact GPU and instruction path.
+ *   Compare matched, qualified configurations and inspect the compiled work.
+ *   A single-block rate does not establish whole-device saturation, and
+ *   instrumented instruction traces are not performance measurements.
  *
  * Usage:
  *   ./fp64_throughput [fmas_per_thread]
@@ -51,6 +51,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 
 #include "../../common/bench_timing.h"
 
@@ -67,8 +68,8 @@
 static const int DEFAULT_FMAS_PER_THREAD = 4096;
 static const int DEFAULT_THREADS_PER_BLOCK = 256;
 // Default 1 block = single-SM/CU measurement: FMA pipes are per-SM
-// resources, so device peak ≈ per-SM value × SM count (an upper bound —
-// an all-SM load throttles below single-SM boost clock).  Raise
+// resources; multiplying by SM count is an extrapolation, not a measured
+// device-wide rate or proven upper bound. Raise
 // BENCH_PARAM_num_blocks (e.g. >= 8 × SM count) for a device-wide run.
 static const int DEFAULT_NUM_BLOCKS = 1;
 
@@ -93,9 +94,10 @@ __global__ void fp64_fma_kernel(double *out, int fmas_per_thread)
         a3 = fma(a3, mul, add);
     }
 
-    if (blockIdx.x == 0 && threadIdx.x == 0) {
-        *out = a0 + a1 + a2 + a3;
-    }
+    // One result per launched thread makes every accumulator chain observable.
+    // This final store is included in the timed kernel, outside the FMA loop.
+    const size_t tid = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    out[tid] = a0 + a1 + a2 + a3;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +133,17 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_threads_per_block");
     if (env_val) threads_per_block = atoi(env_val);
 
+    // Validate before multiplying: the output owns one element per thread.
+    if (num_blocks <= 0 || threads_per_block <= 0 ||
+        static_cast<size_t>(num_blocks) >
+            std::numeric_limits<size_t>::max() / sizeof(double) /
+                static_cast<size_t>(threads_per_block)) {
+        fprintf(stderr, "Invalid or overflowing launch dimensions\n");
+        return EXIT_FAILURE;
+    }
+    const size_t total_threads =
+        static_cast<size_t>(num_blocks) * static_cast<size_t>(threads_per_block);
+
     /* Print device information to stderr. */
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
@@ -139,13 +152,13 @@ int main(int argc, char *argv[])
 
     fprintf(stderr, "Device          : %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "CUs             : %d\n", prop.multiProcessorCount);
-    fprintf(stderr, "Grid            : %d blocks × %d threads = %d total threads\n",
+    fprintf(stderr, "Grid            : %d blocks × %d threads = %zu total threads\n",
            num_blocks, threads_per_block,
-           num_blocks * threads_per_block);
+           total_threads);
     fprintf(stderr, "FMAs / thread   : %d\n\n", fmas_per_thread);
 
     double *d_out = nullptr;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(double)));
+    HIP_CHECK(hipMalloc(&d_out, total_threads * sizeof(double)));
 
     char params[160];
     snprintf(params, sizeof(params),

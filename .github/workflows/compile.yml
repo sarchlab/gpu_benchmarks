@@ -81,6 +81,11 @@ jobs:
       - name: Compile Tier 1 (CUDA)
         run: ./gpubench compile --tier 1 --platform cuda
 
+      - name: Compile FMA output regression tests (GPU required to run)
+        run: |
+          make -C tier1/fp32_throughput PLATFORM=cuda bench_output_test
+          make -C tier1/fp64_throughput PLATFORM=cuda bench_output_test
+
       - name: Compile Tier 2 (CUDA)
         run: ./gpubench compile --tier 2 --platform cuda
 

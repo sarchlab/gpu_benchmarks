@@ -4,7 +4,7 @@
  * HIP port of the fp32_throughput microbenchmark.
  * Compiles for both AMD (ROCm) and NVIDIA (HIP-on-CUDA) targets.
  *
- * Microbenchmark for peak single-precision (FP32) floating-point compute
+ * Microbenchmark for single-precision (FP32) floating-point compute
  * throughput on AMD and NVIDIA GPUs.
  *
  * Strategy:
@@ -15,9 +15,9 @@
  *
  *       GFLOPS = (num_threads × fmas_per_thread × 2) / elapsed_seconds / 1e9
  *
- *   The kernel is intentionally free of memory traffic: all values live in
- *   registers, so the measurement reflects pure FP32 arithmetic throughput
- *   rather than memory bandwidth.
+ *   The FMA loop uses registers. Every thread then stores one checksum, so
+ *   the timed kernel includes a final store per thread as well as arithmetic.
+ *   The store and launch overhead can matter at small work counts.
  *
  * Usage:
  *   ./fp32_throughput [fmas_per_thread]
@@ -44,6 +44,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 
 #include "../../common/bench_timing.h"
 
@@ -66,8 +67,8 @@ static const int DEFAULT_THREADS_PER_BLOCK = 256;
 /**
  * Number of thread blocks.
  * Default 1 block = single-SM/CU measurement: FMA pipes are per-SM
- * resources, so device peak ≈ per-SM value × SM count (an upper bound —
- * an all-SM load throttles below single-SM boost clock).  Raise
+ * resources; multiplying by SM count is an extrapolation, not a measured
+ * device-wide rate or proven upper bound. Raise
  * BENCH_PARAM_num_blocks (e.g. >= 8 × SM count) for a device-wide run.
  */
 static const int DEFAULT_NUM_BLOCKS = 1;
@@ -78,23 +79,20 @@ static const int DEFAULT_NUM_BLOCKS = 1;
 
 /**
  * Each thread performs `fmas_per_thread` fused multiply-add operations on
- * register-resident float values.  A dependency chain (each FMA uses the
- * result of the previous one) prevents the compiler from eliminating the
- * work as dead code while still allowing the hardware to keep its FP pipelines
- * fully busy.
+ * register-resident float values. Each accumulator forms a dependency chain;
+ * the per-thread output makes all four chains observable. Compiled-target
+ * instruction counts must still be checked before deriving throughput.
  *
  * A small set of independent accumulators (UNROLL=4) is used so that the
- * compiler can interleave FMA instructions and hide the FP latency, fully
- * utilising the throughput path rather than the latency path.
+ * compiler can interleave FMA instructions. The resulting issue rate depends
+ * on the compiled instructions, occupancy, and target architecture.
  *
- * @param out            Device pointer to a single float — the kernel writes a
- *                       final checksum here to prevent dead-code elimination.
+ * @param out            Device array with one float per launched thread.
  * @param fmas_per_thread  Number of FMA iterations per thread.
  */
 __global__ void fp32_fma_kernel(float *out, int fmas_per_thread)
 {
-    /* Use four independent accumulators so that the compiler can issue four
-       FMAs per cycle and hide the 4-cycle FP32 latency on modern hardware. */
+    /* Four independent accumulators expose instruction-level parallelism. */
     float a0 = 1.0f + static_cast<float>(threadIdx.x) * 0.001f;
     float a1 = a0 + 0.1f;
     float a2 = a0 + 0.2f;
@@ -112,12 +110,10 @@ __global__ void fp32_fma_kernel(float *out, int fmas_per_thread)
         a3 = fmaf(a3, mul, add);
     }
 
-    /* Write a reduction of all accumulators to global memory so the compiler
-       cannot elide the computation. Only thread 0 of block 0 actually writes,
-       so the memory traffic is negligible. */
-    if (blockIdx.x == 0 && threadIdx.x == 0) {
-        *out = a0 + a1 + a2 + a3;
-    }
+    // One result per launched thread makes every accumulator chain observable.
+    // This final store is included in the timed kernel, outside the FMA loop.
+    const size_t tid = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    out[tid] = a0 + a1 + a2 + a3;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +151,17 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_threads_per_block");
     if (env_val) threads_per_block = atoi(env_val);
 
+    // Validate before multiplying: the output owns one element per thread.
+    if (num_blocks <= 0 || threads_per_block <= 0 ||
+        static_cast<size_t>(num_blocks) >
+            std::numeric_limits<size_t>::max() / sizeof(float) /
+                static_cast<size_t>(threads_per_block)) {
+        fprintf(stderr, "Invalid or overflowing launch dimensions\n");
+        return EXIT_FAILURE;
+    }
+    const size_t total_threads =
+        static_cast<size_t>(num_blocks) * static_cast<size_t>(threads_per_block);
+
     /* Print device information to stderr. */
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
@@ -163,14 +170,13 @@ int main(int argc, char *argv[])
 
     fprintf(stderr, "Device          : %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "CUs             : %d\n", prop.multiProcessorCount);
-    fprintf(stderr, "Grid            : %d blocks × %d threads = %d total threads\n",
+    fprintf(stderr, "Grid            : %d blocks × %d threads = %zu total threads\n",
            num_blocks, threads_per_block,
-           num_blocks * threads_per_block);
+           total_threads);
     fprintf(stderr, "FMAs / thread   : %d\n\n", fmas_per_thread);
 
-    /* Allocate a single float on the device to receive the checksum. */
     float *d_out = nullptr;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(float)));
+    HIP_CHECK(hipMalloc(&d_out, total_threads * sizeof(float)));
 
     char params[160];
     snprintf(params, sizeof(params),

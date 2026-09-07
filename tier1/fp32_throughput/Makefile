@@ -45,12 +45,19 @@ endif
 # ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
-.PHONY: all clean
+.PHONY: all clean test
 
 all: $(TARGET)
 
 $(TARGET): $(SRC)
 	$(CC) $(CFLAGS) $< -o $@
 
+# Optional CUDA/ROCm device test of the production kernel's per-thread output.
+bench_output_test: ../../tests/fma_output_test.hip $(SRC) ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
+	$(CC) $(CFLAGS) -DTEST_FP32 $< -o $@
+
+test: bench_output_test
+	./bench_output_test
+
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) bench_output_test

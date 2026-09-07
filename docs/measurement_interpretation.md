@@ -1,0 +1,128 @@
+# Interpreting Tier 1 measurements
+
+Tier 1 records raw timing and workload parameters. Derived rates describe the
+selected configuration and the qualified executable. Keep the full configuration,
+measurement controls, and source run together when comparing devices; use a
+minimum successful whole-run GPU time across fresh-process repetitions, as in
+[the output protocol](output_protocol.md).
+
+## Single-block arithmetic and device-wide throughput
+
+The FP16/FP32/FP64/INT32 manifests currently fix `num_blocks=1`. Report these as
+**single-block arithmetic measurements**, with `threads_per_block` and the work
+count. Per-SM/CU interpretation additionally depends on the target's scheduling
+unit and how much of it the selected block occupies. One block does not establish
+saturation of that unit or the whole device.
+
+Multiplying a single-block rate by the device's SM/CU count is an extrapolation
+model. It is neither a device-wide measurement nor a demonstrated upper bound:
+occupancy, issue limits, clock behavior, and power limits can change with the
+number of active blocks. A device-wide claim needs a separately declared grid
+configuration/profile and a measured result at that grid size.
+
+For a qualified binary that preserves the intended work, the nominal arithmetic
+counts are:
+
+| Benchmark | Count for one launch |
+|---|---|
+| FP32/FP64 FMA | `num_blocks * threads_per_block * fmas_per_thread * 2` FLOPs |
+| Packed FP16 FMA | `num_blocks * threads_per_block * fmas_per_thread * 4` FLOPs |
+| INT32 multiply-add | `num_blocks * threads_per_block * mads_per_thread * 2` integer operations |
+
+Use effective reported work counts: positive FMA/MAD requests are rounded down
+to a multiple of four with a minimum of four. All declared arithmetic values
+already meet that constraint. These are source-level operation counts. Check the compiled instructions and
+observable results before using them as measured throughput. Packed FP16 FMA
+counts describe the `__hfma2` workload, not a matrix/tensor operation. Work
+preservation and target instruction qualification remain R-02/R-19 in
+[the readiness tracker](https://github.com/sarchlab/gpu_benchmarks/issues/71).
+
+## Empty dispatch and timing resolution
+
+`empty_kernel.time_ms` is the GPU event interval around one empty dispatch.
+It includes the dispatch/grid completion behavior and any delay between the
+recorded events; it is not an isolated host launch API cost. The shared helper's
+`host_time_ms` spans event recording, launch submission, error checking, stop-event
+recording, and synchronization. Label it **host bracket/round-trip time**, rather
+than pure launch-call latency.
+
+Short intervals are sensitive to event granularity and scheduling noise. NVIDIA
+documents approximately 0.5 microsecond resolution for
+[`cudaEventElapsedTime`](https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html).
+Record the timer/runtime used and qualify its practical resolution on each target;
+the number of printed decimal places does not establish measurement precision.
+Preserve zero or near-resolution samples as timing observations, and flag their
+rates as unresolved instead of dividing by zero or claiming infinite throughput.
+Increasing repetitions characterizes variability; it does not improve timer
+resolution. A larger workload changes the experiment and needs its own identity.
+
+## Transfer payload, host allocation, and overlap
+
+For `pcie_bandwidth`, let `B = buffer_size_mb * 1024 * 1024` bytes per direction.
+The unidirectional payload rate is `B / (time_ms * 1e6)` in SI GB/s. The
+bidirectional aggregate payload rate is `2 * B / (time_ms * 1e6)`; both transfers
+use the same event bracket. This is a payload rate, not a count of every bus
+transaction or host staging copy. Do not sum the three mode times and call that
+a per-direction transfer measurement.
+
+The manifest sweeps both pinned and pageable host memory. Keep these results
+separate. The bidirectional path submits H2D and D2H on two streams; actual overlap
+depends on memory allocation, runtime behavior, stream semantics, and the device.
+NVIDIA documents that pageable async transfers may synchronize or require staging
+in its [API synchronization rules](https://docs.nvidia.com/cuda/cuda-runtime-api/api-sync-behavior.html).
+AMD documents synchronous behavior for unpinned host memory in the
+[`hipMemcpyAsync` reference](https://rocm.docs.amd.com/projects/HIP/en/latest/doxygen/html/group___memory.html).
+Consequently, the pageable bidirectional case measures the submitted pair with
+its staging/serialization effects; concurrency must be established by profiling.
+
+The current event bracket relies on legacy default-stream ordering with the two
+blocking copy streams. Qualify completion ordering and overlap on the selected
+runtime/build before treating its interval as an aggregate transfer measurement.
+Pinned buffers permit asynchronous submission, but do not alone prove overlap or
+a particular full-duplex bandwidth. Report the actual link/topology and measured
+payload rate instead of substituting a nominal PCIe generation rate.
+
+## Mixbench's nominal intensity model
+
+The local [kernel](../tier1/mixbench/mixbench.hip) loads one `float`, runs a dependent
+`fmaf` loop, and stores one `float` for each active element. The host computes
+`num_fmas = max(1, int(4 * flops_per_byte))`. For the declared ratios:
+
+| Requested ratio | FMA calls/element | Nominal FLOPs/element | Logical bytes/element | Nominal FLOP/byte |
+|---|---:|---:|---:|---:|
+| 0.5 | 2 | 4 | 8 | 0.5 |
+| 2 | 8 | 16 | 8 | 2 |
+| 4 | 16 | 32 | 8 | 4 |
+| 8 | 32 | 64 | 8 | 8 |
+| 32 | 128 | 256 | 8 | 32 |
+
+Here `elements = buffer_size_mb * 1024 * 1024 / 4`; total nominal FLOPs are
+`elements * num_fmas * 2`, and logical read-plus-write bytes are `elements * 8`.
+The arithmetic intensity is `num_fmas / 4`, including the truncation/clamp for
+custom ratios. The current output rounds the requested ratio to one decimal,
+so use the declared ratios for reproducible analysis until effective override
+reporting is addressed under R-16.
+
+Logical bytes are a source-level model. Cache hits, writeback, transaction
+formation, and compiler transformations determine traffic at each physical memory
+level; target instruction/traffic qualification belongs to R-19. A dependent chain
+and a large buffer do not guarantee peak compute throughput or a memory-bound
+regime. Classify the observed bottleneck from qualified measurements.
+
+## Sampling guidance
+
+Keep short sweeps when they cover meaningful cases. The five EP sizes, seven MG
+sizes, and eight Parboil histogram sizes remain valid with advisory density
+warnings. Add points when they resolve a behavior or capacity transition on the
+target hardware, and keep runs within memory and process-time budgets. Hardware
+and simulator profiles are tracked separately under R-15/R-22.
+
+The September 7, 2026 manifests enumerate 1,584 Tier 1 and 5,341 Tier 2
+configurations: 6,925 total, or 48,475 fresh processes at seven repetitions.
+Measurement controls are fixed rather than multiplied into this count. Recalculate
+after any profile or manifest-value change:
+
+```bash
+gpubench run --tier 1 --reps 7 --dry-run
+gpubench run --tier 2 --reps 7 --dry-run
+```

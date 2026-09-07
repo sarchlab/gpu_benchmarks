@@ -2,7 +2,7 @@
   "benchmark": "fp32_throughput",
   "tier": 1,
   "suite": "microbench",
-  "description": "Measures peak single-precision (FP32) floating-point compute throughput using a long chain of fused multiply-add (FMA) instructions via fmaf(). All values live in registers. Emits per-iteration GPU event time and host time records (total = sum of kernel times); GFLOPS is derived downstream.",
+  "description": "Times FP32 FMA work at the recorded grid geometry. The declared sweep uses one block. Emits raw GPU time and workload descriptors; derive throughput only after verifying counted-work preservation in the compiled target binary.",
   "scaling_param": {
     "name": "fmas_per_thread",
     "description": "Number of FMA operations per thread per kernel invocation; controls total compute work",
@@ -26,7 +26,7 @@
   "non_scaling_params": [
     {
       "name": "num_blocks",
-      "description": "Number of thread blocks (default 1 = single-SM/CU measurement; device peak is derived as per-SM value × SM count)",
+      "description": "Number of thread blocks in the grid; the declared sweep uses one block. Multiplying a single-block rate by SM/CU count is an extrapolation model, not a measured device-wide rate.",
       "type": "int",
       "default": 1,
       "values": [
@@ -48,7 +48,7 @@
     },
     {
       "name": "vector_add_warmup",
-      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "description": "When true, run the untimed vector-add warmer before each timed operation to raise clocks and disturb cache state; qualify the resulting state on the target. False disables the warmer without promising a particular cache state.",
       "type": "enum",
       "default": "true",
       "values": [

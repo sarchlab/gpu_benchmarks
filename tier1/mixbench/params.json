@@ -2,7 +2,7 @@
   "benchmark": "mixbench",
   "tier": 1,
   "suite": "microbench",
-  "description": "Parametric roofline benchmark that sweeps compute-to-memory ratio. Each thread loads one float from global memory, performs a variable-length FMA chain, and stores the result. By varying the FLOP/byte ratio, traces out the roofline curve from memory-bound to compute-bound regimes.",
+  "description": "Times a dependent FP32 FMA chain with one float load and store per active element. The declared ratios model nominal FLOPs per logical byte; physical memory traffic, bottlenecks, and peak throughput require target qualification.",
   "scaling_param": {
     "name": "buffer_size_mb",
     "description": "Array size in MiB; determines total number of elements processed",
@@ -33,7 +33,7 @@
   "non_scaling_params": [
     {
       "name": "flops_per_byte",
-      "description": "Target FLOP/byte ratio; controls the number of FMA operations per thread relative to memory traffic",
+      "description": "Requested nominal FLOP/logical-byte ratio; FMA calls per element are max(1, int(4 * ratio)), with eight logical load/store bytes per element",
       "type": "float",
       "default": 4.0,
       "values": [
@@ -58,7 +58,7 @@
     },
     {
       "name": "vector_add_warmup",
-      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "description": "When true, run the untimed vector-add warmer before each timed operation to raise clocks and disturb cache state; qualify the resulting state on the target. False disables the warmer without promising a particular cache state.",
       "type": "enum",
       "default": "true",
       "values": [

@@ -1,21 +1,21 @@
-# empty_kernel — GPU Launch-Overhead Microbenchmark
+# empty_kernel — Empty-Dispatch Timing Microbenchmark
 
 ## Purpose
 
-Measures the cost of launching a single **empty kernel** — a kernel that does
-no work — so the measured time is pure launch / dispatch / grid-scheduling
-overhead with no compute or memory traffic mixed in. Sweeping `num_blocks` (and
-`block_size` as a non-scaling axis) shows how that overhead grows with grid
-geometry.
+Measures an empty kernel over a selected grid. Sweeping `num_blocks` and
+`block_size` shows how the observed timing interval changes with grid geometry.
 
 Each timed run records two times:
 
-- **`host_time_ms`** — host wall-clock around launch + synchronize: the full
-  launch + sync API round trip as the host sees it. This is the closer proxy
-  for real launch overhead, since it includes the driver/runtime submission
-  path.
-- **`time_ms`** — GPU event time bracketing the launch: the device-side
-  dispatch / grid-scheduling / retire cost measured on the GPU timeline.
+- **`time_ms`** — GPU event interval around one empty dispatch, including grid
+  completion and any delay between the recorded events.
+- **`host_time_ms`** — host bracket spanning event recording, launch submission,
+  error checking, stop-event recording, and synchronization.
+
+Neither is an isolated host launch-call cost. Short GPU intervals can approach
+the event timer's resolution; more printed digits or repetitions do not improve
+that resolution. See [measurement interpretation](../../docs/measurement_interpretation.md#empty-dispatch-and-timing-resolution)
+for timer qualification and handling zero or near-resolution samples.
 
 ## Methodology
 
@@ -27,8 +27,8 @@ This benchmark follows the suite-wide protocol (see the root README
   timed-iteration or warm-up loop.
 - Unless `BENCH_PARAM_vector_add_warmup=false` (default `true`), a vector-add
   warmer runs ~100 ms of sustained load immediately before the timed launch,
-  ramping the GPU clock from idle (and evicting the last-level cache), so the
-  launch is timed at a boosted clock.
+  intended to raise clocks and disturb cache state. Qualify the resulting
+  clock state on the target GPU.
 - Repetition is a fresh re-execution of the process: `gpubench run --reps N`.
 
 ## Files
@@ -70,7 +70,7 @@ argv):
 ## Example Output
 
 Progress and device info go to stderr; stdout carries JSON lines — one kernel
-record for the single timed launch plus a final summary:
+record for the single timed launch plus a final summary. Illustrative timings:
 
 ```
 {"type":"kernel","name":"empty_kernel","iter":0,"time_ms":0.004320,"host_time_ms":0.021500,"params":{"num_blocks":1024,"block_size":256}}
@@ -78,7 +78,7 @@ record for the single timed launch plus a final summary:
 ```
 
 - `time_ms` is the GPU event time for the launch; `host_time_ms` is the host
-  wall-clock around launch + sync (the closer proxy for launch overhead).
+  bracket described above.
 - `total_time_ms` is the sum of all emitted records' GPU event times (one
   record here, so they match).
 
@@ -86,7 +86,7 @@ record for the single timed launch plus a final summary:
 
 ## Notes
 
-- The kernel body is empty, so any nonzero `time_ms` is scheduling/dispatch
-  overhead rather than compute.
+- The empty kernel isolates a grid with no body work; event timing still
+  includes scheduling effects and timer uncertainty.
 - No external dependencies beyond the GPU runtime (CUDA Toolkit / ROCm); the
   directory is self-contained.

@@ -66,6 +66,9 @@ jobs:
       - name: Compile measured LUD verification regression
         run: python3 tests/lud_measured_result.py --platform cuda --work-dir /tmp/lud-measured-result --compile-only
 
+      - name: Compile exact triangle-total verification regression
+        run: python3 tests/triangle_total_verification.py --platform cuda --work-dir /tmp/triangle-total-verification --compile-only
+
       - name: Validate benchmark manifests
         run: ./gpubench validate
 

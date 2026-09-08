@@ -48,7 +48,10 @@ make PLATFORM=rocm
 
 `BENCH_PARAM_verify=false` (also `0`/`skip`) skips CPU verification — an
 undeclared debug knob, not a sweep parameter in `params.json`. The CPU check
-is expensive at large graph sizes.
+is expensive at large graph sizes. Every kernel record now identifies the
+actual policy: `raw_triangle_total_cpu_v1` for the full CPU total comparison,
+or `disabled` for this existing manual bypass. A bypassed run is unverified;
+large-graph process budgets and broader override policy remain separate.
 
 ## Output
 
@@ -77,9 +80,23 @@ PASS (CPU=12345, GPU=12345 triangles)
 
 ## Verification
 
-- GPU triangle count is compared against a CPU reference implementation
+- The exact raw GPU contribution sum is compared against the full CPU raw sum,
+  before division by three is used for triangle-count diagnostics. Comparing
+  only the integer quotients previously accepted raw errors of one or two.
 - Both use the same sorted adjacency list intersection algorithm
 - Reports PASS/FAIL with counts; on FAIL the binary exits with a non-zero status
+
+`python3 tests/triangle_total_verification.py --platform cuda --work-dir /tmp/tc-check`
+from the repository root injects signed errors into actual device edge counts
+after timing, covering first/middle/last positions, all declared degrees, a
+two-vertex zero-triangle case, valid results and manual bypass reporting. Choose a new, nonexistent `--work-dir`
+for each invocation. Use `--platform rocm` for AMD; CI only compiles the test.
+A test timeout stops the suite with failure; completed-case logs are retained.
+
+The GPU kernel, graph/input generator, launch, transfers, timing and full CPU
+reference algorithm are unchanged. This corrects result acceptance without
+reducing the existing CPU verification cost (R-17). Cross-device execution and
+input qualification remain necessary; no AMD execution is claimed here.
 
 ## Platform Notes
 

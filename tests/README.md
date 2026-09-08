@@ -209,3 +209,13 @@ check the emitted verification policy. Run `python3 tests/lud_measured_result.py
 CI compiles the instrumented driver; runtime qualification requires a GPU.
 This retains the
 full O(N³) residual check, so it does not resolve large-process budgets.
+
+`triangle_total_verification.py` checks exact raw triangle-count acceptance in
+the production driver. It alters actual device edge counts after timing and
+requires nonzero exit for every signed nonzero raw-total error, including the
++1/+2 cases formerly hidden by integer division and negative errors for a
+zero-triangle graph. Run `python3
+tests/triangle_total_verification.py --platform cuda --work-dir /tmp/tc-check`
+(or `rocm`) with a new, nonexistent output directory. CI compiles the test;
+execution requires a GPU. A timeout aborts with failure and retains completed
+case logs. Full CPU-reference cost and AMD qualification remain separate.

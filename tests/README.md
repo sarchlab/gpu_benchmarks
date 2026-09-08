@@ -242,7 +242,8 @@ actual-device regression above separately checks measured GPU results.
 device outputs after timing and before the existing result download. It checks
 finite corruption and NaN/+Inf/-Inf at the first element, indices 7 and 8, the
 middle and the last element of every output vector, plus small/rectangular and
-warmer controls. Run `python3 tests/matvec_measured_result.py --platform cuda
+warmer controls. Unequal row/column shapes also receive tail faults to catch
+swapped output bounds. Run `python3 tests/matvec_measured_result.py --platform cuda
 --work-dir /tmp/matvec-check` (or `rocm`) with a new, nonexistent output
 directory. CI compiles the test; execution requires a GPU. A timeout fails the
 test and retains completed-case logs and a partial report. The test requires

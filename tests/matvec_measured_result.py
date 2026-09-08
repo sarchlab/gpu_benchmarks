@@ -160,11 +160,17 @@ def main():
             for index in (0, 7, 8, 32, 63):
                 for kind in ("finite", "nan", "pinf", "ninf"):
                     run(name, 64, 64, field, index, kind)
+        # Unequal vector lengths catch swapped row/column comparison bounds.
+        for rows, columns in ((17, 19), (19, 17)):
+            params = dimensions(name, rows, columns)
+            for field, count in fields:
+                for kind in ("finite", "nan"):
+                    run(name, rows, columns, field, params[count]-1, kind)
         run(name, 17, 19, warm="true")
         run(name, 4096, 4096)
     final = report(complete=True)
     print(f"{final['passed']}/{final['total']} matrix-vector cases passed")
-    return 0 if final["passed"] == final["total"] == 127 else 1
+    return 0 if final["passed"] == final["total"] == 147 else 1
 
 
 if __name__ == "__main__":

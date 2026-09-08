@@ -244,8 +244,8 @@ int main(int argc, char **argv)
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"size\":%d",
-             N);
+             "\"size\":%d,\"verification\":\"%s\"",
+             N, do_verify ? "full_lu_residual_v1" : "disabled");
 
     bench_timer_t timer;
     bench_timer_create(&timer);
@@ -284,16 +284,7 @@ int main(int argc, char **argv)
         }
     };
 
-    // Correctness verification (one extra pass; skipped when
-    // BENCH_PARAM_verify=false — debug knob, not a sweep parameter)
-    bool verify_ok = true;
-    if (do_verify) {
-        run_lud_pass();
-        HIP_CHECK(hipMemcpy(h_lu, d_a, bytes, hipMemcpyDeviceToHost));
-        verify_ok = verify(h_lu, h_a_orig, N);
-    }
-
-    // Timed passes — one record per kernel per pass.
+    // One measured factorization; verification below checks this same result.
     double total_gpu_ms = 0.0;
     run_lud_pass();
     bench_emit_iter("lud_diagonal",  0, &acc_diagonal,  params);
@@ -308,6 +299,15 @@ int main(int argc, char **argv)
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
+
+    // Verify the actual measured result after all event/host launch timing.
+    // Preserve the existing full Frobenius residual and optional debug bypass;
+    // no second factorization or entry warmer is needed for verification.
+    bool verify_ok = true;
+    if (do_verify) {
+        HIP_CHECK(hipMemcpy(h_lu, d_a, bytes, hipMemcpyDeviceToHost));
+        verify_ok = verify(h_lu, h_a_orig, N);
+    }
 
     // Cleanup
     HIP_CHECK(hipFree(d_a));

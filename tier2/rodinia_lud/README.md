@@ -25,11 +25,22 @@ The matrix is stored in-place:
 
 After the timed factorization the benchmark reconstructs **A = L·U** on the
 CPU and checks: `||A - LU||_F / ||A||_F < 1e-4`. On FAIL the benchmark exits
-with a non-zero status.
+with a non-zero status. This checks the actual measured device matrix; there
+is no preliminary verification factorization. Non-finite residuals fail the
+existing comparison. Every kernel record identifies this policy as
+`verification: "full_lu_residual_v1"`.
+
+The full residual remains O(N³) CPU work, with three N² host float buffers
+and one N² device float buffer (plus the optional 768 MiB warmer). Moving the
+check does not make large configurations fit a target process budget; measure
+complete wall time and resolve expensive verification under R-17 before
+admitting those configurations. GPU event times exclude the result download
+and CPU check. AMD execution qualification remains R-19.
 
 The factorization runs **exactly once** (repetition is the harness's job,
 `gpubench run --reps N`); the pristine matrix upload happens before the timed
-brackets.
+brackets. Recollect results from drivers that ran the old preliminary
+factorization, since that extra execution changed the process history.
 
 ## Performance Metric
 
@@ -72,9 +83,9 @@ across all block steps, then a `summary` whose `total_time_ms` is
 the sum of all recorded GPU event times:
 
 ```json
-{"type":"kernel","name":"lud_diagonal","iter":0,"time_ms":0.512300,"host_time_ms":0.850000,"params":{"size":512}}
-{"type":"kernel","name":"lud_perimeter","iter":0,"time_ms":3.123400,"host_time_ms":3.500000,"params":{"size":512}}
-{"type":"kernel","name":"lud_internal","iter":0,"time_ms":8.710000,"host_time_ms":9.100000,"params":{"size":512}}
+{"type":"kernel","name":"lud_diagonal","iter":0,"time_ms":0.512300,"host_time_ms":0.850000,"params":{"size":512,"verification":"full_lu_residual_v1"}}
+{"type":"kernel","name":"lud_perimeter","iter":0,"time_ms":3.123400,"host_time_ms":3.500000,"params":{"size":512,"verification":"full_lu_residual_v1"}}
+{"type":"kernel","name":"lud_internal","iter":0,"time_ms":8.710000,"host_time_ms":9.100000,"params":{"size":512,"verification":"full_lu_residual_v1"}}
 {"type":"summary","total_time_ms":12.345700}
 ```
 
@@ -91,8 +102,18 @@ Derived metrics (e.g. GFLOPS) are computed downstream from `time_ms` and params.
 | `BENCH_PARAM_size` | Matrix dimension N | 512 |
 | `BENCH_PARAM_vector_add_warmup` | Cold-cache calibration before the timed pass | `true` |
 
-`BENCH_PARAM_verify=false` skips CPU verification — an undeclared debug knob
-(not in `params.json`, not a sweep parameter).
+`BENCH_PARAM_verify=false` (also `0` or `skip`) preserves the existing manual
+debug bypass. It is not a declared sweep parameter, and all emitted kernel
+records then say `verification: "disabled"`. Such a run is not a verified
+measurement. Other values retain the existing enabled behavior.
+
+`python3 tests/lud_measured_result.py --platform cuda --work-dir /tmp/lud-check`
+from the repository root checks the production driver in isolated copies.
+It counts factorization passes and corrupts actual device output after the
+recorded factorization, covering diagonal, lower/upper and tail entries with
+NaN, infinities and large finite errors. It also checks valid results and
+manual bypass reporting. Use `--platform rocm` for AMD; GPU execution is
+required, while `--compile-only` only builds the instrumented driver.
 
 ## Reference
 

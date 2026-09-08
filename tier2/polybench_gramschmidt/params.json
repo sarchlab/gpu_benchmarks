@@ -2,7 +2,7 @@
   "benchmark": "polybench_gramschmidt",
   "tier": 2,
   "suite": "polybench",
-  "description": "Gram-Schmidt QR factorization A = Q * R. Multiple GPU kernels per column: norm, normalize, project. Throughput (GB/s) is derived downstream from the emitted per-iteration times.",
+  "description": "Gram-Schmidt QR factorization A = Q * R. Per-column GPU kernels reset the norm accumulator, accumulate and finalize the norm, normalize and project. All required resets and math stages contribute to the summed GPU time.",
   "scaling_param": {
     "name": "m",
     "description": "Number of rows of matrix A",
@@ -52,6 +52,7 @@
     }
   ],
   "kernels": [
+    "gram_norm_zero",
     "gram_norm",
     "gram_norm_finish",
     "gram_normalize",

@@ -2,7 +2,7 @@
   "benchmark": "polybench_correlation",
   "tier": 2,
   "suite": "polybench",
-  "description": "Compute correlation matrix from a data matrix (M samples x N features, M=N). Steps: mean, stddev, normalize, correlation (matmul-like). Derived from the PolyBench/GPU benchmark suite.",
+  "description": "Compute correlation matrix from a data matrix (M samples x N features, M=N). Steps: mean, stddev, normalize, correlation (matmul-like). Derived from the PolyBench/GPU benchmark suite. Checks all four measured outputs against complete independent CPU references after timing (verification=full_cpu_v1).",
   "scaling_param": {
     "name": "size",
     "description": "Data matrix dimension N (MxN where M=N)",

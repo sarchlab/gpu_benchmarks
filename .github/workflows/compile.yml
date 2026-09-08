@@ -69,6 +69,14 @@ jobs:
       - name: Compile measured matrix-vector verification regression
         run: python3 tests/matvec_measured_result.py --platform cuda --work-dir /tmp/matvec-measured-result --compile-only
 
+      - name: Check complete GEMM CPU reference (no GPU required)
+        run: |
+          g++ -O3 -std=c++14 -pthread -fsanitize=address,undefined tests/gemm_reference_test.cpp -o /tmp/gemm_reference_test
+          /tmp/gemm_reference_test
+
+      - name: Compile measured GEMM verification regression
+        run: python3 tests/gemm_measured_result.py --platform cuda --work-dir /tmp/gemm-measured-result --compile-only
+
       - name: Check complete correlation CPU reference (no GPU required)
         run: |
           g++ -O3 -std=c++14 -fsanitize=address,undefined tests/correlation_reference_test.cpp -o /tmp/correlation_reference_test

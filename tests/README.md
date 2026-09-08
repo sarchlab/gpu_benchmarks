@@ -123,3 +123,11 @@ against an independent dense double reference. Run `make test PLATFORM=cuda`
 (or `rocm`) from `tier2/rodinia_backprop`; `bench_output_test --upstream N`
 checks an individual declared size. CI compiles the test; GPU execution and
 ordinary timing-run verification are separate qualification steps.
+
+`two_d_convolution_output.hip` checks the pinned signed PolyBench/GPU operator
+with nine exact unit-impulse outputs and full signed-matrix references, including
+rectangular strides, partial tiles, NaN-poisoned interiors and untouched borders
+and guards. Run `make test PLATFORM=cuda` (or `rocm`) in `tier2/polybench_2dconv`;
+`bench_output_test --size N` checks a declared size, and `--impulse 0` through
+`--impulse 8` isolate the nine coefficients. CI compiles the test; runtime and
+ordinary timing-run verification remain separate qualification steps.

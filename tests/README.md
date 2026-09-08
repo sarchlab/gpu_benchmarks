@@ -249,3 +249,19 @@ directory. CI compiles the test; execution requires a GPU. A timeout fails the
 test and retains completed-case logs and a partial report. The test requires
 `full_cpu_v1` in both kernel records and checks exact workload identity, normal
 verification diagnostics and failure exit codes.
+
+
+`bfs_reference_test.cpp` compares every CPU distance with an independent
+Floyd-Warshall oracle on 66,066 exhaustive directed graphs and 25 structured
+cases, including self-loops, duplicates, deep chains and unreachable nodes.
+Run `c++ -O2 -std=c++14 -fsanitize=address,undefined tests/bfs_reference_test.cpp
+-o /tmp/bfs_reference_test && /tmp/bfs_reference_test`. CI runs this host test.
+
+`bfs_measured_result.py` checks measured BFS distances on random and test-only
+structured graphs, then injects device-output faults at the source, middle and
+tail. It requires exact result diagnostics, failure exits and `full_cpu_v1` in
+both kernel rows. Run `python3 tests/bfs_measured_result.py --platform cuda
+--work-dir /tmp/bfs-check` (or `rocm`) with a new, nonexistent output directory.
+CI compiles this test; execution requires a GPU. A timeout fails and retains
+completed-case logs plus a partial report. Result correctness does not qualify
+the existing GPU concurrent accesses or upstream fidelity.

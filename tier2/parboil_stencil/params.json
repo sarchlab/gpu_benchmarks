@@ -2,7 +2,7 @@
   "benchmark": "parboil_stencil",
   "tier": 2,
   "suite": "parboil",
-  "description": "7-point 3D Jacobi stencil over NxNxN grid with ping-pong buffers. Emits per-pass GPU times; GFLOPS and GB/s are derived downstream.",
+  "description": "Pinned Parboil subtractive-center 7-point operator with float c0=1/6 and c1=1/6/6 on an NxNxN grid with fixed input boundaries. One complete ping-pong sequence per process; emit accumulated raw kernel times.",
   "scaling_param": {
     "name": "grid_dim",
     "description": "Grid dimension N (NxNxN 3D grid)",
@@ -33,7 +33,7 @@
   "non_scaling_params": [
     {
       "name": "num_timesteps",
-      "description": "Stencil time-steps per timed launch",
+      "description": "Number of dependent stencil kernel launches in the complete timed sequence",
       "type": "int",
       "default": 10,
       "values": [

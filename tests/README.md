@@ -204,6 +204,8 @@ verify the matrix produced by that measured factorization. It injects faults
 into the actual device result after the timed pass, and requires failed exit
 status while preserving the timing records. Valid cases and manual bypasses
 check the emitted verification policy. Run `python3 tests/lud_measured_result.py
---platform cuda --work-dir /tmp/lud-check` (or `rocm`). CI compiles the
-instrumented driver; runtime qualification requires a GPU. This retains the
+--platform cuda --work-dir /tmp/lud-check` (or `rocm`). Choose a new, nonexistent
+`--work-dir` for each invocation; previous results are retained for inspection.
+CI compiles the instrumented driver; runtime qualification requires a GPU.
+This retains the
 full O(N³) residual check, so it does not resolve large-process budgets.

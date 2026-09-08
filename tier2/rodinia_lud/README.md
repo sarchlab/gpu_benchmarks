@@ -109,6 +109,8 @@ measurement. Other values retain the existing enabled behavior.
 
 `python3 tests/lud_measured_result.py --platform cuda --work-dir /tmp/lud-check`
 from the repository root checks the production driver in isolated copies.
+Choose a new, nonexistent `--work-dir` for each invocation; previous results
+are retained for inspection.
 It counts factorization passes and corrupts actual device output after the
 recorded factorization, covering diagonal, lower/upper and tail entries with
 NaN, infinities and large finite errors. It also checks valid results and

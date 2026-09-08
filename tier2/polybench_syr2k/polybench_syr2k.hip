@@ -28,6 +28,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include "cpu_reference.h"
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -173,10 +174,10 @@ int main(int argc, char** argv) {
     dim3 block(TILE_SIZE, TILE_SIZE);
     dim3 grid((N + TILE_SIZE - 1) / TILE_SIZE, (N + TILE_SIZE - 1) / TILE_SIZE);
 
-    char params[192];
+    char params[256];
     snprintf(params, sizeof(params),
              "\"matrix_size\":%d,\"inner_size\":%d,"
-             "\"alpha\":%.2f,\"beta\":%.2f",
+             "\"alpha\":%.2f,\"beta\":%.2f,\"verification\":\"full_cpu_v1\"",
              N, M, alpha, beta);
 
     // Single timed launch (optionally preceded by the vector-add warmer).
@@ -191,6 +192,22 @@ int main(int argc, char** argv) {
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
+    // Verify the complete measured result after timing, without another GPU pass.
+    const auto expected = cpu_syr2k(h_A, h_B, h_C, N, M, alpha, beta);
+    HIP_CHECK(hipMemcpy(h_C, d_C, bytes_C, hipMemcpyDeviceToHost));
+    const size_t elements = (size_t)N * N;
+    size_t mismatches = 0;
+    for (size_t i = 0; i < elements; ++i) {
+        if (!syr2k_value_matches(h_C[i], expected[i])) {
+            if (mismatches < 10)
+                fprintf(stderr, "MISMATCH C[%zu]: GPU=%.9g CPU=%.17g\n",
+                        i, h_C[i], expected[i]);
+            ++mismatches;
+        }
+    }
+    fprintf(stderr, "SYR2K verification: %s (%zu elements, %zu mismatches)\n",
+            mismatches ? "FAIL" : "PASS", elements, mismatches);
+
     // Cleanup
     HIP_CHECK(hipFree(d_A));
     HIP_CHECK(hipFree(d_B));
@@ -199,5 +216,5 @@ int main(int argc, char** argv) {
     free(h_B);
     free(h_C);
 
-    return 0;
+    return mismatches ? EXIT_FAILURE : EXIT_SUCCESS;
 }

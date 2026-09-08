@@ -69,6 +69,14 @@ jobs:
       - name: Compile measured matrix-vector verification regression
         run: python3 tests/matvec_measured_result.py --platform cuda --work-dir /tmp/matvec-measured-result --compile-only
 
+      - name: Check complete SYR2K CPU reference (no GPU required)
+        run: |
+          g++ -O3 -std=c++14 -fsanitize=address,undefined tests/syr2k_reference_test.cpp -o /tmp/syr2k_reference_test
+          /tmp/syr2k_reference_test
+
+      - name: Compile measured SYR2K verification regression
+        run: python3 tests/syr2k_measured_result.py --platform cuda --work-dir /tmp/syr2k-measured-result --compile-only
+
       - name: Check complete 2MM CPU reference (no GPU required)
         run: |
           g++ -O3 -std=c++14 -fsanitize=address,undefined tests/two_mm_reference_test.cpp -o /tmp/two_mm_reference_test

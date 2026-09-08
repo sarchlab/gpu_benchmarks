@@ -67,7 +67,7 @@ GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`); the
 summary's `total_time_ms` equals that GPU event time. GFLOPS is derived
 downstream:
 ```json
-{"type":"kernel","name":"syr2k_kernel","iter":0,"time_ms":12.345678,"host_time_ms":12.401234,"params":{"matrix_size":1024,"inner_size":1024,"alpha":1.50,"beta":1.20}}
+{"type":"kernel","name":"syr2k_kernel","iter":0,"time_ms":12.345678,"host_time_ms":12.401234,"params":{"matrix_size":1024,"inner_size":1024,"alpha":1.50,"beta":1.20,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":12.345678}
 ```
 
@@ -79,6 +79,35 @@ SYR2K: N=1024, M=1024  |  alpha=1.5  beta=1.2
 syr2k_kernel: gpu = 12.346 ms, host = 12.401 ms
 Total GPU time: 12.346 ms
 ```
+
+## Measured-result verification
+
+Every ordinary run checks **all N×N values of the actual measured C** after
+GPU timing. The independent CPU reference uses the original A, B and C to
+compute both row dot products in double precision, including the nonsymmetric
+`beta*C` contribution. It never uses a measured GPU result as a reference.
+
+A value passes when the GPU value, reference and error are finite and
+`abs(GPU - reference) <= 5e-4 * max(1, abs(reference))`. For the declared
+nonnegative inputs, alpha/beta and inner dimensions up to 2048, this exceeds a
+conservative FP32 accumulation bound `gamma_(3*M+3)` of less than `3.7e-4`.
+The unit floor covers small absolute errors near zero. Qualification includes
+rectangular inputs, signed and zero coefficient controls, and device-output
+faults; it does not claim that every manual input or another device is qualified.
+
+The checker counts every mismatch, prints at most ten details to stderr and
+returns nonzero on failure. Kernel records include `verification="full_cpu_v1"`.
+There is no separate GPU verification launch or verification bypass. A complete
+result copy follows timing and reuses the original host C buffer after the CPU
+reference has consumed it. The measured kernel, inputs, grid, warmer and event
+sequence are unchanged.
+
+At N=4096 and M=2048, the existing host inputs occupy 128 MiB. The CPU reference
+adds a 128 MiB double result and two float transposes totaling 64 MiB; those
+transposes are released before the 64 MiB result download. Verification adds
+`O(N²*M)` CPU work and process time, so collection must budget for it even though
+it is outside GPU event timing. Host-capacity admission, other-host process
+budgets and AMD execution qualification remain separate requirements.
 
 ## Platform Notes
 

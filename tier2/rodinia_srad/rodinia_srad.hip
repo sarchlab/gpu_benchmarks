@@ -1,11 +1,12 @@
 // rodinia_srad.hip — Rodinia SRAD (v2) benchmark (HIP, self-contained)
 //
-// Faithful port of Rodinia SRAD v2: the device kernels (srad_cuda_1,
-// srad_cuda_2) are the ORIGINAL upstream kernels, copied verbatim from
-// rodinia/cuda/srad/srad_v2/srad_kernel.cu, including their shared-memory
-// neighborhood tiling (temp[][], north/south/east/west shared tiles) and the
-// compile-time BLOCK_SIZE 16 thread block. Only the host driver is
-// restructured for the single-pass timing harness and JSON output.
+// Adapted from Rodinia 3.1 SRAD v2 at commit
+// 366b283456506ef2fe2c2b7dc5e83e941ffc5524, cuda/srad/srad_v2.
+// The srad_cuda_1/srad_cuda_2 arithmetic and shared-memory tiling are retained.
+// Six halo loads select clamped in-bounds indices before reading, instead of
+// the upstream unconditional reads followed by edge overwrites. BLOCK_SIZE
+// is fixed at 16 here (the upstream default). The host driver selects a square
+// problem and ROI, and adds the single-pass timing harness and JSON output.
 //
 // Speckle-Reducing Anisotropic Diffusion iteratively smooths a 2D float
 // image. Each SRAD iteration runs two kernel launches:
@@ -59,7 +60,7 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
 }
 
 // ---------------------------------------------------------------------------
-// BLOCK_SIZE and kernels — verbatim from Rodinia srad_v2 (srad.h + srad_kernel.cu)
+// BLOCK_SIZE and kernels — adapted from pinned Rodinia SRAD v2 (see README)
 // ---------------------------------------------------------------------------
 #define BLOCK_SIZE 16
 
@@ -104,13 +105,11 @@ srad_cuda_1(
   __shared__ float  west[BLOCK_SIZE][BLOCK_SIZE];
 
   //load data to shared memory
-  // NOTE: the original Rodinia srad_v2 issues these neighbour reads
-  // unconditionally and then overwrites the border blocks afterwards, which
-  // performs an out-of-bounds read of J_cuda at the image edges (index_n/_w
-  // go negative on the top/left borders, index_s/_e past the end on the
-  // bottom/right). NVIDIA tolerates the OOB read; AMD (MI300X) faults with an
-  // illegal memory access. Selecting the index with a ternary avoids issuing
-  // the out-of-bounds access while producing identical results.
+  // The pinned upstream reads these halos before overwriting image-edge
+  // entries, issuing invalid accesses at the outer boundaries. Select each
+  // clamped index before loading so every read is in bounds. Independent
+  // guards also cover both opposite edges when a grid has only one block;
+  // the upstream first kernel uses if/else-if for those edge overwrites.
   north[ty][tx] = ( by == 0 )
                   ? J_cuda[BLOCK_SIZE * bx + tx]
                   : J_cuda[index_n];
@@ -261,9 +260,9 @@ srad_cuda_2(
 
     __syncthreads();
 
-	// Same OOB-read avoidance as srad_cuda_1: index_s/index_e run past the end
-	// of C_cuda on the bottom/right borders. Select the in-bounds index rather
-	// than reading OOB and overwriting (which faults on AMD).
+	// As in srad_cuda_1, select clamped south/east indices before reading.
+	// The upstream loads first and then overwrites edge entries, issuing
+	// invalid accesses at the bottom/right image boundaries.
 	south_c[ty][tx] = ( by == gridDim.y - 1 )
 	                  ? C_cuda[cols * BLOCK_SIZE * (gridDim.y - 1) + BLOCK_SIZE * bx + cols * ( BLOCK_SIZE - 1 ) + tx]
 	                  : C_cuda[index_s];

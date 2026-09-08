@@ -2,7 +2,7 @@
   "benchmark": "rodinia_srad",
   "tier": 2,
   "suite": "rodinia",
-  "description": "Speckle-Reducing Anisotropic Diffusion (Rodinia SRAD v2). Faithful port: the original srad_cuda_1 / srad_cuda_2 kernels with shared-memory neighborhood tiling (BLOCK_SIZE 16). Each SRAD iteration runs both kernels; q0sqr is recomputed each iteration on the CPU from an ROI image-statistics reduction.",
+  "description": "Speckle-Reducing Anisotropic Diffusion adapted from Rodinia 3.1 SRAD v2. The shared-memory srad_cuda_1 / srad_cuda_2 kernels retain their arithmetic with guarded halo loads (fixed BLOCK_SIZE 16). Each iteration runs both kernels; q0sqr is recomputed on the CPU from the current image ROI.",
   "scaling_param": {
     "name": "image_size",
     "description": "Image dimension (NxN pixel grid, multiple of 16)",

@@ -114,7 +114,7 @@ per selected test, plus a final summary (illustrative timings for `transfer_type
 | `BENCH_PARAM_buffer_size_mb` (or argv[1]) | 256 | Transfer buffer size in MiB per direction |
 | `BENCH_PARAM_transfer_type` | all | Test(s) to run (`h2d`, `d2h`, `bidir`, `all`) |
 | `BENCH_PARAM_use_pinned_memory` | true | Use pinned (page-locked) host memory |
-| `BENCH_PARAM_vector_add_warmup` | true | Run the cold-cache clock warmer before the timed transfer (`false` to disable) |
+| `BENCH_PARAM_vector_add_warmup` | true | Run the untimed warmer before each selected transfer; qualify the resulting clock/cache state on the target |
 
 ## Notes
 

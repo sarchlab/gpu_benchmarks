@@ -48,6 +48,12 @@
 #include <vector>
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
+static constexpr int CEDD_TILE = 16;
+
+static size_t cedd_shared_bytes(dim3 block) {
+    return (size_t)(block.x+2)*(block.y+2)*sizeof(int);
+}
+
 // All threads participate, including inactive output threads in partial tiles.
 // Callers use square 16x16 blocks, with a one-pixel halo in shared memory.
 __device__ void load_cedd_tile(const unsigned char* data, int* tile, int rows, int cols) {
@@ -305,8 +311,9 @@ struct CeddLaps { bench_lap_t gaussian, sobel, nms, hysteresis; };
 // Each interior is overwritten by its defining stage, without intervening resets.
 static CeddLaps run_cedd_pass(unsigned char* a, unsigned char* b,
                               unsigned char* theta, int width, int height) {
-    dim3 block(16,16), grid((width-2+15)/16,(height-2+15)/16);
-    const size_t shared_bytes=18*18*sizeof(int);
+    dim3 block(CEDD_TILE,CEDD_TILE);
+    dim3 grid((width-2+CEDD_TILE-1)/CEDD_TILE,(height-2+CEDD_TILE-1)/CEDD_TILE);
+    const size_t shared_bytes=cedd_shared_bytes(block);
     bench_timer_t timer;
     bench_timer_create(&timer);
     bench_pass_warm();

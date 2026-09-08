@@ -53,7 +53,8 @@ static bool check_case(int w,int h,int pattern) {
         input[i]=pattern==0?15:pattern==1?(unsigned char)i:pattern==2?(unsigned char)((i*17+i/w*73)%256):((i/w+i%w)%2?255:0);
         theta[i]=(unsigned char)((i%4)*45);
     }
-    dim3 block(16,16),grid((w-2+15)/16,(h-2+15)/16);
+    dim3 block(CEDD_TILE,CEDD_TILE),grid((w-2+CEDD_TILE-1)/CEDD_TILE,(h-2+CEDD_TILE-1)/CEDD_TILE);
+    const size_t shared_bytes=cedd_shared_bytes(block);
     unsigned char *da,*db,*dt;
     HIP_CHECK(hipMalloc(&da,n+2));HIP_CHECK(hipMalloc(&db,n+2));HIP_CHECK(hipMalloc(&dt,n+2));
     bool ok=true;
@@ -72,9 +73,9 @@ static bool check_case(int w,int h,int pattern) {
         HIP_CHECK(hipMemcpy(da,a.data(),n+2,hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(db,b.data(),n+2,hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(dt,t.data(),n+2,hipMemcpyHostToDevice));
-        if (stage==0) gaussian_kernel<<<grid,block,18*18*sizeof(int)>>>(da+1,db+1,h,w);
-        else if (stage==1) sobel_kernel<<<grid,block,18*18*sizeof(int)>>>(da+1,db+1,dt+1,h,w);
-        else if (stage==2) non_max_supp_kernel<<<grid,block,18*18*sizeof(int)>>>(da+1,db+1,dt+1,h,w);
+        if (stage==0) gaussian_kernel<<<grid,block,shared_bytes>>>(da+1,db+1,h,w);
+        else if (stage==1) sobel_kernel<<<grid,block,shared_bytes>>>(da+1,db+1,dt+1,h,w);
+        else if (stage==2) non_max_supp_kernel<<<grid,block,shared_bytes>>>(da+1,db+1,dt+1,h,w);
         else hyst_kernel<<<grid,block>>>(da+1,db+1,h,w);
         HIP_CHECK(hipGetLastError());HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipMemcpy(b.data(),db,n+2,hipMemcpyDeviceToHost));
@@ -135,7 +136,10 @@ static bool check_gradient_domain() {
             fprintf(stderr,"FAIL: gradient (%d,%d): magnitude=%u direction=%u expected %d/%u\n",gx,gy,(unsigned)magnitude[i],(unsigned)theta[i],expected,(unsigned)direction_ref(gx,gy));return false;
         }
     }
-    printf("PASS: all %d same-parity Sobel gradient pairs\n",checked);return checked==2082841;
+    if (checked!=2082841) {
+        fprintf(stderr,"FAIL: checked %d gradient pairs, expected 2082841\n",checked);return false;
+    }
+    printf("PASS: all %d same-parity Sobel gradient pairs\n",checked);return true;
 }
 
 int main(int argc,char** argv) {

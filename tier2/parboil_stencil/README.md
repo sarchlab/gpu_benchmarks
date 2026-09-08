@@ -4,25 +4,33 @@
 
 ## Provenance & fidelity
 
-Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parboil/) — the `stencil` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
-
-- Different stencil formula than Parboil's.
-
-Read this as "a 3D Jacobi stencil benchmark in the spirit of Parboil," not Parboil's `stencil`.
+This implementation restores the operator in the [pinned Parboil source mirror](https://github.com/abduld/Parboil/tree/a4c63da28f45699e9a274cbc49af3e067162aa2b/benchmarks/stencil/src),
+commit `a4c63da28f45699e9a274cbc49af3e067162aa2b`. Its CPU, `cuda_base`, and
+optimized CUDA versions agree on the subtractive-center operator and float
+coefficient definitions below. The current kernel retains an independent
+16×16 direct-global launch layout; it does not reproduce the optimized
+upstream kernel's shared-memory tiling or thread coarsening.
 
 ## Algorithm
 
-For each interior cell `(ix, iy, iz)` of an `N×N×N` grid:
+For each interior cell `(x,y,z)`:
 ```
-out[i] = c0 * in[i]
-       + c1 * (in[i-1] + in[i+1]          // x neighbors
-             + in[i-nx] + in[i+nx]         // y neighbors
-             + in[i-nx*ny] + in[i+nx*ny])  // z neighbors
+out = (in[z+1] + in[z-1] + in[y+1] + in[y-1] + in[x+1] + in[x-1]) * c1
+      - in[center] * c0
+c0 = 1.0f / 6.0f
+c1 = 1.0f / 6.0f / 6.0f
 ```
-where `c0 = 0.6`, `c1 = (1 - c0) / 6 ≈ 0.0667`.
+The notation denotes six face-adjacent neighbors. The source preserves the
+`cuda_base` neighbor order. Both buffers start with identical input boundaries;
+the kernel leaves those boundaries fixed through exactly `num_timesteps`
+updates, swapping source and destination after each launch. The final buffer
+is selected by timestep parity.
 
-Boundary cells (1-cell border) are skipped. The run performs `num_timesteps`
-time-steps using ping-pong buffers.
+The current cubic grid sweep, timestep sweep and seed 42 `rand()%1000/1000.0f`
+input generator are suite configurations. Upstream reads external float grids;
+this is not a claim to reproduce its supplied datasets or launch strategy.
+Host-library RNG portability remains owner-deferred R-27. The old positive
+averaging operator was a different workload; recollect its measurements.
 
 ## Measurement
 
@@ -31,7 +39,8 @@ execution (see the root README "Measurement Methodology"). With
 `BENCH_PARAM_vector_add_warmup` (default `true`), a vector-add warmer boosts
 the GPU clock and evicts the last-level cache immediately before the timed
 run. Repetition = `gpubench run --reps N`. There is **no result verification**
-in this benchmark.
+in ordinary timing runs yet (R-13). Independent qualification below exercises
+the actual production timestep sequence.
 
 ## Parameters
 
@@ -85,9 +94,30 @@ Total GPU time: 1.234 ms (10 timesteps/pass)
 
 - **GFLOPS** = 8 × interior_cells × num_timesteps / time_s / 1e9
 - **GB/s** = 8 × sizeof(float) × interior_cells × num_timesteps / time_s / 1e9
-  (7 reads + 1 write per interior cell per time-step)
+  (logical traffic: 7 reads + 1 write per interior cell per time-step; actual
+  device traffic and instruction counts require target qualification)
 
 ## Platform Notes
 
 - **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `parboil_stencil.hip`
 - Input data is generated synthetically — no external input files required
+
+## Operator qualification
+
+`make test PLATFORM=cuda` (or `rocm`) checks the actual production pass against
+an independent dense double reference using the upstream float coefficient
+values. Seven exact unit impulses isolate the center and six neighbor terms;
+30 signed-grid cases cover rectangular shapes, partial tiles, one/two/odd/even
+and 100-timestep sequences. The first destination interior is NaN-poisoned;
+non-finite outputs fail, both buffers must preserve boundaries and allocation
+guards, and the final buffer must match timestep parity. General outputs use
+`max(1e-7, 2e-5*abs(reference))` tolerance. Unit impulses require exact float
+outputs.
+
+`BENCH_PARAM_vector_add_warmup=false ./bench_output_test --case N T` checks a
+particular declared configuration; `--impulse 0` through `--impulse 6` isolate
+the seven terms. CI compiles the test, while execution requires a GPU.
+Main rejects grids without an interior, overflowing signed N³ indices, and
+nonpositive timestep counts before timing. R-13 measured-result verification,
+R-19 AMD execution, and R-23/R-24 trace qualification remain separate.
+Functional profiling is not performance collection.

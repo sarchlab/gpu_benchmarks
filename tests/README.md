@@ -131,3 +131,12 @@ and guards. Run `make test PLATFORM=cuda` (or `rocm`) in `tier2/polybench_2dconv
 `bench_output_test --size N` checks a declared size, and `--impulse 0` through
 `--impulse 8` isolate the nine coefficients. CI compiles the test; runtime and
 ordinary timing-run verification remain separate qualification steps.
+
+`stencil_output_test.hip` exercises the actual Parboil production timestep
+sequence against an independent dense reference: exact center/neighbor
+impulses, signed rectangular grids, partial tiles, odd/even/100-step sequences,
+NaN-poisoned first destinations, both buffers' boundaries and allocation guards.
+Run `make test PLATFORM=cuda` (or `rocm`) in `tier2/parboil_stencil`, or
+`BENCH_PARAM_vector_add_warmup=false ./bench_output_test --case N T` for a
+particular declared configuration. CI compiles the test; runtime execution and
+ordinary timing-run verification remain separate qualification steps.

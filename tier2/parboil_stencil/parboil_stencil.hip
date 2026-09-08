@@ -1,12 +1,12 @@
 // parboil_stencil.hip — Parboil 3D Jacobi Stencil benchmark (HIP, self-contained)
 //
-// 7-point 3D stencil over a 64×64×64 grid using ping-pong buffers.
-// Each kernel invocation performs one time-step; multiple time-steps per iteration.
+// Pinned Parboil 7-point operator using ping-pong buffers.
+// One complete sequence of num_timesteps launches runs per process.
 //
-// Stencil:
-//   out[i] = c0*in[i] + c1*(in[i-1] + in[i+1] + in[i-nx] + in[i+nx]
-//                           + in[i-nx*ny] + in[i+nx*ny])
-//   c0 = 0.6,  c1 = (1-c0)/6 ≈ 0.0667
+// Stencil: out = c1 * (z+1 + z-1 + y+1 + y-1 + x+1 + x-1 neighbors)
+//                - c0 * center
+// c0 = 1.0f/6.0f, c1 = 1.0f/6.0f/6.0f, as in Parboil CPU/cuda_base
+// at abduld/Parboil commit a4c63da28f45699e9a274cbc49af3e067162aa2b.
 //
 // Boundary cells (1-cell border) remain fixed.
 //
@@ -31,6 +31,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <climits>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -62,14 +63,33 @@ __global__ void stencil3d(const float* __restrict__ in,
         iy >= 1 && iy < ny - 1 &&
         iz >= 1 && iz < nz - 1) {
         int idx = iz * ny * nx + iy * nx + ix;
-        out[idx] = c0 * in[idx]
-                 + c1 * (in[idx - 1]       // x-1
-                       + in[idx + 1]       // x+1
-                       + in[idx - nx]      // y-1
-                       + in[idx + nx]      // y+1
-                       + in[idx - ny*nx]   // z-1
-                       + in[idx + ny*nx]); // z+1
+        // Preserve the pinned cuda_base expression and neighbor order.
+        out[idx] = (in[idx + ny*nx] + in[idx - ny*nx]
+                  + in[idx + nx] + in[idx - nx]
+                  + in[idx + 1] + in[idx - 1]) * c1 - in[idx] * c0;
     }
+}
+
+// Both buffers must start with the input boundary. Return the latest state
+// after exactly num_timesteps updates, including odd timestep counts.
+static float* run_stencil_pass(float* src, float* dst, int nx, int ny, int nz,
+                               int num_timesteps, bench_lap_t* elapsed) {
+    const float c0 = 1.0f / 6.0f;
+    const float c1 = 1.0f / 6.0f / 6.0f;
+    const dim3 block(16, 16, 1);
+    const dim3 grid((nx + 15) / 16, (ny + 15) / 16, nz);
+    bench_timer_t timer;
+    bench_timer_create(&timer);
+    bench_lap_reset(elapsed);
+    bench_pass_warm();
+    for (int t = 0; t < num_timesteps; ++t) {
+        bench_lap_add(elapsed, bench_time_op(&timer, [&]() {
+            stencil3d<<<grid, block>>>(src, dst, nx, ny, nz, c0, c1);
+        }));
+        float* tmp = src; src = dst; dst = tmp;
+    }
+    bench_timer_destroy(&timer);
+    return src;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,13 +114,15 @@ int main(int argc, char** argv) {
     env_val = getenv("BENCH_PARAM_num_timesteps");
     if (env_val) num_timesteps = atoi(env_val);
 
+    if (grid_dim < 3 || grid_dim > INT_MAX / grid_dim / grid_dim || num_timesteps < 1) {
+        fprintf(stderr, "Require grid_dim>=3, grid_dim^3 within signed indexing, and num_timesteps>=1\n");
+        return 1;
+    }
+
     int nx = grid_dim;
     int ny = grid_dim;
     int nz = grid_dim;
     int total = nx * ny * nz;
-
-    float c0 = 0.6f;
-    float c1 = (1.0f - c0) / 6.0f;
 
     // Print device info
     int device_id = 0;
@@ -113,6 +135,7 @@ int main(int argc, char** argv) {
 
     // Host allocation and initialization
     float* h_data = (float*)malloc(total * sizeof(float));
+    if (!h_data) { fprintf(stderr, "malloc failed\n"); return 1; }
     srand(42);
     for (int i = 0; i < total; ++i) {
         h_data[i] = (float)(rand() % 1000) / 1000.0f;
@@ -125,45 +148,15 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(d_A, h_data, total * sizeof(float), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_B, h_data, total * sizeof(float), hipMemcpyHostToDevice));
 
-    // Kernel launch configuration
-    dim3 block(16, 16, 1);
-    dim3 grid((nx + 15) / 16, (ny + 15) / 16, nz);
-
     char params[160];
     snprintf(params, sizeof(params),
              "\"grid_dim\":%d,\"num_timesteps\":%d",
              grid_dim, num_timesteps);
 
-    // Per-pass accumulator: each pass launches the stencil num_timesteps
-    // times (ping-pong); the accumulated GPU/host time becomes that pass's
-    // record.
-    bench_timer_t timer;
-    bench_timer_create(&timer);
+    // Initial copies precede one entry warmer. No resets or warmers occur
+    // between the dependent timesteps; accumulate only their kernel times.
     bench_lap_t acc_stencil;
-
-    // One stencil pass. The ping-pong buffers evolve in place across passes,
-    // but the Jacobi update (c0 + 6*c1 = 1, an averaging) keeps values
-    // bounded and the pass always performs a fixed num_timesteps launches
-    // with no data-dependent control flow, so timing is value-independent
-    // and no per-pass grid reset is needed.
-    auto run_stencil_pass = [&]() {
-        bench_lap_reset(&acc_stencil);
-        float* src = d_A;
-        float* dst = d_B;
-        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
-         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
-         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
-        bench_pass_warm();
-        for (int t = 0; t < num_timesteps; ++t) {
-            bench_lap_add(&acc_stencil, bench_time_op(&timer, [&]() {
-                stencil3d<<<grid, block>>>(src, dst, nx, ny, nz, c0, c1);
-            }));
-            // Ping-pong
-            float* tmp = src; src = dst; dst = tmp;
-        }
-    };
-
-    run_stencil_pass();
+    run_stencil_pass(d_A, d_B, nx, ny, nz, num_timesteps, &acc_stencil);
 
     double total_gpu_ms = 0.0;
     bench_emit_iter("stencil3d", 0, &acc_stencil, params);
@@ -171,7 +164,6 @@ int main(int argc, char** argv) {
     fprintf(stderr, "stencil3d gpu = %.3f ms, host = %.3f ms\n",
             acc_stencil.gpu_ms, acc_stencil.host_ms);
 
-    bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms (%d timesteps/pass)\n",
             total_gpu_ms, num_timesteps);

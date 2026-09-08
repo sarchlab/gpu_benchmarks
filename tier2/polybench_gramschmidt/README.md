@@ -30,6 +30,7 @@ After all N columns, Q has orthonormal columns: `Qᵀ Q ≈ Iₙ`.
 
 | Kernel | Threads | Work |
 |--------|---------|------|
+| `gram_norm_zero` | 1 thread | Reset the norm accumulator to zero |
 | `gram_norm` (HIP) | M threads, atomicAdd | Accumulate `||A[:,k]||²` |
 | `gram_norm_finish` (HIP) | 1 thread | `R[k,k] = sqrt(accum)` |
 | `gram_normalize` | M threads | `Q[:,k] = A[:,k] / nrm` |
@@ -91,12 +92,17 @@ Repetition across runs is the harness's job (`gpubench run --reps N`).
 summary
 
 **stdout** — JSON lines: one kernel record per kernel
-(`gram_norm`, `gram_norm_finish`, `gram_normalize`, `gram_project`) carrying
+(`gram_norm_zero`, `gram_norm`, `gram_norm_finish`, `gram_normalize`, `gram_project`) carrying
 that kernel's GPU event time (`time_ms`) and host wall-clock time
 (`host_time_ms`) accumulated over all k-columns of the factorization,
 then a summary whose `total_time_ms` is the sum of all recorded GPU event
 times. The matrix A is restored (and Q/R zeroed) before the factorization,
-outside the timed brackets:
+outside the timed brackets and before the optional entry warmer. The scalar
+norm reset is required at every column and is a separately timed GPU kernel.
+For N positive, there are N reset launches and `5*N - 1` total timed launches;
+`gram_project` has an empty accumulator when N=1. No warmer runs between stages.
+Prior measurements omitted reset time and must be recollected:
+
 
 ```
 {"type":"kernel","name":"gram_norm","iter":0,"time_ms":12.345600,"host_time_ms":13.010000,"params":{"m":512,"n":64}}
@@ -125,3 +131,14 @@ first `min(8, N)` columns and checks:
 
 A `PASS` / `FAIL` result is printed to stderr; on `FAIL` the process exits
 with a non-zero status.
+
+## Reset qualification
+
+`make test PLATFORM=cuda` (or `rocm`) checks the production reset kernel with
+NaN, infinity, negative zero and finite initial values, requiring exact positive
+zero and untouched guards. CI compiles the test; running it requires a GPU.
+The shared [reset ordering test](../../tests/algorithmic_zero_order.py) uses
+actual NVIDIA Nsight timelines to verify reset order, every event bracket,
+absence of inter-stage runtime memsets/copies, and record/summary agreement.
+See [test instructions](../../tests/README.md). Full measured Q/R verification
+remains R-13 and AMD runtime qualification remains R-19.

@@ -100,6 +100,11 @@ jobs:
       - name: Compile 2MM production-pass reference test (GPU required to run)
         run: make -C tier2/polybench_2mm PLATFORM=cuda bench_output_test
 
+      - name: Compile algorithmic reset output tests (GPU required to run)
+        run: |
+          make -C tier2/polybench_gramschmidt PLATFORM=cuda bench_output_test
+          make -C tier2/npb_mg PLATFORM=cuda bench_output_test
+
       - name: Compile finite-verification fault-injection tests (GPU required to run)
         run: python3 tests/finite_verification.py --platform cuda --work-dir /tmp/finite-verification --compile-only
 

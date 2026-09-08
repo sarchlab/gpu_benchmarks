@@ -10,7 +10,8 @@
 //
 // Output (stdout): per timed pass (one pass = num_vcycles V-cycles from a
 // zeroed solution), one {"type":"kernel",...} JSON line per kernel
-// (smooth_kernel, restrict_kernel, prolong_kernel) carrying that kernel's
+// (smooth_kernel, restrict_kernel, prolong_kernel, residual_kernel, coarse_zero)
+// carrying that kernel's
 // accumulated GPU event time (time_ms) and host wall-clock time
 // (host_time_ms) within the pass, then a summary whose total_time_ms is the
 // SUM of all recorded GPU event times. Mcells/sec is derived downstream
@@ -37,6 +38,15 @@
 
 __device__ __host__ static inline int idx3d(int x, int y, int z, int N) {
     return x + y * N + z * N * N;
+}
+
+// ---------------------------------------------------------------------------
+// Kernel: reset every coarse correction value before its next solve
+// ---------------------------------------------------------------------------
+
+__global__ void coarse_zero(float* u, int count) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < count) u[idx] = 0.0f;
 }
 
 // ---------------------------------------------------------------------------
@@ -300,8 +310,7 @@ int main(int argc, char** argv) {
              "\"num_vcycles\":%d,\"num_smooth_steps\":%d",
              N, block_size, num_vcycles, num_smooth);
 
-    // Per-kernel accumulators for the emitted kernels (smooth / restrict /
-    // prolong), reused across V-cycles within one MG pass.
+    // Per-kernel accumulators, reused across V-cycles within one MG pass.
     bench_timer_t timer;
     bench_timer_create(&timer);
     bench_lap_t acc_smooth, acc_restrict, acc_prolong, acc_residual, acc_zero;
@@ -348,15 +357,14 @@ int main(int argc, char** argv) {
             }
 
             // Zero the coarse-grid correction before coarse smoothing. This is
-            // required device work inside the timed V-cycle, so it is bracketed
-            // and emitted (as coarse_zero) — otherwise total_time_ms would
-            // understate the algorithm.
+            // required work inside the V-cycle: use an explicit GPU kernel so
+            // the launch, event bracket and coarse_zero record agree.
             if (timed) {
                 bench_lap_add(&acc_zero, bench_time_op(&timer, [&]() {
-                    HIP_CHECK(hipMemsetAsync(d_u[lv + 1], 0, level_bytes[lv + 1], 0));
+                    coarse_zero<<<cgrid, block_size>>>(d_u[lv + 1], ctotal);
                 }));
             } else {
-                HIP_CHECK(hipMemset(d_u[lv + 1], 0, level_bytes[lv + 1]));
+                coarse_zero<<<cgrid, block_size>>>(d_u[lv + 1], ctotal);
             }
         }
 

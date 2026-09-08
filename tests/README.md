@@ -94,3 +94,24 @@ NVIDIA GPU, `nsys`, a built binary and a new directory. Run
 Assertions must be enabled; optimized Python is rejected. Captures and reports
 are retained; timeouts abort and may leave a partial report. CI does not run this
 functional GPU check, and its profiled timings are not performance results.
+
+`algorithmic_zero_output.hip` tests the actual Gram–Schmidt and MG reset kernels
+with exact positive-zero and guard checks. Run `make test PLATFORM=cuda` (or
+`rocm`) from each benchmark directory. CI builds both test variants.
+
+`algorithmic_zero_order.py` requires an NVIDIA GPU, `nsys`, both built benchmarks
+and a new output directory:
+
+```sh
+python3 tests/algorithmic_zero_order.py \
+  --gram-binary tier2/polybench_gramschmidt/polybench_gramschmidt \
+  --mg-binary tier2/npb_mg/npb_mg --work-dir /tmp/reset-order
+```
+
+It checks the full timed kernel sequence (including resets), individual event
+brackets, absence of algorithmic runtime memsets/copies, verification extras
+and all records/summary totals. Eight captures cover small/default cases and
+warmer on/off. Run with assertions enabled; optimized Python is rejected.
+Ordinary capture/export failures are recorded; timeouts or missing tools abort
+and may leave partial reports. Captures are retained. CI does not execute this
+GPU check, and its profiled times are not performance results.

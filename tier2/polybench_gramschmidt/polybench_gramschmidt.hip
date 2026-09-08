@@ -6,6 +6,7 @@
 // Derived from the PolyBench/GPU benchmark suite.
 //
 // GPU kernels (executed in a loop over k = 0 .. N-1):
+//   gram_norm_zero    : reset the scalar norm accumulator (1 thread)
 //   gram_norm         : atomic-reduction of ||A[:,k]||^2 into nrm_buf
 //   gram_norm_finish  : nrm_buf = sqrt(nrm_buf); R[k,k] = nrm_buf  (1 thread)
 //   gram_normalize    : Q[:,k] = A[:,k] / nrm_buf                   (M threads)
@@ -26,7 +27,7 @@
 //   BENCH_PARAM_m, BENCH_PARAM_n
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per kernel
-// (gram_norm, gram_norm_finish, gram_normalize, gram_project) carrying that
+// (gram_norm_zero, gram_norm, gram_norm_finish, gram_normalize, gram_project) carrying that
 // kernel's GPU event time (time_ms) and host wall-clock time (host_time_ms)
 // accumulated over all k-columns of the single QR factorization, then a
 // summary whose total_time_ms is the SUM of all recorded GPU event times.
@@ -50,6 +51,14 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
         }
     }
     return defaultVal;
+}
+
+// ---------------------------------------------------------------------------
+// Kernel: reset the norm accumulator before each column's reduction
+// ---------------------------------------------------------------------------
+__global__ void gram_norm_zero(float* nrm_buf)
+{
+    *nrm_buf = 0.0f;
 }
 
 // ---------------------------------------------------------------------------
@@ -203,12 +212,14 @@ int main(int argc, char** argv)
     // (gpubench --reps) — the operation runs exactly once here.
     bench_timer_t timer;
     bench_timer_create(&timer);
-    bench_lap_t acc_norm, acc_norm_finish, acc_normalize, acc_project;
+    bench_lap_t acc_zero, acc_norm, acc_norm_finish, acc_normalize, acc_project;
 
     // The single recorded run. Gram-Schmidt orthogonalizes A in place, so A is
     // restored from the pristine host copy (and Q/R zeroed) before the
-    // factorization. Resets stay outside timed brackets.
+    // factorization. Initial setup stays outside timed brackets; each column's
+    // required accumulator reset is a measured kernel inside the algorithm.
     auto run_iter = [&]() {
+        bench_lap_reset(&acc_zero);
         bench_lap_reset(&acc_norm);
         bench_lap_reset(&acc_norm_finish);
         bench_lap_reset(&acc_normalize);
@@ -226,8 +237,11 @@ int main(int argc, char** argv)
         bench_pass_warm();
 
         for (int k = 0; k < N; ++k) {
-            // Step 1: zero nrm_buf (untimed), then accumulate ||A[:,k]||^2
-            HIP_CHECK(hipMemsetAsync(d_nrm_buf, 0, sizeof(float), 0));
+            // Step 1: reset and then accumulate ||A[:,k]||^2. A separate
+            // launch provides the global ordering required by the reduction.
+            bench_lap_add(&acc_zero, bench_time_op(&timer, [&]() {
+                gram_norm_zero<<<1, 1>>>(d_nrm_buf);
+            }));
             bench_lap_add(&acc_norm, bench_time_op(&timer, [&]() {
                 gram_norm<<<grid_M, block_size>>>(d_A, d_nrm_buf, M, N, k);
             }));
@@ -256,16 +270,17 @@ int main(int argc, char** argv)
     run_iter();
 
     double total_gpu_ms = 0.0;
+    bench_emit_iter("gram_norm_zero",   0, &acc_zero,        params);
     bench_emit_iter("gram_norm",        0, &acc_norm,        params);
     bench_emit_iter("gram_norm_finish", 0, &acc_norm_finish, params);
     bench_emit_iter("gram_normalize",   0, &acc_normalize,   params);
     bench_emit_iter("gram_project",     0, &acc_project,     params);
-    total_gpu_ms += acc_norm.gpu_ms + acc_norm_finish.gpu_ms +
+    total_gpu_ms += acc_zero.gpu_ms + acc_norm.gpu_ms + acc_norm_finish.gpu_ms +
                     acc_normalize.gpu_ms + acc_project.gpu_ms;
     fprintf(stderr,
-            "norm gpu = %.3f ms, finish gpu = %.3f ms, "
+            "zero gpu = %.3f ms, norm gpu = %.3f ms, finish gpu = %.3f ms, "
             "normalize gpu = %.3f ms, project gpu = %.3f ms\n",
-            acc_norm.gpu_ms, acc_norm_finish.gpu_ms,
+            acc_zero.gpu_ms, acc_norm.gpu_ms, acc_norm_finish.gpu_ms,
             acc_normalize.gpu_ms, acc_project.gpu_ms);
 
     bench_timer_destroy(&timer);

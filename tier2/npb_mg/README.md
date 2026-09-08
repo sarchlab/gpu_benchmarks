@@ -18,9 +18,10 @@ Read this as "a multigrid benchmark in the spirit of NPB," not NPB's `MG`.
   1. **Pre-smooth** — Jacobi iterations on current level
   2. **Residual** — Compute r = rhs − A·u (discrete Laplacian)
   3. **Restrict** — Downsample residual to coarser grid (2:1 averaging)
-  4. **Coarse solve** — Extra smoothing on coarsest level
-  5. **Prolong** — Interpolate correction back to fine grid (injection)
-  6. **Post-smooth** — Jacobi iterations after correction
+  4. **Reset coarse correction** — Explicit `coarse_zero` kernel before descending
+  5. **Coarse solve** — Extra smoothing on coarsest level
+  6. **Prolong** — Interpolate correction back to fine grid (injection)
+  7. **Post-smooth** — Jacobi iterations after correction
 - Default: 5 V-cycles per solve, 3 smooth steps per level. One full multigrid solve from a zeroed solution is timed per execution; repetition across fresh processes is the harness's job (`gpubench run --reps N`)
 
 ## Files
@@ -82,3 +83,27 @@ Derived metrics such as Mcells/sec are computed downstream from `time_ms` and pa
 
 - **CUDA/ROCm**: Uses `cudaEvent` / `hipEvent` for GPU timing; shared memory reduction for norm computation
 - Grid size is automatically rounded up to the nearest power of 2 for proper multigrid hierarchy
+
+## Algorithmic reset timing
+
+`coarse_zero` is an explicit GPU kernel that writes every correction cell before
+the next level is smoothed. It replaces a runtime memset previously reported
+under this kernel name. For L levels (`N, N/2, ..., 4`), each solve launches
+`num_vcycles * (L - 1)` resets. Every reset has its own event bracket and its
+time contributes to the existing `coarse_zero` accumulator and summary.
+
+Initial solution/RHS setup zeros remain outside timing and before the optional
+entry warmer. No warmer runs between levels, kernels or V-cycles. Recollect
+old measurements because the implementation of the reset has changed. This
+repair preserves the current numerical operator and sweep; it does not resolve
+the NAS identity differences under R-09 or the weak residual gate under R-13.
+The three separate verification launches remain outside reported time, and
+general trace-region/artifact qualification remains R-23/R-24.
+
+`make test PLATFORM=cuda` (or `rocm`) checks the actual reset kernel against
+poisoned inputs and untouched guards, from partial blocks through the largest
+declared coarse grid. CI compiles this test; execution requires a GPU. The
+shared [reset ordering test](../../tests/algorithmic_zero_order.py) verifies
+actual NVIDIA Nsight launch/event order and output agreement; see the
+[test instructions](../../tests/README.md). AMD runtime qualification remains
+R-19. Profiled checks are functional evidence, not performance measurements.

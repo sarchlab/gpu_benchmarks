@@ -34,8 +34,9 @@ This is an adapted port with the following driver differences:
   loop-count guard. These control different amounts of work.
 - Both use CPU centroid sums in ascending point order and retain the previous
   center for an empty cluster. The local driver omits the pinned default path's
-  unused membership and global cluster-buffer uploads and texture binding setup;
-  centers used by the assignment kernel are still uploaded to constant memory.
+  unused membership and global cluster-buffer uploads. Texture binding setup is
+  omitted because the feature texture access is replaced by `__ldg`. Centers
+  used by the assignment kernel are still uploaded to constant memory.
 - The local driver adds the entry warmer, single-pass execution and accumulated
   per-kernel JSON timings, including feature inversion. These records describe
   the local measured work, not the pinned program's end-to-end runtime.

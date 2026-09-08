@@ -13,8 +13,8 @@
 // iterations. The pinned driver reads a dataset and uses membership-change
 // convergence with a loop guard. Both reduce centroid sums on the CPU in
 // ascending point order, retaining old centers for empty clusters. The local
-// driver adds the warmer/JSON timing harness and omits the pinned driver's
-// unused membership/cluster uploads and texture binding setup.
+// driver adds the warmer/JSON timing harness and omits unused membership/cluster
+// uploads. Texture binding is omitted because feature reads now use __ldg.
 //
 // Usage:
 //   ./rodinia_kmeans [--points N] [--features D] [--clusters K] [--max_iter M]

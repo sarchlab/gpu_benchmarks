@@ -49,7 +49,7 @@ endif
 
 all: $(TARGET)
 
-$(TARGET): $(SRC)
+$(TARGET): $(SRC) ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
 	$(CC) $(CFLAGS) $< -o $@
 
 # Optional CUDA/ROCm device test of the production kernel's per-thread output.

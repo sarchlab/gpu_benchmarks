@@ -140,3 +140,13 @@ Run `make test PLATFORM=cuda` (or `rocm`) in `tier2/parboil_stencil`, or
 `BENCH_PARAM_vector_add_warmup=false ./bench_output_test --case N T` for a
 particular declared configuration. CI compiles the test; runtime execution and
 ordinary timing-run verification remain separate qualification steps.
+
+`common_header_dependencies.py` checks the real Make rebuild decisions for
+all Tier 1/2 benchmark targets and their `bench_output_test` targets under
+both `PLATFORM=cuda` and `PLATFORM=rocm`. In temporary source copies, timestamp
+fixtures must stay current with unchanged inputs and become stale when each
+shared timing, warmer, or compatibility header changes. It executes `make -q`
+without running compiler recipes. Run `python3 tests/common_header_dependencies.py`;
+`--report PATH` preserves every decision and `--repo PATH` selects a checkout.
+CI runs this host-only regression. Target compilation and GPU execution require
+separate toolchains and hardware qualification.

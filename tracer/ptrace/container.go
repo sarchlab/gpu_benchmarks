@@ -34,27 +34,51 @@ func DecodeContainer(data []byte) (header string, blocks []string, err error) {
 	if len(data) < 4 {
 		return "", nil, fmt.Errorf("file too small")
 	}
-	hdrLen := int(binary.LittleEndian.Uint32(data[:4]))
+	hdrLen := binary.LittleEndian.Uint32(data[:4])
 	pos := 4
-	if len(data) < pos+hdrLen {
+	if uint64(hdrLen) > uint64(len(data)-pos) {
 		return "", nil, fmt.Errorf("truncated at header json")
 	}
 	var hdr zstdTraceHeader
-	if err := json.Unmarshal(data[pos:pos+hdrLen], &hdr); err != nil {
+	if err := json.Unmarshal(data[pos:pos+int(hdrLen)], &hdr); err != nil {
 		return "", nil, fmt.Errorf("parsing header json: %w", err)
 	}
-	pos += hdrLen
-	if len(data) < pos+hdr.HeaderSize {
+	pos += int(hdrLen)
+	if hdr.Version != 1 {
+		return "", nil, fmt.Errorf("unsupported container version %d", hdr.Version)
+	}
+	if hdr.NumBlocks <= 0 || len(hdr.BlockOffsets) != hdr.NumBlocks || len(hdr.FrameSizes) != hdr.NumBlocks {
+		return "", nil, fmt.Errorf("invalid block table: count %d, offsets %d, sizes %d",
+			hdr.NumBlocks, len(hdr.BlockOffsets), len(hdr.FrameSizes))
+	}
+	if hdr.HeaderSize < 0 || hdr.HeaderSize > len(data)-pos {
 		return "", nil, fmt.Errorf("truncated at traceg header")
 	}
 	header = string(data[pos : pos+hdr.HeaderSize])
 	pos += hdr.HeaderSize
-	if len(data) < pos+hdr.DictSize {
+	if hdr.DictSize < 0 || hdr.DictSize > len(data)-pos {
 		return "", nil, fmt.Errorf("truncated at dictionary")
 	}
 	dict := data[pos : pos+hdr.DictSize]
 	pos += hdr.DictSize
 	frames := data[pos:]
+
+	// Both version-1 writers pack positive-length frames consecutively. Check
+	// the entire table against the supplied length before indexing, allocating
+	// output blocks or decoding. Slice capacity may extend beyond that length,
+	// and additions involving corrupt file offsets can overflow.
+	end := 0
+	for i, start := range hdr.BlockOffsets {
+		size := hdr.FrameSizes[i]
+		if start != end || size <= 0 || size > len(frames)-end {
+			return "", nil, fmt.Errorf("invalid frame %d: offset %d, size %d, expected offset %d within %d bytes",
+				i, start, size, end, len(frames))
+		}
+		end += size
+	}
+	if end != len(frames) {
+		return "", nil, fmt.Errorf("%d unindexed trailing frame bytes", len(frames)-end)
+	}
 
 	dPlain, err := zstd.NewReader(nil)
 	if err != nil {

@@ -58,6 +58,9 @@ jobs:
       - name: Test gpubench
         run: go test ./cmd/gpubench
 
+      - name: Test trace codecs
+        run: go test ./tracer/...
+
       - name: Check complete matrix-vector CPU references (no GPU required)
         run: |
           g++ -O2 -std=c++14 -fsanitize=address,undefined tests/matvec_reference_test.cpp -o /tmp/matvec_reference_test

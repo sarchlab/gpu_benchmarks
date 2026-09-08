@@ -15,6 +15,7 @@
 // (4*N^3 / time) is derived downstream from time_ms and params.
 
 #include "../../common/bench_timing.h"
+#include "cpu_reference.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -187,7 +188,7 @@ int main(int argc, char** argv) {
     TwoMMLaps laps = run_2mm_pass(d_A, d_B, d_C, d_D, d_tmp, N, alpha, beta);
     char params[192];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"alpha\":%.2f,\"beta\":%.2f", N, alpha, beta);
+             "\"size\":%d,\"alpha\":%.2f,\"beta\":%.2f,\"verification\":\"full_cpu_v1\"", N, alpha, beta);
     bench_emit_iter("mm_kernel_1", 0, &laps.first, params);
     bench_emit_iter("mm_kernel_2", 0, &laps.second, params);
     const double total_gpu_ms = laps.first.gpu_ms + laps.second.gpu_ms;
@@ -195,11 +196,31 @@ int main(int argc, char** argv) {
     fprintf(stderr, "mm1 gpu = %.3f ms, mm2 gpu = %.3f ms\nTotal GPU time: %.3f ms\n",
             laps.first.gpu_ms, laps.second.gpu_ms, total_gpu_ms);
 
+    // Verify both measured products after timing, with no extra GPU pass.
+    // Consume all original inputs before reusing h_A and h_D for the outputs.
+    const CpuTwoMM reference = cpu_2mm(h_A, h_B, h_C, h_D, N, alpha, beta);
+    HIP_CHECK(hipMemcpy(h_A, d_tmp, bytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(h_D, d_D, bytes, hipMemcpyDeviceToHost));
+    size_t errors = 0;
+    for (size_t i = 0; i < elements; ++i)
+        for (int stage = 0; stage < 2; ++stage) {
+            const float actual = stage ? h_D[i] : h_A[i];
+            const double expected = stage ? reference.output[i] : reference.tmp[i];
+            if (!two_mm_value_matches(actual, expected)) {
+                if (errors < 10)
+                    fprintf(stderr, "MISMATCH %s[%zu]: got %.9g expected %.12g\n",
+                            stage ? "D" : "tmp", i, actual, expected);
+                ++errors;
+            }
+        }
+    fprintf(stderr, "2MM verification: %s (%zu elements per matrix, %zu mismatches)\n",
+            errors ? "FAIL" : "PASS", elements, errors);
+
     HIP_CHECK(hipFree(d_A));
     HIP_CHECK(hipFree(d_B));
     HIP_CHECK(hipFree(d_C));
     HIP_CHECK(hipFree(d_D));
     HIP_CHECK(hipFree(d_tmp));
     free(h_A); free(h_B); free(h_C); free(h_D);
-    return EXIT_SUCCESS;
+    return errors ? EXIT_FAILURE : EXIT_SUCCESS;
 }

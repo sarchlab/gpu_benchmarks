@@ -284,3 +284,23 @@ retain finite times and `verification=full_cpu_v1`; faulty runs must exit 1.
 `--work-dir` must be new; reports and process output are retained there.
 Use `--platform rocm` for AMD or `--compile-only` when no GPU is available.
 The independent production-pass oracle remains `tests/stencil_output_test.hip`.
+
+## 2MM measured intermediate and final products
+
+```sh
+c++ -O3 -std=c++14 -fsanitize=address,undefined tests/two_mm_reference_test.cpp -o /tmp/two-mm-reference
+/tmp/two-mm-reference
+python3 tests/two_mm_measured_result.py --platform cuda --work-dir /tmp/two-mm-measured-result
+```
+
+The host oracle compares 168 complete matrix pairs bit for bit against the
+qualified unblocked double products, with input preservation and finite/tolerance
+checks. The GPU regression runs 158 ordinary-path cases (53 controls and 105
+faults), injecting corruption in either or both actual measured device matrices
+after timing. It checks first/prefix/middle/tail elements, partial tiles,
+finite/NaN/±Inf values, zero/negative coefficients and complete mismatch counts
+with capped diagnostics. Both kernel JSON records must retain finite times and
+`verification=full_cpu_v1`; faults must exit 1. The output directory must be new;
+reports and process output remain there. CI runs the host oracle and compiles
+the GPU regression. Use `--compile-only` without a GPU or `--platform rocm` on
+AMD. The existing `two_mm_output_test.hip` keeps its independent oracle.

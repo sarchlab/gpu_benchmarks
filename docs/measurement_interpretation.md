@@ -69,6 +69,14 @@ resolution. A larger workload changes the experiment and needs its own identity.
 
 ## Transfer payload, host allocation, and overlap
 
+The `memory_bandwidth` manifest collects D2D only, with pinned host setup
+buffers. Its direct-binary H2D/D2H/`all` modes are outside that sweep. Use
+`pcie_bandwidth` for the declared host-transfer sweep with both allocation
+types. For D2D, distinguish payload rate `B / (time_ms * 1e6)` from logical
+read-plus-write rate `2 * B / (time_ms * 1e6)`, where
+`B = buffer_size_mb * 1024 * 1024`. Logical bytes do not establish physical
+HBM/GDDR traffic or peak bandwidth.
+
 For `pcie_bandwidth`, let `B = buffer_size_mb * 1024 * 1024` bytes per direction.
 The unidirectional payload rate is `B / (time_ms * 1e6)` in SI GB/s. The
 bidirectional aggregate payload rate is `2 * B / (time_ms * 1e6)`; both transfers

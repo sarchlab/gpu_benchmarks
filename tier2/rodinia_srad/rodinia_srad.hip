@@ -337,6 +337,13 @@ int main(int argc, char** argv) {
     env_val = getenv("BENCH_PARAM_num_iterations"); if (env_val) niter = atoi(env_val);
     env_val = getenv("BENCH_PARAM_lambda");         if (env_val) lambda = (float)atof(env_val);
 
+    // Environment overrides must obey the positive-dimension requirement too.
+    if (image_size < 1 || niter < 1) {
+        fprintf(stderr, "Invalid SRAD parameters: image_size=%d num_iterations=%d; both must be positive\n",
+                image_size, niter);
+        return EXIT_FAILURE;
+    }
+
     // The original kernels index by exact BLOCK_SIZE tiles; rows/cols must be
     // multiples of 16 (upstream enforces the same constraint).
     if (image_size % BLOCK_SIZE != 0) {

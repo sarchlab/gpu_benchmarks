@@ -81,6 +81,10 @@ make PLATFORM=rocm
 | `BENCH_PARAM_lambda` | 0.5 | Diffusion step size in (0,1) |
 | `BENCH_PARAM_vector_add_warmup` | `true` | Cold-cache calibration before the timed run |
 
+After applying environment overrides, nonpositive image sizes or iteration
+counts are rejected with an explicit diagnostic before rounding, allocation or
+device access. Positive values retain the existing rounding and precedence.
+
 `block_size` is fixed at `BLOCK_SIZE=16` (the upstream default) and is
 emitted as a param for downstream derivation only.
 

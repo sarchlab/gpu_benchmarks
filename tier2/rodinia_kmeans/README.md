@@ -1,28 +1,47 @@
 # rodinia_kmeans — Rodinia K-Means Clustering Benchmark
 
-GPU K-means clustering. This is a **faithful port** of Rodinia kmeans: the
-device kernels `invert_mapping` and `kmeansPoint` are the original upstream
-kernels (`rodinia/cuda/kmeans/kmeans_cuda_kernel.cu`). The defining faithful
-characteristic is the **inverted (feature-major) feature layout** for coalesced
-loads — `invert_mapping` transforms the row-major `[point][feature]` array into a
-column-major `[feature][point]` array, and `kmeansPoint` indexes it as
-`point_id + j*npoints`. That layout is preserved exactly.
+GPU K-means clustering using adapted Rodinia GPU kernels and the suite's
+portable measurement driver.
 
 ## Provenance & fidelity
 
-Derived from the [Rodinia benchmark suite](http://lava.cs.virginia.edu/Rodinia/) — the `kmeans` workload. Independent reimplementation, spot-verified to reproduce Rodinia's algorithm faithfully. (One portability substitution — texture fetch → `__ldg` — is documented below; the faithful feature-major data layout is unchanged.)
+The source reference is Rodinia 3.1, commit
+`366b283456506ef2fe2c2b7dc5e83e941ffc5524`:
+[GPU kernels](https://github.com/HPC-FAIR/rodinia_3.1/blob/366b283456506ef2fe2c2b7dc5e83e941ffc5524/cuda/kmeans/kmeans_cuda_kernel.cu),
+[GPU host driver](https://github.com/HPC-FAIR/rodinia_3.1/blob/366b283456506ef2fe2c2b7dc5e83e941ffc5524/cuda/kmeans/kmeans_cuda.cu),
+[clustering loop](https://github.com/HPC-FAIR/rodinia_3.1/blob/366b283456506ef2fe2c2b7dc5e83e941ffc5524/cuda/kmeans/kmeans_clustering.c), and
+[input driver](https://github.com/HPC-FAIR/rodinia_3.1/blob/366b283456506ef2fe2c2b7dc5e83e941ffc5524/cuda/kmeans/kmeans.c).
 
-## Portability substitution (texture → `__ldg`)
+The `invert_mapping` body retains the pinned row-major `[point][feature]` to
+feature-major `[feature][point]` mapping. The default CPU-reduction
+`kmeansPoint` body retains its nearest-center arithmetic, strict `<` comparison
+(first center wins equal computed distances), constant-memory centers and
+point indexing. Default-disabled GPU reduction branches are omitted. The
+assignment launch retains 256 threads and the rounded square 2D grid; inversion
+uses the corresponding total block count in a 1D grid.
 
-The original `kmeansPoint` reads the inverted features through a bound 1D texture
-(`tex1Dfetch(t_features, addr)`). The HIP/CUDA compatibility layer does not map
-CUDA texture references, so the fetch is replaced by `__ldg(&features[addr])`
-(the read-only data cache — the closest portable equivalent). **The data layout,
-which is the faithful part, is unchanged**; only the fetch mechanism differs.
-Cluster centers stay in `__constant__` memory (`c_clusters`), exactly as
-upstream, and centroid sums are done on the CPU each iteration (the upstream
-default `CPU_CENTER_REDUCE`/`CPU_DELTA_REDUCE`; the GPU-reduction paths are
-compiled out upstream and are omitted here).
+The pinned texture read `tex1Dfetch(t_features,addr)` becomes
+`__ldg(&features[addr])`. This preserves the feature address mapping and uses a
+different memory-access mechanism. Texture/cache behavior, generated
+instructions and performance equivalence require target-specific qualification.
+This is an adapted port with the following driver differences:
+
+- The local driver generates synthetic [0,1) floats using an LCG seeded with
+  42; the pinned driver reads an ASCII or binary dataset. For the declared
+  sizes and five centers, both initialize from the first five input points.
+- The local driver performs exactly `max_iter` assignments (default 10).
+  The pinned clustering loop stops on membership-change convergence, with a
+  loop-count guard. These control different amounts of work.
+- Both use CPU centroid sums in ascending point order and retain the previous
+  center for an empty cluster. The local driver omits the pinned default path's
+  unused membership and global cluster-buffer uploads and texture binding setup;
+  centers used by the assignment kernel are still uploaded to constant memory.
+- The local driver adds the entry warmer, single-pass execution and accumulated
+  per-kernel JSON timings, including feature inversion. These records describe
+  the local measured work, not the pinned program's end-to-end runtime.
+
+Source comparison does not establish full measured-result or AMD qualification;
+those remain open in [the readiness tracker](https://github.com/sarchlab/gpu_benchmarks/issues/71).
 
 ## Algorithm
 
@@ -39,7 +58,7 @@ compiled out upstream and are omitted here).
 
 | File | Description |
 |------|-------------|
-| `rodinia_kmeans.hip` | HIP/CUDA source — original `invert_mapping`/`kmeansPoint` kernels + timing driver |
+| `rodinia_kmeans.hip` | HIP/CUDA source — adapted `invert_mapping`/`kmeansPoint` kernels + timing driver |
 | `Makefile` | Platform auto-detect build system |
 | `params.json` | Parameter specification |
 
@@ -88,7 +107,7 @@ is the harness's job (`gpubench run --reps N`).
 
 ## Platform Notes
 
-- **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `rodinia_kmeans.hip` (the faithful upstream kernels; texture fetch → `__ldg`).
+- **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `rodinia_kmeans.hip` (adapted kernels; texture fetch → `__ldg`).
 - Input data is generated synthetically — no external input files required.
 
 ## Reference

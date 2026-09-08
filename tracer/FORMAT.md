@@ -175,6 +175,20 @@ dictionary and its raw text is the raw-content dictionary for blocks 1..N. The
 C++ tracer tags frames with dictID 0, the Go encoder with dictID 1; the reader in
 `container.go` registers the raw dict under both.
 
+The container version is 1. Its block count is positive and must equal both
+frame-table lengths. Header and dictionary sizes are nonnegative. Positive
+frame lengths cover the complete remaining payload consecutively, starting at
+offset zero, without gaps, overlaps or trailing bytes. The decoder checks these
+ranges against the supplied byte length before allocating decoded blocks or
+decompressing. Unsupported versions, inconsistent tables and truncated or
+out-of-range sections return errors rather than panicking or accepting partial
+files. Valid containers retain their original decompressed header and block
+bytes. The stored dictionary must also match decoded block 0 byte for byte;
+this is checked before decoding later blocks that could silently use a corrupt
+dictionary when their zstd frames have no checksum. These container checks do
+not establish instruction validity, measured region membership or a host-memory
+budget for decompressed traces.
+
 ## Tier-7 statistical residual (lossy, `tier7.go`)
 
 A data-dependent gather (SpMV `x[col[]]`) is near-maximal entropy and cannot be

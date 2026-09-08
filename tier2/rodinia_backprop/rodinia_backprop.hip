@@ -1,44 +1,24 @@
-// rodinia_backprop.hip — Rodinia Backpropagation benchmark (HIP, self-contained)
+// Rodinia 3.1 backprop: one complete hybrid training epoch, input -> 16 -> 1.
+// The original two 16x16 GPU kernels are retained. CPU partial-sum reduction,
+// sigmoid/output/error/hidden-delta stages and output-weight update connect them.
+// Only the two GPU kernels contribute to recorded time; required hybrid host
+// work and transfers are outside their event brackets. One entry warmer runs
+// after initial setup; no reconditioning occurs between the dependent stages.
 //
-// One training epoch of a 3-layer neural net (input -> hidden -> output). In the
-// original Rodinia backprop the GPU runs exactly TWO kernels — the input->hidden
-// forward pass (bpnn_layerforward_CUDA) and the input->hidden weight update
-// (bpnn_adjust_weights_cuda); the small output layer and the error/delta math run
-// on the CPU. This port keeps those two kernels VERBATIM from Rodinia 3.1
-// cuda/backprop/backprop_cuda_kernel.cu, together with the original host launch
-// geometry (num_blocks = in/16, grid(1,num_blocks), threads(16,16), HEIGHT=WIDTH=16
-// shared-memory tiling with an in-block log-step reduction tree). Only the driver
-// loop is restructured for the single-pass timing harness and JSON output.
-//
-// The CPU-side partial-sum reduction and output-layer/delta computation from the
-// original are NOT reproduced: they are host code outside the two timed GPU
-// kernels and do not affect kernel timing. The hidden_delta vector consumed by
-// bpnn_adjust_weights_cuda is synthesized instead.
-//
-// Compiles with hipcc (AMD ROCm) or nvcc -x cu (CUDA) via the HIP compat layer.
-//
-// Usage:
-//   ./rodinia_backprop [--input N]
-//
-//   --input N   Input layer size (multiple of 16)   (default: 1000000)
-//
-// The hidden layer is fixed at 16 units: the kernels tile with HEIGHT=WIDTH=16
-// and index the weight matrix with a (hid+1) stride, so hid==16 is baked into
-// the original algorithm and is emitted as a fixed descriptor, not a knob.
-//
-// Environment variables (override argv):
-//   BENCH_PARAM_input
-//
-// Output (stdout): one {"type":"kernel",...} JSON line for each
-// of the two kernels carrying that kernel's GPU event time and host time, then a
-// summary whose total_time_ms is the SUM of all recorded GPU event times.
-// Output (stderr): device info, per-epoch timing.
+// Pinned source: HPC-FAIR/rodinia_3.1 at 366b283456506ef2fe2c2b7dc5e83e941ffc5524,
+// cuda/backprop/{backprop_cuda.cu,backprop_cuda_kernel.cu,backprop.c,backprop.h,
+// facetrain.c,imagenet.c}. See README for initialization and qualification limits.
+// Usage: --input N or BENCH_PARAM_input (default 1000000); positive inputs are
+// rounded down to a multiple of16, with a minimum of16. JSON output contains
+// two accumulated kernel records and their summed GPU event time.
 
 #include "../../common/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
+#include <cmath>
+#include <climits>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -47,8 +27,8 @@
 // ---------------------------------------------------------------------------
 #define WIDTH    16   // shared memory width (hidden units per tile)
 #define HEIGHT   16   // shared memory height (input rows per block)
-#define ETA      0.3f // learning rate
-#define MOMENTUM 0.3f // momentum
+#define ETA      0.3 // learning rate
+#define MOMENTUM 0.3 // momentum
 
 static int parseIntParam(int argc, char** argv, const char* name, int def) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -155,141 +135,159 @@ __global__ void bpnn_adjust_weights_cuda(float * delta,
 
 }
 
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-int main(int argc, char** argv) {
-    setvbuf(stdout, NULL, _IONBF, 0);
+// Host state for one input -> 16 -> 1 training epoch. The unused weight column
+// zero is retained so initialization consumes the same rand() draws as Rodinia.
+struct BackpropNetwork {
+    int input_n;
+    std::vector<float> input, weights, previous_weights;
+    float hidden[WIDTH + 1] = {};
+    float hidden_weights[WIDTH + 1][2] = {};
+    float hidden_previous[WIDTH + 1][2] = {};
+    float hidden_delta[WIDTH + 1] = {};
+    float output = 0.0f, output_delta = 0.0f, target = 0.1f;
 
-    int input_n = parseIntParam(argc, argv, "--input", 1000000);
-    const char* env_val = getenv("BENCH_PARAM_input");
-    if (env_val) input_n = atoi(env_val);
-
-    // Original requires the input layer to be a multiple of 16 (one block row
-    // per 16 input units).
-    if (input_n % 16 != 0) {
-        input_n = (input_n / 16) * 16;
-        if (input_n < 16) input_n = 16;
-        fprintf(stderr, "input rounded down to multiple of 16: %d\n", input_n);
+    explicit BackpropNetwork(int in)
+        : input_n(in), input((size_t)in + 1),
+          weights(((size_t)in + 1) * (WIDTH + 1)),
+          previous_weights(weights.size()) {
+        input[0] = 1.0f;
+        hidden[0] = 1.0f;
     }
-    const int hidden_n = 16;  // fixed by HEIGHT/WIDTH tiling (see header)
+};
 
-    int in  = input_n;
-    int hid = hidden_n;
-    int num_blocks = in / 16;
-    dim3 grid(1, num_blocks);
-    dim3 threads(16, 16);
+static void initialize_network(BackpropNetwork& net) {
+    // bpnn_create initializes both weight matrices before imagenet.c loads the
+    // non-bias inputs. Momentum starts at zero and the one output target is0.1.
+    srand(7);
+    for (float& weight : net.weights) weight = (float)rand() / RAND_MAX;
+    for (int j = 0; j <= WIDTH; ++j)
+        for (int k = 0; k <= 1; ++k)
+            net.hidden_weights[j][k] = (float)rand() / RAND_MAX;
+    for (int i = 1; i <= net.input_n; ++i)
+        net.input[i] = (float)rand() / RAND_MAX;
+}
 
-    int device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    hipDeviceProp_t prop;
-    HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
-    fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Network: %d -> %d -> 1  |  num_blocks: %d  |  single timed epoch\n\n",
-            in, hid, num_blocks);
-
-    // Host buffers (original one-dimensionalized layouts).
-    size_t sz_w    = (size_t)(in + 1) * (hid + 1) * sizeof(float);
-    size_t sz_in   = (size_t)(in + 1) * sizeof(float);
-    size_t sz_hid1 = (size_t)(hid + 1) * sizeof(float);
-    size_t sz_out1 = (size_t)(hid + 1) * sizeof(float);
-    size_t sz_part = (size_t)num_blocks * WIDTH * sizeof(float);
-
-    std::vector<float> h_input(in + 1);
-    std::vector<float> h_weights((size_t)(in + 1) * (hid + 1));
-    std::vector<float> h_prev_weights((size_t)(in + 1) * (hid + 1));
-    std::vector<float> h_delta(hid + 1);
-
-    srand(7);  // original bpnn seed
-    for (int i = 0; i <= in; i++)
-        h_input[i] = (float)rand() / RAND_MAX;
-    for (size_t i = 0; i < h_weights.size(); i++) {
-        h_weights[i]      = (float)rand() / RAND_MAX;
-        h_prev_weights[i] = 0.0f;  // momentum term starts at zero
+static void finish_forward_and_backpropagate(BackpropNetwork& net,
+                                             const std::vector<float>& partial) {
+    const int blocks = net.input_n / HEIGHT;
+    for (int j = 1; j <= WIDTH; ++j) {
+        float sum = 0.0f;
+        for (int b = 0; b < blocks; ++b) sum += partial[b * WIDTH + j - 1];
+        sum += net.weights[j];  // input bias weight
+        net.hidden[j] = (float)(1.0 / (1.0 + std::exp(-(double)sum)));
     }
-    for (int i = 0; i <= hid; i++)
-        h_delta[i] = ((float)rand() / RAND_MAX - 0.5f) * 0.1f;  // synthesized hidden deltas
 
-    // Device buffers.
-    float *d_input, *d_output_hidden, *d_input_hidden, *d_hidden_partial_sum;
-    float *d_hidden_delta, *d_input_prev_weights;
-    HIP_CHECK(hipMalloc(&d_input,              sz_in));
-    HIP_CHECK(hipMalloc(&d_output_hidden,      sz_out1));
-    HIP_CHECK(hipMalloc(&d_input_hidden,       sz_w));
-    HIP_CHECK(hipMalloc(&d_hidden_partial_sum, sz_part));
-    HIP_CHECK(hipMalloc(&d_hidden_delta,       sz_hid1));
-    HIP_CHECK(hipMalloc(&d_input_prev_weights, sz_w));
+    // Original CPU output-layer forward, then output and hidden error stages.
+    net.hidden[0] = 1.0f;
+    float sum = 0.0f;
+    for (int j = 0; j <= WIDTH; ++j) sum += net.hidden_weights[j][1] * net.hidden[j];
+    net.output = (float)(1.0 / (1.0 + std::exp(-(double)sum)));
+    net.output_delta = net.output * (1.0 - net.output) * (net.target - net.output);
+    for (int j = 1; j <= WIDTH; ++j) {
+        float propagated = net.output_delta * net.hidden_weights[j][1];
+        net.hidden_delta[j] = net.hidden[j] * (1.0 - net.hidden[j]) * propagated;
+    }
 
-    HIP_CHECK(hipMemcpy(d_input,        h_input.data(), sz_in,   hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_hidden_delta, h_delta.data(), sz_hid1, hipMemcpyHostToDevice));
+    // Hidden deltas must use the pre-update output weights, as in Rodinia.
+    for (int j = 0; j <= WIDTH; ++j) {
+        float change = ETA * net.output_delta * net.hidden[j] +
+                       MOMENTUM * net.hidden_previous[j][1];
+        net.hidden_weights[j][1] += change;
+        net.hidden_previous[j][1] = change;
+    }
+}
 
-    char params[160];
-    snprintf(params, sizeof(params),
-             "\"input\":%d,\"hidden\":%d,\"height\":%d,\"width\":%d",
-             in, hid, HEIGHT, WIDTH);
+struct BackpropLaps { bench_lap_t forward, adjust; };
+
+// Both main and the GPU reference test call this complete production epoch.
+// Return the actual updated input weights/momentum in net for inspection.
+static BackpropLaps run_backprop_epoch(BackpropNetwork& net) {
+    const int in = net.input_n, hid = WIDTH;
+    const int blocks = in / HEIGHT;
+    const dim3 grid(1, blocks), threads(WIDTH, HEIGHT);
+    const size_t input_bytes = net.input.size() * sizeof(float);
+    const size_t weight_bytes = net.weights.size() * sizeof(float);
+    const size_t hidden_bytes = (hid + 1) * sizeof(float);
+    std::vector<float> partial((size_t)blocks * hid);
+    const size_t partial_bytes = partial.size() * sizeof(float);
+    float *d_input, *d_output_hidden, *d_weights, *d_partial, *d_delta, *d_previous;
+    HIP_CHECK(hipMalloc(&d_input, input_bytes));
+    HIP_CHECK(hipMalloc(&d_output_hidden, hidden_bytes));
+    HIP_CHECK(hipMalloc(&d_weights, weight_bytes));
+    HIP_CHECK(hipMalloc(&d_partial, partial_bytes));
+    HIP_CHECK(hipMalloc(&d_delta, hidden_bytes));
+    HIP_CHECK(hipMalloc(&d_previous, weight_bytes));
+    HIP_CHECK(hipMemcpy(d_input, net.input.data(), input_bytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_weights, net.weights.data(), weight_bytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_previous, net.previous_weights.data(), weight_bytes, hipMemcpyHostToDevice));
 
     bench_timer_t timer;
     bench_timer_create(&timer);
-    bench_lap_t acc_fwd, acc_adj;
+    bench_pass_warm();
+    BackpropLaps laps;
+    laps.forward = bench_time_op(&timer, [&]() {
+        bpnn_layerforward_CUDA<<<grid, threads>>>(d_input, d_output_hidden,
+                                                d_weights, d_partial, in, hid);
+    });
 
-    // One recorded pass = one training epoch: the forward tiled reduction kernel
-    // then the weight-adjust kernel. DATA RESET: bpnn_layerforward_CUDA overwrites
-    // the weight matrix in place (input_hidden_cuda[index] = reduced product) and
-    // bpnn_adjust_weights_cuda mutates both weight buffers. The original allocates
-    // and re-uploads these buffers fresh on every bpnn_train_cuda call, so the
-    // weight matrix and its previous-weights (momentum) buffer are re-uploaded
-    // (untimed) at the start of every epoch — this both matches the original per
-    // -call semantics and keeps every timed epoch identical. d_input and
-    // d_hidden_delta are read-only and uploaded once.
-    auto run_epoch = [&]() {
-        bench_lap_reset(&acc_fwd);
-        bench_lap_reset(&acc_adj);
-
-        HIP_CHECK(hipMemcpy(d_input_hidden,       h_weights.data(),      sz_w, hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(d_input_prev_weights, h_prev_weights.data(), sz_w, hipMemcpyHostToDevice));
-
-        /* Cold-cache calibration: evict the LLC and hold the clock high before
-         * the pass's first timed launch, so it runs cold. No-op when
-         * BENCH_PARAM_vector_add_warmup is disabled. */
-        bench_pass_warm();
-
-        bench_lap_add(&acc_fwd, bench_time_op(&timer, [&]() {
-            bpnn_layerforward_CUDA<<<grid, threads>>>(
-                d_input, d_output_hidden, d_input_hidden,
-                d_hidden_partial_sum, in, hid);
-        }));
-
-        // Original re-uploads the weight matrix before the adjust kernel (the
-        // forward kernel clobbered it). Untimed.
-        HIP_CHECK(hipMemcpy(d_input_hidden, h_weights.data(), sz_w, hipMemcpyHostToDevice));
-
-        bench_lap_add(&acc_adj, bench_time_op(&timer, [&]() {
-            bpnn_adjust_weights_cuda<<<grid, threads>>>(
-                d_hidden_delta, hid, d_input, in,
-                d_input_hidden, d_input_prev_weights);
-        }));
-    };
-
-    run_epoch();
-
-    double total_gpu_ms = 0.0;
-    bench_emit_iter("bpnn_layerforward_CUDA",   0, &acc_fwd, params);
-    bench_emit_iter("bpnn_adjust_weights_cuda", 0, &acc_adj, params);
-    double epoch_gpu_ms = acc_fwd.gpu_ms + acc_adj.gpu_ms;
-    total_gpu_ms += epoch_gpu_ms;
-    fprintf(stderr, "forward = %.3f ms, adjust = %.3f ms\n",
-            acc_fwd.gpu_ms, acc_adj.gpu_ms);
-
+    // These are required stages of the original hybrid algorithm. Their host
+    // time and transfers are excluded from the sum of the two GPU kernel times.
+    HIP_CHECK(hipMemcpy(partial.data(), d_partial, partial_bytes, hipMemcpyDeviceToHost));
+    finish_forward_and_backpropagate(net, partial);
+    HIP_CHECK(hipMemcpy(d_delta, net.hidden_delta, hidden_bytes, hipMemcpyHostToDevice));
+    // The original forward kernel clobbers its weight buffer; restore it.
+    HIP_CHECK(hipMemcpy(d_weights, net.weights.data(), weight_bytes, hipMemcpyHostToDevice));
+    laps.adjust = bench_time_op(&timer, [&]() {
+        bpnn_adjust_weights_cuda<<<grid, threads>>>(d_delta, hid, d_input, in,
+                                                   d_weights, d_previous);
+    });
     bench_timer_destroy(&timer);
-    bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms over 1 epoch\n", total_gpu_ms);
 
+    HIP_CHECK(hipMemcpy(net.weights.data(), d_weights, weight_bytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(net.previous_weights.data(), d_previous, weight_bytes, hipMemcpyDeviceToHost));
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_output_hidden));
-    HIP_CHECK(hipFree(d_input_hidden));
-    HIP_CHECK(hipFree(d_hidden_partial_sum));
-    HIP_CHECK(hipFree(d_hidden_delta));
-    HIP_CHECK(hipFree(d_input_prev_weights));
+    HIP_CHECK(hipFree(d_weights));
+    HIP_CHECK(hipFree(d_partial));
+    HIP_CHECK(hipFree(d_delta));
+    HIP_CHECK(hipFree(d_previous));
+    return laps;
+}
 
+int main(int argc, char** argv) {
+    setvbuf(stdout, NULL, _IONBF, 0);
+    int in = parseIntParam(argc, argv, "--input", 1000000);
+    if (const char* value = getenv("BENCH_PARAM_input")) in = atoi(value);
+    if (in <= 0 || in > INT_MAX / (WIDTH + 1) - 1) {
+        fprintf(stderr, "Input size must be positive and fit the kernel's weight indexing\n");
+        return 1;
+    }
+    if (in % HEIGHT) {
+        in = (in / HEIGHT) * HEIGHT;
+        if (in < HEIGHT) in = HEIGHT;
+        fprintf(stderr, "input rounded down to multiple of16: %d\n", in);
+    }
+    int device = 0;
+    hipDeviceProp_t prop;
+    HIP_CHECK(hipGetDevice(&device));
+    HIP_CHECK(hipGetDeviceProperties(&prop, device));
+    if (in / HEIGHT > prop.maxGridSize[1]) {
+        fprintf(stderr, "Input size exceeds the device's two-dimensional grid limit\n");
+        return 1;
+    }
+    fprintf(stderr, "Device: %s (id=%d)\nNetwork: %d -> 16 -> 1 | single hybrid epoch\n",
+            prop.name, device, in);
+    BackpropNetwork net(in);
+    initialize_network(net);
+    BackpropLaps laps = run_backprop_epoch(net);
+    char params[160];
+    snprintf(params, sizeof(params), "\"input\":%d,\"hidden\":%d,\"height\":%d,\"width\":%d",
+             in, WIDTH, HEIGHT, WIDTH);
+    bench_emit_iter("bpnn_layerforward_CUDA", 0, &laps.forward, params);
+    bench_emit_iter("bpnn_adjust_weights_cuda", 0, &laps.adjust, params);
+    double total = laps.forward.gpu_ms + laps.adjust.gpu_ms;
+    bench_emit_summary(total);
+    fprintf(stderr, "forward = %.6f ms, adjust = %.6f ms, total GPU = %.6f ms\n",
+            laps.forward.gpu_ms, laps.adjust.gpu_ms, total);
     return 0;
 }

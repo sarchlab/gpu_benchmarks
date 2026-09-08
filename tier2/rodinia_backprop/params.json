@@ -2,7 +2,7 @@
   "benchmark": "rodinia_backprop",
   "tier": 2,
   "suite": "rodinia",
-  "description": "Rodinia Backpropagation: one training epoch of the input->hidden layer of a neural net. Faithful port of the original two GPU kernels: bpnn_layerforward_CUDA (16x16 shared-memory tiled forward pass with an in-block log-step reduction tree) and bpnn_adjust_weights_cuda (weight/momentum update). The output layer and delta math run on the CPU in the original and are not GPU-timed. One recorded pass = forward + weight-adjust; one record per kernel.",
+  "description": "Rodinia backprop: one complete input -> 16 -> 1 hybrid training epoch. Original tiled GPU forward and weight/momentum update are connected by CPU partial-sum reduction, activations, output/hidden deltas and output-weight update. Only the two GPU kernels contribute to the summed event time; required host stages/transfers are excluded.",
   "scaling_param": {
     "name": "input",
     "description": "Input layer size (number of input neurons). Must be a multiple of 16; one 16-row block per 16 input units. The original standard run uses 65536.",
@@ -25,7 +25,7 @@
   "non_scaling_params": [
     {
       "name": "vector_add_warmup",
-      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "description": "Optional clock/cache warmer after initial uploads and immediately before the first GPU forward kernel. No reconditioning before the dependent weight update; intervening original hybrid stages can change cache/clock state.",
       "type": "enum",
       "default": "true",
       "values": [

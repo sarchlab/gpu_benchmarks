@@ -66,6 +66,14 @@ jobs:
       - name: Compile measured matrix-vector verification regression
         run: python3 tests/matvec_measured_result.py --platform cuda --work-dir /tmp/matvec-measured-result --compile-only
 
+      - name: Check full stencil CPU reference (no GPU required)
+        run: |
+          g++ -O2 -std=c++14 -fsanitize=address,undefined tests/stencil_reference_test.cpp -o /tmp/stencil_reference_test
+          /tmp/stencil_reference_test
+
+      - name: Compile measured stencil verification regression
+        run: python3 tests/stencil_measured_result.py --platform cuda --work-dir /tmp/stencil-measured-result --compile-only
+
       - name: Check full BFS CPU distances (no GPU required)
         run: |
           g++ -O2 -std=c++14 -fsanitize=address,undefined tests/bfs_reference_test.cpp -o /tmp/bfs_reference_test

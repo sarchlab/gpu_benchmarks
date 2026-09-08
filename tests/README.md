@@ -265,3 +265,22 @@ both kernel rows. Run `python3 tests/bfs_measured_result.py --platform cuda
 CI compiles this test; execution requires a GPU. A timeout fails and retains
 completed-case logs plus a partial report. Result correctness does not qualify
 the existing GPU concurrent accesses or upstream fidelity.
+
+## Parboil stencil measured-output verification
+
+```sh
+c++ -O2 -std=c++14 -fsanitize=address,undefined tests/stencil_reference_test.cpp -o /tmp/stencil-reference
+/tmp/stencil-reference
+python3 tests/stencil_measured_result.py --platform cuda --work-dir /tmp/stencil-measured-result
+```
+
+The host test checks 107 full reference states against a dense matrix operator,
+input preservation, exact boundaries and finite/tolerance predicates. The GPU
+regression runs 212 ordinary-path cases (16 controls, 196 faults) using fresh
+source copies and a fault hook on the final measured device buffer. It checks
+full-grid rejection, one-ULP boundary faults, parity, non-finite outputs, and
+all mismatch counts with at most ten individual diagnostics. JSON records must
+retain finite times and `verification=full_cpu_v1`; faulty runs must exit 1.
+`--work-dir` must be new; reports and process output are retained there.
+Use `--platform rocm` for AMD or `--compile-only` when no GPU is available.
+The independent production-pass oracle remains `tests/stencil_output_test.hip`.

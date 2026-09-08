@@ -38,9 +38,23 @@ The stencil (all `num_timesteps` launches) runs **exactly once** per process
 execution (see the root README "Measurement Methodology"). With
 `BENCH_PARAM_vector_add_warmup` (default `true`), a vector-add warmer boosts
 the GPU clock and evicts the last-level cache immediately before the timed
-run. Repetition = `gpubench run --reps N`. There is **no result verification**
-in ordinary timing runs yet (R-13). Independent qualification below exercises
-the actual production timestep sequence.
+run. Repetition = `gpubench run --reps N`.
+
+Ordinary runs verify every cell of the final measured state after timing,
+using the original input and an independent double CPU reference for all
+requested timesteps. Boundaries must match exactly; interiors use the qualified
+`max(1e-7, 2e-5*abs(reference))` tolerance. Non-finite values fail. The final
+ping-pong buffer is downloaded once into the existing host input allocation,
+after the reference has consumed that input. No extra GPU stencil pass runs.
+A mismatch returns exit code 1, even though timing records have already been
+emitted. The kernel record identifies this policy as `full_cpu_v1`.
+
+The full reference temporarily needs two double grids: 2 GiB at the largest
+512³ configuration, in addition to the existing 512 MiB host input. One
+reference scratch grid is released before the final 512 MiB device-to-host
+copy. CPU work, reference storage and download are outside kernel timing but
+count toward the process timeout; qualify capacity and runtime on the target
+host before collection.
 
 ## Parameters
 
@@ -55,6 +69,7 @@ the actual production timestep sequence.
 | File | Description |
 |------|-------------|
 | `parboil_stencil.hip` | HIP source — 3D stencil kernel + self-contained host utilities |
+| `cpu_reference.h` | Full double CPU reference and finite comparison policy |
 | `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
 
 ## Build
@@ -77,7 +92,7 @@ make PLATFORM=rocm
 
 **stdout** — JSON lines: one `{"type":"kernel",...}` record (`iter:0`) carrying the stencil kernel's GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`) accumulated over the run's `num_timesteps` launches, then a summary whose `total_time_ms` is the sum of all recorded GPU event times:
 ```
-{"type":"kernel","name":"stencil3d","iter":0,"time_ms":1.234500,"host_time_ms":1.301100,"params":{"grid_dim":64,"num_timesteps":10}}
+{"type":"kernel","name":"stencil3d","iter":0,"time_ms":1.234500,"host_time_ms":1.301100,"params":{"grid_dim":64,"num_timesteps":10,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":1.234500}
 ```
 
@@ -88,6 +103,7 @@ Grid: 64×64×64  |  Timesteps/pass: 10
 
 stencil3d gpu = 1.234 ms, host = 1.301 ms
 Total GPU time: 1.234 ms (10 timesteps/pass)
+Stencil verification: PASS (262144 cells, 0 mismatches)
 ```
 
 ## Performance Metrics (derived downstream from time_ms and params)
@@ -118,6 +134,25 @@ outputs.
 particular declared configuration; `--impulse 0` through `--impulse 6` isolate
 the seven terms. CI compiles the test, while execution requires a GPU.
 Main rejects grids without an interior, overflowing signed N³ indices, and
-nonpositive timestep counts before timing. R-13 measured-result verification,
-R-19 AMD execution, and R-23/R-24 trace qualification remain separate.
+nonpositive timestep counts before timing.
+
+`tests/stencil_reference_test.cpp` checks the complete CPU helper against an
+independent dense transition matrix, including all 27 basis vectors of a 3³
+grid, rectangular shapes, signed inputs, fixed boundaries and timestep parity.
+It also checks finite-value rejection and both tolerance branches.
+
+```bash
+python3 tests/stencil_measured_result.py --platform cuda --work-dir /tmp/stencil-measured-result
+```
+
+Run this from the repository root with a new output directory (use `rocm` on
+AMD). It compiles a disposable copy and corrupts the actual final device
+buffer after timing. Its 212 cases include 16 controls and 196 faults: finite,
+NaN and ±Inf values at interior and boundary positions, one-ULP boundary
+changes, odd/even/100-step sequences, and 12 simultaneous mismatches to check
+the diagnostic cap without truncating verification. CI runs the host oracle
+and compiles this regression; a GPU is required to execute it. The existing
+production-pass operator test keeps its separate CPU oracle.
+
+R-19 AMD execution and R-23/R-24 trace qualification remain separate.
 Functional profiling is not performance collection.

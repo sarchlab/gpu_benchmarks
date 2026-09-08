@@ -115,3 +115,11 @@ warmer on/off. Run with assertions enabled; optimized Python is rejected.
 Ordinary capture/export failures are recorded; timeouts or missing tools abort
 and may leave partial reports. Captures are retained. CI does not execute this
 GPU check, and its profiled times are not performance results.
+
+`backprop_output_test.hip` calls the real Rodinia backprop hybrid epoch with
+non-saturating signed inputs, nonzero momentum and pinned initialization. It
+compares every input/output weight and momentum value, activation and delta
+against an independent dense double reference. Run `make test PLATFORM=cuda`
+(or `rocm`) from `tier2/rodinia_backprop`; `bench_output_test --upstream N`
+checks an individual declared size. CI compiles the test; GPU execution and
+ordinary timing-run verification are separate qualification steps.

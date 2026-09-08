@@ -28,6 +28,7 @@
 // GFLOPS / GB/s are derived downstream from time_ms and params.
 
 #include "../../common/bench_timing.h"
+#include "cpu_reference.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -150,13 +151,13 @@ int main(int argc, char** argv) {
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"grid_dim\":%d,\"num_timesteps\":%d",
+             "\"grid_dim\":%d,\"num_timesteps\":%d,\"verification\":\"full_cpu_v1\"",
              grid_dim, num_timesteps);
 
     // Initial copies precede one entry warmer. No resets or warmers occur
     // between the dependent timesteps; accumulate only their kernel times.
     bench_lap_t acc_stencil;
-    run_stencil_pass(d_A, d_B, nx, ny, nz, num_timesteps, &acc_stencil);
+    float* latest = run_stencil_pass(d_A, d_B, nx, ny, nz, num_timesteps, &acc_stencil);
 
     double total_gpu_ms = 0.0;
     bench_emit_iter("stencil3d", 0, &acc_stencil, params);
@@ -168,9 +169,29 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Total GPU time: %.3f ms (%d timesteps/pass)\n",
             total_gpu_ms, num_timesteps);
 
+    // Verify the final measured state after timing, with no extra GPU pass.
+    // The reference consumes the original input before h_data becomes output.
+    const std::vector<double> reference = cpu_stencil(h_data, nx, ny, nz, num_timesteps);
+    HIP_CHECK(hipMemcpy(h_data, latest, total * sizeof(float), hipMemcpyDeviceToHost));
+    int errors = 0;
+    for (int z = 0; z < nz; ++z)
+        for (int y = 0; y < ny; ++y)
+            for (int x = 0; x < nx; ++x) {
+                const size_t i = ((size_t)z * ny + y) * nx + x;
+                const bool boundary = x == 0 || x == nx-1 || y == 0 || y == ny-1 || z == 0 || z == nz-1;
+                if (!stencil_value_matches(h_data[i], reference[i], boundary)) {
+                    if (errors < 10)
+                        fprintf(stderr, "MISMATCH stencil[%zu] (%d,%d,%d): got %.9g expected %.12g\n",
+                                i, x, y, z, h_data[i], reference[i]);
+                    ++errors;
+                }
+            }
+    fprintf(stderr, "Stencil verification: %s (%d cells, %d mismatches)\n",
+            errors ? "FAIL" : "PASS", total, errors);
+
     HIP_CHECK(hipFree(d_A));
     HIP_CHECK(hipFree(d_B));
     free(h_data);
 
-    return 0;
+    return errors ? 1 : 0;
 }

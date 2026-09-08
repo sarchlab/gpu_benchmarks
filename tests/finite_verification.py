@@ -32,6 +32,11 @@ SITES = {
     "parboil_cutcp": [("float tol = 1e-3f * (fabsf(ref)", [("potential", "got", "ref")])],
     "parboil_sgemm": [("float diff = fabsf(h_C[i]", [("C", "h_C[i]", "h_ref[i]")])],
     "parboil_spmv": [("float thresh = 1e-4f *", [("selftest", "got[r]", "ref[r]")]), ("float thresh = 1e-3f *", [("y", "h_y[r]", "ref[r]")])],
+    "polybench_2dconv": [
+        ("double tolerance = interior ?", [("output", "actual", "expected")]),
+        ("const bool verified = verify_convolution(",
+         [("measured_tail", "h_B[(N-2)*N+N-2]", "h_A[(N-2)*N+N-2]")]),
+    ],
     "polybench_atax": [("float rel = fabsf(h_y[j]", [("y", "h_y[j]", "y_ref[j]")])],
     "polybench_bicg": [("float rel = fabsf(h_s[j]", [("s", "h_s[j]", "ref")]), ("float rel = fabsf(h_q[i]", [("q", "h_q[i]", "ref")])],
     "polybench_gramschmidt": [("float expected = (ci == cj) ? 1.0f : 0.0f;", [("dot", "dot", "expected")])],

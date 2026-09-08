@@ -50,6 +50,8 @@ def main():
     dst.mkdir(parents=True)
     for name in ("graph_tc.hip", "Makefile", "params.json"):
         shutil.copy2(src / name, dst / name)
+    for header in src.glob("*.h"):
+        shutil.copy2(header, dst / header.name)
     shutil.copytree(args.source / "common", args.work_dir / "common")
     source = (src / "graph_tc.hip").read_text()
     (dst / "graph_tc.hip").write_text(instrument(source))

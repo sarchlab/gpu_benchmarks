@@ -218,7 +218,7 @@ zero-triangle graph. Run `python3
 tests/triangle_total_verification.py --platform cuda --work-dir /tmp/tc-check`
 (or `rocm`) with a new, nonexistent output directory. CI compiles the test;
 execution requires a GPU. A timeout aborts with failure and retains completed
-case logs. Full CPU-reference cost and AMD qualification remain separate.
+case logs. Target process budgets and AMD qualification remain separate.
 
 `lud_residual_test.cpp` checks the full CPU LU residual against the original
 unblocked formula. It compares every reconstructed double and the final
@@ -228,3 +228,13 @@ near-threshold residuals and output guards. Run `c++ -O3 -std=c++14
 -fsanitize=address,undefined tests/lud_residual_test.cpp -o /tmp/lud_residual_test
 && /tmp/lud_residual_test`. CI runs this host-only test under sanitizers. The
 GPU regression above separately checks the actual measured device output.
+
+`triangle_host_test.cpp` checks complete generated CSR arrays and subsequent
+RNG values against the original `std::set` generator, and compares the full raw
+triangle total with both the original reference and an independent cubic oracle.
+It exhausts all simple undirected graphs through six vertices, checks sparse
+large vertex IDs, and exercises the compact edge table's collisions, wraparound,
+duplicate handling, packing and capacity bounds. Run `c++ -O3 -std=c++14
+-fsanitize=address,undefined tests/triangle_host_test.cpp -o /tmp/triangle_host_test
+&& /tmp/triangle_host_test`. CI runs this host-only check under sanitizers; the
+actual-device regression above separately checks measured GPU results.

@@ -71,6 +71,11 @@ jobs:
       - name: Compile measured LUD verification regression
         run: python3 tests/lud_measured_result.py --platform cuda --work-dir /tmp/lud-measured-result --compile-only
 
+      - name: Check graph input and full triangle-reference equivalence
+        run: |
+          g++ -O3 -std=c++14 -fsanitize=address,undefined tests/triangle_host_test.cpp -o /tmp/triangle_host_test
+          /tmp/triangle_host_test
+
       - name: Compile exact triangle-total verification regression
         run: python3 tests/triangle_total_verification.py --platform cuda --work-dir /tmp/triangle-total-verification --compile-only
 

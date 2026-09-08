@@ -40,7 +40,12 @@ static bool check_stencil(int nx, int ny, int nz, int steps, int impulse = -1) {
     HIP_CHECK(hipMemcpy(b, second.data(), bytes, hipMemcpyHostToDevice));
     bench_lap_t elapsed;
     float* latest = run_stencil_pass(a+1, b+1, nx, ny, nz, steps, &elapsed);
-    if (latest != (steps % 2 ? b+1 : a+1)) { fprintf(stderr, "Wrong final buffer\n"); return false; }
+    if (latest != (steps % 2 ? b+1 : a+1)) {
+        HIP_CHECK(hipFree(a));
+        HIP_CHECK(hipFree(b));
+        fprintf(stderr, "Wrong final buffer\n");
+        return false;
+    }
     std::vector<float> output(cells+2), previous(cells+2);
     HIP_CHECK(hipMemcpy(output.data(), latest-1, bytes, hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(previous.data(), latest == a+1 ? b : a, bytes, hipMemcpyDeviceToHost));

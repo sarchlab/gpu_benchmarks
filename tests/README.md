@@ -207,8 +207,8 @@ check the emitted verification policy. Run `python3 tests/lud_measured_result.py
 --platform cuda --work-dir /tmp/lud-check` (or `rocm`). Choose a new, nonexistent
 `--work-dir` for each invocation; previous results are retained for inspection.
 CI compiles the instrumented driver; runtime qualification requires a GPU.
-This retains the
-full O(N³) residual check, so it does not resolve large-process budgets.
+The checker retains the full O(N³) residual; target process budgets still
+require qualification even with its tiled CPU reconstruction.
 
 `triangle_total_verification.py` checks exact raw triangle-count acceptance in
 the production driver. It alters actual device edge counts after timing and
@@ -219,3 +219,12 @@ tests/triangle_total_verification.py --platform cuda --work-dir /tmp/tc-check`
 (or `rocm`) with a new, nonexistent output directory. CI compiles the test;
 execution requires a GPU. A timeout aborts with failure and retains completed
 case logs. Full CPU-reference cost and AMD qualification remain separate.
+
+`lud_residual_test.cpp` checks the full CPU LU residual against the original
+unblocked formula. It compares every reconstructed double and the final
+residual bit-for-bit for finite values, preserves non-finite classification
+and pass/fail behavior, and checks partial tile boundaries, a known LU product,
+near-threshold residuals and output guards. Run `c++ -O3 -std=c++14
+-fsanitize=address,undefined tests/lud_residual_test.cpp -o /tmp/lud_residual_test
+&& /tmp/lud_residual_test`. CI runs this host-only test under sanitizers. The
+GPU regression above separately checks the actual measured device output.

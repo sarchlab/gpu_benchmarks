@@ -30,12 +30,18 @@ is no preliminary verification factorization. Non-finite residuals fail the
 existing comparison. Every kernel record identifies this policy as
 `verification: "full_lu_residual_v1"`.
 
-The full residual remains O(N³) CPU work, with three N² host float buffers
-and one N² device float buffer (plus the optional 768 MiB warmer). Moving the
-check does not make large configurations fit a target process budget; measure
-complete wall time and resolve expensive verification under R-17 before
-admitting those configurations. GPU event times exclude the result download
-and CPU check. AMD execution qualification remains R-19.
+The full residual remains O(N³) CPU work. Its CPU reconstruction now processes
+four rows and 64 columns at a time to reuse matrix reads. Every output keeps
+its original increasing-k accumulation order, and both norm sums retain their
+original row-major order. Verification coverage, tolerance and the recorded
+`full_lu_residual_v1` policy are preserved.
+
+There are three N² host float buffers and one N² device float buffer, plus the
+optional 768 MiB warmer. The CPU checker adds 4N doubles of scratch and a
+4×64-double tile: 256 KiB plus 2 KiB at N=8192. Measure complete process wall
+time on each target before admitting a configuration; the cubic check still
+depends on the host CPU and its memory system. GPU event times exclude the
+result download and CPU check. AMD execution qualification remains R-19.
 
 The factorization runs **exactly once** (repetition is the harness's job,
 `gpubench run --reps N`); the pristine matrix upload happens before the timed
@@ -116,6 +122,15 @@ recorded factorization, covering diagonal, lower/upper and tail entries with
 NaN, infinities and large finite errors. It also checks valid results and
 manual bypass reporting. Use `--platform rocm` for AMD; GPU execution is
 required, while `--compile-only` only builds the instrumented driver.
+
+`tests/lud_residual_test.cpp` independently compares every reconstructed value
+and the final residual with the original unblocked formula, including partial
+row/column tiles, signed and extreme inputs, non-finite values and near-threshold
+acceptance. It also checks a known factorization and protects output boundaries.
+Run `c++ -O3 -std=c++14 -fsanitize=address,undefined tests/lud_residual_test.cpp
+-o /tmp/lud_residual_test && /tmp/lud_residual_test` from the repository root.
+This host test needs no GPU; CI runs it alongside compilation of the actual
+measured-result GPU regression above.
 
 ## Reference
 

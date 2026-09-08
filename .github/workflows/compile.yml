@@ -63,6 +63,11 @@ jobs:
           g++ -O2 -std=c++14 -fsanitize=address,undefined tests/prefix_reference_test.cpp -o /tmp/prefix_reference_test
           /tmp/prefix_reference_test
 
+      - name: Check full LU residual arithmetic (no GPU required)
+        run: |
+          g++ -O3 -std=c++14 -fsanitize=address,undefined tests/lud_residual_test.cpp -o /tmp/lud_residual_test
+          /tmp/lud_residual_test
+
       - name: Compile measured LUD verification regression
         run: python3 tests/lud_measured_result.py --platform cuda --work-dir /tmp/lud-measured-result --compile-only
 

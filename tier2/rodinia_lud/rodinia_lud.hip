@@ -25,6 +25,7 @@
 // Output (stderr): device info, per-pass timing, verification result
 
 #include "../../common/bench_timing.h"
+#include "lud_residual.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -161,22 +162,7 @@ static void init_matrix(float *a, int n)
 //                   upper-triangular (i<=j) → U
 static bool verify(const float *lu, const float *a_orig, int n)
 {
-    double err = 0.0, norm_a = 0.0;
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < n; j++) {
-            double sum = 0.0;
-            int lim = (i < j) ? i : j;   // min(i, j)
-            for (int k = 0; k <= lim; k++) {
-                double l = (k == i) ? 1.0 : (double)lu[i * n + k];
-                double u = (double)lu[k * n + j];
-                sum += l * u;
-            }
-            double diff = (double)a_orig[i * n + j] - sum;
-            err    += diff * diff;
-            norm_a += (double)a_orig[i * n + j] * (double)a_orig[i * n + j];
-        }
-    }
-    double rel = sqrt(err / norm_a);
+    const double rel = lud_reference::relative_residual(lu, a_orig, n);
     fprintf(stderr, "Verification: ||A - LU||_F / ||A||_F = %.6e  %s\n",
             rel, (rel < 1e-4) ? "(PASS)" : "(FAIL)");
     return rel < 1e-4;

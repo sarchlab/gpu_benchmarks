@@ -83,7 +83,13 @@ make PLATFORM=rocm
 
 After applying environment overrides, nonpositive image sizes or iteration
 counts are rejected with an explicit diagnostic before rounding, allocation or
-device access. Positive values retain the existing rounding and precedence.
+device access. Representable positive values retain the existing rounding and precedence.
+
+Rounding and the image element count must also fit the kernels' signed `int`
+indexing. The largest representable rounded dimension is 46336; larger requests
+are rejected before device access using overflow-safe arithmetic. This is an
+index-range bound, not a memory-capacity guarantee. The declared sweep still ends
+at 8192, and available host/device memory must cover the workload and verifier.
 
 `block_size` is fixed at `BLOCK_SIZE=16` (the upstream default) and is
 emitted as a param for downstream derivation only.

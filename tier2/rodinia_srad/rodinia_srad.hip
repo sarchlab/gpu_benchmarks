@@ -46,6 +46,7 @@
 #include <cstring>
 #include "cpu_reference.h"
 #include <cmath>
+#include <climits>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -346,9 +347,15 @@ int main(int argc, char** argv) {
 
     // The original kernels index by exact BLOCK_SIZE tiles; rows/cols must be
     // multiples of 16 (upstream enforces the same constraint).
-    if (image_size % BLOCK_SIZE != 0) {
-        image_size = ((image_size + BLOCK_SIZE - 1) / BLOCK_SIZE) * BLOCK_SIZE;
+    // Widen before rounding; host and GPU image indices still use signed int.
+    const long long rounded_size =
+        ((static_cast<long long>(image_size) + BLOCK_SIZE - 1) / BLOCK_SIZE) * BLOCK_SIZE;
+    if (rounded_size * rounded_size > INT_MAX) {
+        fprintf(stderr, "Invalid SRAD image_size=%d: rounded dimension %lld exceeds signed-int indexing\n",
+                image_size, rounded_size);
+        return EXIT_FAILURE;
     }
+    image_size = static_cast<int>(rounded_size);
     int rows = image_size;
     int cols = image_size;
     int size_I = cols * rows;

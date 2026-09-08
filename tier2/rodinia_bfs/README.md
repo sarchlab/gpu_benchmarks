@@ -44,6 +44,7 @@ harness's job (`gpubench run --reps N`).
 |------|-------------|
 | `rodinia_bfs.hip`        | HIP source — BFS kernels + self-contained utilities |
 | `Makefile`               | Auto-detecting build (ROCm→rocm, else→cuda) |
+| `cpu_reference.h` | Independent complete CPU distance reference |
 
 ## Build
 
@@ -68,7 +69,7 @@ kernel's GPU event time accumulated over all BFS levels of the traversal,
 then a `summary` whose `total_time_ms` is the sum of the recorded times:
 
 ```
-{"type":"kernel","name":"bfs_kernel","iter":0,"time_ms":...,"host_time_ms":...,"params":{"num_nodes":65536,"edges_per_node":20,"block_size":256}}
+{"type":"kernel","name":"bfs_kernel","iter":0,"time_ms":...,"host_time_ms":...,"params":{"num_nodes":65536,"edges_per_node":20,"block_size":256,"verification":"full_cpu_v1"}}
 {"type":"kernel","name":"bfs_update","iter":0,"time_ms":...,"host_time_ms":...,"params":{...}}
 {"type":"summary","total_time_ms":...}
 ```
@@ -76,10 +77,47 @@ then a `summary` whose `total_time_ms` is the sum of the recorded times:
 Bandwidth / edges-per-second are derived downstream from `time_ms` and the
 params — the benchmark never computes them.
 
-**stderr** — device info, node/edge counts, and per-kernel timing.
+**stderr** — device info, node/edge counts, per-kernel timing, and full-distance
+verification. A mismatch prints `FAIL` and exits nonzero; all distances are
+compared even though individual diagnostics are limited to the first ten errors.
 
 ## Platform Notes
 
 - **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `rodinia_bfs.hip`
 - Input data is generated synthetically — no external input files required
-- The benchmark measures traversal bandwidth, not correctness; concurrent cost writes for the same neighbor are benign (all threads write the same value)
+
+## Correctness and qualification
+
+Every measured distance is downloaded after timing and compared exactly with
+an independent serial CPU breadth-first traversal of the same directed graph.
+The reference starts at vertex 0, uses unit edge lengths, and preserves `-1`
+for unreachable vertices. Cycles, self-loops and duplicate edges do not change
+the shortest-distance contract. Both kernel rows record `full_cpu_v1`.
+
+The CPU reference costs O(V+E) and uses two V-element integer vectors for
+distances and its queue (64 MiB total at 8,388,608 vertices). The added result
+download reuses the existing host cost buffer and transfers 32 MiB at that
+size. These operations are outside the recorded timing intervals and add no
+GPU kernel launches. Include this host work and transfer in target process
+budgets; AMD runtime qualification remains separate.
+
+Full-distance verification does not establish GPU race freedom or identical
+memory-write counts across runs and devices. The existing expansion kernel
+reads and writes shared costs without atomic synchronization, and multiple
+update threads write the completion flag. Those concurrency/work properties
+need separate qualification; this patch leaves the GPU algorithm unchanged.
+The upstream-fidelity limitations above also remain.
+
+`tests/bfs_reference_test.cpp` checks the CPU reference against an independent
+all-pairs shortest-path oracle on all 66,066 directed graphs through four
+vertices, including self-loops, plus 25 structured cases with duplicate edges
+and disconnected components. CI runs it under host sanitizers.
+
+`tests/bfs_measured_result.py` checks actual GPU results on random and structured
+graphs, including unreachable vertices, and injects post-timing device faults
+at the source, middle and tail. Structured graphs replace inputs only in the
+test copy; they are not production collection configurations. Run `python3
+tests/bfs_measured_result.py --platform cuda --work-dir /tmp/bfs-check` from the
+repository root with a new, nonexistent output directory (or use `rocm`). CI
+compiles this GPU test; execution requires a GPU. A timeout fails the test and
+retains completed logs and a partial report.

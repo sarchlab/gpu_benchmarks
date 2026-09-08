@@ -66,6 +66,14 @@ jobs:
       - name: Compile measured matrix-vector verification regression
         run: python3 tests/matvec_measured_result.py --platform cuda --work-dir /tmp/matvec-measured-result --compile-only
 
+      - name: Check full BFS CPU distances (no GPU required)
+        run: |
+          g++ -O2 -std=c++14 -fsanitize=address,undefined tests/bfs_reference_test.cpp -o /tmp/bfs_reference_test
+          /tmp/bfs_reference_test
+
+      - name: Compile measured BFS verification regression
+        run: python3 tests/bfs_measured_result.py --platform cuda --work-dir /tmp/bfs-measured-result --compile-only
+
       - name: Check full LU residual arithmetic (no GPU required)
         run: |
           g++ -O3 -std=c++14 -fsanitize=address,undefined tests/lud_residual_test.cpp -o /tmp/lud_residual_test

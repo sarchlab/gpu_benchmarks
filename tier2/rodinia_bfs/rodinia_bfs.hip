@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include "cpu_reference.h"
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -60,7 +61,7 @@ __global__ void bfs_kernel(const int* __restrict__ row_offsets,
         for (int e = row_start; e < row_end; ++e) {
             int nb = col_indices[e];
             if (cost[nb] < 0) {
-                cost[nb] = new_cost;  // may race but harmless (same value)
+                cost[nb] = new_cost;  // concurrent same-value writes; see qualification limits
             }
         }
     }
@@ -171,7 +172,7 @@ int main(int argc, char** argv) {
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"num_nodes\":%d,\"edges_per_node\":%d,\"block_size\":%d",
+             "\"num_nodes\":%d,\"edges_per_node\":%d,\"block_size\":%d,\"verification\":\"full_cpu_v1\"",
              num_nodes, edges_per_node, block_size);
 
     // Per-kernel accumulators: each BFS pass launches both kernels once per
@@ -240,6 +241,20 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Total GPU time: %.3f ms over 1 pass\n",
             total_gpu_ms);
 
+    // Verify every distance produced by the measured traversal, after timing.
+    HIP_CHECK(hipMemcpy(h_cost, d_cost, (size_t)num_nodes * sizeof(int), hipMemcpyDeviceToHost));
+    const std::vector<int> reference = bfs_reference(h_row_offsets, h_col_indices, num_nodes);
+    int errors = 0;
+    for (int v = 0; v < num_nodes; ++v) {
+        if (h_cost[v] != reference[v]) {
+            if (errors < 10)
+                fprintf(stderr, "MISMATCH cost[%d]: gpu=%d cpu=%d\n", v, h_cost[v], reference[v]);
+            ++errors;
+        }
+    }
+    fprintf(stderr, "BFS verification: %s (%d distances, %d mismatches)\n",
+            errors ? "FAIL" : "PASS", num_nodes, errors);
+
     // Cleanup
     HIP_CHECK(hipFree(d_row_offsets));
     HIP_CHECK(hipFree(d_col_indices));
@@ -253,5 +268,5 @@ int main(int argc, char** argv) {
     free(h_frontier);
     free(h_visited);
 
-    return 0;
+    return errors ? 1 : 0;
 }

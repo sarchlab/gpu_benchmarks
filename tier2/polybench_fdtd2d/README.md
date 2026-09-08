@@ -11,19 +11,25 @@ Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/project
 Three field arrays `ex[NX][NY]`, `ey[NX][NY]`, `hz[NX][NY]` are updated each time step. The equations actually computed are:
 
 ```
-ex[0][j]  = 0                                          (boundary)
-ex[i][j] += 0.5*(hz[i][j] - hz[i-1][j])  for i >= 1
+ex[i][j] -= 0.5*(hz[i][j] - hz[i][j-1])       for all i, j >= 1
+ex[i][0] is unchanged
 
-ey[i][0]  = 0                                          (boundary)
-ey[i][j] += 0.5*(hz[i][j] - hz[i][j-1])  for j >= 1
+ey[0][j]  = t                                for all j
+ey[i][j] -= 0.5*(hz[i][j] - hz[i-1][j])       for i >= 1, all j
 
 hz[i][j] -= 0.7*(ex[i][j+1] - ex[i][j] +
-                 ey[i+1][j]  - ey[i][j])  for i < NX-1, j < NY-1
+                 ey[i+1][j] - ey[i][j])       for i < NX-1, j < NY-1
+hz's final row and final column are unchanged
 ```
 
-**Fidelity to canonical PolyBench:** this implements the upstream FDTD-2D recurrence — `ey[0][j] = _fict_[t]` (with `_fict_[t] = t`), `ey[i][j] -= 0.5*(hz[i][j]-hz[i-1][j])` for `i ≥ 1`, `ex[i][j] -= 0.5*(hz[i][j]-hz[i][j-1])` for `j ≥ 1`, and `hz[i][j] -= 0.7*(ex[i][j+1]-ex[i][j] + ey[i+1][j]-ey[i][j])`.
+Each step uses the current `hz` to update `ex` and `ey`, then uses both
+updated electric fields to update `hz`. The unchanged boundaries retain their
+initial input values; they are not forced to zero. The source row uses
+`_fict_[t] = t` for `t = 0, ..., TMAX-1`.
 
-The benchmark runs the `TMAX`-step simulation exactly once per execution and records each kernel's GPU time accumulated over the steps. Effective bandwidth (`7 * NX * NY * sizeof(float)` bytes per step) is derived downstream.
+The benchmark runs the `TMAX`-step simulation exactly once per execution and
+records each kernel's GPU event time accumulated over the steps. A logical
+access-count model for downstream bandwidth calculations is given below.
 
 ## Files
 
@@ -106,7 +112,29 @@ Total GPU time: 45.233 ms (50 steps/pass)
 
 ## Performance Notes
 
-- Each time step performs three stencil passes over NX×NY float arrays
-- Memory-bound benchmark; performance scales with GPU memory bandwidth
-- Effective bandwidth formula (derived downstream from `time_ms` and params): `7 * NX * NY * 4 bytes * TMAX / time_seconds`
-  - The factor 7 accounts for reads and writes across all three kernels
+Each time step performs three stencil passes. The following model counts one
+float access for each source-level array read or write in the current kernels:
+
+| Kernel | Float accesses per step | Counted work |
+|---|---:|---|
+| `fdtd_update_ex` | `4 * NX * (NY-1)` | Two `hz` reads, one `ex` read and one `ex` write per updated cell |
+| `fdtd_update_ey` | `NY + 4 * (NX-1) * NY` | One source-row write per column; elsewhere two `hz` reads, one `ey` read and one `ey` write |
+| `fdtd_update_hz` | `6 * (NX-1) * (NY-1)` | Two `ex` reads, two `ey` reads, one `hz` read and one `hz` write per updated cell |
+
+For the square driver (`NX = NY = N`), the total is
+`14*N*N - 19*N + 6` float accesses per step. A logical effective-bandwidth
+calculation for the complete simulation is therefore:
+
+```
+logical_bytes = (14*N*N - 19*N + 6) * sizeof(float) * TMAX
+logical_GB_per_second = logical_bytes / (total_time_ms * 1e-3) / 1e9
+```
+
+For a single kernel, use its row's count and its accumulated `time_ms`, with
+the same `sizeof(float) * TMAX` factor. Initial field uploads and the warmer
+are outside these timed regions and this access model. The benchmark emits
+raw times and workload parameters; it does not compute this derived rate.
+
+This is a source-level logical traffic model, not measured DRAM traffic.
+Caching, reuse, compiler transformations and memory transactions can change
+physical traffic; hardware counters are needed to qualify that quantity.

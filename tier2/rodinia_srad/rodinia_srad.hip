@@ -44,6 +44,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include "cpu_reference.h"
 #include <cmath>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
@@ -384,9 +385,9 @@ int main(int argc, char** argv) {
     dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
     dim3 dimGrid(block_x, block_y);
 
-    char params[160];
+    char params[256];
     snprintf(params, sizeof(params),
-             "\"image_size\":%d,\"num_iterations\":%d,\"block_size\":%d,\"lambda\":%.3f",
+             "\"image_size\":%d,\"num_iterations\":%d,\"block_size\":%d,\"lambda\":%.3f,\"verification\":\"full_cpu_trajectory_and_step_v1\"",
              image_size, niter, BLOCK_SIZE, lambda);
 
     bench_timer_t timer;
@@ -444,7 +445,8 @@ int main(int argc, char** argv) {
                 srad_cuda_2<<<dimGrid, dimBlock>>>(E_C, W_C, N_C, S_C, J_cuda, C_cuda, cols, rows, lambda, q0sqr);
             }));
 
-            HIP_CHECK(hipMemcpy(h_J, J_cuda, size_I * sizeof(float), hipMemcpyDeviceToHost));
+            // Preserve the actual last-step input in h_J; h_I is consumed.
+            HIP_CHECK(hipMemcpy(iter == niter - 1 ? h_I : h_J, J_cuda, size_I * sizeof(float), hipMemcpyDeviceToHost));
         }
         // Catch any launch-config/launch failure before it is recorded.
         HIP_CHECK(hipGetLastError());
@@ -463,6 +465,41 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Total GPU time: %.3f ms (%d SRAD iters/pass)\n",
             total_gpu_ms, niter);
 
+    // Check the measured image independently across the entire trajectory,
+    // then check all six outputs of the actual final step. No GPU rerun.
+    const auto trajectory = cpu_srad_image(h_Jini, rows, cols, niter, lambda);
+    const auto step = cpu_srad(h_J, rows, cols, 1, lambda);
+    const std::vector<float>* expected[] = {&step.J, &step.C, &step.E, &step.W, &step.S, &step.N};
+    float* device[] = {J_cuda, C_cuda, E_C, W_C, S_C, N_C};
+    const char* names[] = {"J", "C", "E", "W", "S", "N"};
+    size_t mismatches = 0, checked = 0;
+    for (int stage = 0; stage < 6; ++stage) {
+        // Final J is already in h_I. Both references have consumed h_Jini,
+        // so reuse it for the five added post-timing result downloads.
+        float* actual = stage == 0 ? h_I : h_Jini;
+        if (stage != 0)
+            HIP_CHECK(hipMemcpy(actual, device[stage], size_I * sizeof(float), hipMemcpyDeviceToHost));
+        for (int i = 0; i < size_I; ++i) {
+            const float value = (*expected[stage])[i];
+            bool matches = stage == 1 ? srad_coefficient_matches(actual[i], value)
+                         : srad_value_matches(actual[i], value, stage == 0 ? 1e-5 : 0);
+            if (stage == 0)
+                matches = srad_value_matches(actual[i], trajectory[i], 1e-3) && matches;
+            if (!matches) {
+                if (mismatches < 10) {
+                    fprintf(stderr, "MISMATCH %s[%d]: GPU=%.9g CPU_step=%.9g",
+                            names[stage], i, actual[i], value);
+                    if (stage == 0) fprintf(stderr, " CPU_trajectory=%.9g", trajectory[i]);
+                    fprintf(stderr, "\n");
+                }
+                ++mismatches;
+            }
+            ++checked;
+        }
+    }
+    fprintf(stderr, "SRAD verification: %s (%zu values, %zu comparisons, %zu mismatches)\n",
+            mismatches ? "FAIL" : "PASS", checked, (size_t)size_I * 7, mismatches);
+
     HIP_CHECK(hipFree(J_cuda));
     HIP_CHECK(hipFree(C_cuda));
     HIP_CHECK(hipFree(E_C));
@@ -473,5 +510,5 @@ int main(int argc, char** argv) {
     free(h_Jini);
     free(h_J);
 
-    return 0;
+    return mismatches ? EXIT_FAILURE : EXIT_SUCCESS;
 }

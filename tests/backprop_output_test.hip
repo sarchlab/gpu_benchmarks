@@ -95,6 +95,9 @@ static bool check_epoch(int in, bool upstream_inputs, bool momentum) {
                                   change, "input_weight_change", index, 1e-7)) return false;
         }
     }
+    // Keep the independent dense oracle above, and exercise the production
+    // verifier on these non-saturating and nonzero-momentum states as well.
+    if (!verify_backprop_epoch(initial,net,laps)) return false;
     printf("PASS: input=%d upstream_inputs=%d momentum=%d\n", in, upstream_inputs, momentum);
     return true;
 }

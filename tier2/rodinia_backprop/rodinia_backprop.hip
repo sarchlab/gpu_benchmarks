@@ -19,6 +19,7 @@
 #include <vector>
 #include <cmath>
 #include <climits>
+#include <algorithm>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -197,7 +198,10 @@ static void finish_forward_and_backpropagate(BackpropNetwork& net,
     }
 }
 
-struct BackpropLaps { bench_lap_t forward, adjust; };
+struct BackpropLaps {
+    bench_lap_t forward, adjust;
+    std::vector<float> partials; // actual first-stage output, retained after timing
+};
 
 // Both main and the GPU reference test call this complete production epoch.
 // Return the actual updated input weights/momentum in net for inspection.
@@ -251,7 +255,100 @@ static BackpropLaps run_backprop_epoch(BackpropNetwork& net) {
     HIP_CHECK(hipFree(d_partial));
     HIP_CHECK(hipFree(d_delta));
     HIP_CHECK(hipFree(d_previous));
+    laps.partials.swap(partial); // no extra GPU work, transfer or between-stage verification
     return laps;
+}
+
+// Independent post-epoch CPU reference. Keep the measured partials as well as
+// final state: the standard positive inputs saturate hidden activations, which
+// can otherwise conceal an incorrect forward reduction.
+static bool verify_epoch_value(double actual, double expected, const char* field,
+                               size_t index, double absolute_tolerance = 2e-5,
+                               double relative_tolerance = 2e-5) {
+    double tolerance = std::max(absolute_tolerance, relative_tolerance * std::fabs(expected));
+    if (!std::isfinite(actual) || !std::isfinite(expected) ||
+        std::fabs(actual - expected) > tolerance) {
+        fprintf(stderr, "FAIL: measured %s[%zu]: got %.12g expected %.12g (tol %.9g)\n",
+                field,index,actual,expected,tolerance);
+        return false;
+    }
+    return true;
+}
+
+static bool verify_backprop_epoch(const BackpropNetwork& initial,
+                                 const BackpropNetwork& actual,
+                                 const BackpropLaps& measured) {
+    const int in = initial.input_n;
+    if (measured.partials.size() != (size_t)(in/HEIGHT)*WIDTH) {
+        fprintf(stderr,"FAIL: incomplete measured forward partials\n");
+        return false;
+    }
+    double hidden[WIDTH+1] = {1.0}, delta[WIDTH+1] = {};
+    for (int j=1; j<=WIDTH; ++j) {
+        double dot = initial.weights[j];
+        for (int b=0; b<in/HEIGHT; ++b) {
+            double expected = 0.0, scale = 0.0;
+            // A dense double dot over sixteen input rows, independent of the
+            // production kernel's float shared-memory reduction tree.
+            for (int r=1; r<=HEIGHT; ++r) {
+                int i=b*HEIGHT+r;
+                double product = (double)initial.input[i]*initial.weights[(size_t)i*(WIDTH+1)+j];
+                expected += product;
+                scale += std::fabs(product);
+            }
+            size_t index=(size_t)b*WIDTH+j-1;
+            if (!std::isfinite(scale)) {
+                fprintf(stderr,"FAIL: non-finite forward reference scale[%zu]\n",index);
+                return false;
+            }
+            if (!verify_epoch_value(measured.partials[index],expected,"forward_partial",index,
+                                    1e-6*std::max(1.0,scale),0.0)) return false;
+            dot += expected;
+        }
+        hidden[j] = 1.0/(1.0+std::exp(-dot));
+    }
+    double output_dot=0.0;
+    for (int j=0; j<=WIDTH; ++j) output_dot += hidden[j]*initial.hidden_weights[j][1];
+    double output=1.0/(1.0+std::exp(-output_dot));
+    double output_delta=output*(1.0-output)*((double)initial.target-output);
+    for (int j=1; j<=WIDTH; ++j)
+        delta[j]=hidden[j]*(1.0-hidden[j])*output_delta*initial.hidden_weights[j][1];
+    if (!verify_epoch_value(actual.output,output,"output",0) ||
+        !verify_epoch_value(actual.output_delta,output_delta,"output_delta",0,1e-7)) return false;
+    for (int j=0; j<=WIDTH; ++j) {
+        if (!verify_epoch_value(actual.hidden[j],hidden[j],"hidden",j) ||
+            !verify_epoch_value(actual.hidden_delta[j],delta[j],"hidden_delta",j,1e-7)) return false;
+        for (int k=0; k<=1; ++k) {
+            size_t index=2*j+k;
+            if (!k) {
+                if (!verify_epoch_value(actual.hidden_weights[j][k],initial.hidden_weights[j][k],"unused_output_weight",index,0,0) ||
+                    !verify_epoch_value(actual.hidden_previous[j][k],initial.hidden_previous[j][k],"unused_output_momentum",index,0,0)) return false;
+                continue;
+            }
+            double change=0.3*output_delta*hidden[j]+0.3*initial.hidden_previous[j][k];
+            if (!verify_epoch_value(actual.hidden_weights[j][k],initial.hidden_weights[j][k]+change,"output_weight",index) ||
+                !verify_epoch_value(actual.hidden_previous[j][k],change,"output_momentum",index,1e-7) ||
+                !verify_epoch_value((double)actual.hidden_weights[j][k]-initial.hidden_weights[j][k],change,"output_weight_change",index,1e-7)) return false;
+        }
+    }
+    for (int i=0; i<=in; ++i) {
+        if (!verify_epoch_value(actual.input[i],initial.input[i],"input",i,0,0)) return false;
+        for (int j=0; j<=WIDTH; ++j) {
+            size_t index=(size_t)i*(WIDTH+1)+j;
+            if (!j) {
+                if (!verify_epoch_value(actual.weights[index],initial.weights[index],"unused_input_weight",index,0,0) ||
+                    !verify_epoch_value(actual.previous_weights[index],initial.previous_weights[index],"unused_input_momentum",index,0,0)) return false;
+                continue;
+            }
+            double change=0.3*delta[j]*(i?initial.input[i]:1.0)+0.3*initial.previous_weights[index];
+            if (!verify_epoch_value(actual.weights[index],initial.weights[index]+change,"input_weight",index) ||
+                !verify_epoch_value(actual.previous_weights[index],change,"input_momentum",index,1e-7) ||
+                !verify_epoch_value((double)actual.weights[index]-initial.weights[index],change,"input_weight_change",index,1e-7)) return false;
+        }
+    }
+    fprintf(stderr,"PASS: verified %zu measured forward partials and complete epoch state (full_epoch_cpu_v1)\n",
+            measured.partials.size());
+    return true;
 }
 
 int main(int argc, char** argv) {
@@ -279,9 +376,10 @@ int main(int argc, char** argv) {
             prop.name, device, in);
     BackpropNetwork net(in);
     initialize_network(net);
+    BackpropNetwork initial = net; // untimed snapshot, before the entry warmer
     BackpropLaps laps = run_backprop_epoch(net);
-    char params[160];
-    snprintf(params, sizeof(params), "\"input\":%d,\"hidden\":%d,\"height\":%d,\"width\":%d",
+    char params[224];
+    snprintf(params, sizeof(params), "\"input\":%d,\"hidden\":%d,\"height\":%d,\"width\":%d,\"verification\":\"full_epoch_cpu_v1\"",
              in, WIDTH, HEIGHT, WIDTH);
     bench_emit_iter("bpnn_layerforward_CUDA", 0, &laps.forward, params);
     bench_emit_iter("bpnn_adjust_weights_cuda", 0, &laps.adjust, params);
@@ -289,5 +387,5 @@ int main(int argc, char** argv) {
     bench_emit_summary(total);
     fprintf(stderr, "forward = %.6f ms, adjust = %.6f ms, total GPU = %.6f ms\n",
             laps.forward.gpu_ms, laps.adjust.gpu_ms, total);
-    return 0;
+    return verify_backprop_epoch(initial,net,laps) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

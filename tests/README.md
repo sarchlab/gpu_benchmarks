@@ -116,6 +116,12 @@ Ordinary capture/export failures are recorded; timeouts or missing tools abort
 and may leave partial reports. Captures are retained. CI does not execute this
 GPU check, and its profiled times are not performance results.
 
+`backprop_output_test.hip` also exercises the production measured-epoch verifier
+on every test state while retaining its independent dense reference. Ordinary
+runs verify all retained forward partials and the complete updated state after
+timing; finite-injection tests cover the comparator and tail partial, weight,
+momentum and output/reference values.
+
 `backprop_output_test.hip` calls the real Rodinia backprop hybrid epoch with
 non-saturating signed inputs, nonzero momentum and pinned initialization. It
 compares every input/output weight and momentum value, activation and delta

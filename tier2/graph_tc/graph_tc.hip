@@ -15,7 +15,7 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_vertices, BENCH_PARAM_avg_degree, BENCH_PARAM_block_size
 //   BENCH_PARAM_verify=false|0|skip skips CPU verification (debug knob, not a
-//   declared parameter; it is not echoed into records)
+//   declared parameter; records identify the effective verification policy)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // carrying the GPU event time and host wall-clock time, then a summary whose
@@ -262,8 +262,9 @@ int main(int argc, char** argv) {
 
     char params[192];
     snprintf(params, sizeof(params),
-             "\"vertices\":%d,\"avg_degree\":%d,\"block_size\":%d",
-             vertices, avg_degree, block_size);
+             "\"vertices\":%d,\"avg_degree\":%d,\"block_size\":%d,\"verification\":\"%s\"",
+             vertices, avg_degree, block_size,
+             run_verify ? "raw_triangle_total_cpu_v1" : "disabled");
 
     // Single timed launch (repetition is the harness's job). The kernel
     // reads only the immutable graph arrays and fully overwrites every
@@ -310,7 +311,9 @@ int main(int argc, char** argv) {
         long long cpu_raw = triangle_count_cpu(row_ptr, col_idx, N);
         long long cpu_triangles = cpu_raw / 3;
 
-        if (num_triangles == cpu_triangles) {
+        // A correct raw total has exactly three contributions per triangle.
+        // Comparing quotients hides erroneous totals cpu_raw+1 and cpu_raw+2.
+        if (gpu_total == cpu_raw) {
             fprintf(stderr, "PASS (CPU=%lld, GPU=%lld triangles)\n",
                     cpu_triangles, num_triangles);
         } else {

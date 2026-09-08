@@ -86,23 +86,7 @@ __global__ void bicg_kernel2(const float* __restrict__ A,
 // ---------------------------------------------------------------------------
 // CPU reference for correctness check
 // ---------------------------------------------------------------------------
-static void cpu_bicg(const float* A, const float* p, const float* r,
-                     float* s_ref, float* q_ref, int m, int n) {
-    // s = A^T * r
-    for (int j = 0; j < n; j++) {
-        float sum = 0.0f;
-        for (int i = 0; i < m; i++)
-            sum += A[i * n + j] * r[i];
-        s_ref[j] = sum;
-    }
-    // q = A * p
-    for (int i = 0; i < m; i++) {
-        float sum = 0.0f;
-        for (int j = 0; j < n; j++)
-            sum += A[i * n + j] * p[j];
-        q_ref[i] = sum;
-    }
-}
+#include "cpu_reference.h"
 
 // ---------------------------------------------------------------------------
 // Main
@@ -167,9 +151,9 @@ int main(int argc, char** argv) {
     int grid_k1 = (n + block_size - 1) / block_size;  // kernel1: one thread per column
     int grid_k2 = (m + block_size - 1) / block_size;  // kernel2: one thread per row
 
-    char params[128];
+    char params[192];
     snprintf(params, sizeof(params),
-             "\"m\":%d,\"n\":%d,\"block_size\":%d", m, n, block_size);
+             "\"m\":%d,\"n\":%d,\"block_size\":%d,\"verification\":\"prefix8_cpu_v1\"", m, n, block_size);
 
     bench_timer_t timer;
     bench_timer_create(&timer);
@@ -214,8 +198,8 @@ int main(int argc, char** argv) {
     // Correctness check against CPU reference (small subset)
     int check_n = (n < 8) ? n : 8;
     int check_m = (m < 8) ? m : 8;
-    std::vector<float> s_ref(n), q_ref(m);
-    cpu_bicg(h_A, h_p, h_r, s_ref.data(), q_ref.data(), m, n);
+    std::vector<float> s_ref(check_n), q_ref(check_m);
+    cpu_bicg_prefix(h_A, h_p, h_r, s_ref.data(), q_ref.data(), m, n, check_m, check_n);
 
     bool pass = true;
     for (int j = 0; j < check_n; ++j) {

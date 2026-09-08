@@ -84,19 +84,7 @@ __global__ void atax_kernel2(const float* __restrict__ A,
 // ---------------------------------------------------------------------------
 // CPU reference for correctness check
 // ---------------------------------------------------------------------------
-static void cpu_atax(const float* A, const float* x, float* y_ref, int nx, int ny) {
-    // tmp = A * x
-    std::vector<float> tmp(nx, 0.0f);
-    for (int i = 0; i < nx; i++)
-        for (int j = 0; j < ny; j++)
-            tmp[i] += A[i * ny + j] * x[j];
-    // y = A^T * tmp
-    for (int j = 0; j < ny; j++) {
-        y_ref[j] = 0.0f;
-        for (int i = 0; i < nx; i++)
-            y_ref[j] += A[i * ny + j] * tmp[i];
-    }
-}
+#include "cpu_reference.h"
 
 // ---------------------------------------------------------------------------
 // Main
@@ -154,9 +142,9 @@ int main(int argc, char** argv) {
     int grid1 = (nx + block_size - 1) / block_size;
     int grid2 = (ny + block_size - 1) / block_size;
 
-    char params[128];
+    char params[192];
     snprintf(params, sizeof(params),
-             "\"nx\":%d,\"ny\":%d,\"block_size\":%d",
+             "\"nx\":%d,\"ny\":%d,\"block_size\":%d,\"verification\":\"prefix8_cpu_v1\"",
              nx, ny, block_size);
 
     // One full ATAX pass (run exactly once): kernel1 writes d_tmp, kernel2
@@ -200,8 +188,8 @@ int main(int argc, char** argv) {
 
     // Correctness check against CPU reference (small subset)
     int check_n = (ny < 8) ? ny : 8;
-    std::vector<float> y_ref(ny);
-    cpu_atax(h_A, h_x, y_ref.data(), nx, ny);
+    std::vector<float> y_ref(check_n);
+    cpu_atax_prefix(h_A, h_x, y_ref.data(), nx, ny, check_n);
     bool pass = true;
     for (int j = 0; j < check_n; ++j) {
         float rel = fabsf(h_y[j] - y_ref[j]) / (fabsf(y_ref[j]) + 1e-6f);

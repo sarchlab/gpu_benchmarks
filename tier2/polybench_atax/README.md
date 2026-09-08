@@ -89,3 +89,20 @@ The pass runs exactly once per execution; repetition is the harness's job
 ## Reference
 
 Derived from the [PolyBench/GPU](https://sourceforge.net/projects/polybench/) benchmark suite, ATAX kernel.
+
+The fixed `verification` parameter is `prefix8_cpu_v1`: compare the first
+`min(8, dimension)` elements of each existing output vector, with the same
+float accumulation order, relative tolerance and non-finite rejection as
+before. CPU references now compute only those final dot products and allocate
+only the checked output prefix. This is a limited prefix check; it provides no
+coverage guarantee for other output positions. Full-result qualification and
+cross-device verification remain separate requirements.
+
+ATAX still computes **all** of `tmp = A*x`, since every checked element of
+`Aᵀ*tmp` depends on all rows. The reference cost is
+O(nx×ny + nx×min(8,ny)), with nx temporary floats plus the checked prefix.
+
+Input generation, GPU kernels, transfers and timing intervals are unchanged.
+The CPU work remains outside GPU/host launch timing. The process still pays
+for full input generation and allocation; measure its complete wall time when
+admitting a configuration under a target's process budget.

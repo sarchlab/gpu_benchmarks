@@ -77,12 +77,13 @@ make test PLATFORM=cuda        # requires a GPU
 Stdout contains one record per GPU kernel and a summary:
 
 ```text
-{"type":"kernel","name":"bpnn_layerforward_CUDA","iter":0,"time_ms":0.1,"host_time_ms":0.2,"params":{"input":65536,"hidden":16,"height":16,"width":16}}
-{"type":"kernel","name":"bpnn_adjust_weights_cuda","iter":0,"time_ms":0.2,"host_time_ms":0.3,"params":{"input":65536,"hidden":16,"height":16,"width":16}}
+{"type":"kernel","name":"bpnn_layerforward_CUDA","iter":0,"time_ms":0.1,"host_time_ms":0.2,"params":{"input":65536,"hidden":16,"height":16,"width":16,"verification":"full_epoch_cpu_v1"}}
+{"type":"kernel","name":"bpnn_adjust_weights_cuda","iter":0,"time_ms":0.2,"host_time_ms":0.3,"params":{"input":65536,"hidden":16,"height":16,"width":16,"verification":"full_epoch_cpu_v1"}}
 {"type":"summary","total_time_ms":0.3}
 ```
 
-Times above are illustrative. Stderr reports the device and raw timing summary.
+Times above are illustrative. Stderr reports the device, raw timing summary and
+verification outcome.
 
 ## Qualification
 
@@ -99,10 +100,30 @@ nonzero momentum, multiple tiles, the largest declared size and pinned setup.
 Use `bench_output_test --upstream N` for a specific declared size. CI compiles
 this test; running it requires a GPU.
 
-Ordinary timing runs return the updated values but do not yet independently
-verify them (R-13). The test's double reference establishes the training
-expression; target qualification must additionally check the pinned original
-implementation and actual GPU timelines. With the warmer disabled, a raw run
+Ordinary timing runs now independently verify the actual measured epoch after
+both kernel timings have finished. An initial host-network snapshot is taken
+before the entry warmer. The already-downloaded forward partials are retained
+and checked against independent double dot products over each 16-row tile;
+final activations, deltas, weights, momentum and weight changes are checked
+against an independent full CPU epoch. Unused weight/momentum slots and host
+inputs must remain unchanged. No extra GPU transfer, kernel or verification
+work is inserted between the two training stages.
+
+Checking the partials matters: the standard positive inputs saturate hidden
+activations, so a wrong forward sum can leave final weights unchanged. Each
+partial uses tolerance `1e-6 * max(1, sum(abs(input * initial_weight)))`; final
+state uses the tolerances described above, including the tight check on actual
+weight changes. Non-finite values fail with a diagnostic and nonzero exit.
+The fixed `verification=full_epoch_cpu_v1` tag is stored in both kernel records;
+there is no verification-disable control. Failed verification can follow valid
+timing records; the harness marks the complete run as an error.
+
+Verification requires O(input × 16) CPU work. The snapshot copies the input and
+two full weight/momentum arrays, about 140 MiB at the largest declared size;
+retaining the partials keeps about another 4 MiB live after the epoch. These
+costs are outside GPU and host launch timing, but the complete process must fit
+the target's host memory and collection timeout. Target qualification must
+additionally check the pinned original implementation and actual GPU timelines. With the warmer disabled, a raw run
 has two GPU kernels, a partial-sum download and two uploads between them, and
 result downloads afterward. General trace-region/artifact qualification remains
 R-23/R-24. AMD execution and performance collection remain separate from these

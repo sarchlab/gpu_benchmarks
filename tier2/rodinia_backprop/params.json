@@ -2,7 +2,7 @@
   "benchmark": "rodinia_backprop",
   "tier": 2,
   "suite": "rodinia",
-  "description": "Rodinia backprop: one complete input -> 16 -> 1 hybrid training epoch. Original tiled GPU forward and weight/momentum update are connected by CPU partial-sum reduction, activations, output/hidden deltas and output-weight update. Only the two GPU kernels contribute to the summed event time; required host stages/transfers are excluded.",
+  "description": "Rodinia backprop: one complete input -> 16 -> 1 hybrid training epoch. Original tiled GPU forward and weight/momentum update are connected by CPU partial-sum reduction, activations, output/hidden deltas and output-weight update. Only the two GPU kernels contribute to the summed event time; required host stages/transfers are excluded. After timing, full_epoch_cpu_v1 independently verifies every measured forward partial and the complete updated epoch state, failing nonzero on corruption.",
   "scaling_param": {
     "name": "input",
     "description": "Input layer size (number of input neurons). Must be a multiple of 16; one 16-row block per 16 input units. The original standard run uses 65536.",

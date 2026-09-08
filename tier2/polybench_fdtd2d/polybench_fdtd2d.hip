@@ -37,6 +37,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include "cpu_reference.h"
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -153,7 +154,7 @@ int main(int argc, char** argv) {
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"tmax\":%d",
+             "\"size\":%d,\"tmax\":%d,\"verification\":\"full_cpu_v1\"",
              N, TMAX);
 
     // Per-kernel accumulators: the single pass runs TMAX time steps; the
@@ -209,10 +210,37 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Total GPU time: %.3f ms (%d steps/pass)\n",
             total_gpu_ms, TMAX);
 
+    // Verify every measured final field after timing, without another GPU pass.
+    const auto reference = cpu_fdtd(h_ex, h_ey, h_hz, NX, NY, TMAX);
+    const std::vector<double>* expected[] = {&reference.ex, &reference.ey, &reference.hz};
+    float* host[] = {h_ex, h_ey, h_hz};
+    float* device[] = {d_ex, d_ey, d_hz};
+    const char* names[] = {"ex", "ey", "hz"};
+    size_t mismatches = 0, checked = 0;
+    for (int stage = 0; stage < 3; ++stage) {
+        // The complete independent reference has consumed all three inputs.
+        HIP_CHECK(hipMemcpy(host[stage], device[stage], grid_bytes, hipMemcpyDeviceToHost));
+        for (int i = 0; i < NX; ++i) for (int j = 0; j < NY; ++j) {
+            const size_t q = (size_t)i * NY + j;
+            const bool exact = stage == 0 ? j == 0 : stage == 1 ? i == 0
+                               : (i == NX - 1 || j == NY - 1);
+            const double value = (*expected[stage])[q];
+            if (!fdtd_value_matches(host[stage][q], value, exact)) {
+                if (mismatches < 10)
+                    fprintf(stderr, "MISMATCH %s[%zu]: GPU=%.9g CPU=%.17g\n",
+                            names[stage], q, host[stage][q], value);
+                ++mismatches;
+            }
+            ++checked;
+        }
+    }
+    fprintf(stderr, "FDTD verification: %s (%zu values, %zu mismatches)\n",
+            mismatches ? "FAIL" : "PASS", checked, mismatches);
+
     HIP_CHECK(hipFree(d_ex));
     HIP_CHECK(hipFree(d_ey));
     HIP_CHECK(hipFree(d_hz));
     free(h_ex); free(h_ey); free(h_hz);
 
-    return 0;
+    return mismatches ? EXIT_FAILURE : EXIT_SUCCESS;
 }

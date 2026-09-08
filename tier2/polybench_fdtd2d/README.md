@@ -93,9 +93,9 @@ The TMAX-step simulation runs exactly once per execution; repetition is the harn
 
 **stdout** — JSON lines: one `{"type":"kernel",...}` record per kernel (`fdtd_update_ex`, `fdtd_update_ey`, `fdtd_update_hz`) with that kernel's GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`) accumulated over the TMAX steps, then a summary whose `total_time_ms` is the sum of all recorded GPU event times:
 ```
-{"type":"kernel","name":"fdtd_update_ex","iter":0,"time_ms":14.2310,"host_time_ms":15.0121,"params":{"size":512,"tmax":50}}
-{"type":"kernel","name":"fdtd_update_ey","iter":0,"time_ms":14.8120,"host_time_ms":15.4020,"params":{"size":512,"tmax":50}}
-{"type":"kernel","name":"fdtd_update_hz","iter":0,"time_ms":16.1900,"host_time_ms":16.8010,"params":{"size":512,"tmax":50}}
+{"type":"kernel","name":"fdtd_update_ex","iter":0,"time_ms":14.2310,"host_time_ms":15.0121,"params":{"size":512,"tmax":50,"verification":"full_cpu_v1"}}
+{"type":"kernel","name":"fdtd_update_ey","iter":0,"time_ms":14.8120,"host_time_ms":15.4020,"params":{"size":512,"tmax":50,"verification":"full_cpu_v1"}}
+{"type":"kernel","name":"fdtd_update_hz","iter":0,"time_ms":16.1900,"host_time_ms":16.8010,"params":{"size":512,"tmax":50,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":45.2330}
 ```
 
@@ -138,3 +138,37 @@ raw times and workload parameters; it does not compute this derived rate.
 This is a source-level logical traffic model, not measured DRAM traffic.
 Caching, reuse, compiler transformations and memory transactions can change
 physical traffic; hardware counters are needed to qualify that quantity.
+
+## Measured-result verification
+
+Every run checks every value in the measured final ex, ey and hz fields against
+a complete independent double CPU recurrence from the pristine initial fields.
+The reference uses the exact float `0.7f` coefficient promoted to double and
+the same source sequence and boundaries. Each timestep completes the electric
+field phase before updating hz. It never consumes GPU results as reference
+inputs and launches no separate GPU verification pass.
+
+Actual, reference and error must be finite. Updated values require
+`abs(actual-reference) <= 1e-3 * max(1,abs(reference))`. This is an empirical
+tolerance qualified for the declared inputs and tested controls, not a
+universal roundoff bound; smaller errors are intentionally admitted. The
+retained ex first column, retained hz last row/column and final ey source row
+must match exactly. All mismatches are counted, at most ten details go to
+stderr, and any mismatch causes a nonzero exit. Every kernel record includes
+`verification="full_cpu_v1"`.
+
+The CPU phases use at most sixteen workers on disjoint row ranges, with a join
+between phases. Each value keeps the same operation order at every worker
+count. Automatic mode uses one worker below 512×512 cells, otherwise caps by
+hardware concurrency and row count. Thread creation failures, including
+allocation failures, finish missing partitions on the caller and join prior
+workers. There are no concurrent phase pools.
+
+All reference work and three full result downloads follow GPU timing. The
+downloads reuse the consumed input buffers. GPU kernels, RNG/inputs, geometry,
+source/timestep sequence, initial uploads, warmer/events and declared sweep
+are unchanged. At N=8192 all 201,326,592 final values are checked; three double
+references add 1.5 GiB to the original 768 MiB host fields. The three 256 MiB
+downloads allocate no additional host result arrays. CPU work is outside GPU
+event time but inside the process timeout. Other-host admission/budgets,
+AMD/tolerance qualification and full upstream qualification remain open.

@@ -2,7 +2,7 @@
   "benchmark": "polybench_syr2k",
   "tier": 2,
   "suite": "polybench",
-  "description": "Symmetric rank-2k update: C = alpha*A*B^T + alpha*B*A^T + beta*C. A,B are NxM, C is NxN. Emits per-iteration kernel times; GFLOPS is derived downstream.",
+  "description": "Symmetric rank-2k update: C = alpha*A*B^T + alpha*B*A^T + beta*C. A,B are NxM, C is NxN. Emits per-iteration kernel times; GFLOPS is derived downstream. Checks every measured output against an independent double CPU reference after timing (verification=full_cpu_v1).",
   "scaling_param": {
     "name": "matrix_size",
     "description": "Square output matrix dimension N (C is NxN, A and B are NxM)",

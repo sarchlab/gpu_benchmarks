@@ -77,15 +77,34 @@ Stdout contains one record for each logical stage and a final summary. Example
 with illustrative times:
 
 ```json
-{"type":"kernel","name":"mm_kernel_1","iter":0,"time_ms":1.2,"host_time_ms":1.3,"params":{"size":1024,"alpha":1.5,"beta":1.2}}
-{"type":"kernel","name":"mm_kernel_2","iter":0,"time_ms":1.3,"host_time_ms":1.4,"params":{"size":1024,"alpha":1.5,"beta":1.2}}
+{"type":"kernel","name":"mm_kernel_1","iter":0,"time_ms":1.2,"host_time_ms":1.3,"params":{"size":1024,"alpha":1.5,"beta":1.2,"verification":"full_cpu_v1"}}
+{"type":"kernel","name":"mm_kernel_2","iter":0,"time_ms":1.3,"host_time_ms":1.4,"params":{"size":1024,"alpha":1.5,"beta":1.2,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":2.5}
 ```
 
 Stage 1 is the overwrite specialization `mm_kernel<false>`; stage 2 is the
 accumulating specialization `mm_kernel<true>`. Each event bracket covers one
 kernel, and the summary sums those two GPU times. Host times additionally include
-launch/synchronization costs. Device/setup information goes to stderr.
+launch/synchronization costs. Device/setup and verification information go to
+stderr. After timing, ordinary runs check every element of both measured
+matrices against full independent double CPU products. The second reference
+uses the CPU temporary, not the measured temporary. A mismatch returns exit
+code 1 even though timing records have already been emitted. Both kernel
+records identify `verification=full_cpu_v1`.
+
+The reference preserves the qualified formula, increasing reduction-index
+order per output, and `5e-4 * max(1, abs(reference))` tolerance. Non-finite
+actual values, references and errors fail. Independent columns are blocked to
+reuse matrix reads; no output or reduction term is skipped. Only the first ten
+mismatch diagnostics are printed, while all mismatches are counted.
+
+Verification adds two full device-to-host copies after timing and no GPU
+kernel. The original host A and D allocations are reused for those copies only
+after the CPU products have consumed all inputs. Two double reference matrices
+need 256 MiB in total at N=4096, in addition to the existing 256 MiB of host
+inputs; the two result downloads total 128 MiB. CPU work and copies are outside
+GPU timing but count toward the process timeout. Qualify memory capacity and
+the complete process runtime on each collection host.
 
 The leading-order logical operation count is 4·N³ for two matrix products. Derive
 GFLOPS downstream from that model and the summed GPU time. Scalar coefficients,
@@ -110,7 +129,27 @@ largest declared N without a cubic CPU reference. The tolerance is 5e-4 relative
 with an absolute floor near zero; non-finite values always fail. These checks
 establish the expression and data dependency, not performance.
 
-CI compiles this GPU test; execution requires CUDA or ROCm hardware. NVIDIA
-validation does not establish AMD execution (R-19). The ordinary benchmark still
-emits timings without automatic per-process numerical verification; that broader
-coverage remains R-13. Trace-region/artifact qualification remains R-23/R-24.
+CI compiles this GPU test; execution requires CUDA or ROCm hardware. Its CPU
+oracle remains separate from the ordinary-run reference.
+
+From the repository root:
+
+```sh
+c++ -O3 -std=c++14 -fsanitize=address,undefined tests/two_mm_reference_test.cpp -o /tmp/two-mm-reference
+/tmp/two-mm-reference
+python3 tests/two_mm_measured_result.py --platform cuda --work-dir /tmp/two-mm-measured-result
+```
+
+The host test checks 168 complete reference pairs against unblocked per-output
+double products, including partial blocks and signed/zero coefficients, with
+bit-identical values and unchanged inputs. It checks both tolerance branches
+and non-finite rejection. The GPU regression uses a new output directory and
+disposable instrumented source copies to run 158 ordinary-path cases: 53
+controls and 105 actual measured-output faults, including both matrices,
+first/prefix/middle/tail positions, finite and NaN/±Inf values, zero/negative
+coefficients, and 12/24 simultaneous mismatches with capped diagnostics. CI
+runs the host test and compiles the GPU regression; use `--compile-only` without
+a GPU or `--platform rocm` on AMD.
+
+NVIDIA validation does not establish AMD execution (R-19). Other-host process
+budgets and trace-region/artifact qualification remain R-19/R-23/R-24.

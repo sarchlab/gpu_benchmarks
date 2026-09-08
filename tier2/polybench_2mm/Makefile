@@ -51,10 +51,10 @@ all: $(TARGET)
 
 COMMON := ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
 
-$(TARGET): $(SRC) $(COMMON)
+$(TARGET): $(SRC) cpu_reference.h $(COMMON)
 	$(CC) $(CFLAGS) $< -o $@
 
-bench_output_test: ../../tests/two_mm_output_test.hip $(SRC) $(COMMON)
+bench_output_test: ../../tests/two_mm_output_test.hip $(SRC) cpu_reference.h $(COMMON)
 	$(CC) $(CFLAGS) $< -o $@
 
 test: bench_output_test

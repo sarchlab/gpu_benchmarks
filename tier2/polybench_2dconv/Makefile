@@ -45,12 +45,20 @@ endif
 # ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
-.PHONY: all clean
+.PHONY: all clean test
 
 all: $(TARGET)
 
-$(TARGET): $(SRC)
+COMMON := ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
+
+$(TARGET): $(SRC) $(COMMON)
 	$(CC) $(CFLAGS) $< -o $@
 
+bench_output_test: ../../tests/two_d_convolution_output.hip $(SRC) $(COMMON)
+	$(CC) $(CFLAGS) $< -o $@
+
+test: bench_output_test
+	./bench_output_test
+
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) bench_output_test

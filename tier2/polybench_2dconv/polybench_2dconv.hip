@@ -1,13 +1,12 @@
 // polybench_2dconv.hip — PolyBench 2D Convolution benchmark (HIP, self-contained)
 //
 // Applies a fixed 3×3 kernel to an NI×NJ matrix A, producing output B.
-// Same 9-tap structure as PolyBench/GPU 2DCONV, but with a fixed coefficient
-// set that differs from upstream's values (canonical PolyBench/GPU uses a
-// signed c11..c33 set):
+// Pinned PolyBench/GPU 2DCONV operator (PolyBench-ACC commit 70ea4ca,
+// CUDA/stencils/convolution-2d/2DConvolution.cu):
 //
-//   c = {{0.8, 0.2, 0.3},
-//        {0.2, 0.7, 0.4},
-//        {0.1, 0.2, 0.5}}
+//   c = {{ 0.2, 0.5, -0.8},
+//        {-0.3, 0.6, -0.9},
+//        { 0.4, 0.7,  0.1}}
 //
 //   B[i][j] = sum_{k1=0}^{2} sum_{k2=0}^{2} c[k1][k2] * A[i+k1-1][j+k2-1]
 //             for 1 <= i < NI-1, 1 <= j < NJ-1
@@ -33,6 +32,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <climits>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -60,10 +60,11 @@ __global__ void convolution2D_kernel(const float* __restrict__ A,
     if (i < 1 || i >= NI - 1 || j < 1 || j >= NJ - 1)
         return;
 
-    // Fixed coefficients (differ from upstream PolyBench/GPU's signed set)
-    const float c00 = 0.8f, c01 = 0.2f, c02 = 0.3f;
-    const float c10 = 0.2f, c11 = 0.7f, c12 = 0.4f;
-    const float c20 = 0.1f, c21 = 0.2f, c22 = 0.5f;
+    // Upstream names enumerate the first coordinate vertically: row 0 below
+    // corresponds to c11,c21,c31, not c11,c12,c13.
+    const float c00 = 0.2f, c01 = 0.5f, c02 = -0.8f;
+    const float c10 = -0.3f, c11 = 0.6f, c12 = -0.9f;
+    const float c20 = 0.4f, c21 = 0.7f, c22 = 0.1f;
 
     B[i * NJ + j] =
         c00 * A[(i - 1) * NJ + (j - 1)] +
@@ -88,6 +89,10 @@ int main(int argc, char** argv) {
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
+    if (N < 3 || N > INT_MAX / N) {
+        fprintf(stderr, "Size must be at least 3 and N*N must fit the kernel's signed indexing\n");
+        return 1;
+    }
     int NI = N, NJ = N;
     size_t matSize = (size_t)NI * NJ * sizeof(float);
 
@@ -122,8 +127,8 @@ int main(int argc, char** argv) {
     snprintf(params, sizeof(params), "\"size\":%d", N);
 
     // Single timed launch (optionally preceded by the vector-add warmer).
-    // Input A is read-only and output B is fully overwritten, so every
-    // process execution performs identical work — no reset needed.
+    // Input A is read-only; B's interior is overwritten and its borders were
+    // zeroed during setup, before the optional entry warmer.
     double total_gpu_ms =
         bench_run_once("convolution2D_kernel", params, [&]() {
             convolution2D_kernel<<<grid, block>>>(d_A, d_B, NI, NJ);

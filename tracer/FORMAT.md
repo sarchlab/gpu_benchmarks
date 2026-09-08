@@ -38,6 +38,26 @@ PC  mask  dst_num [Rdst]  opcode  src_num [Rsrc...]  W [mode payload...]  imm
 dynamic occurrence; an inconsistency is a hard error (it would indicate the
 decomposition is unsafe for that kernel).
 
+Raw text parsing requires complete `#BEGIN_TB` / `#END_TB` frames with three
+nonnegative block coordinates and no repeated block coordinates. Warp IDs must
+start at zero and follow their array positions. Each warp declares one
+nonnegative `insts` count that must equal its actual instruction lines. Empty
+warps and blocks with no warps remain representable; sampled block coordinates
+may be sparse and need not be sorted. Header text is retained verbatim.
+
+Instruction operand counts are bounded by the available tokens before indexing.
+PCs must be nonnegative and fit the host `int`; masks must fit 32 bits. Memory
+widths are positive integers, and modes 0/1/2 require the corresponding complete
+address payload with valid numeric fields. The non-memory `0` marker is followed
+only by the immediate token. Zero-mask stride/base payloads and valid numeric
+spellings are preserved, including signed strides and deltas. Malformed framing,
+counts and operands return errors rather than panicking or silently renumbering
+warps, truncating masks or accepting missing instructions.
+
+These grammar checks leave opcode/register/immediate meaning and launch-header
+consistency to the consuming tool. They do not establish measured-region
+membership or make an empty trace sufficient collection evidence.
+
 ## `isa/<hash>.json` — static table
 
 ```json

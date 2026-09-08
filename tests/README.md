@@ -129,8 +129,12 @@ with nine exact unit-impulse outputs and full signed-matrix references, includin
 rectangular strides, partial tiles, NaN-poisoned interiors and untouched borders
 and guards. Run `make test PLATFORM=cuda` (or `rocm`) in `tier2/polybench_2dconv`;
 `bench_output_test --size N` checks a declared size, and `--impulse 0` through
-`--impulse 8` isolate the nine coefficients. CI compiles the test; runtime and
-ordinary timing-run verification remain separate qualification steps.
+`--impulse 8` isolate the nine coefficients. Ordinary timing runs also check
+every measured output after timing under fixed policy `full_cpu_v1`.
+`finite_verification.py --benchmark polybench_2dconv` injects non-finite and
+incorrect finite values into that comparison, including the last interior
+output and original reference input. CI compiles these tests; GPU execution
+requires target qualification.
 
 `stencil_output_test.hip` exercises the actual Parboil production timestep
 sequence against an independent dense reference: exact center/neighbor

@@ -2,7 +2,7 @@
   "benchmark": "polybench_2dconv",
   "tier": 2,
   "suite": "polybench",
-  "description": "PolyBench/GPU 2D convolution with the pinned signed 3x3 operator on an NxN matrix. One thread computes each interior output; setup leaves output borders zero. One kernel event time is emitted; source arithmetic is 9 multiplications plus 8 additions per interior output.",
+  "description": "PolyBench/GPU 2D convolution with the pinned signed 3x3 operator on an NxN matrix. One thread computes each interior output; setup leaves output borders zero. One kernel event time is emitted; source arithmetic is 9 multiplications plus 8 additions per interior output. Every measured output is verified by a full CPU reference after timing (fixed policy full_cpu_v1).",
   "scaling_param": {
     "name": "size",
     "description": "Matrix dimension N (NxN input matrix)",

@@ -84,7 +84,7 @@ The kernel runs exactly once per execution; repetition is the harness's job
 the GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`),
 then a summary whose `total_time_ms` equals that GPU event time:
 ```
-{"type":"kernel","name":"convolution2D_kernel","iter":0,"time_ms":3.210000,"host_time_ms":3.270000,"params":{"size":2048}}
+{"type":"kernel","name":"convolution2D_kernel","iter":0,"time_ms":3.210000,"host_time_ms":3.270000,"params":{"size":2048,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":3.210000}
 ```
 
@@ -98,6 +98,7 @@ Matrix: 2048×2048
 
 convolution2D_kernel: gpu = 3.210 ms, host = 3.270 ms
 Total GPU time: 3.210 ms
+PASS: verified all 4194304 measured outputs (full_cpu_v1)
 ```
 
 ## Notes
@@ -121,7 +122,27 @@ coefficient. Other interior outputs use tolerance
 
 `bench_output_test --size N` checks every output at an individual declared size;
 `--impulse 0` through `--impulse 8` isolate each coefficient. CI compiles this
-test; execution requires a GPU. Ordinary timing runs still lack an independent
-measured-result verifier (R-13). AMD execution remains R-19 and general
+test; execution requires a GPU. AMD execution remains R-19 and general
 trace-region/artifact qualification remains R-23/R-24. Functional profiling
 does not constitute performance collection.
+
+## Measured-result verification
+
+Every timing run copies its actual measured output to the host after GPU timing
+and checks every element. It launches no verification kernel and does not reset
+or recompute the GPU result. An independent double CPU reference evaluates the
+pinned operator for all interior cells, using `1e-5 * max(1, abs(reference))`
+tolerance. Borders must remain exactly zero; non-finite outputs or references
+fail. A mismatch exits nonzero, so the harness marks that process unsuccessful.
+The kernel record contains the fixed policy `"verification":"full_cpu_v1"`;
+there is no verification-off control.
+
+The reference uses O(N²) CPU work and one extra N²-float host output buffer
+(up to 1 GiB at N=16384), in addition to the existing input and device buffers.
+Its transfer and CPU work are outside GPU and host launch timing. This cost
+must fit the admitted process/memory budget on each target; R-15/R-17/R-19
+cover broader capacity, verification-cost and target qualification.
+`tests/finite_verification.py --benchmark polybench_2dconv` exercises this
+actual comparison path with non-finite output/reference and wrong finite
+injections, including the last interior output and its original reference
+input; see the test's help for required platform/work-directory arguments.

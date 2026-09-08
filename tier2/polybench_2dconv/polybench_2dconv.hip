@@ -33,6 +33,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <climits>
+#include <algorithm>
+#include <cmath>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -76,6 +78,33 @@ __global__ void convolution2D_kernel(const float* __restrict__ A,
         c20 * A[(i + 1) * NJ + (j - 1)] +
         c21 * A[(i + 1) * NJ +  j     ] +
         c22 * A[(i + 1) * NJ + (j + 1)];
+}
+
+// Check the actual measured output on the CPU; no GPU re-execution or reset.
+// The independent double reference follows the pinned mathematical operator.
+static bool verify_convolution(const float* A, const float* B, int N) {
+    const double weights[3][3] = {{0.2, 0.5, -0.8}, {-0.3, 0.6, -0.9}, {0.4, 0.7, 0.1}};
+    for (int i = 0; i < N; ++i) {
+        for (int j = 0; j < N; ++j) {
+            const bool interior = i > 0 && i < N-1 && j > 0 && j < N-1;
+            double expected = 0.0;
+            if (interior) {
+                for (int di = -1; di <= 1; ++di)
+                    for (int dj = -1; dj <= 1; ++dj)
+                        expected += weights[di+1][dj+1] * A[(i+di)*N+j+dj];
+            }
+            float actual = B[i*N+j];
+            double tolerance = interior ? 1e-5 * std::max(1.0, std::fabs(expected)) : 0.0;
+            if (!std::isfinite(actual) || !std::isfinite(expected) ||
+                std::fabs((double)actual-expected) > tolerance) {
+                fprintf(stderr, "FAIL: measured convolution[%d,%d] got %.9g expected %.12g tolerance %.3g\n",
+                        i,j,actual,expected,tolerance);
+                return false;
+            }
+        }
+    }
+    fprintf(stderr, "PASS: verified all %zu measured outputs (full_cpu_v1)\n", (size_t)N*N);
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +153,7 @@ int main(int argc, char** argv) {
     dim3 grid((NJ + block.x - 1) / block.x, (NI + block.y - 1) / block.y);
 
     char params[160];
-    snprintf(params, sizeof(params), "\"size\":%d", N);
+    snprintf(params, sizeof(params), "\"size\":%d,\"verification\":\"full_cpu_v1\"", N);
 
     // Single timed launch (optionally preceded by the vector-add warmer).
     // Input A is read-only; B's interior is overwritten and its borders were
@@ -137,9 +166,17 @@ int main(int argc, char** argv) {
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
+    // Always verify the measured B, including its zero borders, after timing.
+    // The extra host output buffer is N*N*sizeof(float) bytes.
+    float* h_B = (float*)malloc(matSize);
+    if (!h_B) { fprintf(stderr, "Verification allocation failed\n"); return 1; }
+    HIP_CHECK(hipMemcpy(h_B, d_B, matSize, hipMemcpyDeviceToHost));
+    const bool verified = verify_convolution(h_A, h_B, N);
+    free(h_B);
+
     HIP_CHECK(hipFree(d_A));
     HIP_CHECK(hipFree(d_B));
     free(h_A);
 
-    return 0;
+    return verified ? EXIT_SUCCESS : EXIT_FAILURE;
 }

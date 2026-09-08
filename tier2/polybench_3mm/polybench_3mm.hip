@@ -26,6 +26,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include "cpu_reference.h"
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -167,7 +168,7 @@ int main(int argc, char** argv) {
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"size\":%d", N);
+             "\"size\":%d,\"verification\":\"full_cpu_v1\"", N);
 
     // Per-kernel accumulators: the single pass launches the three kernels
     // once each. No state reset is needed — inputs A/B/C/D are read-only and
@@ -212,6 +213,31 @@ int main(int argc, char** argv) {
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
+    // Verify all three measured products after timing, with no extra GPU pass.
+    const auto reference = cpu_3mm(h_A, h_B, h_C, h_D, NI, NJ, NK, NL, NM);
+    const std::vector<double>* expected[] = {&reference.e, &reference.f, &reference.g};
+    float* outputs[] = {d_E, d_F, d_G};
+    const char* names[] = {"E", "F", "G"};
+    size_t mismatches = 0, checked = 0;
+    for (int stage = 0; stage < 3; ++stage) {
+        // All dimensions are N here, so each output fits the original h_A
+        // buffer after the complete independent reference has consumed it.
+        HIP_CHECK(hipMemcpy(h_A, outputs[stage], expected[stage]->size() * sizeof(float),
+                            hipMemcpyDeviceToHost));
+        for (size_t i = 0; i < expected[stage]->size(); ++i) {
+            const double value = (*expected[stage])[i];
+            if (!mm3_value_matches(h_A[i], value, stage == 2)) {
+                if (mismatches < 10)
+                    fprintf(stderr, "MISMATCH %s[%zu]: GPU=%.9g CPU=%.17g\n",
+                            names[stage], i, h_A[i], value);
+                ++mismatches;
+            }
+            ++checked;
+        }
+    }
+    fprintf(stderr, "3MM verification: %s (%zu values, %zu mismatches)\n",
+            mismatches ? "FAIL" : "PASS", checked, mismatches);
+
     // Cleanup
     HIP_CHECK(hipFree(d_A));
     HIP_CHECK(hipFree(d_B));
@@ -225,5 +251,5 @@ int main(int argc, char** argv) {
     free(h_C);
     free(h_D);
 
-    return 0;
+    return mismatches ? EXIT_FAILURE : EXIT_SUCCESS;
 }

@@ -15,7 +15,7 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_vertices, BENCH_PARAM_avg_degree, BENCH_PARAM_block_size
 //   BENCH_PARAM_verify=false|0|skip skips CPU verification (debug knob, not a
-//   declared parameter; it is not echoed into records)
+//   declared parameter; records identify the effective verification policy)
 //
 // Output (stdout): one {"type":"kernel",...} JSON line per timed iteration
 // carrying the GPU event time and host wall-clock time, then a summary whose

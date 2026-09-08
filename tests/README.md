@@ -198,3 +198,14 @@ Run `c++ -O2 -std=c++14 -fsanitize=address,undefined tests/prefix_reference_test
 root. CI runs this test under address/undefined-behavior sanitizers. The ordinary
 benchmarks retain their existing first-eight checks; this cost regression does
 not establish correctness of unsampled GPU output positions.
+
+`lud_measured_result.py` checks that ordinary LUD runs factor exactly once and
+verify the matrix produced by that measured factorization. It injects faults
+into the actual device result after the timed pass, and requires failed exit
+status while preserving the timing records. Valid cases and manual bypasses
+check the emitted verification policy. Run `python3 tests/lud_measured_result.py
+--platform cuda --work-dir /tmp/lud-check` (or `rocm`). Choose a new, nonexistent
+`--work-dir` for each invocation; previous results are retained for inspection.
+CI compiles the instrumented driver; runtime qualification requires a GPU.
+This retains the
+full O(N³) residual check, so it does not resolve large-process budgets.

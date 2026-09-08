@@ -26,8 +26,8 @@ image rounded up to a multiple of 16, and selects ROI rows/columns
 arguments and rejects dimensions that are not multiples of 16. Both generate
 the input with seed 7 and `J = exp(I)`. The local driver adds the entry warmer,
 single-pass measurement and accumulated per-kernel JSON records. These
-source comparisons do not establish full measured-result or AMD qualification;
-those remain open in [the readiness tracker](https://github.com/sarchlab/gpu_benchmarks/issues/71).
+source comparisons alone do not establish runtime equivalence. AMD and other-host
+qualification remain open in [the readiness tracker](https://github.com/sarchlab/gpu_benchmarks/issues/71).
 
 ## Algorithm
 
@@ -94,8 +94,8 @@ the harness's job (`gpubench run --reps N`).
 (`time_ms`) and host time (`host_time_ms`) across all SRAD iterations,
 then a summary whose `total_time_ms` is the sum of all recorded GPU event times:
 ```json
-{"type":"kernel","name":"srad_cuda_1","iter":0,"time_ms":6.123,"host_time_ms":9.001,"params":{"image_size":512,"num_iterations":100,"block_size":16,"lambda":0.500}}
-{"type":"kernel","name":"srad_cuda_2","iter":0,"time_ms":6.222,"host_time_ms":9.100,"params":{"image_size":512,"num_iterations":100,"block_size":16,"lambda":0.500}}
+{"type":"kernel","name":"srad_cuda_1","iter":0,"time_ms":6.123,"host_time_ms":9.001,"params":{"image_size":512,"num_iterations":100,"block_size":16,"lambda":0.500,"verification":"full_cpu_trajectory_and_step_v1"}}
+{"type":"kernel","name":"srad_cuda_2","iter":0,"time_ms":6.222,"host_time_ms":9.100,"params":{"image_size":512,"num_iterations":100,"block_size":16,"lambda":0.500,"verification":"full_cpu_trajectory_and_step_v1"}}
 {"type":"summary","total_time_ms":12.345}
 ```
 
@@ -105,3 +105,48 @@ then a summary whose `total_time_ms` is the sum of all recorded GPU event times:
 
 - **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `rodinia_srad.hip` (the adapted SRAD v2 kernels).
 - The input image is generated synthetically (`J = exp(I)` for a random `I`) — no external input files required.
+
+## Measured-result verification
+
+Every run checks all six retained measured arrays: the final image J,
+coefficient C and directional differences E/W/S/N. A full independent CPU
+trajectory starts from pristine J=exp(I), recomputes every ROI statistic and
+iteration, and checks the final J. A second CPU reference starts from the
+preserved actual final-iteration input, recomputes its ROI statistic and one
+step, and checks all six outputs. This complementary step check avoids loose
+coefficient tolerances caused by accumulated float trajectory differences;
+the full-trajectory image reference never consumes GPU results or statistics.
+Both references preserve the pinned CPU implementation's float intermediates,
+mixed float/double literals, reduction order and clamped neighbors.
+
+Actual and reference values must be finite. The full-trajectory image requires
+`abs(actual-reference) <= 1e-3 * max(1,abs(reference))`; final-step J and C use
+`1e-5 * max(1,abs(reference))`. C must also lie in [0,1]. E/W/S/N require exact
+numeric equality. The J/C tolerances are empirical for the declared inputs and
+qualified controls, not universal roundoff bounds; smaller errors are
+intentionally admitted. Each measured value is counted once even if J fails
+both comparisons: 6*N*N values and 7*N*N comparisons. All mismatches are
+counted, at most ten details go to stderr, and any mismatch causes a nonzero
+exit. Each kernel record includes
+`verification="full_cpu_trajectory_and_step_v1"`.
+
+The existing last image download is redirected into the consumed h_I buffer,
+preserving its input in h_J without adding per-iteration transfers. CPU work
+and five added intermediate downloads occur after GPU timing. These downloads
+reuse h_Jini after both references have consumed it. Kernels, inputs/RNG,
+geometry, iteration sequence, original transfer counts/sizes, warmer, events
+and declared sweep remain unchanged; there is no separate GPU verification
+pass. The final-step reference checks the retained last-step intermediate
+arrays, not intermediate arrays from earlier iterations.
+
+CPU phases use at most sixteen workers on disjoint rows, joining between the
+coefficient/difference and image phases. Each value keeps the same operation
+order at every worker count. Automatic mode uses one worker below 512*512
+cells, otherwise caps by hardware concurrency and row count. Thread creation
+failures finish missing partitions on the caller and join prior workers.
+At N=8192, all 402,653,184 values undergo 469,762,048 comparisons. The unused
+full-trajectory intermediates are released before constructing the step
+reference: peak reference matrices are 1.75 GiB, alongside the original
+768 MiB host images (2.5 GiB total matrix storage, plus runtime overhead).
+Verification lies outside GPU event time but inside the process timeout.
+Other-host budgets/admission, AMD and tolerance qualification remain open.

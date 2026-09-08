@@ -29,7 +29,10 @@
 #include <cstring>
 #include <vector>
 #include <algorithm>
-#include <set>
+#include "graph_tc_host.h"
+
+using graph_tc_host::generate_graph;
+using graph_tc_host::triangle_count_cpu;
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -90,88 +93,6 @@ __global__ void triangle_count_kernel(
     }
 
     edge_counts[eid] = count;
-}
-
-// ---------------------------------------------------------------------------
-// CPU reference: triangle counting via sorted list intersection
-// ---------------------------------------------------------------------------
-
-static long long triangle_count_cpu(
-    const std::vector<int>& row_ptr,
-    const std::vector<int>& col_idx,
-    int N)
-{
-    long long total = 0;
-    for (int u = 0; u < N; ++u) {
-        for (int idx = row_ptr[u]; idx < row_ptr[u + 1]; ++idx) {
-            int v = col_idx[idx];
-            if (v <= u) continue; // only process edges u < v
-            // Intersect neighbors of u and v
-            int ui = row_ptr[u], ue = row_ptr[u + 1];
-            int vi = row_ptr[v], ve = row_ptr[v + 1];
-            while (ui < ue && vi < ve) {
-                if (col_idx[ui] == col_idx[vi]) {
-                    total++;
-                    ui++;
-                    vi++;
-                } else if (col_idx[ui] < col_idx[vi]) {
-                    ui++;
-                } else {
-                    vi++;
-                }
-            }
-        }
-    }
-    // Each edge (u,v) with u<v counts ALL common neighbors, so a triangle
-    // (a,b,c) is counted once per each of its three edges — 3 times total.
-    // Return the raw count; the caller divides by 3 (same as the GPU path).
-    return total;
-}
-
-// ---------------------------------------------------------------------------
-// Graph generation: random undirected graph with sorted adjacency lists
-// ---------------------------------------------------------------------------
-
-static void generate_graph(int N, int avg_degree,
-                           std::vector<int>& row_ptr,
-                           std::vector<int>& col_idx)
-{
-    long long target_edges = (long long)N * avg_degree / 2;
-    std::set<std::pair<int,int>> edge_set;
-
-    srand(42);
-    while ((long long)edge_set.size() < target_edges) {
-        int u = rand() % N;
-        int v = rand() % N;
-        if (u == v) continue;
-        if (u > v) std::swap(u, v);
-        edge_set.insert({u, v});
-    }
-
-    // Build adjacency lists
-    std::vector<std::vector<int>> adj(N);
-    for (auto& e : edge_set) {
-        adj[e.first].push_back(e.second);
-        adj[e.second].push_back(e.first);
-    }
-
-    // Sort each adjacency list
-    for (int i = 0; i < N; ++i) {
-        std::sort(adj[i].begin(), adj[i].end());
-    }
-
-    // Build CSR
-    row_ptr.resize(N + 1);
-    row_ptr[0] = 0;
-    for (int i = 0; i < N; ++i) {
-        row_ptr[i + 1] = row_ptr[i] + (int)adj[i].size();
-    }
-    col_idx.resize(row_ptr[N]);
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < (int)adj[i].size(); ++j) {
-            col_idx[row_ptr[i] + j] = adj[i][j];
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------

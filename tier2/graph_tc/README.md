@@ -18,7 +18,8 @@ Not named after a specific upstream suite — derived from common graph-analytic
 
 | File | Description |
 |------|-------------|
-| `graph_tc.hip` | HIP source — triangle counting kernel, graph generation, verification |
+| `graph_tc.hip` | GPU kernel, timed driver and exact-total acceptance |
+| `graph_tc_host.h` | Equivalent graph generation and full CPU triangle reference |
 | `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
 
 ## Build
@@ -83,7 +84,9 @@ PASS (CPU=12345, GPU=12345 triangles)
 - The exact raw GPU contribution sum is compared against the full CPU raw sum,
   before division by three is used for triangle-count diagnostics. Comparing
   only the integer quotients previously accepted raw errors of one or two.
-- Both use the same sorted adjacency list intersection algorithm
+- The CPU reference counts each ordered `u < v < w` triangle once and multiplies
+  by three to compare the full raw GPU contribution sum. Forward-neighbor
+  boundaries are reused across edges; no part of the total is sampled.
 - Reports PASS/FAIL with counts; on FAIL the binary exits with a non-zero status
 
 `python3 tests/triangle_total_verification.py --platform cuda --work-dir /tmp/tc-check`
@@ -93,10 +96,27 @@ two-vertex zero-triangle case, valid results and manual bypass reporting. Choose
 for each invocation. Use `--platform rocm` for AMD; CI only compiles the test.
 A test timeout stops the suite with failure; completed-case logs are retained.
 
-The GPU kernel, graph/input generator, launch, transfers, timing and full CPU
-reference algorithm are unchanged. This corrects result acceptance without
-reducing the existing CPU verification cost (R-17). Cross-device execution and
-input qualification remain necessary; no AMD execution is claimed here.
+The GPU kernel, input data, launch, transfers, timing and exact raw-total
+acceptance are preserved. CPU preparation now uses a compact edge table and
+constructs CSR through degree counts, prefix offsets, filling and per-row sorting.
+It retains the original `srand(42)` / `rand()` sequence and duplicate acceptance,
+producing the same sorted input arrays and RNG continuation on a given host.
+This does not make libc input generation portable across different runtimes.
+
+The edge table uses linear probing at no more than half occupancy. At the largest
+declared graph it occupies 1 GiB during generation; the CPU reference adds one
+N-element integer vector (4 MiB at N=1048576). The table is freed before the benchmark allocates its device arrays and begins
+timing. Full graph generation, verification and process wall time
+still require target-specific budget qualification. General manual-input
+admission and AMD qualification remain separate.
+
+`tests/triangle_host_test.cpp` compares complete generated inputs and RNG
+continuation with the original ordered-set generator. It checks all 33,867 simple
+undirected graphs through six vertices against an independent triple oracle,
+plus high vertex IDs, hash collisions, wraparound and capacity bounds. Run
+`c++ -O3 -std=c++14 -fsanitize=address,undefined tests/triangle_host_test.cpp
+-o /tmp/triangle_host_test && /tmp/triangle_host_test` from the repository root.
+CI runs this host test and compiles the actual-device fault regression above.
 
 ## Platform Notes
 

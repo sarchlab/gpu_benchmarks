@@ -80,6 +80,9 @@ jobs:
       - name: Reject nonpositive SRAD parameters (no GPU required)
         run: python3 tests/srad_invalid_parameters.py --binary /tmp/srad-measured-result/tier2/rodinia_srad/rodinia_srad
 
+      - name: Check SRAD index-range admission (no GPU required)
+        run: python3 tests/srad_index_range.py --compiler g++ --binary /tmp/srad-measured-result/tier2/rodinia_srad/rodinia_srad
+
       - name: Check complete FDTD CPU reference (no GPU required)
         run: |
           g++ -O3 -std=c++14 -pthread -fsanitize=address,undefined tests/fdtd_reference_test.cpp -o /tmp/fdtd_reference_test

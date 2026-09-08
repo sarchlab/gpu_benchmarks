@@ -11,9 +11,10 @@
 #include <cstring>
 #include <vector>
 
-static bool close_value(float actual, double expected, const char* field, size_t index) {
+static bool close_value(double actual, double expected, const char* field, size_t index,
+                        double absolute_tolerance = 2e-5) {
     if (!std::isfinite(actual) || !std::isfinite(expected) ||
-        std::fabs((double)actual - expected) > 2e-5 * std::max(1.0, std::fabs(expected))) {
+        std::fabs(actual - expected) > std::max(absolute_tolerance, 2e-5 * std::fabs(expected))) {
         fprintf(stderr, "%s[%zu]: got %.9g, expected %.12g\n", field, index, actual, expected);
         return false;
     }
@@ -62,20 +63,26 @@ static bool check_epoch(int in, bool upstream_inputs, bool momentum) {
     if (!std::isfinite(laps.forward.gpu_ms) || !std::isfinite(laps.adjust.gpu_ms) ||
         laps.forward.gpu_ms < 0 || laps.adjust.gpu_ms < 0) return false;
     if (!close_value(net.output, output, "output", 0) ||
-        !close_value(net.output_delta, output_delta, "output_delta", 0)) return false;
+        !close_value(net.output_delta, output_delta, "output_delta", 0, 1e-7)) return false;
     for (int j = 0; j <= WIDTH; ++j) {
         if (!close_value(net.hidden[j], hidden[j], "hidden", j) ||
-            !close_value(net.hidden_delta[j], delta[j], "hidden_delta", j)) return false;
+            !close_value(net.hidden_delta[j], delta[j], "hidden_delta", j, 1e-7)) return false;
         for (int k = 0; k <= 1; ++k) {
             double change = 0.3 * output_delta * hidden[j] + 0.3 * initial.hidden_previous[j][k];
             double expected_weight = initial.hidden_weights[j][k] + (k ? change : 0.0);
             double expected_previous = k ? change : initial.hidden_previous[j][k];
             if (!close_value(net.hidden_weights[j][k], expected_weight, "output_weight", 2*j+k) ||
-                !close_value(net.hidden_previous[j][k], expected_previous, "output_momentum", 2*j+k)) return false;
+                !close_value(net.hidden_previous[j][k], expected_previous, "output_momentum", 2*j+k, 1e-7)) return false;
+            if (k && !close_value((double)net.hidden_weights[j][k] - initial.hidden_weights[j][k],
+                                  change, "output_weight_change", j, 1e-7)) return false;
         }
     }
     for (int i = 0; i <= in; ++i) {
-        if (net.input[i] != initial.input[i]) return false;
+        if (net.input[i] != initial.input[i]) {
+            fprintf(stderr, "input[%d]: got %.9g, expected unchanged %.9g\n",
+                    i, net.input[i], initial.input[i]);
+            return false;
+        }
         for (int j = 0; j <= WIDTH; ++j) {
             size_t index = (size_t)i * (WIDTH + 1) + j;
             double change = 0.3 * delta[j] * (i ? initial.input[i] : 1.0) +
@@ -83,7 +90,9 @@ static bool check_epoch(int in, bool upstream_inputs, bool momentum) {
             double expected_weight = initial.weights[index] + (j ? change : 0.0);
             double expected_previous = j ? change : initial.previous_weights[index];
             if (!close_value(net.weights[index], expected_weight, "input_weight", index) ||
-                !close_value(net.previous_weights[index], expected_previous, "input_momentum", index)) return false;
+                !close_value(net.previous_weights[index], expected_previous, "input_momentum", index, 1e-7)) return false;
+            if (j && !close_value((double)net.weights[index] - initial.weights[index],
+                                  change, "input_weight_change", index, 1e-7)) return false;
         }
     }
     printf("PASS: input=%d upstream_inputs=%d momentum=%d\n", in, upstream_inputs, momentum);

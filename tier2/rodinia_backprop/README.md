@@ -90,7 +90,10 @@ Times above are illustrative. Stderr reports the device and raw timing summary.
 complete production epoch as `main`. It checks every updated input/output
 weight and momentum value, all activations and deltas, and unchanged inputs
 against independent dense double-precision calculations. The tolerance is
-`2e-5 * max(1, abs(reference))`, allowing float reduction/activation rounding;
+`max(2e-5, 2e-5 * abs(reference))` for full weights and activations. Deltas,
+momentum and actual weight changes use the tighter absolute floor `1e-7` with
+the same relative tolerance, so the magnitude of an original weight cannot hide
+an incorrect small update. This allows float reduction/activation rounding;
 non-finite values fail. Eighteen cases include non-saturating signed inputs,
 nonzero momentum, multiple tiles, the largest declared size and pinned setup.
 Use `bench_output_test --upstream N` for a specific declared size. CI compiles

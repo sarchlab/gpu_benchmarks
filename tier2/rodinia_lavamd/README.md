@@ -74,7 +74,7 @@ emitted as params for downstream derivation only.
 time (`host_time_ms`), then a summary whose `total_time_ms` is the recorded
 GPU event time:
 ```json
-{"type":"kernel","name":"kernel_gpu_cuda","iter":0,"time_ms":12.345,"host_time_ms":12.501,"params":{"boxes1d":10,"particles_per_box":100,"number_threads":128}}
+{"type":"kernel","name":"kernel_gpu_cuda","iter":0,"time_ms":12.345,"host_time_ms":12.501,"params":{"boxes1d":10,"particles_per_box":100,"number_threads":128,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":12.345}
 ```
 
@@ -85,6 +85,39 @@ output, that output buffer is zeroed before the launch (untimed); the
 immutable position/charge/box inputs need no reset.
 
 **stderr** — human-readable timing.
+
+## Measured-result verification
+
+Every ordinary run checks all four energy/force components (`v`, `x`, `y`, `z`)
+of every actual measured particle after GPU timing. The independent CPU
+reference evaluates the complete double-precision pair sums from the original
+positions and charges. It includes self interactions and the home box plus
+valid adjacent boxes; CPU neighbors are derived from grid coordinates rather
+than copied from the neighbor list supplied to the GPU.
+
+The reference follows the energy and force formulas in the pinned
+[Rodinia 3.1 CPU kernel](https://github.com/HPC-FAIR/rodinia_3.1/blob/366b283456506ef2fe2c2b7dc5e83e941ffc5524/openmp/lavaMD/kernel/kernel_cpu.c).
+A component passes only when actual, reference and error are finite and
+`abs(actual - reference) <= 1e-10 * max(1, abs(reference))`. The absolute floor
+handles force components near zero; errors within this stated tolerance are
+accepted. Qualification checks independent long-double sums, exact uniform
+geometry cases, zero/signed charges and measured-output faults. AMD execution
+and other-device tolerance qualification remain separate requirements.
+
+The checker counts every mismatch, prints at most ten details to stderr and
+exits nonzero on failure. The kernel record includes
+`verification="full_cpu_v1"`. There is no bypass or separate GPU verification
+launch. After the reference consumes the original positions, their host buffer
+is reused for one complete device-to-host copy of the measured output. The
+GPU kernel, input generation, initial output memset, launch geometry, warmer
+and timed event sequence are unchanged.
+
+At the largest declared 20³ boxes, there are 800,000 particles and 3,200,000
+checked components. The reference adds a 25,600,000-byte result buffer (about
+24.4 MiB); the equally sized result download reuses existing host storage.
+Full reference work grows with every box-particle interaction and adds CPU
+process time outside GPU timing. Host admission, other-host process budgets
+and full upstream-fidelity qualification remain open.
 
 ## Platform Notes
 

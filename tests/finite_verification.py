@@ -125,6 +125,8 @@ def main():
         dest.mkdir(parents=True)
         for filename in ("Makefile", "params.json"):
             shutil.copy2(src / filename, dest / filename)
+        for header in src.glob("*.h"):
+            shutil.copy2(header, dest / header.name)
         original = (src / f"{name}.hip").read_text()
         (dest / f"{name}.hip").write_text(instrument(original, SITES[name]))
         with (dest / "build.log").open("w") as log:

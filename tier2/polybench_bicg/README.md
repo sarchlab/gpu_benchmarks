@@ -114,3 +114,19 @@ GPU results for `s` and `q` are compared against a CPU reference. The first 8 el
 
 - [PolyBench/GPU](https://web.cse.ohio-state.edu/~pouchet.2/software/polybench/)
 - BiCGStab iterative solver: Barrett et al., *Templates for the Solution of Linear Systems*, SIAM 1994.
+
+The fixed `verification` parameter is `prefix8_cpu_v1`: compare the first
+`min(8, dimension)` elements of each existing output vector, with the same
+float accumulation order, relative tolerance and non-finite rejection as
+before. CPU references now compute only those final dot products and allocate
+only the checked output prefix. This is a limited prefix check; it provides no
+coverage guarantee for other output positions. Full-result qualification and
+cross-device verification remain separate requirements.
+
+BiCG reference work is O(m×min(8,n) + n×min(8,m)), replacing two complete
+m×n matrix-vector references. At most 16 reference output floats are allocated.
+
+Input generation, GPU kernels, transfers and timing intervals are unchanged.
+The CPU work remains outside GPU/host launch timing. The process still pays
+for full input generation and allocation; measure its complete wall time when
+admitting a configuration under a target's process budget.

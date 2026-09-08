@@ -188,3 +188,13 @@ the proved stencil invariant, not by an output mismatch allowance. Run
 `bench_output_test --case W H` checks a chosen shape. Byte outputs have no
 NaN/Inf representation; corruption tests should alter actual output bytes,
 including the last interior pixel and preserved border, after timing.
+
+`prefix_reference_test.cpp` checks the production CPU reference helpers for
+ATAX, BiCG and MVT without a GPU or GPU compiler. Rectangular and square cases,
+including dimensions below/equal/above eight, compare every retained value
+bit-for-bit with complete float references and protect the prefix boundaries.
+Run `c++ -O2 -std=c++14 -fsanitize=address,undefined tests/prefix_reference_test.cpp
+-o /tmp/prefix_reference_test && /tmp/prefix_reference_test` from the repository
+root. CI runs this test under address/undefined-behavior sanitizers. The ordinary
+benchmarks retain their existing first-eight checks; this cost regression does
+not establish correctness of unsampled GPU output positions.

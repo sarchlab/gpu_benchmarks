@@ -85,21 +85,7 @@ __global__ void mvt_kernel2(const float* __restrict__ A,
 // ---------------------------------------------------------------------------
 // CPU reference for correctness check
 // ---------------------------------------------------------------------------
-static void cpu_mvt(const float* A, const float* y1, const float* y2,
-                    float* x1_ref, float* x2_ref, int n) {
-    // x1 = A * y1
-    for (int i = 0; i < n; i++) {
-        x1_ref[i] = 0.0f;
-        for (int j = 0; j < n; j++)
-            x1_ref[i] += A[i * n + j] * y1[j];
-    }
-    // x2 = A^T * y2
-    for (int j = 0; j < n; j++) {
-        x2_ref[j] = 0.0f;
-        for (int i = 0; i < n; i++)
-            x2_ref[j] += A[i * n + j] * y2[i];
-    }
-}
+#include "cpu_reference.h"
 
 // ---------------------------------------------------------------------------
 // Main
@@ -160,9 +146,9 @@ int main(int argc, char** argv) {
     int block_size = 256;
     int grid       = (n + block_size - 1) / block_size;
 
-    char params[128];
+    char params[192];
     snprintf(params, sizeof(params),
-             "\"n\":%d", n);
+             "\"n\":%d,\"verification\":\"prefix8_cpu_v1\"", n);
 
     bench_timer_t timer;
     bench_timer_create(&timer);
@@ -209,8 +195,8 @@ int main(int argc, char** argv) {
 
     // Correctness check against CPU reference (small subset)
     int check_n = (n < 8) ? n : 8;
-    std::vector<float> x1_ref(n), x2_ref(n);
-    cpu_mvt(h_A, h_y1, h_y2, x1_ref.data(), x2_ref.data(), n);
+    std::vector<float> x1_ref(check_n), x2_ref(check_n);
+    cpu_mvt_prefix(h_A, h_y1, h_y2, x1_ref.data(), x2_ref.data(), n, check_n);
 
     bool pass = true;
     for (int i = 0; i < check_n; ++i) {

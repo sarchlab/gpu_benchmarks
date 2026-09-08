@@ -1,547 +1,438 @@
-// chai_cedd.hip — Canny Edge Detection benchmark (HIP)
-//
-// 5-stage pipeline: Gaussian blur, Sobel gradient, magnitude+direction,
-// non-maximum suppression, hysteresis thresholding.
-//
-// Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
-//
-// Usage:
-//   ./chai_cedd [W=2048] [H=2048]
-//
-//   W=<width>    Image width  (default: 2048)
-//   H=<height>   Image height (default: 2048)
-//
-// Environment variables (override argv):
-//   BENCH_PARAM_width, BENCH_PARAM_height,
-//   BENCH_PARAM_threshold_low, BENCH_PARAM_threshold_high
-//
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
-// pipeline kernel carrying that kernel's GPU event time and host wall-clock
-// time within the pass, then a summary whose total_time_ms is the SUM of all
-// recorded GPU event times. Throughput (Mpixels/sec) is derived downstream
-// from time_ms and params.
-// Output (stderr): human-readable results
+/*
+ * Copyright (c) 2016 University of Cordoba and University of Illinois
+ * All rights reserved.
+ *
+ * Developed by:    IMPACT Research Group
+ *                  University of Cordoba and University of Illinois
+ *                  http://impact.crhc.illinois.edu/
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * with the Software without restriction, including without limitation the
+ * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+ * sell copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ *      > Redistributions of source code must retain the above copyright notice,
+ *        this list of conditions and the following disclaimers.
+ *      > Redistributions in binary form must reproduce the above copyright
+ *        notice, this list of conditions and the following disclaimers in the
+ *        documentation and/or other materials provided with the distribution.
+ *      > Neither the names of IMPACT Research Group, University of Cordoba,
+ *        University of Illinois nor the names of its contributors may be used
+ *        to endorse or promote products derived from this Software without
+ *        specific prior written permission.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH
+ * THE SOFTWARE.
+ *
+ */
 
+// Chai CUDA-D/CEDD, pinned at 61db988662cb993fa108429a13759dbdc83ab9be.
+// Preserve the four byte-valued operators and A/B ping-pong dependencies.
+// Port changes: bounded cooperative halo loads, complete partial tiles, defined
+// scratch borders, shared timing protocol and full measured-output verification.
 #include "../../common/bench_timing.h"
+#include <algorithm>
+#include <cerrno>
+#include <climits>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
 #include <vector>
-
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
-// ---------------------------------------------------------------------------
-// Argument parsing (key=value style)
-// ---------------------------------------------------------------------------
-
-static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
-    size_t nlen = strlen(name);
-    for (int i = 1; i < argc; ++i) {
-        if (strncmp(argv[i], name, nlen) == 0) {
-            int v = atoi(argv[i] + nlen);
-            if (v > 0) return v;
-        }
+// All threads participate, including inactive output threads in partial tiles.
+// Callers use square 16x16 blocks, with a one-pixel halo in shared memory.
+__device__ void load_cedd_tile(const unsigned char* data, int* tile, int rows, int cols) {
+    const int pitch = blockDim.x + 2;
+    for (int t=threadIdx.y*blockDim.x+threadIdx.x; t<pitch*pitch;
+         t+=blockDim.x*blockDim.y) {
+        int row=blockIdx.y*blockDim.y+t/pitch;
+        int col=blockIdx.x*blockDim.x+t%pitch;
+        tile[t]=(row<rows && col<cols) ? data[(size_t)row*cols+col] : 0;
     }
-    return defaultVal;
 }
 
-// ---------------------------------------------------------------------------
-// Kernel 1: Gaussian blur (5x5)
-// ---------------------------------------------------------------------------
+__constant__ float gaus[3][3] = {{0.0625f, 0.125f, 0.0625f}, {0.1250f, 0.250f, 0.1250f}, {0.0625f, 0.125f, 0.0625f}};
+__constant__ int   sobx[3][3] = {{-1, 0, 1}, {-2, 0, 2}, {-1, 0, 1}};
+__constant__ int   soby[3][3] = {{-1, -2, -1}, {0, 0, 0}, {1, 2, 1}};
 
-__constant__ float d_gauss[25] = {
-    2.f/159, 4.f/159,  5.f/159,  4.f/159, 2.f/159,
-    4.f/159, 9.f/159, 12.f/159,  9.f/159, 4.f/159,
-    5.f/159,12.f/159, 15.f/159, 12.f/159, 5.f/159,
-    4.f/159, 9.f/159, 12.f/159,  9.f/159, 4.f/159,
-    2.f/159, 4.f/159,  5.f/159,  4.f/159, 2.f/159
-};
+// https://github.com/smskelley/canny-opencl
+// Gaussian Kernel
+// data: image input data with each pixel taking up 1 byte (8Bit 1Channel)
+// out: image output data (8B1C)
+__global__ void gaussian_kernel(unsigned char *data, unsigned char *out, int rows, int cols) {
 
-__global__ void gaussian_blur_kernel(
-    const float* __restrict__ input,
-    float* __restrict__ output,
-    int W, int H)
-{
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x >= W || y >= H) return;
+    extern __shared__ int l_mem[];
+    int* l_data = l_mem;
 
-    float sum = 0.0f;
-    for (int ky = -2; ky <= 2; ++ky) {
-        for (int kx = -2; kx <= 2; ++kx) {
-            int nx = min(max(x + kx, 0), W - 1);
-            int ny = min(max(y + ky, 0), H - 1);
-            sum += input[ny * W + nx] * d_gauss[(ky + 2) * 5 + (kx + 2)];
+    const int L_SIZE = blockDim.x;
+    int sum         = 0;
+    const int g_row = blockIdx.y * blockDim.y + threadIdx.y + 1;
+    const int g_col = blockIdx.x * blockDim.x + threadIdx.x + 1;
+    const int l_row = threadIdx.y + 1;
+    const int l_col = threadIdx.x + 1;
+
+    load_cedd_tile(data, l_data, rows, cols);
+    __syncthreads();
+    if (g_row >= rows-1 || g_col >= cols-1) return;
+    const int pos = g_row * cols + g_col;
+
+    for(int i = 0; i < 3; i++) {
+        for(int j = 0; j < 3; j++) {
+            sum += gaus[i][j] * l_data[(i + l_row - 1) * (L_SIZE + 2) + j + l_col - 1];
         }
     }
-    output[y * W + x] = sum;
+
+    out[pos] = min(255, max(0, sum));
 }
 
-// ---------------------------------------------------------------------------
-// Kernel 2: Sobel gradient (Gx, Gy)
-// ---------------------------------------------------------------------------
+// Upstream float magnitude/angle quantization, shared with the domain test.
+__device__ void cedd_gradient(float sumx, float sumy, unsigned char* magnitude,
+                              unsigned char* direction) {
+    const float PI = 3.14159265f;
+    float angle = 0;
+    // The output is now the square root of their squares, but they are
+    // constrained to 0 <= value <= 255. Note that hypot is a built in function
+    // defined as: hypot(x,y) = sqrt(x*x, y*y).
+    *magnitude = min(255, max(0, (int)hypot(sumx, sumy)));
 
-__global__ void sobel_kernel(
-    const float* __restrict__ blurred,
-    float* __restrict__ gx,
-    float* __restrict__ gy,
-    int W, int H)
-{
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x >= W || y >= H) return;
+    // Compute the direction angle theta in radians
+    // atan2 has a range of (-PI, PI) degrees
+    angle = atan2(sumy, sumx);
 
-    float sx = 0.0f, sy = 0.0f;
-
-    // Sobel X kernel: [[-1,0,1],[-2,0,2],[-1,0,1]]
-    // Sobel Y kernel: [[-1,-2,-1],[0,0,0],[1,2,1]]
-    const int sobel_x[3][3] = {{-1,0,1},{-2,0,2},{-1,0,1}};
-    const int sobel_y[3][3] = {{-1,-2,-1},{0,0,0},{1,2,1}};
-
-    for (int ky = -1; ky <= 1; ++ky) {
-        for (int kx = -1; kx <= 1; ++kx) {
-            int nx = min(max(x + kx, 0), W - 1);
-            int ny = min(max(y + ky, 0), H - 1);
-            float val = blurred[ny * W + nx];
-            sx += val * sobel_x[ky + 1][kx + 1];
-            sy += val * sobel_y[ky + 1][kx + 1];
-        }
+    // If the angle is negative,
+    // shift the range to (0, 2PI) by adding 2PI to the angle,
+    // then perform modulo operation of 2PI
+    if(angle < 0) {
+        angle = fmod((angle + 2 * PI), (2 * PI));
     }
-    gx[y * W + x] = sx;
-    gy[y * W + x] = sy;
-}
 
-// ---------------------------------------------------------------------------
-// Kernel 3: Magnitude and direction
-// ---------------------------------------------------------------------------
-
-__global__ void magnitude_direction_kernel(
-    const float* __restrict__ gx,
-    const float* __restrict__ gy,
-    float* __restrict__ mag,
-    int* __restrict__ dir,
-    int W, int H)
-{
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x >= W || y >= H) return;
-
-    int idx = y * W + x;
-    float vx = gx[idx], vy = gy[idx];
-    mag[idx] = sqrtf(vx * vx + vy * vy);
-
-    // Quantize angle to 0, 45, 90, 135 degrees
-    float angle = atan2f(vy, vx) * (180.0f / 3.14159265f);
-    if (angle < 0) angle += 180.0f;
-
-    int d;
-    if ((angle >= 0 && angle < 22.5f) || (angle >= 157.5f && angle <= 180.0f))
-        d = 0;   // horizontal
-    else if (angle >= 22.5f && angle < 67.5f)
-        d = 45;
-    else if (angle >= 67.5f && angle < 112.5f)
-        d = 90;  // vertical
+    // Round the angle to one of four possibilities: 0, 45, 90, 135 degrees
+    // then store it in the theta buffer at the proper position
+    //*direction = ((int)(degrees(angle * (PI/8) + PI/8-0.0001) / 45) * 45) % 180;
+    if(angle <= PI / 8)
+        *direction = 0;
+    else if(angle <= 3 * PI / 8)
+        *direction = 45;
+    else if(angle <= 5 * PI / 8)
+        *direction = 90;
+    else if(angle <= 7 * PI / 8)
+        *direction = 135;
+    else if(angle <= 9 * PI / 8)
+        *direction = 0;
+    else if(angle <= 11 * PI / 8)
+        *direction = 45;
+    else if(angle <= 13 * PI / 8)
+        *direction = 90;
+    else if(angle <= 15 * PI / 8)
+        *direction = 135;
     else
-        d = 135;
-
-    dir[idx] = d;
+        *direction = 0; // (angle <= 16*PI/8)
 }
 
-// ---------------------------------------------------------------------------
-// Kernel 4: Non-maximum suppression
-// ---------------------------------------------------------------------------
+// Sobel kernel. Apply sobx and soby separately, then find the sqrt of their
+//               squares.
+// data:  image input data with each pixel taking up 1 byte (8Bit 1Channel)
+// out:   image output data (8B1C)
+// theta: angle output data
+__global__ void sobel_kernel(unsigned char *data, unsigned char *out, unsigned char *theta,
+    int rows, int cols) {
 
-__global__ void nms_kernel(
-    const float* __restrict__ mag,
-    const int* __restrict__ dir,
-    float* __restrict__ nms_out,
-    int W, int H)
-{
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x >= W || y >= H) return;
+    extern __shared__ int l_mem[];
+    int* l_data = l_mem;
 
-    int idx = y * W + x;
-    float m = mag[idx];
-    int d = dir[idx];
+    // collect sums separately. we're storing them into floats because that
+    // is what hypot and atan2 will expect.
+    const int L_SIZE = blockDim.x;
+    const int   g_row = blockIdx.y * blockDim.y + threadIdx.y + 1;
+    const int   g_col = blockIdx.x * blockDim.x + threadIdx.x + 1;
+    const int   l_row = threadIdx.y + 1;
+    const int   l_col = threadIdx.x + 1;
 
-    float n1 = 0.0f, n2 = 0.0f;
-    if (d == 0) {
-        // Compare left/right
-        if (x > 0) n1 = mag[y * W + (x - 1)];
-        if (x < W - 1) n2 = mag[y * W + (x + 1)];
-    } else if (d == 90) {
-        // Compare up/down
-        if (y > 0) n1 = mag[(y - 1) * W + x];
-        if (y < H - 1) n2 = mag[(y + 1) * W + x];
-    } else if (d == 45) {
-        // Compare diagonal
-        if (x < W - 1 && y > 0) n1 = mag[(y - 1) * W + (x + 1)];
-        if (x > 0 && y < H - 1) n2 = mag[(y + 1) * W + (x - 1)];
-    } else { // 135
-        if (x > 0 && y > 0) n1 = mag[(y - 1) * W + (x - 1)];
-        if (x < W - 1 && y < H - 1) n2 = mag[(y + 1) * W + (x + 1)];
+    load_cedd_tile(data, l_data, rows, cols);
+    __syncthreads();
+    if (g_row >= rows-1 || g_col >= cols-1) return;
+    const int pos = g_row * cols + g_col;
+
+    float sumx = 0, sumy = 0;
+    // find x and y derivatives
+    for(int i = 0; i < 3; i++) {
+        for(int j = 0; j < 3; j++) {
+            sumx += sobx[i][j] * l_data[(i + l_row - 1) * (L_SIZE + 2) + j + l_col - 1];
+            sumy += soby[i][j] * l_data[(i + l_row - 1) * (L_SIZE + 2) + j + l_col - 1];
+        }
     }
 
-    nms_out[idx] = (m >= n1 && m >= n2) ? m : 0.0f;
+    cedd_gradient(sumx, sumy, out+pos, theta+pos);
 }
 
-// ---------------------------------------------------------------------------
-// Kernel 5: Hysteresis thresholding
-// ---------------------------------------------------------------------------
+// Non-maximum Supression Kernel
+// data: image input data with each pixel taking up 1 byte (8Bit 1Channel)
+// out: image output data (8B1C)
+// theta: angle input data
+__global__ void non_max_supp_kernel(unsigned char *data, unsigned char *out,
+    unsigned char *theta, int rows, int cols) {
 
-__global__ void hysteresis_kernel(
-    const float* __restrict__ nms,
-    unsigned char* __restrict__ edges,
-    int W, int H,
-    float low_thresh, float high_thresh)
-{
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x >= W || y >= H) return;
+    extern __shared__ int l_mem[];
+    int* l_data = l_mem;
 
-    int idx = y * W + x;
-    float val = nms[idx];
+    // These variables are offset by one to avoid seg. fault errors
+    // As such, this kernel ignores the outside ring of pixels
+    const int L_SIZE = blockDim.x;
+    const int g_row = blockIdx.y * blockDim.y + threadIdx.y + 1;
+    const int g_col = blockIdx.x * blockDim.x + threadIdx.x + 1;
+    const int l_row = threadIdx.y + 1;
+    const int l_col = threadIdx.x + 1;
 
-    if (val >= high_thresh) {
-        edges[idx] = 255;
-    } else if (val >= low_thresh) {
-        // Check if any 8-neighbor is a strong edge
-        unsigned char is_edge = 0;
-        for (int ky = -1; ky <= 1 && !is_edge; ++ky) {
-            for (int kx = -1; kx <= 1 && !is_edge; ++kx) {
-                if (kx == 0 && ky == 0) continue;
-                int nx = x + kx, ny = y + ky;
-                if (nx >= 0 && nx < W && ny >= 0 && ny < H) {
-                    if (nms[ny * W + nx] >= high_thresh) {
-                        is_edge = 255;
-                    }
-                }
-            }
+    load_cedd_tile(data, l_data, rows, cols);
+    __syncthreads();
+    if (g_row >= rows-1 || g_col >= cols-1) return;
+    const int pos = g_row * cols + g_col;
+
+    unsigned char my_magnitude = l_data[l_row * (L_SIZE + 2) + l_col];
+
+    // The following variables are used to address the matrices more easily
+    switch(theta[pos]) {
+    // A gradient angle of 0 degrees = an edge that is North/South
+    // Check neighbors to the East and West
+    case 0:
+        // supress me if my neighbor has larger magnitude
+        if(my_magnitude <= l_data[l_row * (L_SIZE + 2) + l_col + 1] || // east
+            my_magnitude <= l_data[l_row * (L_SIZE + 2) + l_col - 1]) // west
+        {
+            out[pos] = 0;
         }
-        edges[idx] = is_edge;
-    } else {
-        edges[idx] = 0;
-    }
-}
-
-// ---------------------------------------------------------------------------
-// CPU reference: simple Canny edge detection (for verification subset)
-// ---------------------------------------------------------------------------
-
-static void canny_cpu(const float* input, unsigned char* output, int W, int H,
-                      float low_thresh, float high_thresh) {
-    // Gaussian kernel
-    const float gauss[25] = {
-        2.f/159, 4.f/159,  5.f/159,  4.f/159, 2.f/159,
-        4.f/159, 9.f/159, 12.f/159,  9.f/159, 4.f/159,
-        5.f/159,12.f/159, 15.f/159, 12.f/159, 5.f/159,
-        4.f/159, 9.f/159, 12.f/159,  9.f/159, 4.f/159,
-        2.f/159, 4.f/159,  5.f/159,  4.f/159, 2.f/159
-    };
-
-    int npix = W * H;
-    std::vector<float> blurred(npix), gx(npix), gy(npix), mag(npix), nms(npix);
-    std::vector<int> dir(npix);
-
-    // Stage 1: Gaussian blur
-    for (int y = 0; y < H; ++y) {
-        for (int x = 0; x < W; ++x) {
-            float sum = 0.0f;
-            for (int ky = -2; ky <= 2; ++ky) {
-                for (int kx = -2; kx <= 2; ++kx) {
-                    int nx = std::min(std::max(x + kx, 0), W - 1);
-                    int ny = std::min(std::max(y + ky, 0), H - 1);
-                    sum += input[ny * W + nx] * gauss[(ky + 2) * 5 + (kx + 2)];
-                }
-            }
-            blurred[y * W + x] = sum;
+        // otherwise, copy my value to the output buffer
+        else {
+            out[pos] = my_magnitude;
         }
-    }
+        break;
 
-    // Stage 2: Sobel
-    const int sobel_x[3][3] = {{-1,0,1},{-2,0,2},{-1,0,1}};
-    const int sobel_y[3][3] = {{-1,-2,-1},{0,0,0},{1,2,1}};
-    for (int y = 0; y < H; ++y) {
-        for (int x = 0; x < W; ++x) {
-            float sx = 0.0f, sy = 0.0f;
-            for (int ky = -1; ky <= 1; ++ky) {
-                for (int kx = -1; kx <= 1; ++kx) {
-                    int nx = std::min(std::max(x + kx, 0), W - 1);
-                    int ny = std::min(std::max(y + ky, 0), H - 1);
-                    float val = blurred[ny * W + nx];
-                    sx += val * sobel_x[ky + 1][kx + 1];
-                    sy += val * sobel_y[ky + 1][kx + 1];
-                }
-            }
-            gx[y * W + x] = sx;
-            gy[y * W + x] = sy;
+    // A gradient angle of 45 degrees = an edge that is NW/SE
+    // Check neighbors to the NE and SW
+    case 45:
+        // supress me if my neighbor has larger magnitude
+        if(my_magnitude <= l_data[(l_row - 1) * (L_SIZE + 2) + l_col + 1] || // north east
+            my_magnitude <= l_data[(l_row + 1) * (L_SIZE + 2) + l_col - 1]) // south west
+        {
+            out[pos] = 0;
         }
-    }
+        // otherwise, copy my value to the output buffer
+        else {
+            out[pos] = my_magnitude;
+        }
+        break;
 
-    // Stage 3: Magnitude + direction
-    for (int y = 0; y < H; ++y) {
-        for (int x = 0; x < W; ++x) {
-            int idx = y * W + x;
-            float vx = gx[idx], vy = gy[idx];
-            mag[idx] = sqrtf(vx * vx + vy * vy);
-            float angle = atan2f(vy, vx) * (180.0f / 3.14159265f);
-            if (angle < 0) angle += 180.0f;
-            if ((angle >= 0 && angle < 22.5f) || (angle >= 157.5f && angle <= 180.0f))
-                dir[idx] = 0;
-            else if (angle >= 22.5f && angle < 67.5f)
-                dir[idx] = 45;
-            else if (angle >= 67.5f && angle < 112.5f)
-                dir[idx] = 90;
-            else
-                dir[idx] = 135;
+    // A gradient angle of 90 degrees = an edge that is E/W
+    // Check neighbors to the North and South
+    case 90:
+        // supress me if my neighbor has larger magnitude
+        if(my_magnitude <= l_data[(l_row - 1) * (L_SIZE + 2) + l_col] || // north
+            my_magnitude <= l_data[(l_row + 1) * (L_SIZE + 2) + l_col]) // south
+        {
+            out[pos] = 0;
         }
-    }
+        // otherwise, copy my value to the output buffer
+        else {
+            out[pos] = my_magnitude;
+        }
+        break;
 
-    // Stage 4: NMS
-    for (int y = 0; y < H; ++y) {
-        for (int x = 0; x < W; ++x) {
-            int idx = y * W + x;
-            float m = mag[idx];
-            int d = dir[idx];
-            float n1 = 0.0f, n2 = 0.0f;
-            if (d == 0) {
-                if (x > 0) n1 = mag[y * W + (x - 1)];
-                if (x < W - 1) n2 = mag[y * W + (x + 1)];
-            } else if (d == 90) {
-                if (y > 0) n1 = mag[(y - 1) * W + x];
-                if (y < H - 1) n2 = mag[(y + 1) * W + x];
-            } else if (d == 45) {
-                if (x < W - 1 && y > 0) n1 = mag[(y - 1) * W + (x + 1)];
-                if (x > 0 && y < H - 1) n2 = mag[(y + 1) * W + (x - 1)];
-            } else {
-                if (x > 0 && y > 0) n1 = mag[(y - 1) * W + (x - 1)];
-                if (x < W - 1 && y < H - 1) n2 = mag[(y + 1) * W + (x + 1)];
-            }
-            nms[idx] = (m >= n1 && m >= n2) ? m : 0.0f;
+    // A gradient angle of 135 degrees = an edge that is NE/SW
+    // Check neighbors to the NW and SE
+    case 135:
+        // supress me if my neighbor has larger magnitude
+        if(my_magnitude <= l_data[(l_row - 1) * (L_SIZE + 2) + l_col - 1] || // north west
+            my_magnitude <= l_data[(l_row + 1) * (L_SIZE + 2) + l_col + 1]) // south east
+        {
+            out[pos] = 0;
         }
-    }
+        // otherwise, copy my value to the output buffer
+        else {
+            out[pos] = my_magnitude;
+        }
+        break;
 
-    // Stage 5: Hysteresis
-    for (int y = 0; y < H; ++y) {
-        for (int x = 0; x < W; ++x) {
-            int idx = y * W + x;
-            float val = nms[idx];
-            if (val >= high_thresh) {
-                output[idx] = 255;
-            } else if (val >= low_thresh) {
-                unsigned char is_edge = 0;
-                for (int ky = -1; ky <= 1 && !is_edge; ++ky) {
-                    for (int kx = -1; kx <= 1 && !is_edge; ++kx) {
-                        if (kx == 0 && ky == 0) continue;
-                        int nx = x + kx, ny = y + ky;
-                        if (nx >= 0 && nx < W && ny >= 0 && ny < H) {
-                            if (nms[ny * W + nx] >= high_thresh) {
-                                is_edge = 255;
-                            }
-                        }
-                    }
-                }
-                output[idx] = is_edge;
-            } else {
-                output[idx] = 0;
-            }
-        }
+    default: out[pos] = my_magnitude; break;
     }
 }
 
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
+// Hysteresis Threshold Kernel
+// data: image input data with each pixel taking up 1 byte (8Bit 1Channel)
+// out: image output data (8B1C)
+__global__ void hyst_kernel(unsigned char *data, unsigned char *out, int rows, int cols) {
+    // Establish our high and low thresholds as floats
+    float lowThresh  = 10;
+    float highThresh = 70;
 
-int main(int argc, char** argv) {
-    setvbuf(stdout, NULL, _IONBF, 0);
+    // These variables are offset by one to avoid seg. fault errors
+    // As such, this kernel ignores the outside ring of pixels
+    const int row = blockIdx.y * blockDim.y + threadIdx.y + 1;
+    const int col = blockIdx.x * blockDim.x + threadIdx.x + 1;
+    if (row >= rows-1 || col >= cols-1) return;
+    const int pos = row * cols + col;
 
-    // Defaults from params.json
-    int width          = 2048;
-    int height         = 2048;
-    int threshold_low  = 50;
-    int threshold_high = 150;
+    const unsigned char EDGE = 255;
 
-    // Command-line fallback
-    width  = parseIntParam(argc, argv, "W=", width);
-    height = parseIntParam(argc, argv, "H=", height);
+    unsigned char magnitude = data[pos];
 
-    // Environment variable overrides
-    const char* env_val;
-    env_val = getenv("BENCH_PARAM_width");
-    if (env_val) width = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_height");
-    if (env_val) height = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_threshold_low");
-    if (env_val) threshold_low = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_threshold_high");
-    if (env_val) threshold_high = atoi(env_val);
+    if(magnitude >= highThresh)
+        out[pos] = EDGE;
+    else if(magnitude <= lowThresh)
+        out[pos] = 0;
+    else {
+        float med = (highThresh + lowThresh) / 2;
 
-    int W = width;
-    int H = height;
-    int npix = W * H;
-
-    // Print device info
-    int device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    hipDeviceProp_t prop;
-    HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
-    fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Canny Edge Detection  |  Image: %dx%d\n\n", W, H);
-
-    // Generate synthetic grayscale image
-    std::vector<float> h_input(npix);
-    srand(42);
-    for (int i = 0; i < npix; ++i) {
-        h_input[i] = (float)(rand() % 256);
+        if(magnitude >= med)
+            out[pos] = EDGE;
+        else
+            out[pos] = 0;
     }
+}
 
-    // Allocate device memory
-    float *d_input, *d_blurred, *d_gx, *d_gy, *d_mag, *d_nms;
-    int *d_dir;
-    unsigned char *d_edges;
 
-    HIP_CHECK(hipMalloc(&d_input,   npix * sizeof(float)));
-    HIP_CHECK(hipMalloc(&d_blurred, npix * sizeof(float)));
-    HIP_CHECK(hipMalloc(&d_gx,      npix * sizeof(float)));
-    HIP_CHECK(hipMalloc(&d_gy,      npix * sizeof(float)));
-    HIP_CHECK(hipMalloc(&d_mag,     npix * sizeof(float)));
-    HIP_CHECK(hipMalloc(&d_dir,     npix * sizeof(int)));
-    HIP_CHECK(hipMalloc(&d_nms,     npix * sizeof(float)));
-    HIP_CHECK(hipMalloc(&d_edges,   npix * sizeof(unsigned char)));
+struct CeddLaps { bench_lap_t gaussian, sobel, nms, hysteresis; };
 
-    HIP_CHECK(hipMemcpy(d_input, h_input.data(), npix * sizeof(float), hipMemcpyHostToDevice));
-
-    dim3 blockDim(16, 16);
-    dim3 gridDim((W + 15) / 16, (H + 15) / 16);
-
-    float low_t = (float)threshold_low, high_t = (float)threshold_high;
-
-    char params[192];
-    snprintf(params, sizeof(params),
-             "\"width\":%d,\"height\":%d,\"threshold_low\":%d,\"threshold_high\":%d",
-             width, height, threshold_low, threshold_high);
-
-    // Per-kernel accumulators: each pass launches every pipeline kernel once;
-    // the measured GPU/host time of each launch becomes that pass's record
-    // for the kernel.
+// Input A contains the image; B and theta have zero borders before entry.
+// Each interior is overwritten by its defining stage, without intervening resets.
+static CeddLaps run_cedd_pass(unsigned char* a, unsigned char* b,
+                              unsigned char* theta, int width, int height) {
+    dim3 block(16,16), grid((width-2+15)/16,(height-2+15)/16);
+    const size_t shared_bytes=18*18*sizeof(int);
     bench_timer_t timer;
     bench_timer_create(&timer);
-    bench_lap_t acc_gauss, acc_sobel, acc_magdir, acc_nms, acc_hyst;
-
-    // One full 5-stage CEDD pass. The pipeline is feed-forward: d_input is
-    // never written and every intermediate buffer is fully overwritten each
-    // pass, so no state reset is needed between passes.
-    auto run_cedd_pass = [&]() {
-        bench_lap_reset(&acc_gauss);
-        bench_lap_reset(&acc_sobel);
-        bench_lap_reset(&acc_magdir);
-        bench_lap_reset(&acc_nms);
-        bench_lap_reset(&acc_hyst);
-
-        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
-         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
-         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
-        bench_pass_warm();
-
-        bench_lap_add(&acc_gauss, bench_time_op(&timer, [&]() {
-            gaussian_blur_kernel<<<gridDim, blockDim>>>(d_input, d_blurred, W, H);
-        }));
-        bench_lap_add(&acc_sobel, bench_time_op(&timer, [&]() {
-            sobel_kernel<<<gridDim, blockDim>>>(d_blurred, d_gx, d_gy, W, H);
-        }));
-        bench_lap_add(&acc_magdir, bench_time_op(&timer, [&]() {
-            magnitude_direction_kernel<<<gridDim, blockDim>>>(d_gx, d_gy, d_mag, d_dir, W, H);
-        }));
-        bench_lap_add(&acc_nms, bench_time_op(&timer, [&]() {
-            nms_kernel<<<gridDim, blockDim>>>(d_mag, d_dir, d_nms, W, H);
-        }));
-        bench_lap_add(&acc_hyst, bench_time_op(&timer, [&]() {
-            hysteresis_kernel<<<gridDim, blockDim>>>(d_nms, d_edges, W, H, low_t, high_t);
-        }));
-    };
-
-    double total_gpu_ms = 0.0;
-    run_cedd_pass();
-    bench_emit_iter("gaussian_blur_kernel",       0, &acc_gauss,  params);
-    bench_emit_iter("sobel_kernel",               0, &acc_sobel,  params);
-    bench_emit_iter("magnitude_direction_kernel", 0, &acc_magdir, params);
-    bench_emit_iter("nms_kernel",                 0, &acc_nms,    params);
-    bench_emit_iter("hysteresis_kernel",          0, &acc_hyst,   params);
-    total_gpu_ms += acc_gauss.gpu_ms + acc_sobel.gpu_ms + acc_magdir.gpu_ms +
-                    acc_nms.gpu_ms + acc_hyst.gpu_ms;
-    fprintf(stderr, "gauss=%.3f sobel=%.3f magdir=%.3f nms=%.3f hyst=%.3f ms\n",
-            acc_gauss.gpu_ms, acc_sobel.gpu_ms, acc_magdir.gpu_ms,
-            acc_nms.gpu_ms, acc_hyst.gpu_ms);
-
+    bench_pass_warm();
+    CeddLaps laps;
+    laps.gaussian=bench_time_op(&timer,[&]() {
+        gaussian_kernel<<<grid,block,shared_bytes>>>(a,b,height,width);
+    });
+    laps.sobel=bench_time_op(&timer,[&]() {
+        sobel_kernel<<<grid,block,shared_bytes>>>(b,a,theta,height,width);
+    });
+    laps.nms=bench_time_op(&timer,[&]() {
+        non_max_supp_kernel<<<grid,block,shared_bytes>>>(a,b,theta,height,width);
+    });
+    laps.hysteresis=bench_time_op(&timer,[&]() {
+        hyst_kernel<<<grid,block>>>(b,a,height,width);
+    });
     bench_timer_destroy(&timer);
-    bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
+    return laps;
+}
 
-    bool verify_ok = true;
-    // -------------------------------------------------------------------
-    // Verification: compare a small sub-region with CPU reference
-    // -------------------------------------------------------------------
-    {
-        // Verify a 128x128 sub-region at top-left
-        int vW = (W < 128) ? W : 128;
-        int vH = (H < 128) ? H : 128;
-
-        // Build the sub-region input
-        std::vector<float> sub_input(vW * vH);
-        for (int y = 0; y < vH; ++y) {
-            for (int x = 0; x < vW; ++x) {
-                sub_input[y * vW + x] = h_input[y * W + x];
-            }
-        }
-
-        std::vector<unsigned char> cpu_edges(vW * vH);
-        canny_cpu(sub_input.data(), cpu_edges.data(), vW, vH, low_t, high_t);
-
-        // Get GPU results for the same sub-region
-        std::vector<unsigned char> h_edges(npix);
-        HIP_CHECK(hipMemcpy(h_edges.data(), d_edges, npix * sizeof(unsigned char),
-                             hipMemcpyDeviceToHost));
-
-        // Note: GPU processes full image so border effects at (128,128) differ
-        // from CPU processing only the sub-image. Compare interior only,
-        // skipping a 6px border: the pipeline's influence radius is ~5px
-        // (gaussian 2 + sobel 1 + nms 1 + hysteresis 1), so pixels closer to
-        // the sub-region border can legitimately differ.
-        int errors = 0;
-        int compared = 0;
-        for (int y = 6; y < vH - 6; ++y) {
-            for (int x = 6; x < vW - 6; ++x) {
-                unsigned char gpu_val = h_edges[y * W + x];
-                unsigned char cpu_val = cpu_edges[y * vW + x];
-                if (gpu_val != cpu_val) {
-                    errors++;
-                }
-                compared++;
-            }
-        }
-
-        float error_rate = compared > 0 ? (float)errors / compared * 100.0f : 0.0f;
-        if (error_rate < 1.0f) {
-            fprintf(stderr, "PASS (%.1f%% pixel mismatch in %dx%d interior, %d/%d)\n",
-                    error_rate, vW - 12, vH - 12, errors, compared);
-        } else {
-            fprintf(stderr, "FAIL (%.1f%% pixel mismatch in %dx%d interior, %d/%d)\n",
-                    error_rate, vW - 12, vH - 12, errors, compared);
-            verify_ok = false;
-        }
+// Independent integer/double CPU evaluation, with the same defined boundaries.
+// Gaussian truncates EACH positive term because upstream uses an int accumulator.
+static std::vector<unsigned char> reference_cedd(const std::vector<unsigned char>& input,
+                                                int width, int height) {
+    std::vector<unsigned char> a=input, b(input.size(),0), theta(input.size(),0);
+    const int weights[3][3]={{1,2,1},{2,4,2},{1,2,1}};
+    for (int y=1;y<height-1;++y) for (int x=1;x<width-1;++x) {
+        int sum=0;
+        for (int dy=-1;dy<=1;++dy) for (int dx=-1;dx<=1;++dx)
+            sum += (weights[dy+1][dx+1]*input[(size_t)(y+dy)*width+x+dx])/16;
+        b[(size_t)y*width+x]=(unsigned char)sum;
     }
+    for (int y=1;y<height-1;++y) for (int x=1;x<width-1;++x) {
+        size_t p=(size_t)y*width+x;
+        int gx=b[p-width+1]+2*b[p+1]+b[p+width+1]
+              -b[p-width-1]-2*b[p-1]-b[p+width-1];
+        int gy=b[p+width-1]+2*b[p+width]+b[p+width+1]
+              -b[p-width-1]-2*b[p-width]-b[p-width+1];
+        a[p]=(unsigned char)std::min(255,(int)std::sqrt((double)gx*gx+(double)gy*gy));
+        // Integer gradients never sit on the irrational 22.5/67.5-degree ties.
+        const double tangent=std::sqrt(2.0)-1.0;
+        if (std::abs(gy)<=std::abs(gx)*tangent) theta[p]=0;
+        else if (std::abs(gx)<=std::abs(gy)*tangent) theta[p]=90;
+        else theta[p]=((gx<0)==(gy<0))?45:135;
+    }
+    for (int y=1;y<height-1;++y) for (int x=1;x<width-1;++x) {
+        size_t p=(size_t)y*width+x;
+        int offset=theta[p]==0?1:theta[p]==45?width-1:theta[p]==90?width:width+1;
+        b[p]=(a[p]>a[p-offset] && a[p]>a[p+offset])?a[p]:0;
+    }
+    for (int y=1;y<height-1;++y) for (int x=1;x<width-1;++x) {
+        size_t p=(size_t)y*width+x;
+        // Pinned low=10/high=70 branches reduce to this per-pixel midpoint.
+        a[p]=b[p]>=40?255:0;
+    }
+    return a;
+}
 
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_blurred));
-    HIP_CHECK(hipFree(d_gx));
-    HIP_CHECK(hipFree(d_gy));
-    HIP_CHECK(hipFree(d_mag));
-    HIP_CHECK(hipFree(d_dir));
-    HIP_CHECK(hipFree(d_nms));
-    HIP_CHECK(hipFree(d_edges));
+static bool verify_cedd(const std::vector<unsigned char>& input,
+                        const std::vector<unsigned char>& actual, int width, int height) {
+    std::vector<unsigned char> expected=reference_cedd(input,width,height);
+    if (actual.size()!=expected.size()) {
+        fprintf(stderr,"FAIL: incomplete measured CEDD output\n"); return false;
+    }
+    for (size_t i=0;i<expected.size();++i) if (actual[i]!=expected[i]) {
+        fprintf(stderr,"FAIL: measured CEDD pixel[%zu]: got %u expected %u\n",
+                i,(unsigned)actual[i],(unsigned)expected[i]); return false;
+    }
+    fprintf(stderr,"PASS: verified all %zu measured pixels exactly (full_cpu_byte_v1)\n",actual.size());
+    return true;
+}
 
-    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
+static bool read_dimension(const char* name,const char* text,int* value) {
+    errno=0;
+    char* end=nullptr;
+    long parsed=strtol(text,&end,10);
+    if (errno || end==text || *end || parsed<3 || parsed>INT_MAX) {
+        fprintf(stderr,"Invalid %s: %s (requires integer >=3)\n",name,text); return false;
+    }
+    *value=(int)parsed; return true;
+}
+
+int main(int argc,char** argv) {
+    setvbuf(stdout,nullptr,_IONBF,0);
+    int width=2048,height=2048;
+    if (getenv("BENCH_PARAM_threshold_low") || getenv("BENCH_PARAM_threshold_high")) {
+        fprintf(stderr,"Chai CEDD has fixed thresholds 10/70; threshold overrides are unsupported\n"); return 1;
+    }
+    // Retain W=/H= command-line inputs and environment precedence.
+    for (int i=1;i<argc;++i) {
+        if (!strncmp(argv[i],"W=",2)) { if (!read_dimension("width",argv[i]+2,&width)) return 1; }
+        else if (!strncmp(argv[i],"H=",2)) { if (!read_dimension("height",argv[i]+2,&height)) return 1; }
+        else { fprintf(stderr,"Unknown argument: %s; use W= and H= only\n",argv[i]); return 1; }
+    }
+    const char* text=getenv("BENCH_PARAM_width");
+    if (text && !read_dimension("width",text,&width)) return 1;
+    text=getenv("BENCH_PARAM_height");
+    if (text && !read_dimension("height",text,&height)) return 1;
+    if (width>INT_MAX/height) { fprintf(stderr,"width*height exceeds signed kernel indexing\n"); return 1; }
+    const size_t pixels=(size_t)width*height;
+    int device=0;
+    HIP_CHECK(hipGetDevice(&device));
+    hipDeviceProp_t prop;
+    HIP_CHECK(hipGetDeviceProperties(&prop,device));
+    fprintf(stderr,"Device: %s (id=%d), Chai CEDD %dx%d\n",prop.name,device,width,height);
+    std::vector<unsigned char> input(pixels), output(pixels);
+    srand(42);
+    for (size_t i=0;i<pixels;++i) input[i]=(unsigned char)(rand()%256);
+    unsigned char *d_a,*d_b,*d_theta;
+    HIP_CHECK(hipMalloc(&d_a,pixels));
+    HIP_CHECK(hipMalloc(&d_b,pixels));
+    HIP_CHECK(hipMalloc(&d_theta,pixels));
+    HIP_CHECK(hipMemcpy(d_a,input.data(),pixels,hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemset(d_b,0,pixels));
+    HIP_CHECK(hipMemset(d_theta,0,pixels));
+    CeddLaps laps=run_cedd_pass(d_a,d_b,d_theta,width,height);
+    char params[320];
+    snprintf(params,sizeof(params),"\"width\":%d,\"height\":%d,\"operator\":\"chai_61db988\",\"boundary\":\"input_a_zero_scratch_v1\",\"input_generator\":\"libc_rand42_mod256\",\"verification\":\"full_cpu_byte_v1\"",width,height);
+    bench_emit_iter("gaussian_kernel",0,&laps.gaussian,params);
+    bench_emit_iter("sobel_kernel",0,&laps.sobel,params);
+    bench_emit_iter("non_max_supp_kernel",0,&laps.nms,params);
+    bench_emit_iter("hyst_kernel",0,&laps.hysteresis,params);
+    bench_emit_summary(laps.gaussian.gpu_ms+laps.sobel.gpu_ms+laps.nms.gpu_ms+laps.hysteresis.gpu_ms);
+    HIP_CHECK(hipMemcpy(output.data(),d_a,pixels,hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(d_a));
+    HIP_CHECK(hipFree(d_b));
+    HIP_CHECK(hipFree(d_theta));
+    return verify_cedd(input,output,width,height)?EXIT_SUCCESS:EXIT_FAILURE;
 }

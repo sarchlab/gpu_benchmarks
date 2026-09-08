@@ -345,7 +345,7 @@ The metric column names downstream quantities. See [measurement interpretation](
 | Graph Analytics | `graph_tc` | Triangle Counting (sorted adjacency intersection) |
 | Graph Analytics | `graph_cc` | Connected Components (label propagation) |
 | Chai | `chai_hsto` | Histogram (shared memory privatization) |
-| Chai | `chai_cedd` | Canny Edge Detection (5-stage pipeline) |
+| Chai | `chai_cedd` | Chai CEDD (four-stage byte pipeline) |
 
 ---
 

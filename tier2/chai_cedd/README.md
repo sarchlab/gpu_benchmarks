@@ -1,84 +1,99 @@
-# tier2/chai_cedd — Canny Edge Detection (Chai)
+# Chai CEDD
 
-Benchmarks Canny Edge Detection (CEDD) on the GPU using a 5-stage pipeline. Processes a synthetic grayscale image exactly once per execution and reports per-kernel GPU times; throughput (Mpixels/sec) is derived downstream.
+One frame of the four-stage byte-valued CEDD workload from
+[Chai CUDA-D/CEDD, commit 61db988](https://github.com/chai-benchmarks/chai/tree/61db988662cb993fa108429a13759dbdc83ab9be/CUDA-D/CEDD).
+The [GPU](https://github.com/chai-benchmarks/chai/blob/61db988662cb993fa108429a13759dbdc83ab9be/CUDA-D/CEDD/kernel.cu)
+and [CPU](https://github.com/chai-benchmarks/chai/blob/61db988662cb993fa108429a13759dbdc83ab9be/CUDA-D/CEDD/kernel.cpp)
+sources agree on the operations below. The port retains their arithmetic and
+16×16 shared-memory tiles, with bounded cooperative halo loading for partial
+tiles. The upstream copyright and license are retained in the source and
+[UPSTREAM_LICENSE](UPSTREAM_LICENSE).
 
-Derived from the [Chai benchmark suite](https://github.com/chai-benchmarks/chai) CEDD workload.
+## Operator and boundaries
 
-## Algorithm
+All images, intermediate magnitudes and directions use unsigned bytes. One
+process executes these four kernels once, in this order:
 
-- **Input**: W×H grayscale image (default: 2048×2048, synthetic random)
-- 5 GPU kernels launched sequentially:
-  1. **Gaussian Blur** — 5×5 Gaussian smoothing to reduce noise
-  2. **Sobel Gradient** — compute horizontal (Gx) and vertical (Gy) gradients
-  3. **Magnitude + Direction** — compute gradient magnitude and quantize direction to 0°/45°/90°/135°
-  4. **Non-Maximum Suppression** — thin edges by suppressing non-local-maxima along gradient direction
-  5. **Hysteresis Thresholding** — double-threshold edge classification (defaults: low=50, high=150). This is a **single-pass approximation**: a weak pixel (between the thresholds) is promoted only if one of its 8 neighbors is already a strong pixel — there is no iterative propagation of edge connectivity as in full Canny
-- Mpixels/sec = W × H / time\_sec / 10⁶ (derived downstream from the recorded times)
+1. `gaussian_kernel`: 3×3 weights `{{1,2,1},{2,4,2},{1,2,1}}/16`.
+   The upstream accumulator is an **integer**: each weighted term is truncated
+   when added. Computing a float sum and rounding once gives a different result.
+2. `sobel_kernel`: integer Sobel weights accumulated into floats; `hypot`
+   magnitude truncated to an integer and clamped to 255; `atan2` direction
+   quantized to 0°, 45°, 90° or 135° using the pinned inclusive angular bounds.
+3. `non_max_supp_kernel`: keep the magnitude only when it is **strictly greater**
+   than both directional neighbors; ties are suppressed.
+4. `hyst_kernel`: pinned low=10/high=70 branches, with their midpoint=40 for
+   intermediate magnitudes. This is independent per-pixel thresholding,
+   equivalent to output 255 when magnitude≥40 and zero otherwise. It does not
+   propagate edge connectivity or inspect neighboring strong edges.
 
-## Files
+The buffers follow the original dependency chain `A → B → A → B → A`.
+Each stage writes only the interior. A starts with the input image, so its
+outer ring retains those input bytes, including in the final output. B and the
+angle buffer start at zero. This explicitly defines upstream's uninitialized
+scratch border, which can affect pixels near the image edge. Comparisons with
+upstream must initialize the same borders; undefined upstream bytes are not a
+reference result. Original GPU wrappers floor the tile count and omit partial
+tiles; this port covers every interior pixel with bounds-checked halo loads and
+output guards after the shared-memory barrier.
 
-| File | Description |
-|------|-------------|
-| `chai_cedd.hip` | HIP source — 5 CEDD kernels, CPU reference, verification |
-| `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
+The original driver handles a collection of image frames across CPU/GPU workers.
+This benchmark's unit of work is one GPU frame with deterministic synthetic
+values from the existing `srand(42); rand()%256` sequence. These values are now
+stored directly as bytes, rather than their previous exact float representation.
+This is not the upstream image dataset. Libc RNG sequences still require input
+provenance checks for comparisons across systems.
 
-## Build
+## Build and run
 
 ```bash
-make               # auto-detect platform
-make PLATFORM=cuda
-make PLATFORM=rocm
+make PLATFORM=cuda           # or PLATFORM=rocm
+./chai_cedd                   # 2048×2048
+./chai_cedd W=4096 H=1024
+make PLATFORM=cuda test      # GPU stage, guard and production-pass tests
 ```
 
-## Run
+| Control | Default | Meaning |
+|---|---|---|
+| `W=` / `BENCH_PARAM_width` | 2048 | Width; environment takes precedence |
+| `H=` / `BENCH_PARAM_height` | 2048 | Height; environment takes precedence |
+| `BENCH_PARAM_vector_add_warmup` | true | Shared entry warmer; false leaves the incoming state as-is |
 
-```bash
-./chai_cedd                       # defaults: W=2048, H=2048
-./chai_cedd W=1024 H=1024         # smaller image
-./chai_cedd W=4096 H=4096         # larger image
-```
+Both dimensions must be integers ≥3 and their product must fit signed kernel
+indexing. The manifest preserves 22 widths (64…16384) and four heights
+(512, 1024, 2048, 4096): **88 configurations**, or **616 processes** at seven
+repetitions under the runner's standard warmer policy. The previous low/high
+threshold sweep is removed because the pinned operator fixes these constants.
+Any old threshold environment variable or command-line override is rejected;
+it cannot silently label a different workload. Other unknown arguments also fail.
 
-### Environment variables
+This replaces the previous five-stage float pipeline, 5×5 Gaussian, non-strict
+suppression and one-hop threshold rule. Old measurements are not comparable
+and must be recollected. Fixed `operator`, `boundary`, `input_generator` and
+`verification` tags are emitted in each kernel's `params` alongside width/height.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BENCH_PARAM_width` | 2048 | Image width |
-| `BENCH_PARAM_height` | 2048 | Image height |
-| `BENCH_PARAM_threshold_low` | 50 | Low hysteresis threshold |
-| `BENCH_PARAM_threshold_high` | 150 | High hysteresis threshold |
-| `BENCH_PARAM_vector_add_warmup` | true | Cold-cache calibration: boost the clock and evict the LLC before the timed pipeline; set `false` to time as-is |
+## Timing and verification
 
-## Output
+Upload A and zero scratch buffers before the single entry warmer. Each of the
+four stages has one GPU-event interval and one host launch interval. No resets,
+transfers, warmers or verification work intervene between stages. Standard output
+contains four kernel JSON records and one summary whose GPU time is their sum.
+Downstream Mpixels/s uses width×height divided by that sum; the active interior
+of each stage is `(width−2)×(height−2)` pixels.
 
-**stdout** — JSON lines: for the single timed pipeline run, one `{"type":"kernel",...}` record per pipeline kernel with `time_ms` (GPU event time) and `host_time_ms` (host wall-clock), then a summary whose `total_time_ms` is the sum of all recorded GPU event times:
-```
-{"type":"kernel","name":"gaussian_blur_kernel","iter":0,"time_ms":1.0241,"host_time_ms":1.0555,"params":{"width":2048,...}}
-...
-{"type":"summary","total_time_ms":3.0960}
-```
+After timing, copy the actual final A to the host and compare **every byte**,
+including the input-valued border, with an independent integer/double CPU
+pipeline. The reference evaluates Gaussian term truncation with integer division,
+Sobel with integer differences and double magnitude/direction classification,
+and the final threshold with its equivalent midpoint predicate. There is no
+mismatch quota or floating tolerance on the byte output. A mismatch prints its
+index, returns nonzero and makes the runner reject the measurement. The fixed
+policy is `full_cpu_byte_v1`. No separate GPU verification pipeline is launched.
 
-Derived metrics (Mpixels/sec) are computed downstream from `time_ms` and the params.
-
-**stderr** — human-readable results:
-```
-Device: AMD Radeon RX 7900 XTX (id=0)
-Canny Edge Detection  |  Image: 2048x2048
-
-gauss=1.024 sobel=0.512 magdir=0.480 nms=0.470 hyst=0.610 ms
-Total GPU time: 3.096 ms
-PASS (0.3% pixel mismatch in 116x116 interior, 39/13456)
-```
-
-## Verification
-
-- A 128×128 sub-region is processed on both GPU and CPU, using the same
-  low/high hysteresis thresholds as the GPU run
-- Interior pixels (excluding a 6-pixel border, covering the pipeline's
-  ~5-pixel influence radius) are compared
-- Reports PASS if mismatch rate < 1%, FAIL otherwise (float rounding can
-  still flip pixels sitting exactly at a threshold)
-- A FAIL makes the benchmark exit non-zero (after all JSON output is emitted)
-
-## Platform Notes
-
-- **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `chai_cedd.hip`; Gaussian kernel in `__constant__` memory; 16×16 thread blocks
+Verification adds O(width×height) CPU work outside the reported intervals.
+Device buffers total three bytes per pixel; host input/output total two bytes
+per pixel, and the CPU reference adds three more while active. At 16384×4096,
+these are 192 MiB device and 320 MiB peak host array storage, plus the shared
+warmer's independent memory requirement and runtime overhead. Capacity and
+process-time budgets must be qualified for the target. AMD output, instruction
+and performance qualification remains required before collecting AMD results.

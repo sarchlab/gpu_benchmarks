@@ -9,6 +9,22 @@ import subprocess
 import time
 
 
+def run_case(binary, cli, env, label):
+    start = time.monotonic()
+    try:
+        p = subprocess.run([str(binary), *cli], env=env, capture_output=True,
+                           text=True, timeout=60)
+        result = dict(exit=p.returncode, stdout=p.stdout, stderr=p.stderr, timed_out=False)
+    except subprocess.TimeoutExpired as exc:
+        # TimeoutExpired may carry bytes even when subprocess.run uses text=True.
+        def decoded(output):
+            return output.decode(errors="replace") if isinstance(output, bytes) else (output or "")
+
+        result = dict(exit=None, stdout=decoded(exc.stdout), stderr=decoded(exc.stderr), timed_out=True)
+    result.update(label=label, seconds=time.monotonic()-start)
+    return result
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--binary",type=Path,required=True)
@@ -29,12 +45,10 @@ def main():
     for label,cli,n,t in cases:
         env = dict(clean,BENCH_PARAM_image_size=str(n),BENCH_PARAM_num_iterations=str(t),
                    BENCH_PARAM_vector_add_warmup="false")
-        start = time.monotonic()
-        p = subprocess.run([str(binary),*cli],env=env,capture_output=True,text=True,timeout=60)
+        result = run_case(binary,cli,env,label)
         expected = f"Invalid SRAD parameters: image_size={n} num_iterations={t}; both must be positive\n"
-        passed = p.returncode==1 and p.stdout=="" and p.stderr==expected
-        results.append(dict(label=label,passed=passed,exit=p.returncode,seconds=time.monotonic()-start,
-                            stdout=p.stdout,stderr=p.stderr))
+        result["passed"] = result["exit"]==1 and result["stdout"]=="" and result["stderr"]==expected
+        results.append(result)
     if args.gpu_controls:
         controls = [
             ("default",[],{},512,100),
@@ -52,13 +66,11 @@ def main():
             env = dict(clean)
             if label!="default":env["BENCH_PARAM_vector_add_warmup"]="false"
             env.update({"BENCH_PARAM_"+k:v for k,v in params.items()})
-            start = time.monotonic()
-            p = subprocess.run([str(binary),*cli],env=env,capture_output=True,text=True,timeout=60)
-            elapsed = time.monotonic()-start
-            passed = p.returncode==0 and elapsed<60
-            passed &= f"SRAD verification: PASS ({6*n*n} values, {7*n*n} comparisons, 0 mismatches)" in p.stderr
+            result = run_case(binary,cli,env,label)
+            passed = result["exit"]==0 and result["seconds"]<60
+            passed &= f"SRAD verification: PASS ({6*n*n} values, {7*n*n} comparisons, 0 mismatches)" in result["stderr"]
             try:
-                first,second,summary = [json.loads(line) for line in p.stdout.splitlines()]
+                first,second,summary = [json.loads(line) for line in result["stdout"].splitlines()]
                 for kernel,name in zip((first,second),("srad_cuda_1","srad_cuda_2")):
                     passed &= kernel["type"]=="kernel" and kernel["name"]==name and kernel["iter"]==0
                     passed &= kernel["params"]=={"image_size":n,"num_iterations":t,"block_size":16,
@@ -67,12 +79,14 @@ def main():
                 passed &= summary["type"]=="summary" and abs(summary["total_time_ms"]-first["time_ms"]-second["time_ms"])<.000004
             except (ValueError,KeyError,TypeError):
                 passed = False
-            results.append(dict(label=label,passed=bool(passed),exit=p.returncode,seconds=elapsed,
-                                stdout=p.stdout,stderr=p.stderr))
+            result["passed"] = bool(passed)
+            results.append(result)
     report = dict(total=len(results),passed=sum(r["passed"] for r in results),gpu_controls=args.gpu_controls,results=results)
     if args.report:args.report.write_text(json.dumps(report,indent=2)+"\n")
     for result in results:
-        if not result["passed"]:print("FAIL",result["label"],repr(result["stdout"]),repr(result["stderr"]))
+        if not result["passed"]:
+            print("FAIL",result["label"],"(timeout after 60s)" if result["timed_out"] else "",
+                  repr(result["stdout"]),repr(result["stderr"]))
     print(f"{report['passed']}/{report['total']} SRAD parameter cases passed")
     return 0 if report["passed"]==report["total"] else 1
 

@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include "cpu_reference.h"
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -131,7 +132,7 @@ int main(int argc, char** argv) {
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"size\":%d", N);
+             "\"size\":%d,\"verification\":\"full_cpu_v1\"", N);
 
     // Single timed launch (optionally preceded by the vector-add warmer).
     // The kernel rewrites C in place (beta*C term), but it runs only once
@@ -145,6 +146,22 @@ int main(int argc, char** argv) {
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
+    // Check the complete measured C after timing, without another GPU pass.
+    const auto reference = cpu_gemm(h_A, h_B, h_C, N, N, N, alpha, beta);
+    // The reference has consumed initial C, so its buffer can hold the result.
+    HIP_CHECK(hipMemcpy(h_C, d_C, bytes, hipMemcpyDeviceToHost));
+    size_t mismatches = 0;
+    for (size_t i = 0; i < reference.size(); ++i) {
+        if (!gemm_value_matches(h_C[i], reference[i])) {
+            if (mismatches < 10)
+                fprintf(stderr, "MISMATCH C[%zu]: GPU=%.9g CPU=%.17g\n",
+                        i, h_C[i], reference[i]);
+            ++mismatches;
+        }
+    }
+    fprintf(stderr, "GEMM verification: %s (%zu values, %zu mismatches)\n",
+            mismatches ? "FAIL" : "PASS", reference.size(), mismatches);
+
     // Cleanup
     HIP_CHECK(hipFree(d_A));
     HIP_CHECK(hipFree(d_B));
@@ -153,5 +170,5 @@ int main(int argc, char** argv) {
     free(h_B);
     free(h_C);
 
-    return 0;
+    return mismatches ? EXIT_FAILURE : EXIT_SUCCESS;
 }

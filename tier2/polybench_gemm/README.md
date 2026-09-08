@@ -54,7 +54,7 @@ once per execution; repetition is the harness's job (`gpubench run --reps N`).
 the GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`),
 then a summary whose `total_time_ms` equals that GPU event time:
 ```
-{"type":"kernel","name":"polybench_gemm_kernel","iter":0,"time_ms":0.245600,"host_time_ms":0.301200,"params":{"size":1024}}
+{"type":"kernel","name":"polybench_gemm_kernel","iter":0,"time_ms":0.245600,"host_time_ms":0.301200,"params":{"size":1024,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":0.245600}
 ```
 
@@ -80,3 +80,38 @@ Total GPU time: 0.246 ms
 | Default N | 512 | 1024 |
 | alpha | 1.0 | 1.5 |
 | beta | 0.0 | 1.2 |
+
+## Measured-result verification
+
+Every run checks every element of the actual measured `C` against a complete
+independent double-precision `alpha*A*B + beta*C_initial` CPU reference. The
+original input arrays and the nonzero initial-C contribution are preserved.
+Checking happens after timing, with one complete result download that reuses
+the consumed host C buffer. No separate GPU verification pass is launched.
+
+A value passes only when actual, reference and error are finite and
+`abs(actual-reference) <= 5e-4 * max(1,abs(reference))`. For the declared
+nonnegative inputs, fixed positive float coefficients and `N <= 8192`, this
+exceeds the conservative `gamma_(N+3)` dot-product/scaling bound with float
+unit roundoff `u = 2^-24` and `gamma_k = k*u/(1-k*u)`, including the negligible
+double-reference error. Smaller errors are intentionally admitted; this does
+not promise detection of arbitrary corruption or qualify every manual input.
+The checker counts all mismatches, prints at most ten details to stderr and
+exits nonzero on failure. Kernel metadata records `verification="full_cpu_v1"`.
+
+The full CPU product uses at most eight host threads on disjoint output row
+tiles, with increasing reduction order for every element. It uses one worker
+below 512×512 output cells and otherwise caps the count by hardware concurrency
+and available row tiles. If an additional thread cannot be created because of
+a system error or thread-state allocation failure, its remaining partitions
+run on the calling thread; already-started workers are
+joined before the result is consumed. This changes verification cost only;
+GPU kernels, inputs, geometry, upload/warmer/event sequence and the declared
+size sweep are unchanged.
+
+At N=8192, the reference checks 67,108,864 values and adds 512 MiB of host
+storage alongside the existing 768 MiB inputs. The 256 MiB result copy reuses
+host C. CPU cost is outside GPU event time but inside the process timeout;
+other-host budgets/admission and AMD qualification remain open. This preserves
+the documented independent reimplementation and makes no new upstream-fidelity
+claim.

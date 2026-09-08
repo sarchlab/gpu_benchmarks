@@ -88,6 +88,15 @@ BENCH_PARAM_points=65536 ./rodinia_kmeans
 | `BENCH_PARAM_max_iter` | 10 | K-means assignment iterations in the run |
 | `BENCH_PARAM_vector_add_warmup` | `true` | Cold-cache calibration before the timed run |
 
+After environment overrides, all four dimensions/counts must be positive and
+`clusters <= points` must hold so the initial-center copy stays within the input.
+The constant-memory product must fit 1088 floats, and both `points*features` and
+the padded launch's point indices must fit the existing signed `int` indexing.
+Unsupported requests fail with an explicit diagnostic before device access or
+allocation. These bounds preserve the declared sweep and do not guarantee that
+the required memory is available. Existing CLI fallback and override precedence
+remain unchanged.
+
 The clustering (all `max_iter` iterations) runs **exactly once**; repetition
 is the harness's job (`gpubench run --reps N`).
 

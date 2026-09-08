@@ -61,6 +61,11 @@ jobs:
       - name: Test trace codecs
         run: go test ./tracer/...
 
+      - name: Check k-means input admission (no GPU required)
+        run: |
+          make -C tier2/rodinia_kmeans PLATFORM=cuda
+          python3 tests/kmeans_input_parameters.py --compiler g++ --binary tier2/rodinia_kmeans/rodinia_kmeans
+
       - name: Check complete matrix-vector CPU references (no GPU required)
         run: |
           g++ -O2 -std=c++14 -fsanitize=address,undefined tests/matvec_reference_test.cpp -o /tmp/matvec_reference_test

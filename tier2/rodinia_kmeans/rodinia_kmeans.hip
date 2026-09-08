@@ -40,6 +40,7 @@
 #include <cstring>
 #include <cmath>
 #include <cfloat>
+#include <climits>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -154,9 +155,44 @@ int main(int argc, char** argv) {
     env_val = getenv("BENCH_PARAM_clusters"); if (env_val) nclusters = atoi(env_val);
     env_val = getenv("BENCH_PARAM_max_iter"); if (env_val) max_iter  = atoi(env_val);
 
-    if (nclusters * nfeatures > ASSUMED_NR_CLUSTERS * 34) {
-        fprintf(stderr, "clusters*features (%d) exceeds constant-memory capacity (%d)\n",
-                nclusters * nfeatures, ASSUMED_NR_CLUSTERS * 34);
+    if (npoints < 1 || nfeatures < 1 || nclusters < 1 || max_iter < 1) {
+        fprintf(stderr, "Invalid k-means parameters: points=%d features=%d clusters=%d max_iter=%d; all must be positive\n",
+                npoints, nfeatures, nclusters, max_iter);
+        return EXIT_FAILURE;
+    }
+    const long long center_elements = static_cast<long long>(nclusters) * nfeatures;
+    if (center_elements > ASSUMED_NR_CLUSTERS * 34) {
+        fprintf(stderr, "clusters*features (%lld) exceeds constant-memory capacity (%d)\n",
+                center_elements, ASSUMED_NR_CLUSTERS * 34);
+        return EXIT_FAILURE;
+    }
+    // Initial centers are copied from the first nclusters complete input points.
+    if (nclusters > npoints) {
+        fprintf(stderr, "Invalid k-means parameters: clusters=%d exceeds points=%d\n",
+                nclusters, npoints);
+        return EXIT_FAILURE;
+    }
+    const long long feature_elements = static_cast<long long>(npoints) * nfeatures;
+    if (feature_elements > INT_MAX) {
+        fprintf(stderr, "Invalid k-means parameters: points*features=%lld exceeds signed-int indexing\n",
+                feature_elements);
+        return EXIT_FAILURE;
+    }
+
+    // Grid geometry retained from pinned allocateMemory/kmeansCuda.
+    const int num_threads_perdim = 16;                          // THREADS_PER_DIM
+    const int num_threads = num_threads_perdim * num_threads_perdim;  // 256
+    int num_blocks = npoints / num_threads;
+    if (npoints % num_threads > 0) num_blocks++;
+    int num_blocks_perdim = (int)sqrt((double)num_blocks);
+    while (num_blocks_perdim * num_blocks_perdim < num_blocks) num_blocks_perdim++;
+    num_blocks = num_blocks_perdim * num_blocks_perdim;
+
+    // invert_mapping stores even padded threads' point IDs in signed int.
+    const long long padded_points = static_cast<long long>(num_blocks) * num_threads;
+    if (padded_points - 1 > INT_MAX) {
+        fprintf(stderr, "Invalid k-means parameters: padded point count=%lld exceeds signed-int indexing\n",
+                padded_points);
         return EXIT_FAILURE;
     }
 
@@ -194,15 +230,6 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMalloc((void**)&clusters_d,        centers_bytes));
     HIP_CHECK(hipMalloc((void**)&membership_d,      (size_t)npoints * sizeof(int)));
     HIP_CHECK(hipMemcpy(feature_flipped_d, h_features, feat_bytes, hipMemcpyHostToDevice));
-
-    // Grid geometry retained from pinned allocateMemory/kmeansCuda.
-    const int num_threads_perdim = 16;                          // THREADS_PER_DIM
-    const int num_threads = num_threads_perdim * num_threads_perdim;  // 256
-    int num_blocks = npoints / num_threads;
-    if (npoints % num_threads > 0) num_blocks++;
-    int num_blocks_perdim = (int)sqrt((double)num_blocks);
-    while (num_blocks_perdim * num_blocks_perdim < num_blocks) num_blocks_perdim++;
-    num_blocks = num_blocks_perdim * num_blocks_perdim;
 
     dim3 grid(num_blocks_perdim, num_blocks_perdim);
     dim3 threads(num_threads);

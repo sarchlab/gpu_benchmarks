@@ -304,3 +304,24 @@ with capped diagnostics. Both kernel JSON records must retain finite times and
 reports and process output remain there. CI runs the host oracle and compiles
 the GPU regression. Use `--compile-only` without a GPU or `--platform rocm` on
 AMD. The existing `two_mm_output_test.hip` keeps its independent oracle.
+
+## SHOC Stencil2D measured final state
+
+```sh
+c++ -O3 -std=c++14 -fsanitize=address,undefined tests/shoc_stencil_reference_test.cpp -o /tmp/shoc-stencil-reference
+/tmp/shoc-stencil-reference
+python3 tests/shoc_stencil_measured_result.py --platform cuda --work-dir /tmp/shoc-stencil-measured-result
+python3 tests/finite_verification.py --platform cuda --benchmark shoc_stencil2d --work-dir /tmp/shoc-stencil-finite
+```
+
+The host oracle compares 240 complete float-reference states bit for bit,
+checks input/boundary preservation and isolates all nine coefficients with
+exact one-step impulses. The GPU regression checks 210 ordinary-path cases
+(16 controls, 194 faults), injecting finite/NaN/±Inf errors into the actual
+final measured buffer across interior/boundary positions and timestep parity.
+It checks exact boundary rejection, complete mismatch counts with ten-line
+diagnostic caps, normal failure exits, finite JSON times and `full_cpu_v1`.
+The existing finite-value regression also checks the new actual-result
+comparator's CPU-reference rejection. Output directories must be new; logs and
+reports remain there. CI executes the host test and compiles the GPU tests.
+Use `--platform rocm` for AMD or `--compile-only` without GPU execution.

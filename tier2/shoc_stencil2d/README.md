@@ -49,6 +49,7 @@ processes.
 | File                        | Description                                |
 |-----------------------------|--------------------------------------------|
 | `shoc_stencil2d.hip`        | HIP/CUDA kernel + host (NVIDIA & AMD)      |
+| `cpu_reference.h`         | Complete float CPU reference              |
 | `Makefile`                  | Multi-platform build (cuda/rocm)           |
 | `README.md`                 | This file                                  |
 
@@ -99,7 +100,7 @@ Environment variables override the flags:
 time (`time_ms`) and host time (`host_time_ms`) of all stencil steps in the
 run, then a summary whose `total_time_ms` equals that record's GPU event time:
 ```json
-{"type":"kernel","name":"stencil2d_kernel","iter":0,"time_ms":12.345,"host_time_ms":13.100,"params":{"n":2048,"iterations":5,"block_size":16}}
+{"type":"kernel","name":"stencil2d_kernel","iter":0,"time_ms":12.345,"host_time_ms":13.100,"params":{"n":2048,"iterations":5,"block_size":16,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":12.345}
 ```
 
@@ -113,12 +114,53 @@ reading and writing the full N×N grid:
 GB/s = ITERATIONS × 2 × N × N × sizeof(float) / (time_s × 1e9)
 ```
 
-## Correctness Verification
+## Correctness verification
 
-Before the timed run, a single stencil iteration is applied to a small
-64×64 grid on both CPU and GPU. The GPU result is compared element-wise
-to the CPU reference; the check passes when the maximum relative error
-across all interior cells is less than 1×10⁻⁴. On FAIL the process exits
-non-zero (after the measurements have been emitted), so the harness marks
-the run as failed without losing the timing data. There is no verification
-on/off parameter.
+Ordinary runs check every cell of the actual final measured state after timing.
+The CPU reference applies the existing float formula for all requested
+`iterations` from the original seed-123 input, with fixed zero boundaries. It
+preserves the single-step arithmetic and per-cell grouping of the former
+64×64 qualification reference. Interior acceptance remains
+`fabsf(gpu-ref)/(fabsf(ref)+1e-6f) <= 1e-4f`; the GPU value, CPU reference and
+relative error must all be finite. Boundaries must match exactly.
+
+The returned GPU buffer follows timestep parity. The CPU reference consumes the
+original host input before that allocation is reused for one full result
+download. No separate GPU verification launch runs. All mismatches contribute
+to the failure count, while at most ten individual diagnostics are printed.
+Failure returns exit code 1, even though timing records have been emitted;
+the CLI marks the run as failed. The kernel record identifies `full_cpu_v1`.
+There is no verification on/off parameter.
+
+At N=8192, the two float reference grids need 512 MiB at peak, in addition to
+the existing 256 MiB host input. One reference scratch is released before the
+256 MiB device-to-host result copy. CPU work and result copying are outside GPU
+timing but count toward the process timeout. Qualify full process runtime and
+host/device capacity on each collection host.
+
+From the repository root:
+
+```sh
+c++ -O3 -std=c++14 -fsanitize=address,undefined tests/shoc_stencil_reference_test.cpp -o /tmp/shoc-stencil-reference
+/tmp/shoc-stencil-reference
+python3 tests/shoc_stencil_measured_result.py --platform cuda --work-dir /tmp/shoc-stencil-measured-result
+python3 tests/finite_verification.py --platform cuda --benchmark shoc_stencil2d --work-dir /tmp/shoc-stencil-finite
+```
+
+Each output directory must be new. The host test compares 240 complete float
+states bit for bit against an independently indexed recurrence, covering
+positive/signed/zero/impulse inputs, partial blocks, one/two/odd/even/50/51-step
+sequences, input preservation and exact zero boundaries. Nine exact one-step
+impulses isolate the coefficients. The measured GPU regression checks 210
+ordinary-path cases (16 controls, 194 faults), including first/middle/last
+interior cells, boundaries, finite and NaN/±Inf corruption, one-ULP boundary
+changes and capped diagnostics with complete mismatch counts. It modifies only
+disposable copies and retains process logs/reports. The existing finite-value
+regression now exercises the full measured-state comparator, including bad CPU
+references. CI runs the host test and compiles the GPU regressions; executing
+them requires a GPU. Use `--platform rocm` on AMD or `--compile-only` without
+hardware.
+
+AMD execution, other-host budgets, manual input admission and trace
+qualification remain separate. Full result verification does not by itself
+establish upstream implementation identity or publication performance.

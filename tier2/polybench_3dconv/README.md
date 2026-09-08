@@ -1,77 +1,116 @@
-# tier2/polybench_3dconv — 3D Convolution (PolyBench)
+# polybench_3dconv — fixed PolyBench/GPU 3D stencil
 
-Benchmarks 3D convolution over an **N×N×N** volume with a small 3D filter (e.g., 3×3×3). Each output voxel is the weighted sum of its spatial neighborhood. The convolution runs exactly once per execution; the raw kernel time is emitted and compute throughput in GFLOPS is derived downstream.
+The benchmark applies the fixed PolyBench/GPU stencil to every interior point
+of an N×N×N input volume. It runs one timed GPU kernel, then copies and verifies
+the actual measured output on the CPU. Repetition is performed by launching a
+fresh process (`gpubench run --reps N`).
 
-## Provenance & fidelity
+## Provenance and operator
 
-Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) — the `3d-conv` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+The operator is pinned to [PolyBench-ACC commit 70ea4ca](https://github.com/cavazos-lab/PolyBench-ACC/blob/70ea4ca9047dc4ec9c3ca79b4c91b3b2cc1510e7/CUDA/stencils/convolution-3d/3DConvolution.cu).
+Both its `conv3D` CPU reference and `convolution3D_kernel` GPU implementation
+contain 15 ordered terms with the same coefficients and coordinates. The
+repeated coordinates in the k−1 plane are intentional here because they occur
+in both pinned implementations; they are not replaced by a symmetric filter.
+Their combined spatial weights are:
 
-- Generic runtime-filter convolution vs PolyBench's fixed sparse stencil; boundary semantics differ (random normalized filter with zero-padded borders, not the upstream fixed-coefficient stencil).
+| Offset (di, dj, dk) | Combined coefficient |
+|---|---:|
+| (−1, −1, −1) | −1 (= 2 + 5 − 8) |
+| (+1, −1, −1) | 21 (= 4 + 7 + 10) |
+| (0, −1, 0) | −3 |
+| (0, 0, 0) | 6 |
+| (0, +1, 0) | −9 |
+| (−1, −1, +1) | 2 |
+| (+1, −1, +1) | 4 |
+| (−1, 0, +1) | 5 |
+| (+1, 0, +1) | 7 |
+| (−1, +1, +1) | −8 |
+| (+1, +1, +1) | 10 |
 
-Read this as "a 3D-convolution benchmark in the spirit of PolyBench," not PolyBench's `3d-conv`.
+All other spatial weights are zero. The GPU expression retains all 15 terms
+and their order; the CPU verifier independently uses the combined weights.
+The source expression has 15 multiplies and 14 additions/subtractions per
+interior output: nominal work is `29 * (N-2)^3` FLOPs. This is a source model;
+compiled instructions and physical memory traffic require target qualification.
 
-## Algorithm
+The implementation uses one cubic 3D thread grid instead of the upstream's
+sequence of independent 2D slice launches. There are no dependencies between
+slices. Input generation retains the existing `srand(42)` and
+`(rand()%100)/100.0f` sequence, rather than the upstream coordinate-based
+initializer; this is a synthetic dataset, and its cross-libc identity remains
+subject to input provenance. Output borders are explicitly initialized to zero
+before timing and left untouched by the kernel. The upstream only defines and
+compares interior outputs; its uninitialized output borders are not reproduced.
 
-- 3D convolution: for each output point `(i,j,k)`, sum `input[i±r][j±r][k±r] * filter[fi][fj][fk]` where `r = filter_size/2`
-- Default parameters: N=128, filter_size=3
-- Boundary handling: zero-padding (out-of-bounds reads treated as 0)
-- GFLOPS = 2 × N³ × filter_size³ / time_sec / 1e9 (derived downstream from the emitted times)
+Earlier revisions computed a different dense, normalized random-filter
+convolution at filter sizes 3, 5 and 7. Those measurements are not comparable
+with this fixed stencil and must be recollected. `filter_size` is removed from
+the manifest; its old environment variable and command-line option now fail
+explicitly, including value 3. Fixed `operator=polybench_gpu_70ea4ca` metadata
+identifies the restored operator without declaring an inert execution control.
 
-## Parameters
+## Parameters and measurement
 
-| Env var | Description | Default |
-|---------|-------------|---------|
-| `BENCH_PARAM_size` | Volume dimension N (N×N×N) | 128 |
-| `BENCH_PARAM_block_size` | Threads per block dimension (block_size³ block) | 8 |
-| `BENCH_PARAM_filter_size` | Filter dimension (filter_size³ kernel) | 3 |
-| `BENCH_PARAM_vector_add_warmup` | Vector-add warmer (clock boost + LLC eviction) before the timed launch | true |
+| Parameter | Default | Declared sweep / behavior |
+|---|---:|---|
+| `BENCH_PARAM_size` / `--size` | 128 | 25 volume dimensions from 16 to 512; N≥3 and N³ must fit signed integer indexing |
+| `BENCH_PARAM_block_size` / `--block_size` | 8 | Cubic block side; manifest fixes 8 (512 threads), custom positive values must satisfy the selected device's launch limits |
+| `BENCH_PARAM_vector_add_warmup` | true | Fixed per harness run; optional untimed warmer before the measured stencil |
 
-The kernel runs exactly once per execution; repetition is the harness's job (`gpubench run --reps N`).
+The declared sweep now has 25 configurations, rather than 75 combinations
+with the old filter-size parameter. Environment variables override command-line
+values. Invalid values fail before a timing record is emitted.
 
-## Files
+Host allocation, input initialization, initial upload and output zeroing occur
+before the optional warmer. The warmer is intended to raise clocks and disturb
+cache state; qualify its achieved state on the target. One event-timed
+`conv3d_kernel` launch follows. The output copy and CPU verification occur after
+the timing bracket. No verification kernel or recomputation replaces the measured
+output. GPU event time is the measured operation's time; host launch-bracket time
+also excludes the subsequent verifier.
 
-| File | Description |
-|------|-------------|
-| `polybench_3dconv.hip` | HIP/ROCm implementation |
-| `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
-| `params.json` | Parameter specification |
+## Verification and cost
 
-## Build
+Every interior value is compared with an independent double-precision CPU
+reference. Every output border must remain exactly zero. Non-finite output,
+reference or error scale fails verification, and the process exits nonzero.
+The fixed `verification=full_cpu_v1` policy is recorded in kernel parameters.
+It is always enabled.
+
+The interior tolerance is `2e-6 * max(1, sum(abs(source_term)))`, with the
+absolute weights of all 15 terms retained even where coordinates repeat. This
+allows float accumulation rounding near cancellation while bounding the error;
+it does not divide by a near-zero reference. Qualify the actual error/tolerance
+ratios on each target, including AMD.
+
+Verification costs O(N³) CPU work and a host output buffer of `4*N³` bytes
+(512 MiB at N=512). The program has two host and two device volume buffers in
+total, plus the optional warmer's device scratch. These allocations and the
+complete process time must fit the target's capacity and collection timeout.
+The post-timing CPU cost does not change an already measured GPU interval.
+
+## Build, run and test
 
 ```bash
-make               # auto-detect platform
-make PLATFORM=cuda
-make PLATFORM=rocm
+make PLATFORM=cuda        # or PLATFORM=rocm
+./polybench_3dconv
+BENCH_PARAM_size=256 ./polybench_3dconv
+make PLATFORM=cuda test   # actual GPU required
 ```
 
-## Run
+The GPU regression uses all 27 spatial basis inputs, signed volumes, partial
+blocks, untouched borders and allocation guards. Exactly representable test
+inputs permit exact comparisons. The finite-injection suite separately exercises
+the production verifier, including the last measured interior output.
 
-```bash
-./polybench_3dconv                                      # defaults: 128³, filter 3³
-BENCH_PARAM_size=256 ./polybench_3dconv                 # 256³ volume
-BENCH_PARAM_filter_size=5 ./polybench_3dconv            # 5×5×5 filter
-```
+Stdout contains one kernel record and its matching summary (illustrative times):
 
-## Output
-
-**stdout** — JSON lines, one `kernel` record for the single timed launch followed by a
-`summary` whose `total_time_ms` equals that GPU event time:
 ```json
-{"type":"kernel","name":"conv3d_kernel","iter":0,"time_ms":12.345678,"host_time_ms":12.401000,"params":{"size":128,"block_size":8,"filter_size":3}}
-{"type":"summary","total_time_ms":12.345678}
+{"type":"kernel","name":"conv3d_kernel","iter":0,"time_ms":0.123456,"host_time_ms":0.145678,"params":{"size":128,"block_size":8,"operator":"polybench_gpu_70ea4ca","verification":"full_cpu_v1"}}
+{"type":"summary","total_time_ms":0.123456}
 ```
 
-Derived metrics (e.g. GFLOPS) are computed downstream from `time_ms` and params.
-
-**stderr** — human-readable:
-```
-Device: NVIDIA GeForce RTX 4090 (id=0)
-Volume: 128x128x128  |  Filter: 3x3x3
-
-conv3d_kernel: gpu = 12.346 ms, host = 12.401 ms
-Total GPU time: 12.346 ms
-```
-
-## Platform Notes
-
-- **CUDA/ROCm**: 3D thread blocks (block_size³), compiled with `nvcc`/`hipcc`
+Device information and `PASS` or `FAIL` diagnostics go to stderr. A verification
+failure may follow valid timing records; the nonzero process exit makes the
+complete run an error. Derive rates downstream from successful complete runs.

@@ -1,25 +1,20 @@
 // rodinia_kmeans.hip — Rodinia K-Means Clustering benchmark (HIP, self-contained)
 //
-// Faithful port of Rodinia kmeans: the device kernels (invert_mapping,
-// kmeansPoint) are the ORIGINAL upstream kernels, copied from
-// rodinia/cuda/kmeans/kmeans_cuda_kernel.cu. The FAITHFUL characteristic of
-// this benchmark is its INVERTED (feature-major) feature layout for coalesced
-// loads: invert_mapping transforms the row-major [point][feature] array into a
-// column-major [feature][point] array, and kmeansPoint indexes it as
-// `point_id + j*npoints`. That layout is preserved exactly.
+// Adapted from Rodinia 3.1 cuda/kmeans at commit
+// 366b283456506ef2fe2c2b7dc5e83e941ffc5524 (see README for pinned files).
+// invert_mapping retains the upstream row-major -> feature-major mapping;
+// kmeansPoint retains the default CPU-reduction kernel's nearest-center
+// arithmetic, strict tie order, constant-memory centers and point geometry.
+// The bound texture fetch is replaced by __ldg(&features[addr]). This keeps
+// the feature address mapping; caching/instruction behavior requires separate
+// target qualification. Inactive GPU reduction branches are omitted.
 //
-// PORTABILITY SUBSTITUTION (spec rule 2): the original kmeansPoint reads the
-// inverted features through a bound 1D texture: tex1Dfetch(t_features, addr).
-// Our hip/cuda compat layer does not map CUDA texture references, so the fetch
-// is replaced by __ldg(&features[addr]) — the read-only data cache, the
-// closest portable equivalent. The DATA LAYOUT (the faithful part) is
-// unchanged; only the fetch mechanism differs. Cluster centers stay in
-// __constant__ memory (c_clusters), exactly as upstream.
-//
-// Centroid sums are done on the CPU each iteration (the upstream default:
-// CPU_CENTER_REDUCE / CPU_DELTA_REDUCE; the GPU reduction paths are compiled
-// out upstream and are omitted here). The driver is restructured for the
-// single-pass timing harness and JSON output.
+// The local measurement driver uses synthetic LCG input and exactly max_iter
+// iterations. The pinned driver reads a dataset and uses membership-change
+// convergence with a loop guard. Both reduce centroid sums on the CPU in
+// ascending point order, retaining old centers for empty clusters. The local
+// driver adds the warmer/JSON timing harness and omits unused membership/cluster
+// uploads. Texture binding is omitted because feature reads now use __ldg.
 //
 // Usage:
 //   ./rodinia_kmeans [--points N] [--features D] [--clusters K] [--max_iter M]
@@ -69,7 +64,7 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
 __constant__ float c_clusters[ASSUMED_NR_CLUSTERS * 34];
 
 // invert_mapping: row-major [point][feature] -> column-major [feature][point]
-// so that consecutive threads (point_id) read consecutive addresses. Verbatim.
+// so consecutive threads read consecutive addresses. The pinned body is retained.
 __global__ void invert_mapping(float *input,   /* original */
                                float *output,   /* inverted */
                                int npoints,
@@ -84,10 +79,10 @@ __global__ void invert_mapping(float *input,   /* original */
     return;
 }
 
-// kmeansPoint: assign each point to its nearest cluster center. Verbatim from
-// upstream (default CPU-reduction configuration), except tex1Dfetch(t_features,
-// addr) -> __ldg(&features[addr]) (see header). The GPU_DELTA_REDUCTION /
-// GPU_NEW_CENTER_REDUCTION blocks are compiled out upstream and are omitted.
+// kmeansPoint: assign each point to its nearest cluster center. The pinned
+// default CPU-reduction body is retained except for the texture -> __ldg
+// substitution. Inactive GPU_DELTA_REDUCTION / GPU_NEW_CENTER_REDUCTION
+// branches are omitted (see README).
 __global__ void
 kmeansPoint(float  *features,           /* in: inverted [nfeatures*npoints] */
             int     nfeatures,
@@ -200,7 +195,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMalloc((void**)&membership_d,      (size_t)npoints * sizeof(int)));
     HIP_CHECK(hipMemcpy(feature_flipped_d, h_features, feat_bytes, hipMemcpyHostToDevice));
 
-    // Grid geometry (verbatim from allocateMemory/kmeansCuda).
+    // Grid geometry retained from pinned allocateMemory/kmeansCuda.
     const int num_threads_perdim = 16;                          // THREADS_PER_DIM
     const int num_threads = num_threads_perdim * num_threads_perdim;  // 256
     int num_blocks = npoints / num_threads;

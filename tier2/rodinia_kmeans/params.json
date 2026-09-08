@@ -2,7 +2,7 @@
   "benchmark": "rodinia_kmeans",
   "tier": 2,
   "suite": "rodinia",
-  "description": "Rodinia K-means clustering. Faithful port: the original invert_mapping (row-major to feature-major inversion for coalesced loads) and kmeansPoint (nearest-center assignment) kernels; the inverted feature-major layout is preserved. tex1Dfetch on the inverted features is replaced by __ldg (portability substitution). Cluster centers live in constant memory; centroid sums are done on the CPU each iteration. Centroids re-init per pass so every pass runs identical work.",
+  "description": "K-means clustering adapted from Rodinia 3.1. Feature-major inversion, nearest-center arithmetic, constant-memory centers and CPU centroid sums are retained; texture loads use __ldg. The local driver uses synthetic LCG input seeded with 42 and exactly max_iter assignments, with accumulated per-kernel timing. Upstream uses file input and convergence control.",
   "scaling_param": {
     "name": "points",
     "description": "Number of data points to cluster",

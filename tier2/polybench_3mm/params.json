@@ -2,7 +2,7 @@
   "benchmark": "polybench_3mm",
   "tier": 2,
   "suite": "polybench",
-  "description": "Three chained matrix multiplications: E=A*B, F=C*D, G=E*F. All matrices are NxN. Emits per-iteration kernel times; GFLOPS is derived downstream.",
+  "description": "Three chained matrix multiplications: E=A*B, F=C*D, G=E*F. All matrices are NxN. Reports raw kernel times and checks every measured E/F/G value against complete independent double CPU references after timing (verification=full_cpu_v1).",
   "scaling_param": {
     "name": "size",
     "description": "Square matrix dimension N (all matrices are NxN)",

@@ -87,3 +87,40 @@ With `--size N`:
 | D      | N    | N    |
 | F=C*D  | N    | N    |
 | G=E*F  | N    | N    |
+
+## Measured-result verification
+
+Every run checks every element of the measured E, F and G matrices. Complete
+independent double CPU products compute E and F from the original A/B/C/D,
+then G from those independent intermediates. GPU intermediates are never used
+as reference input. All checking follows the three timed launches; three full
+result downloads reuse the consumed host A buffer (all driver dimensions are
+N). There is no separate GPU verification pass or bypass.
+
+Actual, reference and error must be finite. E and F require
+`abs(actual-reference) <= 5e-4 * max(1,abs(reference))`; G uses `2e-3` in place
+of `5e-4` to cover propagation through both intermediate products. For the
+declared nonnegative inputs and N <= 8192, these exceed the conservative
+`gamma_N` and `gamma_(3*N)` bounds, respectively, where `u = 2^-24` and
+`gamma_k = k*u/(1-k*u)`. The double-reference error is negligible relative to
+these margins. Smaller errors are intentionally admitted; this does not
+promise detection of arbitrary corruption or qualify every manual input.
+All mismatches are counted, at most ten details go to stderr, and any mismatch
+causes a nonzero exit. Each kernel record includes `verification="full_cpu_v1"`.
+
+Each CPU product packs its right operand into contiguous column tiles and uses
+at most sixteen workers on disjoint output row tiles. Packing preserves every
+value and increasing reduction order. Products run sequentially, with one
+worker below 512×512 output cells and otherwise a cap based on hardware
+concurrency and row tiles. Thread creation failures, including allocation
+failures, complete the missing partitions on the caller; prior workers are
+joined before the result is returned and packed storage is released.
+GPU kernels, inputs, geometry, initial uploads, warmer/event sequence and the
+declared sweep are unchanged.
+
+At N=8192, all 201,326,592 measured values are checked. Three double reference
+matrices use 1.5 GiB; the largest temporary packed operand adds 512 MiB, giving
+2 GiB of reference storage alongside the original 1 GiB host inputs. Packing
+is released before the three 256 MiB result downloads, which reuse host A.
+CPU work is outside GPU event time but inside the process timeout. Other-host
+budgets/admission, AMD and full upstream qualification remain open.

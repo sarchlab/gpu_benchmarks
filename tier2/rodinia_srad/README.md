@@ -1,16 +1,33 @@
 # tier2/rodinia_srad — Speckle-Reducing Anisotropic Diffusion (Rodinia SRAD v2)
 
-Iterative 2D image smoothing using SRAD (Perona-Malik-style anisotropic
-diffusion). This is a **faithful port** of Rodinia SRAD v2: the device kernels
-`srad_cuda_1` and `srad_cuda_2` are the original upstream kernels
-(`rodinia/cuda/srad/srad_v2/srad_kernel.cu`), copied verbatim, including their
-shared-memory neighborhood tiling and the compile-time `BLOCK_SIZE 16` thread
-block. Only the host driver is restructured for the single-pass timing
-harness and JSON output.
+Iterative 2D image smoothing using speckle-reducing anisotropic diffusion.
+This is an adaptation of the Rodinia SRAD v2 shared-memory GPU kernels for
+the suite's portable measurement driver.
 
 ## Provenance & fidelity
 
-Derived from the [Rodinia benchmark suite](http://lava.cs.virginia.edu/Rodinia/) — the `srad` (v2) workload. Independent reimplementation, spot-verified to reproduce Rodinia's algorithm faithfully (includes the documented AMD out-of-bounds fix).
+The source reference is Rodinia 3.1, commit
+`366b283456506ef2fe2c2b7dc5e83e941ffc5524`:
+[GPU kernels](https://github.com/HPC-FAIR/rodinia_3.1/blob/366b283456506ef2fe2c2b7dc5e83e941ffc5524/cuda/srad/srad_v2/srad_kernel.cu),
+[host driver and CPU implementation](https://github.com/HPC-FAIR/rodinia_3.1/blob/366b283456506ef2fe2c2b7dc5e83e941ffc5524/cuda/srad/srad_v2/srad.cu), and
+[block-size definitions](https://github.com/HPC-FAIR/rodinia_3.1/blob/366b283456506ef2fe2c2b7dc5e83e941ffc5524/cuda/srad/srad_v2/srad.h).
+
+The local kernels retain the arithmetic, shared-memory neighborhood tiling
+and synchronization structure. Six halo loads use guarded index selection
+instead of the pinned source's unconditional reads followed by boundary
+overwrites. Those original reads can address outside the image; their behavior
+is not guaranteed on either vendor. The local guards select the intended
+clamped edge values before loading, including both opposite edges in a
+single-block grid. This is an adapted port, not an unchanged source copy.
+
+The local driver fixes `BLOCK_SIZE=16` (the upstream default), uses a square
+image rounded up to a multiple of 16, and selects ROI rows/columns
+`0..min(127,N-1)`. The pinned driver accepts rows, columns and ROI bounds as
+arguments and rejects dimensions that are not multiples of 16. Both generate
+the input with seed 7 and `J = exp(I)`. The local driver adds the entry warmer,
+single-pass measurement and accumulated per-kernel JSON records. These
+source comparisons do not establish full measured-result or AMD qualification;
+those remain open in [the readiness tracker](https://github.com/sarchlab/gpu_benchmarks/issues/71).
 
 ## Algorithm
 
@@ -34,7 +51,7 @@ stay in the pass but **outside** the timed brackets.
 
 | File | Description |
 |------|-------------|
-| `rodinia_srad.hip` | HIP/CUDA source — original `srad_cuda_1`/`srad_cuda_2` kernels + timing driver |
+| `rodinia_srad.hip` | HIP/CUDA source — adapted `srad_cuda_1`/`srad_cuda_2` kernels + timing driver |
 | `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
 | `params.json` | Parameter specification |
 
@@ -64,7 +81,7 @@ make PLATFORM=rocm
 | `BENCH_PARAM_lambda` | 0.5 | Diffusion step size in (0,1) |
 | `BENCH_PARAM_vector_add_warmup` | `true` | Cold-cache calibration before the timed run |
 
-`block_size` is fixed at the original compile-time `BLOCK_SIZE=16` and is
+`block_size` is fixed at `BLOCK_SIZE=16` (the upstream default) and is
 emitted as a param for downstream derivation only.
 
 The full `num_iterations`-step diffusion runs **exactly once**; repetition is
@@ -86,5 +103,5 @@ then a summary whose `total_time_ms` is the sum of all recorded GPU event times:
 
 ## Platform Notes
 
-- **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `rodinia_srad.hip` (the faithful upstream kernels).
+- **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `rodinia_srad.hip` (the adapted SRAD v2 kernels).
 - The input image is generated synthetically (`J = exp(I)` for a random `I`) — no external input files required.

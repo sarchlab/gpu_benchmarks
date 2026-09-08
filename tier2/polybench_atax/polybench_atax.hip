@@ -144,7 +144,7 @@ int main(int argc, char** argv) {
 
     char params[192];
     snprintf(params, sizeof(params),
-             "\"nx\":%d,\"ny\":%d,\"block_size\":%d,\"verification\":\"prefix8_cpu_v1\"",
+             "\"nx\":%d,\"ny\":%d,\"block_size\":%d,\"verification\":\"full_cpu_v1\"",
              nx, ny, block_size);
 
     // One full ATAX pass (run exactly once): kernel1 writes d_tmp, kernel2
@@ -186,12 +186,11 @@ int main(int argc, char** argv) {
     // Copy result back for correctness check
     HIP_CHECK(hipMemcpy(h_y, d_y, bytes_y, hipMemcpyDeviceToHost));
 
-    // Correctness check against CPU reference (small subset)
-    int check_n = (ny < 8) ? ny : 8;
-    std::vector<float> y_ref(check_n);
-    cpu_atax_prefix(h_A, h_x, y_ref.data(), nx, ny, check_n);
+    // Correctness check against full CPU reference
+    std::vector<float> y_ref(ny);
+    cpu_atax(h_A, h_x, y_ref.data(), nx, ny);
     bool pass = true;
-    for (int j = 0; j < check_n; ++j) {
+    for (int j = 0; j < ny; ++j) {
         float rel = fabsf(h_y[j] - y_ref[j]) / (fabsf(y_ref[j]) + 1e-6f);
         if (!std::isfinite(h_y[j]) || !std::isfinite(y_ref[j]) || !std::isfinite(rel) ||
             rel > 1e-3f) {
@@ -200,8 +199,8 @@ int main(int argc, char** argv) {
             pass = false;
         }
     }
-    fprintf(stderr, "Correctness check (first %d elements): %s\n\n",
-            check_n, pass ? "PASS" : "FAIL");
+    fprintf(stderr, "Correctness check (all %d elements): %s\n\n",
+            ny, pass ? "PASS" : "FAIL");
 
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);

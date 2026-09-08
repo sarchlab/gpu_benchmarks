@@ -189,15 +189,14 @@ the proved stencil invariant, not by an output mismatch allowance. Run
 NaN/Inf representation; corruption tests should alter actual output bytes,
 including the last interior pixel and preserved border, after timing.
 
-`prefix_reference_test.cpp` checks the production CPU reference helpers for
+`matvec_reference_test.cpp` checks the production CPU reference helpers for
 ATAX, BiCG and MVT without a GPU or GPU compiler. Rectangular and square cases,
-including dimensions below/equal/above eight, compare every retained value
-bit-for-bit with complete float references and protect the prefix boundaries.
-Run `c++ -O2 -std=c++14 -fsanitize=address,undefined tests/prefix_reference_test.cpp
--o /tmp/prefix_reference_test && /tmp/prefix_reference_test` from the repository
-root. CI runs this test under address/undefined-behavior sanitizers. The ordinary
-benchmarks retain their existing first-eight checks; this cost regression does
-not establish correctness of unsampled GPU output positions.
+including dimensions below/equal/above eight, compare every output value
+bit-for-bit with complete float references and protect the output boundaries.
+Run `c++ -O2 -std=c++14 -fsanitize=address,undefined tests/matvec_reference_test.cpp
+-o /tmp/matvec_reference_test && /tmp/matvec_reference_test` from the repository
+root. CI runs this test under address/undefined-behavior sanitizers. The GPU
+regression below separately checks the actual measured device outputs.
 
 `lud_measured_result.py` checks that ordinary LUD runs factor exactly once and
 verify the matrix produced by that measured factorization. It injects faults
@@ -238,3 +237,15 @@ duplicate handling, packing and capacity bounds. Run `c++ -O3 -std=c++14
 -fsanitize=address,undefined tests/triangle_host_test.cpp -o /tmp/triangle_host_test
 && /tmp/triangle_host_test`. CI runs this host-only check under sanitizers; the
 actual-device regression above separately checks measured GPU results.
+
+`matvec_measured_result.py` injects faults into actual ATAX, BiCG and MVT
+device outputs after timing and before the existing result download. It checks
+finite corruption and NaN/+Inf/-Inf at the first element, indices 7 and 8, the
+middle and the last element of every output vector, plus small/rectangular and
+warmer controls. Unequal row/column shapes also receive tail faults to catch
+swapped output bounds. Run `python3 tests/matvec_measured_result.py --platform cuda
+--work-dir /tmp/matvec-check` (or `rocm`) with a new, nonexistent output
+directory. CI compiles the test; execution requires a GPU. A timeout fails the
+test and retains completed-case logs and a partial report. The test requires
+`full_cpu_v1` in both kernel records and checks exact workload identity, normal
+verification diagnostics and failure exit codes.

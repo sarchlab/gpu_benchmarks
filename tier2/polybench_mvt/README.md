@@ -39,15 +39,15 @@ wall-clock time, then a `summary` whose `total_time_ms` is the sum of the two
 recorded GPU event times:
 
 ```json
-{"type":"kernel","name":"mvt_kernel1","iter":0,"time_ms":6.123400,"host_time_ms":6.150000,"params":{"n":4096}}
-{"type":"kernel","name":"mvt_kernel2","iter":0,"time_ms":6.234500,"host_time_ms":6.260000,"params":{"n":4096}}
+{"type":"kernel","name":"mvt_kernel1","iter":0,"time_ms":6.123400,"host_time_ms":6.150000,"params":{"n":4096,"verification":"full_cpu_v1"}}
+{"type":"kernel","name":"mvt_kernel2","iter":0,"time_ms":6.234500,"host_time_ms":6.260000,"params":{"n":4096,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":12.357900}
 ```
 
 Derived metrics (e.g. GB/s) are computed downstream from `time_ms` and params.
 
-**stderr** — device info, per-kernel timing, and a correctness check: the
-first 8 elements of `x1` and `x2` are compared against a CPU reference. On
+**stderr** — device info, per-kernel timing, and a correctness check:
+all elements of `x1` and `x2` are compared against a CPU reference. On
 mismatch the check prints `FAIL` and the process exits with a non-zero
 status.
 
@@ -99,18 +99,25 @@ The pass runs exactly once per execution; repetition is the harness's job
 
 Derived from the [PolyBench/GPU](https://sourceforge.net/projects/polybench/) benchmark suite, MVT kernel.
 
-The fixed `verification` parameter is `prefix8_cpu_v1`: compare the first
-`min(8, dimension)` elements of each existing output vector, with the same
-float accumulation order, relative tolerance and non-finite rejection as
-before. CPU references now compute only those final dot products and allocate
-only the checked output prefix. This is a limited prefix check; it provides no
-coverage guarantee for other output positions. Full-result qualification and
-cross-device verification remain separate requirements.
+The fixed `verification` parameter is `full_cpu_v1`: compare every element
+of the actual measured output vectors against the complete CPU formula after
+timing. The original float accumulation order, relative-error threshold
+(`1e-3`, with `abs(reference)+1e-6` in the denominator), and rejection of
+non-finite GPU values, references and relative errors are retained. A mismatch
+prints `FAIL` and exits nonzero. No separate GPU verification pass is launched.
 
-MVT reference work is O(2×n×min(8,n)), replacing two complete n×n
-matrix-vector references. At most 16 reference output floats are allocated.
+The CPU reference performs both complete matrix-vector products, O(n²)
+work, with 2n reference-output floats (256 KiB at the largest declared size).
+All output vectors were already downloaded in full; input generation, GPU
+kernels, transfers and timing intervals are unchanged. The process pays for
+the complete CPU check outside GPU/host launch timing. Qualify full process
+wall time and numerical tolerance on each target; AMD execution remains
+separate from CUDA compilation and the tested H100 results.
 
-Input generation, GPU kernels, transfers and timing intervals are unchanged.
-The CPU work remains outside GPU/host launch timing. The process still pays
-for full input generation and allocation; measure its complete wall time when
-admitting a configuration under a target's process budget.
+`tests/matvec_measured_result.py` checks actual device-output corruption at
+the first element, the old prefix boundary, the middle and the tail, including
+finite errors and NaN/Inf. Run `python3 tests/matvec_measured_result.py
+--platform cuda --work-dir /tmp/matvec-check` from the repository root with a
+new, nonexistent output directory (or use `rocm`). CI compiles this GPU test
+and runs `tests/matvec_reference_test.cpp` under host sanitizers. A timeout
+fails the GPU test and retains completed logs and a partial report.

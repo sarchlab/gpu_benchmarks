@@ -148,7 +148,7 @@ int main(int argc, char** argv) {
 
     char params[192];
     snprintf(params, sizeof(params),
-             "\"n\":%d,\"verification\":\"prefix8_cpu_v1\"", n);
+             "\"n\":%d,\"verification\":\"full_cpu_v1\"", n);
 
     bench_timer_t timer;
     bench_timer_create(&timer);
@@ -193,13 +193,12 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(h_x1, d_x1, bytes_v, hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(h_x2, d_x2, bytes_v, hipMemcpyDeviceToHost));
 
-    // Correctness check against CPU reference (small subset)
-    int check_n = (n < 8) ? n : 8;
-    std::vector<float> x1_ref(check_n), x2_ref(check_n);
-    cpu_mvt_prefix(h_A, h_y1, h_y2, x1_ref.data(), x2_ref.data(), n, check_n);
+    // Correctness check against full CPU reference
+    std::vector<float> x1_ref(n), x2_ref(n);
+    cpu_mvt(h_A, h_y1, h_y2, x1_ref.data(), x2_ref.data(), n);
 
     bool pass = true;
-    for (int i = 0; i < check_n; ++i) {
+    for (int i = 0; i < n; ++i) {
         float rel1 = fabsf(h_x1[i] - x1_ref[i]) / (fabsf(x1_ref[i]) + 1e-6f);
         if (!std::isfinite(h_x1[i]) || !std::isfinite(x1_ref[i]) || !std::isfinite(rel1) ||
             rel1 > 1e-3f) {
@@ -215,8 +214,8 @@ int main(int argc, char** argv) {
             pass = false;
         }
     }
-    fprintf(stderr, "Correctness check (first %d elements): %s\n\n",
-            check_n, pass ? "PASS" : "FAIL");
+    fprintf(stderr, "Correctness check (all %d elements): %s\n\n",
+            n, pass ? "PASS" : "FAIL");
 
     // Cleanup
     HIP_CHECK(hipFree(d_A));

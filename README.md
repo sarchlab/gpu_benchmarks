@@ -263,7 +263,7 @@ The metric column names downstream quantities. See [measurement interpretation](
 
 | Benchmark | Metric | Description |
 |-----------|--------|-------------|
-| `memory_bandwidth` | GB/s | Global memory bandwidth (H2D, D2H, D2D) |
+| `memory_bandwidth` | GB/s | Device-to-device copy sweep; host-transfer sweeps use `pcie_bandwidth` |
 | `fp32_throughput` | GFLOPS | Single-precision FP32 FMA throughput (declared grid: one block) |
 | `fp64_throughput` | GFLOPS | Double-precision FP64 FMA throughput (declared grid: one block) |
 | `fp16_throughput` | GFLOPS | Half-precision FP16 FMA throughput (declared grid: one block) |

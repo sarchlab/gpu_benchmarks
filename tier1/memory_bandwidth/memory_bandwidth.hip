@@ -4,17 +4,16 @@
  * HIP port of the memory_bandwidth microbenchmark.
  * Compiles for both AMD (ROCm) and NVIDIA (HIP-on-CUDA) targets.
  *
- * Measures GPU memory copy time in three directions:
- *   - Host-to-Device (H2D)
- *   - Device-to-Host (D2H)
- *   - Device-to-Device (D2D)
+ * The declared sweep times Device-to-Device (D2D) copies with pinned host
+ * setup buffers. Host-to-Device (H2D), Device-to-Host (D2H), and all remain
+ * available for direct binary use; pcie_bandwidth sweeps host transfers.
  *
  * Each selected direction is copied EXACTLY ONCE and timed with HIP events
  * (device time) and host wall-clock; there is no in-program warmup or
  * iteration loop. When BENCH_PARAM_vector_add_warmup is on (default), a
- * vector-add warmer runs immediately before the timed copy to boost the GPU
- * clock and evict the last-level cache, so the copy is measured cold-cache at
- * a boosted clock. Repetition is the harness's job (gpubench --reps).
+ * vector-add warmer runs immediately before each timed copy, intended to
+ * raise clocks and disturb cache state. Qualify the resulting state on the
+ * target. Repetition is the harness's job (gpubench --reps).
  *
  * Usage:
  *   ./memory_bandwidth [buffer_size_mb]

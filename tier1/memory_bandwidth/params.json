@@ -2,7 +2,7 @@
   "benchmark": "memory_bandwidth",
   "tier": 1,
   "suite": "microbench",
-  "description": "Measures GPU memory bandwidth in three directions: Host-to-Device (H2D), Device-to-Host (D2H), and Device-to-Device (D2D) using hipMemcpy with pinned host memory. Emits per-iteration GPU event time and host time records (total = sum of transfer times); bandwidth in GB/s is derived downstream.",
+  "description": "Times one device-to-device runtime copy per process in the declared 13-size sweep. Host setup allocations are pinned and the initial host-to-device upload is untimed. Direct-binary H2D/D2H/all modes remain supported outside this sweep; pcie_bandwidth provides declared host-transfer coverage. Emits raw GPU event and host bracket times; derive labeled payload or logical read-plus-write rates downstream.",
   "scaling_param": {
     "name": "buffer_size_mb",
     "description": "Transfer buffer size in MiB; controls the total data volume per transfer",
@@ -26,7 +26,7 @@
   "non_scaling_params": [
     {
       "name": "transfer_type",
-      "description": "Direction of memory transfer",
+      "description": "Declared sweep is D2D only. The binary also accepts h2d, d2h and all for direct use and records the selected value; the kernels list covers all supported record names, not the set required in each run.",
       "type": "enum",
       "default": "d2d",
       "values": [
@@ -35,7 +35,7 @@
     },
     {
       "name": "use_pinned_memory",
-      "description": "Whether to use pinned (page-locked) host memory for transfers",
+      "description": "Declared sweep fixes pinned host setup buffers. This controls the two host allocations and initial upload, not the device allocations or timed D2D copy. The direct binary also accepts false for pageable host buffers.",
       "type": "enum",
       "default": "true",
       "values": [
@@ -44,7 +44,7 @@
     },
     {
       "name": "vector_add_warmup",
-      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "description": "When true, run the untimed vector-add warmer before each selected copy to raise clocks and disturb cache state; qualify the resulting state on the target. False disables the warmer without promising a particular cache state.",
       "type": "enum",
       "default": "true",
       "values": [

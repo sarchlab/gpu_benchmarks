@@ -2,7 +2,7 @@
   "benchmark": "polybench_3dconv",
   "tier": 2,
   "suite": "polybench",
-  "description": "3D convolution over an NxNxN volume with a small 3D filter. Each output voxel is the weighted sum of its neighborhood. Emits per-iteration kernel times; GFLOPS is derived downstream.",
+  "description": "Fixed PolyBench/GPU 3D interior stencil: the pinned 15-term expression, including repeated offsets, with one independent 3D-grid launch. Preserves 25 volume sizes; output borders are initialized to zero before timing. Verifies every actual measured output afterward with a full CPU reference and emits raw timing plus fixed operator/verification identities.",
   "scaling_param": {
     "name": "size",
     "description": "Volume dimension N (NxNxN grid)",
@@ -46,19 +46,8 @@
       ]
     },
     {
-      "name": "filter_size",
-      "description": "Filter dimension (filter_size^3 convolution kernel)",
-      "type": "int",
-      "default": 3,
-      "values": [
-        3,
-        5,
-        7
-      ]
-    },
-    {
       "name": "vector_add_warmup",
-      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "description": "When true, run the untimed vector-add warmer before the measured stencil to raise clocks and disturb cache state; qualify the resulting state on the target. False disables the warmer.",
       "type": "enum",
       "default": "true",
       "values": [

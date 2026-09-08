@@ -37,6 +37,11 @@ SITES = {
         ("const bool verified = verify_convolution(",
          [("measured_tail", "h_B[(N-2)*N+N-2]", "h_A[(N-2)*N+N-2]")]),
     ],
+    "polybench_3dconv": [
+        ("double tolerance = interior ?", [("output", "actual", "expected")]),
+        ("const bool verified = verify_convolution3d(",
+         [("measured_tail", "h_output[((N-2)*N+N-2)*N+N-2]", "h_input[((N-2)*N+N-2)*N+N-2]")]),
+    ],
     "polybench_atax": [("float rel = fabsf(h_y[j]", [("y", "h_y[j]", "y_ref[j]")])],
     "polybench_bicg": [("float rel = fabsf(h_s[j]", [("s", "h_s[j]", "ref")]), ("float rel = fabsf(h_q[i]", [("q", "h_q[i]", "ref")])],
     "polybench_gramschmidt": [("float expected = (ci == cj) ? 1.0f : 0.0f;", [("dot", "dot", "expected")])],

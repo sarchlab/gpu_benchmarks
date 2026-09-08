@@ -154,3 +154,16 @@ without running compiler recipes. Run `python3 tests/common_header_dependencies.
 `--report PATH` preserves every decision and `--repo PATH` selects a checkout.
 CI runs this host-only regression. Target compilation and GPU execution require
 separate toolchains and hardware qualification.
+
+### Fixed 3D convolution output
+
+`make -C tier2/polybench_3dconv PLATFORM=cuda test` (or `PLATFORM=rocm`)
+requires an actual GPU. `three_d_convolution_output.hip` includes the production
+kernel and compares all 27 spatial basis inputs and 40 signed-volume/block
+combinations with an independent spatial-weight reference. Exactly representable
+inputs permit exact comparison; NaN destination interiors, untouched border
+sentinels and allocation guards detect missing or out-of-region writes.
+`--case N B` selects a cubic volume/block side; `--impulse 0..26` isolates one
+basis input. The production executable also checks every actual measured output
+after timing. The existing finite-injection harness covers that comparator and
+the last interior output/reference input, while CI only compiles these GPU tests.

@@ -114,6 +114,9 @@ jobs:
       - name: Compile 2D convolution operator test (GPU required to run)
         run: make -C tier2/polybench_2dconv PLATFORM=cuda bench_output_test
 
+      - name: Compile 3D convolution operator test (GPU required to run)
+        run: make -C tier2/polybench_3dconv PLATFORM=cuda bench_output_test
+
       - name: Compile Parboil stencil production-pass test (GPU required to run)
         run: make -C tier2/parboil_stencil PLATFORM=cuda bench_output_test
 

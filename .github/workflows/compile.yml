@@ -58,10 +58,13 @@ jobs:
       - name: Test gpubench
         run: go test ./cmd/gpubench
 
-      - name: Check CPU prefix references (no GPU required)
+      - name: Check complete matrix-vector CPU references (no GPU required)
         run: |
-          g++ -O2 -std=c++14 -fsanitize=address,undefined tests/prefix_reference_test.cpp -o /tmp/prefix_reference_test
-          /tmp/prefix_reference_test
+          g++ -O2 -std=c++14 -fsanitize=address,undefined tests/matvec_reference_test.cpp -o /tmp/matvec_reference_test
+          /tmp/matvec_reference_test
+
+      - name: Compile measured matrix-vector verification regression
+        run: python3 tests/matvec_measured_result.py --platform cuda --work-dir /tmp/matvec-measured-result --compile-only
 
       - name: Check full LU residual arithmetic (no GPU required)
         run: |

@@ -80,7 +80,7 @@ Device: NVIDIA GeForce RTX 4090 (id=0)
 Matrix size: 4096×4096
 
 bicg_kernel1 gpu = 0.161 ms, bicg_kernel2 gpu = 0.159 ms
-Correctness check (first 8 s, 8 q elements): PASS
+Correctness check (all 4096 s, 4096 q elements): PASS
 
 Total GPU time: 0.320 ms
 ```
@@ -90,8 +90,8 @@ its GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`),
 then a summary whose `total_time_ms` is the sum of the two GPU event
 times:
 ```json
-{"type":"kernel","name":"bicg_kernel1","iter":0,"time_ms":0.161,"host_time_ms":0.180,"params":{"m":4096,"n":4096,"block_size":256}}
-{"type":"kernel","name":"bicg_kernel2","iter":0,"time_ms":0.159,"host_time_ms":0.175,"params":{"m":4096,"n":4096,"block_size":256}}
+{"type":"kernel","name":"bicg_kernel1","iter":0,"time_ms":0.161,"host_time_ms":0.180,"params":{"m":4096,"n":4096,"block_size":256,"verification":"full_cpu_v1"}}
+{"type":"kernel","name":"bicg_kernel2","iter":0,"time_ms":0.159,"host_time_ms":0.175,"params":{"m":4096,"n":4096,"block_size":256,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":0.320}
 ```
 
@@ -108,25 +108,32 @@ Matrix A is read once by each kernel, totalling 2 reads.
 
 ## Correctness Verification
 
-GPU results for `s` and `q` are compared against a CPU reference. The first 8 elements of each output vector are checked. Maximum relative error threshold: **1e-4**. On mismatch the check prints `FAIL` and the process exits with a non-zero status.
+GPU results for `s` and `q` are compared against a CPU reference. All elements of each output vector are checked. Maximum relative error threshold: **1e-4**. On mismatch the check prints `FAIL` and the process exits with a non-zero status.
 
 ## References
 
 - [PolyBench/GPU](https://web.cse.ohio-state.edu/~pouchet.2/software/polybench/)
 - BiCGStab iterative solver: Barrett et al., *Templates for the Solution of Linear Systems*, SIAM 1994.
 
-The fixed `verification` parameter is `prefix8_cpu_v1`: compare the first
-`min(8, dimension)` elements of each existing output vector, with the same
-float accumulation order, relative tolerance and non-finite rejection as
-before. CPU references now compute only those final dot products and allocate
-only the checked output prefix. This is a limited prefix check; it provides no
-coverage guarantee for other output positions. Full-result qualification and
-cross-device verification remain separate requirements.
+The fixed `verification` parameter is `full_cpu_v1`: compare every element
+of the actual measured output vectors against the complete CPU formula after
+timing. The original float accumulation order, relative-error threshold
+(`1e-4`, with `abs(reference)+1e-6` in the denominator), and rejection of
+non-finite GPU values, references and relative errors are retained. A mismatch
+prints `FAIL` and exits nonzero. No separate GPU verification pass is launched.
 
-BiCG reference work is O(m×min(8,n) + n×min(8,m)), replacing two complete
-m×n matrix-vector references. At most 16 reference output floats are allocated.
+The CPU reference performs both complete matrix-vector products, O(m×n)
+work, with m+n reference-output floats (160 KiB at the largest declared shape).
+All output vectors were already downloaded in full; input generation, GPU
+kernels, transfers and timing intervals are unchanged. The process pays for
+the complete CPU check outside GPU/host launch timing. Qualify full process
+wall time and numerical tolerance on each target; AMD execution remains
+separate from CUDA compilation and the tested H100 results.
 
-Input generation, GPU kernels, transfers and timing intervals are unchanged.
-The CPU work remains outside GPU/host launch timing. The process still pays
-for full input generation and allocation; measure its complete wall time when
-admitting a configuration under a target's process budget.
+`tests/matvec_measured_result.py` checks actual device-output corruption at
+the first element, the old prefix boundary, the middle and the tail, including
+finite errors and NaN/Inf. Run `python3 tests/matvec_measured_result.py
+--platform cuda --work-dir /tmp/matvec-check` from the repository root with a
+new, nonexistent output directory (or use `rocm`). CI compiles this GPU test
+and runs `tests/matvec_reference_test.cpp` under host sanitizers. A timeout
+fails the GPU test and retains completed logs and a partial report.

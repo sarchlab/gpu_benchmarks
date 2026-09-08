@@ -35,13 +35,13 @@ Derived downstream from the emitted `time_ms` and params; not reported by the bi
 `summary` whose `total_time_ms` is the sum of the two GPU event times:
 
 ```
-{"type":"kernel","name":"atax_kernel1","iter":0,"time_ms":1.234000,"host_time_ms":1.290000,"params":{"nx":4096,"ny":4096,"block_size":256}}
-{"type":"kernel","name":"atax_kernel2","iter":0,"time_ms":2.345000,"host_time_ms":2.401000,"params":{"nx":4096,"ny":4096,"block_size":256}}
+{"type":"kernel","name":"atax_kernel1","iter":0,"time_ms":1.234000,"host_time_ms":1.290000,"params":{"nx":4096,"ny":4096,"block_size":256,"verification":"full_cpu_v1"}}
+{"type":"kernel","name":"atax_kernel2","iter":0,"time_ms":2.345000,"host_time_ms":2.401000,"params":{"nx":4096,"ny":4096,"block_size":256,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":3.579000}
 ```
 
-**stderr** — device info, per-kernel timing, and a correctness check: the
-first 8 elements of `y` are compared against a CPU reference. On mismatch
+**stderr** — device info, per-kernel timing, and a correctness check:
+all elements of `y` are compared against a CPU reference. On mismatch
 the check prints `FAIL` and the process exits with a non-zero status.
 
 ## Build
@@ -90,19 +90,26 @@ The pass runs exactly once per execution; repetition is the harness's job
 
 Derived from the [PolyBench/GPU](https://sourceforge.net/projects/polybench/) benchmark suite, ATAX kernel.
 
-The fixed `verification` parameter is `prefix8_cpu_v1`: compare the first
-`min(8, dimension)` elements of each existing output vector, with the same
-float accumulation order, relative tolerance and non-finite rejection as
-before. CPU references now compute only those final dot products and allocate
-only the checked output prefix. This is a limited prefix check; it provides no
-coverage guarantee for other output positions. Full-result qualification and
-cross-device verification remain separate requirements.
+The fixed `verification` parameter is `full_cpu_v1`: compare every element
+of the actual measured output vectors against the complete CPU formula after
+timing. The original float accumulation order, relative-error threshold
+(`1e-3`, with `abs(reference)+1e-6` in the denominator), and rejection of
+non-finite GPU values, references and relative errors are retained. A mismatch
+prints `FAIL` and exits nonzero. No separate GPU verification pass is launched.
 
-ATAX still computes **all** of `tmp = A*x`, since every checked element of
-`Aᵀ*tmp` depends on all rows. The reference cost is
-O(nx×ny + nx×min(8,ny)), with nx temporary floats plus the checked prefix.
+The CPU reference performs both complete matrix-vector products, O(nx×ny)
+work, with nx temporary floats and ny reference-output floats (160 KiB total
+at the largest declared shape).
+All output vectors were already downloaded in full; input generation, GPU
+kernels, transfers and timing intervals are unchanged. The process pays for
+the complete CPU check outside GPU/host launch timing. Qualify full process
+wall time and numerical tolerance on each target; AMD execution remains
+separate from CUDA compilation and the tested H100 results.
 
-Input generation, GPU kernels, transfers and timing intervals are unchanged.
-The CPU work remains outside GPU/host launch timing. The process still pays
-for full input generation and allocation; measure its complete wall time when
-admitting a configuration under a target's process budget.
+`tests/matvec_measured_result.py` checks actual device-output corruption at
+the first element, the old prefix boundary, the middle and the tail, including
+finite errors and NaN/Inf. Run `python3 tests/matvec_measured_result.py
+--platform cuda --work-dir /tmp/matvec-check` from the repository root with a
+new, nonexistent output directory (or use `rocm`). CI compiles this GPU test
+and runs `tests/matvec_reference_test.cpp` under host sanitizers. A timeout
+fails the GPU test and retains completed logs and a partial report.

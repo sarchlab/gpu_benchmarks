@@ -153,7 +153,7 @@ int main(int argc, char** argv) {
 
     char params[192];
     snprintf(params, sizeof(params),
-             "\"m\":%d,\"n\":%d,\"block_size\":%d,\"verification\":\"prefix8_cpu_v1\"", m, n, block_size);
+             "\"m\":%d,\"n\":%d,\"block_size\":%d,\"verification\":\"full_cpu_v1\"", m, n, block_size);
 
     bench_timer_t timer;
     bench_timer_create(&timer);
@@ -195,14 +195,12 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(h_s, d_s, bytes_s, hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(h_q, d_q, bytes_q, hipMemcpyDeviceToHost));
 
-    // Correctness check against CPU reference (small subset)
-    int check_n = (n < 8) ? n : 8;
-    int check_m = (m < 8) ? m : 8;
-    std::vector<float> s_ref(check_n), q_ref(check_m);
-    cpu_bicg_prefix(h_A, h_p, h_r, s_ref.data(), q_ref.data(), m, n, check_m, check_n);
+    // Correctness check against full CPU reference
+    std::vector<float> s_ref(n), q_ref(m);
+    cpu_bicg(h_A, h_p, h_r, s_ref.data(), q_ref.data(), m, n);
 
     bool pass = true;
-    for (int j = 0; j < check_n; ++j) {
+    for (int j = 0; j < n; ++j) {
         float ref = s_ref[j];
         float rel = fabsf(h_s[j] - ref) / (fabsf(ref) + 1e-6f);
         if (!std::isfinite(h_s[j]) || !std::isfinite(ref) || !std::isfinite(rel) ||
@@ -212,7 +210,7 @@ int main(int argc, char** argv) {
             pass = false;
         }
     }
-    for (int i = 0; i < check_m; ++i) {
+    for (int i = 0; i < m; ++i) {
         float ref = q_ref[i];
         float rel = fabsf(h_q[i] - ref) / (fabsf(ref) + 1e-6f);
         if (!std::isfinite(h_q[i]) || !std::isfinite(ref) || !std::isfinite(rel) ||
@@ -222,8 +220,8 @@ int main(int argc, char** argv) {
             pass = false;
         }
     }
-    fprintf(stderr, "Correctness check (first %d s, %d q elements): %s\n\n",
-            check_n, check_m, pass ? "PASS" : "FAIL");
+    fprintf(stderr, "Correctness check (all %d s, %d q elements): %s\n\n",
+            n, m, pass ? "PASS" : "FAIL");
 
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);

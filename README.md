@@ -55,7 +55,7 @@ The rules split cleanly by implementation language: everything that matters when
 
 6. **The timed bracket contains only the operation under test.** Host-side setup, `hipMalloc`, initial Host→Device uploads, and result verification all happen outside the timed region. For most benchmarks that means **we only care about kernel time** — the bracket contains kernel launches and nothing else. The only exception is a few Tier 1 benchmarks whose subject *is* the transfer (`memory_bandwidth`, `pcie_bandwidth`): there the bracket times the memory-copy operations, because copy time/bandwidth is what they measure.
 
-   Required resets or copies between algorithm stages are part of the algorithm. In kernel benchmarks, implement these operations as explicit GPU kernels, time each launch, and emit matching per-kernel records. Initial problem setup remains outside timing and before the entry warmer.
+   Required device-only resets and device-to-device copies between algorithm stages are part of the algorithm. In kernel benchmarks, implement these operations as explicit GPU kernels, time each launch, and emit matching per-kernel records. Initial problem setup remains outside timing and before the entry warmer. When the selected upstream algorithm is hybrid, retain its required host computation and host/device transfers, and document that these gaps are excluded from summed GPU kernel time.
 
 7. **GPU event timing, raw output.** Time is measured with **GPU events** (`hipEvent`/`cudaEvent`) bracketing exactly the enqueued operation — no host wall-clock timing is needed. Benchmarks never compute GFLOPS, GB/s, or latency — they emit the raw time plus the work-descriptor parameters as JSON lines on stdout, and all derived metrics are computed downstream.
 

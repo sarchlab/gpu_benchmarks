@@ -183,8 +183,11 @@ ranges against the supplied byte length before allocating decoded blocks or
 decompressing. Unsupported versions, inconsistent tables and truncated or
 out-of-range sections return errors rather than panicking or accepting partial
 files. Valid containers retain their original decompressed header and block
-bytes. This layout check does not establish instruction validity, measured
-region membership or a host-memory budget for decompressed traces.
+bytes. The stored dictionary must also match decoded block 0 byte for byte;
+this is checked before decoding later blocks that could silently use a corrupt
+dictionary when their zstd frames have no checksum. These container checks do
+not establish instruction validity, measured region membership or a host-memory
+budget for decompressed traces.
 
 ## Tier-7 statistical residual (lossy, `tier7.go`)
 

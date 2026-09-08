@@ -136,43 +136,72 @@ func TestContainerRejectsInvalidJSONAndFrames(t *testing.T) {
 	}
 }
 
-func TestContainerDictionaryIDCompatibility(t *testing.T) {
-	// C++ uses raw dictionary ID 0; Go uses ID 1. Exercise a second block so
-	// dictionary decoding is required, and keep the complete expected text.
+func dictionaryContainer(t testing.TB, id uint32, checksum bool) []byte {
+	t.Helper()
 	header, blocks := splitTracegBlocks(sampleTraceg())
+	plain, err := zstd.NewWriter(nil, zstd.WithEncoderCRC(checksum))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plain.Close()
+	dict, err := zstd.NewWriter(nil, zstd.WithEncoderDictRaw(id, []byte(blocks[0])), zstd.WithEncoderCRC(checksum))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dict.Close()
+	h := zstdTraceHeader{Version: 1, NumBlocks: len(blocks), HeaderSize: len(header), DictSize: len(blocks[0])}
+	body := []byte(header + blocks[0])
+	offset := 0
+	for i, block := range blocks {
+		encoder := dict
+		if i == 0 {
+			encoder = plain
+		}
+		frame := encoder.EncodeAll([]byte(block), nil)
+		h.BlockOffsets = append(h.BlockOffsets, offset)
+		h.FrameSizes = append(h.FrameSizes, len(frame))
+		offset += len(frame)
+		body = append(body, frame...)
+	}
+	return packContainerHeader(t, h, body)
+}
+
+func TestContainerDictionaryIDCompatibility(t *testing.T) {
+	// C++ uses raw dictionary ID 0 without checksums; Go uses ID 1 with them.
+	// Exercise a second block so dictionary decoding is required.
 	for _, id := range []uint32{0, 1} {
-		plain, err := zstd.NewWriter(nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		dict, err := zstd.NewWriter(nil, zstd.WithEncoderDictRaw(id, []byte(blocks[0])))
-		if err != nil {
-			plain.Close()
-			t.Fatal(err)
-		}
-		h := zstdTraceHeader{Version: 1, NumBlocks: len(blocks), HeaderSize: len(header), DictSize: len(blocks[0])}
-		body := []byte(header + blocks[0])
-		offset := 0
-		for i, block := range blocks {
-			encoder := dict
-			if i == 0 {
-				encoder = plain
-			}
-			frame := encoder.EncodeAll([]byte(block), nil)
-			h.BlockOffsets = append(h.BlockOffsets, offset)
-			h.FrameSizes = append(h.FrameSizes, len(frame))
-			offset += len(frame)
-			body = append(body, frame...)
-		}
-		plain.Close()
-		dict.Close()
-		gotHeader, gotBlocks, err := DecodeContainer(packContainerHeader(t, h, body))
+		gotHeader, gotBlocks, err := DecodeContainer(dictionaryContainer(t, id, id == 1))
 		if err != nil {
 			t.Fatalf("dictionary ID %d: %v", id, err)
 		}
 		if gotHeader+strings.Join(gotBlocks, "") != sampleTraceg() {
 			t.Fatalf("dictionary ID %d changed decoded bytes", id)
 		}
+	}
+}
+
+func TestContainerRejectsDictionaryMismatch(t *testing.T) {
+	for _, id := range []uint32{0, 1} {
+		data := dictionaryContainer(t, id, id == 1)
+		n := int(binary.LittleEndian.Uint32(data[:4]))
+		var h zstdTraceHeader
+		if err := json.Unmarshal(data[4:4+n], &h); err != nil {
+			t.Fatal(err)
+		}
+		for _, at := range []int{0, h.DictSize / 2, h.DictSize - 1} {
+			corrupt := append([]byte(nil), data...)
+			corrupt[4+n+h.HeaderSize+at] ^= 1
+			requireContainerError(t, corrupt)
+		}
+		// Even a one-block file must match: no later frame otherwise uses the
+		// dictionary, so successful decompression alone cannot detect damage.
+		body := append([]byte(nil), data[4+n:4+n+h.HeaderSize+h.DictSize+h.FrameSizes[0]]...)
+		h.NumBlocks, h.BlockOffsets, h.FrameSizes = 1, h.BlockOffsets[:1], h.FrameSizes[:1]
+		if _, _, err := DecodeContainer(packContainerHeader(t, h, body)); err != nil {
+			t.Fatal(err)
+		}
+		body[h.HeaderSize] ^= 1
+		requireContainerError(t, packContainerHeader(t, h, body))
 	}
 }
 

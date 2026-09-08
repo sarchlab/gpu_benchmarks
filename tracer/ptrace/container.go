@@ -11,6 +11,7 @@ package ptrace
 // Mirrors github.com/sarchlab/bbsim/internal/codec.
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -107,6 +108,9 @@ func DecodeContainer(data []byte) (header string, blocks []string, err error) {
 		}
 		if err != nil {
 			return "", nil, fmt.Errorf("decoding frame %d: %w", i, err)
+		}
+		if i == 0 && !bytes.Equal(dict, out) {
+			return "", nil, fmt.Errorf("dictionary differs from decoded block 0")
 		}
 		blocks[i] = string(out)
 	}

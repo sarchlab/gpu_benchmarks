@@ -49,7 +49,7 @@ endif
 
 all: $(TARGET)
 
-$(TARGET): $(SRC) ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
+$(TARGET): $(SRC) cpu_reference.h ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
 	$(CC) $(CFLAGS) $< -o $@
 
 clean:

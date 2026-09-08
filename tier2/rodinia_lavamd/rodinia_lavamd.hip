@@ -37,6 +37,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include "cpu_reference.h"
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -329,9 +330,9 @@ int main(int argc, char** argv) {
     dim3 blocks(dim_cpu.number_boxes, 1);
     dim3 threads(NUMBER_THREADS, 1);
 
-    char params[128];
+    char params[192];
     snprintf(params, sizeof(params),
-             "\"boxes1d\":%d,\"particles_per_box\":%d,\"number_threads\":%d",
+             "\"boxes1d\":%d,\"particles_per_box\":%d,\"number_threads\":%d,\"verification\":\"full_cpu_v1\"",
              boxes1d, NUMBER_PAR_PER_BOX, NUMBER_THREADS);
 
     bench_timer_t timer;
@@ -370,6 +371,29 @@ int main(int argc, char** argv) {
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms over 1 pass\n", total_gpu_ms);
 
+    // Verify every measured energy/force component after timing, with no extra GPU pass.
+    const auto expected = cpu_lavamd(rv_cpu, qv_cpu, boxes1d,
+                                    NUMBER_PAR_PER_BOX, par_cpu.alpha);
+    // The reference has consumed all positions; reuse their buffer for output.
+    HIP_CHECK(hipMemcpy(rv_cpu, d_fv_gpu, dim_cpu.space_mem, hipMemcpyDeviceToHost));
+    size_t mismatches = 0;
+    const char* component_names[] = {"v", "x", "y", "z"};
+    for (size_t i = 0; i < (size_t)dim_cpu.space_elem; ++i) {
+        const double actual[] = {rv_cpu[i].v, rv_cpu[i].x, rv_cpu[i].y, rv_cpu[i].z};
+        const double reference[] = {expected[i].v, expected[i].x, expected[i].y, expected[i].z};
+        for (int c = 0; c < 4; ++c) {
+            if (!lavamd_value_matches(actual[c], reference[c])) {
+                if (mismatches < 10)
+                    fprintf(stderr, "MISMATCH force[%zu].%s: GPU=%.17g CPU=%.17g\n",
+                            i, component_names[c], actual[c], reference[c]);
+                ++mismatches;
+            }
+        }
+    }
+    fprintf(stderr, "LavaMD verification: %s (%zu particles, %zu components, %zu mismatches)\n",
+            mismatches ? "FAIL" : "PASS", (size_t)dim_cpu.space_elem,
+            (size_t)dim_cpu.space_elem * 4, mismatches);
+
     HIP_CHECK(hipFree(d_box_gpu));
     HIP_CHECK(hipFree(d_rv_gpu));
     HIP_CHECK(hipFree(d_qv_gpu));
@@ -378,5 +402,5 @@ int main(int argc, char** argv) {
     free(rv_cpu);
     free(qv_cpu);
 
-    return 0;
+    return mismatches ? EXIT_FAILURE : EXIT_SUCCESS;
 }

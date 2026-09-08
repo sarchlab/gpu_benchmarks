@@ -69,6 +69,14 @@ jobs:
       - name: Compile measured matrix-vector verification regression
         run: python3 tests/matvec_measured_result.py --platform cuda --work-dir /tmp/matvec-measured-result --compile-only
 
+      - name: Check complete LavaMD CPU reference (no GPU required)
+        run: |
+          g++ -O3 -std=c++14 -fsanitize=address,undefined tests/lavamd_reference_test.cpp -o /tmp/lavamd_reference_test
+          /tmp/lavamd_reference_test
+
+      - name: Compile measured LavaMD verification regression
+        run: python3 tests/lavamd_measured_result.py --platform cuda --work-dir /tmp/lavamd-measured-result --compile-only
+
       - name: Check complete SYR2K CPU reference (no GPU required)
         run: |
           g++ -O3 -std=c++14 -fsanitize=address,undefined tests/syr2k_reference_test.cpp -o /tmp/syr2k_reference_test

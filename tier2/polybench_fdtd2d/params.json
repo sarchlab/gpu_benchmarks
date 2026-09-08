@@ -2,7 +2,7 @@
   "benchmark": "polybench_fdtd2d",
   "tier": 2,
   "suite": "polybench",
-  "description": "2D Finite Difference Time Domain electromagnetic simulation with three field arrays (ex, ey, hz). Three GPU kernels update fields per time step.",
+  "description": "2D Finite Difference Time Domain electromagnetic simulation with three field arrays (ex, ey, hz). Three GPU kernels update fields per time step. Every measured final ex/ey/hz value is checked against a complete independent double CPU recurrence after timing (verification=full_cpu_v1).",
   "scaling_param": {
     "name": "size",
     "description": "Grid dimension N (NxN grid for each field array)",

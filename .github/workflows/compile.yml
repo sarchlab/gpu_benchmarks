@@ -114,6 +114,9 @@ jobs:
       - name: Compile 2D convolution operator test (GPU required to run)
         run: make -C tier2/polybench_2dconv PLATFORM=cuda bench_output_test
 
+      - name: Compile Chai CEDD operator reference test (GPU required to run)
+        run: make -C tier2/chai_cedd PLATFORM=cuda bench_output_test
+
       - name: Compile 3D convolution operator test (GPU required to run)
         run: make -C tier2/polybench_3dconv PLATFORM=cuda bench_output_test
 

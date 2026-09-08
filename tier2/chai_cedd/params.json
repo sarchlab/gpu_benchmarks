@@ -2,10 +2,10 @@
   "benchmark": "chai_cedd",
   "tier": 2,
   "suite": "chai",
-  "description": "Canny Edge Detection pipeline: Gaussian blur, Sobel gradient, magnitude+direction, non-maximum suppression, hysteresis thresholding. Emits per-pass, per-kernel GPU times; Mpixels/s is derived downstream.",
+  "description": "Pinned Chai four-stage byte CEDD: 3x3 Gaussian with per-term truncation, Sobel magnitude/direction, strict non-maximum suppression, fixed 10/70 midpoint thresholding. One frame per process; full measured-output CPU verification after timing.",
   "scaling_param": {
     "name": "width",
-    "description": "Image width in pixels (W= parameter). Height is set independently via the `height` parameter (default 2048), so the image is not necessarily square; total pixels = width × height.",
+    "description": "Image width in pixels (W= parameter). Height is set independently via the `height` parameter (default 2048), so the image is not necessarily square; total pixels = width \u00d7 height.",
     "type": "int",
     "values": [
       64,
@@ -46,30 +46,8 @@
       ]
     },
     {
-      "name": "threshold_low",
-      "description": "Low threshold for Canny hysteresis (0-255)",
-      "type": "int",
-      "default": 50,
-      "values": [
-        30,
-        50,
-        100
-      ]
-    },
-    {
-      "name": "threshold_high",
-      "description": "High threshold for Canny hysteresis (0-255)",
-      "type": "int",
-      "default": 150,
-      "values": [
-        100,
-        150,
-        200
-      ]
-    },
-    {
       "name": "vector_add_warmup",
-      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "description": "Optional shared clock/cache warmer after input upload and scratch initialization, before the first timed stage only. Dependent stages retain naturally evolving state; false leaves the incoming state as-is.",
       "type": "enum",
       "default": "true",
       "values": [
@@ -79,10 +57,9 @@
     }
   ],
   "kernels": [
-    "gaussian_blur_kernel",
+    "gaussian_kernel",
     "sobel_kernel",
-    "magnitude_direction_kernel",
-    "nms_kernel",
-    "hysteresis_kernel"
+    "non_max_supp_kernel",
+    "hyst_kernel"
   ]
 }

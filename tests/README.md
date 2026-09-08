@@ -173,3 +173,18 @@ sentinels and allocation guards detect missing or out-of-region writes.
 basis input. The production executable also checks every actual measured output
 after timing. The existing finite-injection harness covers that comparator and
 the last interior output/reference input, while CI only compiles these GPU tests.
+
+`cedd_output_test.hip` checks every output byte of all four actual Chai CEDD
+kernels with independent integer/double stage references, allocation guards,
+unchanged borders, partial tiles, constant images, ramps and alternating pixels.
+It also executes the real timed production pass and its full-output verifier.
+An exhaustive test covers all 2,082,841 same-parity integer Sobel gradient pairs in
+[-1020,1020]² against the production float quantization helper. Opposite-parity
+pairs cannot come from a byte-valued Sobel patch: both sums have the same four
+corner values modulo two. Some impossible pairs cross a float angular bin
+boundary differently from the ideal double reference; these are excluded by
+the proved stencil invariant, not by an output mismatch allowance. Run
+`make -C tier2/chai_cedd PLATFORM=cuda test` (or `PLATFORM=rocm`).
+`bench_output_test --case W H` checks a chosen shape. Byte outputs have no
+NaN/Inf representation; corruption tests should alter actual output bytes,
+including the last interior pixel and preserved border, after timing.

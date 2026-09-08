@@ -74,6 +74,14 @@ jobs:
       - name: Compile measured 2MM verification regression
         run: python3 tests/two_mm_measured_result.py --platform cuda --work-dir /tmp/two-mm-measured-result --compile-only
 
+      - name: Check complete SHOC Stencil2D CPU reference (no GPU required)
+        run: |
+          g++ -O3 -std=c++14 -fsanitize=address,undefined tests/shoc_stencil_reference_test.cpp -o /tmp/shoc_stencil_reference_test
+          /tmp/shoc_stencil_reference_test
+
+      - name: Compile measured SHOC Stencil2D verification regression
+        run: python3 tests/shoc_stencil_measured_result.py --platform cuda --work-dir /tmp/shoc-stencil-measured-result --compile-only
+
       - name: Check full stencil CPU reference (no GPU required)
         run: |
           g++ -O2 -std=c++14 -fsanitize=address,undefined tests/stencil_reference_test.cpp -o /tmp/stencil_reference_test

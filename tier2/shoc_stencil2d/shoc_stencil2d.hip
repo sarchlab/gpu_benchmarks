@@ -33,6 +33,7 @@
 // Output (stderr): device info, timing details, correctness check
 
 #include "../../common/bench_timing.h"
+#include "cpu_reference.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -83,92 +84,6 @@ __global__ void stencil2d_kernel(const float* __restrict__ in,
 }
 
 // ---------------------------------------------------------------------------
-// CPU reference (single iteration, for correctness check)
-// ---------------------------------------------------------------------------
-
-static void cpu_stencil2d(const float* in, float* out, int N)
-{
-    for (int i = 1; i < N - 1; ++i) {
-        for (int j = 1; j < N - 1; ++j) {
-            float center = in[i * N + j];
-            float north  = in[(i - 1) * N + j];
-            float south  = in[(i + 1) * N + j];
-            float west   = in[i * N + (j - 1)];
-            float east   = in[i * N + (j + 1)];
-            float nw     = in[(i - 1) * N + (j - 1)];
-            float ne     = in[(i - 1) * N + (j + 1)];
-            float sw     = in[(i + 1) * N + (j - 1)];
-            float se     = in[(i + 1) * N + (j + 1)];
-
-            out[i * N + j] = 0.5f   * center
-                           + 0.1f   * (north + south + west + east)
-                           + 0.025f * (nw + ne + sw + se);
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Correctness check on a small grid
-// ---------------------------------------------------------------------------
-
-static bool correctness_check()
-{
-    const int NC = 64;
-    size_t bytes = (size_t)NC * NC * sizeof(float);
-
-    std::vector<float> h_in(NC * NC, 0.0f);
-    std::vector<float> h_out_cpu(NC * NC, 0.0f);
-    std::vector<float> h_out_gpu(NC * NC, 0.0f);
-
-    srand(42);
-    for (int i = 0; i < NC * NC; ++i)
-        h_in[i] = (float)(rand() % 100) / 10.0f;
-    // Keep boundaries at 0
-    for (int j = 0; j < NC; ++j) h_in[0 * NC + j] = 0.0f;
-    for (int j = 0; j < NC; ++j) h_in[(NC - 1) * NC + j] = 0.0f;
-    for (int i = 0; i < NC; ++i) h_in[i * NC + 0] = 0.0f;
-    for (int i = 0; i < NC; ++i) h_in[i * NC + (NC - 1)] = 0.0f;
-
-    // CPU reference
-    cpu_stencil2d(h_in.data(), h_out_cpu.data(), NC);
-
-    // GPU
-    float *d_in, *d_out;
-    HIP_CHECK(hipMalloc(&d_in,  bytes));
-    HIP_CHECK(hipMalloc(&d_out, bytes));
-    HIP_CHECK(hipMemcpy(d_in,  h_in.data(),      bytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemset(d_out, 0, bytes));
-
-    dim3 block(BLOCK_DIM, BLOCK_DIM);
-    dim3 grid((NC - 2 + BLOCK_DIM - 1) / BLOCK_DIM,
-              (NC - 2 + BLOCK_DIM - 1) / BLOCK_DIM);
-    stencil2d_kernel<<<grid, block>>>(d_in, d_out, NC);
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipMemcpy(h_out_gpu.data(), d_out, bytes, hipMemcpyDeviceToHost));
-
-    HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_out));
-
-    bool pass = true;
-    for (int i = 1; i < NC - 1; ++i) {
-        for (int j = 1; j < NC - 1; ++j) {
-            float ref = h_out_cpu[i * NC + j];
-            float gpu = h_out_gpu[i * NC + j];
-            float rel = fabsf(gpu - ref) / (fabsf(ref) + 1e-6f);
-            if (!std::isfinite(gpu) || !std::isfinite(ref) || !std::isfinite(rel) ||
-                rel > 1e-4f) {
-                fprintf(stderr, "MISMATCH at [%d][%d]: gpu=%.6f cpu=%.6f rel=%.4e\n",
-                        i, j, gpu, ref, rel);
-                pass = false;
-                if (!pass) goto done; // report first mismatch only
-            }
-        }
-    }
-done:
-    return pass;
-}
-
-// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -197,10 +112,6 @@ int main(int argc, char** argv)
     fprintf(stderr, "Grid: %d×%d  |  Stencil steps/pass: %d\n\n",
             N, N, iters);
 
-    // Correctness check runs AFTER the timed pass (below) — launching the
-    // kernel-under-test on a 64×64 grid here would pre-warm the I-cache/module
-    // state the single cold launch is meant to pay.
-
     // Allocate host and device buffers for full run
     size_t bytes = (size_t)N * N * sizeof(float);
     std::vector<float> h_data(N * N, 0.0f);
@@ -224,7 +135,7 @@ int main(int argc, char** argv)
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"n\":%d,\"iterations\":%d,\"block_size\":%d",
+             "\"n\":%d,\"iterations\":%d,\"block_size\":%d,\"verification\":\"full_cpu_v1\"",
              N, iters, block_size);
 
     bench_timer_t timer;
@@ -252,11 +163,12 @@ int main(int argc, char** argv)
             }));
             float* tmp = in_ptr; in_ptr = out_ptr; out_ptr = tmp;
         }
+        return in_ptr;
     };
 
     // Timed pass — one record with the accumulated kernel time
     double total_gpu_ms = 0.0;
-    run_pass();
+    float* latest = run_pass();
     bench_emit_iter("stencil2d_kernel", 0, &acc, params);
     total_gpu_ms += acc.gpu_ms;
     fprintf(stderr, "gpu = %.3f ms, host = %.3f ms (%d stencil steps)\n",
@@ -266,16 +178,30 @@ int main(int argc, char** argv)
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
-    // Cleanup
+    // Verify the final measured state after timing, with no extra GPU pass.
+    // Consume the original input before h_data becomes the downloaded output.
+    const std::vector<float> reference = cpu_stencil2d_pass(h_data.data(), N, iters);
+    HIP_CHECK(hipMemcpy(h_data.data(), latest, bytes, hipMemcpyDeviceToHost));
+    size_t errors = 0;
+    for (int i = 0; i < N; ++i)
+        for (int j = 0; j < N; ++j) {
+            const size_t index = (size_t)i * N + j;
+            float gpu = h_data[index];
+            float ref = reference[index];
+            float rel = fabsf(gpu - ref) / (fabsf(ref) + 1e-6f);
+            const bool boundary = i == 0 || j == 0 || i == N-1 || j == N-1;
+            if (!std::isfinite(gpu) || !std::isfinite(ref) || !std::isfinite(rel) ||
+                (boundary ? gpu != ref : rel > 1e-4f)) {
+                if (errors < 10)
+                    fprintf(stderr, "MISMATCH stencil[%zu] (%d,%d): gpu=%.9g cpu=%.9g rel=%.4e\n",
+                            index, i, j, gpu, ref, rel);
+                ++errors;
+            }
+        }
+    fprintf(stderr, "Stencil verification: %s (%zu cells, %zu mismatches)\n",
+            errors ? "FAIL" : "PASS", reference.size(), errors);
+
     HIP_CHECK(hipFree(d_buf0));
     HIP_CHECK(hipFree(d_buf1));
-
-    // Correctness check on a separate 64×64 grid, AFTER the timed pass so its
-    // kernel launch cannot pre-warm the timed one. All JSON records and the
-    // summary line have been emitted by now, so failing here only marks the run
-    // as failed without losing the measurements.
-    bool ok = correctness_check();
-    fprintf(stderr, "Correctness check (64×64, 1 iteration): %s\n",
-            ok ? "PASS" : "FAIL");
-    return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+    return errors ? EXIT_FAILURE : EXIT_SUCCESS;
 }

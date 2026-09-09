@@ -258,6 +258,13 @@ test and retains completed-case logs and a partial report. The test requires
 verification diagnostics and failure exit codes.
 
 
+`python3 tests/npb_ep_input_ranges.py --compiler clang++` executes the actual EP
+parameter and geometry prefix with host sanitizers. It checks exponent/thread
+and per-block histogram index limits, positive block sizes, all declared
+configurations, and existing argv/environment precedence without allocating
+large inputs. Host acceptance establishes representable indices, not device
+support, verification coverage or runtime feasibility. CI runs it with g++.
+
 `python3 tests/bfs_input_ranges.py --compiler clang++` executes the actual
 BFS parameter prefix and row-size expression under host sanitizers. It checks
 positive vertex/block counts, nonnegative out-degree, signed edge/index limits,

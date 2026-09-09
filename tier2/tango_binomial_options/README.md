@@ -36,6 +36,7 @@ measured cold-cache at a boosted clock. Repetition is the harness's job:
 | File | Description |
 |------|-------------|
 | `tango_binomial_options.hip` | HIP source — binomial tree kernel (one block per option, shared memory) |
+| `cpu_reference.h` | Complete CPU price reference with cached payoffs and bounded parallelism |
 | `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
 
 ## Build
@@ -69,7 +70,7 @@ workload. It is still emitted in each record as `"steps":1024`.
 
 **stdout** — JSON lines: one `{"type":"kernel",...}` record with `time_ms` (GPU event time) and `host_time_ms` (host wall-clock), then a summary whose `total_time_ms` equals that record's GPU event time:
 ```
-{"type":"kernel","name":"binomial_kernel","iter":0,"time_ms":45.6789,"host_time_ms":45.9012,"params":{"options":512,"steps":1024}}
+{"type":"kernel","name":"binomial_kernel","iter":0,"time_ms":45.6789,"host_time_ms":45.9012,"params":{"options":512,"steps":1024,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":45.678900}
 ```
 
@@ -82,15 +83,42 @@ Options: 512  |  Steps: 1024
 
 binomial_kernel: gpu = 45.679 ms, host = 45.901 ms
 Total GPU time: 45.679 ms
-PASS
+Binomial verification: PASS (512 prices, 0 mismatches)
 ```
 
 ## Verification
 
-- After the timed run (measurements already emitted), GPU results are compared against a CPU reference for the first 10 options
-- CPU reference uses identical backward induction algorithm
-- Tolerance: relative error with absolute floor
-- On FAIL the process exits non-zero, so the harness marks the run as failed without losing the measurements; there is no verification on/off parameter
+After timing and output emission, every measured option price is downloaded and
+checked against the existing CPU American-put recurrence. Both values must be
+finite and their absolute difference must be at most
+`1e-2 * abs(CPU price) + 1e-4`. Each kernel record identifies this policy as
+`verification="full_cpu_v1"`. Diagnostics report the complete price/mismatch
+counts and print details for at most ten mismatches. A mismatch or unavailable
+full CPU reference causes a nonzero process exit; previously emitted timing
+records remain available to the harness. There is no verification-off mode.
+
+The reference caches the identical payoff expression for every exponent in
+`-1024..1024`, preserving the original continuation arithmetic. An explicit
+NaN-aware maximum permits vectorization without fast-math. At most 16 CPU
+workers evaluate independent options, with a sequential fallback if a thread
+cannot be created. Reference storage is one float per option (4 MiB at the
+largest declared size), plus approximately 12 KiB of scratch per active worker.
+All reference work occurs after the timed GPU launch. The kernel, input sequence,
+33 declared sizes and 60-second collection budget are unchanged.
+
+The process budget includes CPU verification. On the qualified H100 host using
+16 CPU workers, the largest declared size completes in about 26 seconds end to
+end. Fewer available CPU workers or host contention can exceed that budget;
+supported host/size profiles remain part of R-17/R-22 in the readiness tracker.
+
+The host regression compares against the original per-node-power recurrence,
+including early exercise, extreme generated inputs, complete parallel results
+and NaN/infinity selection. The measured-result regression corrupts actual GPU
+prices before their production download, including outputs beyond the former
+ten-price prefix and the largest-size tail. See [test instructions](../../tests/README.md).
+This repair verifies the current local formula; it does not settle upstream
+attribution under [R-09](https://github.com/sarchlab/gpu_benchmarks/issues/71),
+general input/capacity admission or AMD hardware qualification.
 
 ## Platform Notes
 

@@ -412,3 +412,22 @@ Use `rocm` for an AMD run. The default 60 cases gain eight largest-size tail
 faults with `--largest`. Each process retains the 60-second budget; a timeout
 stops the test with logs and a partial report. CI uses `--compile-only` and does
 not claim GPU qualification.
+
+
+`tests/binomial_cpu_reference.cpp` compares the optimized binomial CPU reference
+bit for bit against the frozen original per-node-power recurrence, using 665
+input/depth combinations. It checks 42 complete parallel runs, input preservation,
+49 finite/non-finite maximum selections and six invalid-reference arguments.
+Compile it with C++14, `-O3 -pthread -fsanitize=address,undefined
+-fno-sanitize-recover=all`; CI runs the g++ build. No GPU is needed.
+
+`python3 tests/binomial_measured_result.py --platform cuda --work-dir /tmp/binomial-measured --largest`
+checks actual measured GPU prices through the ordinary full verifier. It injects
+finite/NaN/±Inf corruption at the first price, indices 9 and 10, the middle and
+last price, plus a 12-error diagnostic-cap case. It checks full-reference failure
+and all 15 thread-creation failures with successful sequential fallback. The
+optional largest-size cases corrupt the final price with all four fault kinds.
+The test requires exact counts, verification identity, finite timing records and
+appropriate process status within 60 seconds; a timeout preserves partial logs
+and stops the run. Use `--platform rocm` on AMD or `--compile-only` for CI without
+a GPU. The existing finite-value test also covers the production comparator.

@@ -192,6 +192,9 @@ jobs:
       - name: Compile exact triangle-total verification regression
         run: python3 tests/triangle_total_verification.py --platform cuda --work-dir /tmp/triangle-total-verification --compile-only
 
+      - name: Check SpMV execution-control records (no GPU required)
+        run: python3 tests/parboil_spmv_controls.py --compiler g++
+
       - name: Validate benchmark manifests
         run: ./gpubench validate
 

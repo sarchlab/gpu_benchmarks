@@ -2,7 +2,7 @@
   "benchmark": "parboil_spmv",
   "tier": 2,
   "suite": "parboil",
-  "description": "Sparse matrix-vector multiplication y = A*x in JDS (Jagged Diagonal Storage) layout. The matrix is sorted by row length and stored column-major (padded/transposed) so one thread walks its JDS row at stride-1 offsets; per-warp-group column counts and column base offsets live in constant memory. Faithful port of the Parboil cuda kernel spmv_jds (x fetched via __ldg in place of the original texture); emits per-iteration kernel times.",
+  "description": "Sparse matrix-vector multiplication y = A*x in JDS (Jagged Diagonal Storage) layout. The matrix is sorted by row length and stored column-major (padded/transposed) so one thread walks its JDS row at stride-1 offsets; per-warp-group column counts and column base offsets live in constant memory. Faithful port of the Parboil cuda kernel spmv_jds (x fetched via __ldg in place of the original texture); emits per-iteration kernel times. Direct-binary block-size and CLI seed controls are not swept; each kernel record identifies the resolved seed, requested block size, launch policy, and effective block/grid sizes.",
   "scaling_param": {
     "name": "num_rows",
     "description": "Number of matrix rows (JDS tables cap this near 160000)",

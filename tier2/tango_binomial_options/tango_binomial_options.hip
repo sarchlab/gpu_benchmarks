@@ -29,7 +29,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <vector>
+#include "cpu_reference.h"
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -47,18 +47,6 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     }
     return defaultVal;
 }
-
-// ---------------------------------------------------------------------------
-// Option parameters structure
-// ---------------------------------------------------------------------------
-
-struct OptionData {
-    float S;      // stock price
-    float K;      // strike price
-    float T;      // time to expiration
-    float r;      // risk-free rate
-    float sigma;  // volatility
-};
 
 // ---------------------------------------------------------------------------
 // Binomial option pricing kernel
@@ -129,40 +117,6 @@ __global__ void binomial_kernel(
 }
 
 // ---------------------------------------------------------------------------
-// CPU reference: binomial option pricing
-// ---------------------------------------------------------------------------
-
-static float binomial_cpu(OptionData opt, int numSteps) {
-    float dt   = opt.T / (float)numSteps;
-    float u    = expf(opt.sigma * sqrtf(dt));
-    float d    = 1.0f / u;
-    float R    = expf(opt.r * dt);
-    float Rinv = 1.0f / R;
-    float p    = (R - d) / (u - d);
-    float q    = 1.0f - p;
-
-    std::vector<float> vals((size_t)(numSteps + 1));
-
-    // Terminal payoffs
-    for (int j = 0; j <= numSteps; ++j) {
-        float ST = opt.S * powf(u, (float)(2 * j - numSteps));
-        vals[j] = fmaxf(opt.K - ST, 0.0f);
-    }
-
-    // Backward induction
-    for (int step = numSteps; step > 0; --step) {
-        for (int j = 0; j < step; ++j) {
-            float cont = Rinv * (p * vals[j + 1] + q * vals[j]);
-            float ST = opt.S * powf(u, (float)(2 * j - (step - 1)));
-            float exercise = fmaxf(opt.K - ST, 0.0f);
-            vals[j] = fmaxf(cont, exercise);
-        }
-    }
-
-    return vals[0];
-}
-
-// ---------------------------------------------------------------------------
 // Simple deterministic pseudo-random in range [lo, hi]
 // ---------------------------------------------------------------------------
 
@@ -188,7 +142,7 @@ int main(int argc, char** argv) {
     // us nothing the `options` scaling axis doesn't. The kernel emits it so the
     // tree depth stays visible in the record. 2*(numSteps+1)*4 B ≈ 8 KB shared,
     // well under the 48 KB default.
-    const int numSteps = 1024;
+    const int numSteps = binomial_reference::num_steps;
 
     // Command-line fallback
     numOptions = parseIntParam(argc, argv, "--options", numOptions);
@@ -238,7 +192,7 @@ int main(int argc, char** argv) {
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"options\":%d,\"steps\":%d",
+             "\"options\":%d,\"steps\":%d,\"verification\":\"full_cpu_v1\"",
              numOptions, numSteps);
 
     // Single timed launch (bench_run_once: optional cold-cache warmer, then
@@ -259,28 +213,35 @@ int main(int argc, char** argv) {
     // -------------------------------------------------------------------
     HIP_CHECK(hipMemcpy(h_prices, d_prices, priceBytes, hipMemcpyDeviceToHost));
 
-    int verifyN = (numOptions < 10) ? numOptions : 10;
-    int errors = 0;
-    for (int i = 0; i < verifyN; ++i) {
-        float ref = binomial_cpu(h_options[i], numSteps);
-        float tol = 1e-2f * fabsf(ref) + 1e-4f;
-        if (!std::isfinite(h_prices[i]) || !std::isfinite(ref) ||
-            fabsf(h_prices[i] - ref) > tol) {
-            fprintf(stderr, "Mismatch at option %d: GPU=%.6f CPU=%.6f (diff=%.6f)\n",
-                    i, h_prices[i], ref, fabsf(h_prices[i] - ref));
-            errors++;
-        }
+    std::vector<float> reference;
+    bool available = true;
+    try {
+        reference = binomial_reference::prices(h_options, numOptions);
+    } catch (const std::exception& exc) {
+        fprintf(stderr, "Verification unavailable: CPU reference failed (%s)\n", exc.what());
+        available = false;
     }
-
-    if (errors > 0)
-        fprintf(stderr, "FAIL: %d errors out of %d verified\n", errors, verifyN);
-    else
-        fprintf(stderr, "PASS\n");
+    int errors = 0;
+    if (available) {
+        for (int i = 0; i < numOptions; ++i) {
+            float ref = reference[i];
+            float tol = 1e-2f * fabsf(ref) + 1e-4f;
+            if (!std::isfinite(h_prices[i]) || !std::isfinite(ref) ||
+                fabsf(h_prices[i] - ref) > tol) {
+                if (errors < 10)
+                    fprintf(stderr, "Mismatch at option %d: GPU=%.6f CPU=%.6f (diff=%.6f)\n",
+                            i, h_prices[i], ref, fabsf(h_prices[i] - ref));
+                errors++;
+            }
+        }
+        fprintf(stderr, "Binomial verification: %s (%d prices, %d mismatches)\n",
+                errors ? "FAIL" : "PASS", numOptions, errors);
+    }
 
     HIP_CHECK(hipFree(d_options));
     HIP_CHECK(hipFree(d_prices));
     free(h_options);
     free(h_prices);
 
-    return (errors > 0) ? EXIT_FAILURE : EXIT_SUCCESS;
+    return (!available || errors > 0) ? EXIT_FAILURE : EXIT_SUCCESS;
 }

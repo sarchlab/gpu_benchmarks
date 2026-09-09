@@ -185,6 +185,11 @@ jobs:
       - name: Check NPB EP input ranges (no GPU required)
         run: python3 tests/npb_ep_input_ranges.py --compiler g++
 
+      - name: Check binomial CPU reference (no GPU required)
+        run: |
+          g++ -std=c++14 -O3 -pthread -fsanitize=address,undefined -fno-sanitize-recover=all tests/binomial_cpu_reference.cpp -o /tmp/binomial-cpu-reference
+          /tmp/binomial-cpu-reference
+
       - name: Check Pathfinder input ranges (no GPU required)
         run: python3 tests/pathfinder_input_ranges.py --compiler g++
 
@@ -283,6 +288,9 @@ jobs:
 
       - name: Compile Parboil stencil production-pass test (GPU required to run)
         run: make -C tier2/parboil_stencil PLATFORM=cuda bench_output_test
+
+      - name: Compile binomial measured-result tests (GPU required to run)
+        run: python3 tests/binomial_measured_result.py --platform cuda --work-dir /tmp/binomial-measured --compile-only
 
       - name: Compile finite-verification fault-injection tests (GPU required to run)
         run: python3 tests/finite_verification.py --platform cuda --work-dir /tmp/finite-verification --compile-only

@@ -511,11 +511,14 @@ int main(int argc, char** argv)
                               prop.multiProcessorCount);
     }
 
-    char params[192];
+    char params[320];
     snprintf(params, sizeof(params),
              "\"num_rows\":%d,\"avg_nnz_per_row\":%d,\"nnz\":%d,"
-             "\"jds_len\":%d,\"jds_depth\":%d,\"block_size\":%u",
-             num_rows, avg_nnz, nz, len, depth, block);
+             "\"jds_len\":%d,\"jds_depth\":%d,\"block_size\":%u,"
+             "\"requested_block_size\":%d,\"grid_size\":%u,\"seed\":%d,"
+             "\"launch_policy\":\"%s\"",
+             num_rows, avg_nnz, nz, len, depth, block, block_size, grid, seed,
+             block_size > 0 ? "block_override_v1" : "auto_v1");
 
     // One pass = one spmv_jds launch. The kernel reads immutable JDS/vector data
     // and fully overwrites dst_vector (one write per real row), so repeated

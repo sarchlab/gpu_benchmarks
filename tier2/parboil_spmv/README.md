@@ -59,10 +59,20 @@ last-level cache immediately before the timed launch. Repetition =
 | `BENCH_PARAM_avg_nnz_per_row` / `--avg_nnz_per_row` | Avg non-zeros per row (depth < 5000) | 80 |
 | `BENCH_PARAM_vector_add_warmup` | Cold-cache clock warmer on/off | true |
 
-Undeclared debug knobs (not in `params.json`, not swept):
+Direct-binary controls (not swept by `params.json`):
 `BENCH_PARAM_block_size` / `--block_size` overrides the launch block size
 (default 0 = the original `compute_active_thread` geometry); `--seed` sets the
-matrix RNG seed (default 42).
+matrix RNG seed (default 42). These preserve the existing parsing rules:
+positive CLI values are accepted; the environment block-size override takes
+precedence, and its zero or negative values select automatic geometry.
+
+Every kernel record includes `seed`, the resolved `requested_block_size`,
+`launch_policy` (`auto_v1` or `block_override_v1`), and the effective `block_size`
+and `grid_size`. The requested value is recorded after CLI/default/environment
+resolution. The regular manifest sweep uses seed 42 and automatic geometry
+unless `BENCH_PARAM_block_size` is inherited from the harness environment.
+That override is visible in the output even though it is not a sweep axis. A seed alone does not ensure identical matrices across C-library RNG
+implementations; portable input generation remains deferred.
 
 Matrix and vector are generated synthetically (no `.mtx` file); sized to a
 Parboil-scale matrix (Dubcova3/mixtank are tens of thousands of rows).
@@ -82,3 +92,9 @@ then a `summary` whose `total_time_ms` is the sum of all recorded GPU event
 times. **stderr** — device info, timing, PASS/FAIL (all rows vs. a CPU
 reference built from the generated COO); on FAIL the process exits non-zero.
 GFLOPS (`2 × nnz / t`) is derived downstream from `time_ms` and params.
+
+`python3 tests/parboil_spmv_controls.py --compiler clang++` checks the actual
+parameter resolution, geometry calculation and JSON formatting without a GPU.
+Its independent expectations cover CLI/environment precedence, automatic
+geometry branches and direct overrides; it does not qualify hardware support
+for arbitrary block sizes.

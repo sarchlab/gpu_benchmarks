@@ -24,6 +24,13 @@ Parboil SpMV checks its host self-test and actual GPU result. Complex/vector
 comparisons cover each compared component independently. CG/MG injection targets
 the reduced residual and reference norms that their verifiers actually compare.
 
+`python3 tests/parboil_spmv_controls.py --compiler clang++` checks SpMV’s
+resolved seed, requested/effective launch geometry and JSON identity without a
+GPU. Its 72 cases cover CLI/environment precedence and simulated device
+geometry branches under host sanitizers. CI runs the test with g++; simulated
+properties do not qualify hardware support for arbitrary block sizes.
+Missing or duplicated extraction anchors report the source file and anchor.
+
 Failure requires the hook to have executed, a verification failure diagnostic,
 and exit status 1, with no HIP runtime error. A crash, timeout, missing hook,
 or later cleanup error cannot satisfy the test. A timeout aborts the run; the

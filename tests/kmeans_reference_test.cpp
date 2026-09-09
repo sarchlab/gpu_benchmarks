@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include "../tier2/rodinia_kmeans/cpu_reference.h"
 #include <cassert>
 #include <cstdio>

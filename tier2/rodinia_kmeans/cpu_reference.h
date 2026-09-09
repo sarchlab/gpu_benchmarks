@@ -28,7 +28,7 @@ struct Result {
     std::vector<float> centers;
 };
 
-Result trajectory(const float* points, const float* initial, int n, int d, int k,
+inline Result trajectory(const float* points, const float* initial, int n, int d, int k,
                   int iterations, unsigned workers = std::thread::hardware_concurrency()) {
     Result result;
     result.membership.resize(history_elements(n, iterations));

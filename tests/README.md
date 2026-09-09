@@ -269,6 +269,17 @@ test and retains completed-case logs and a partial report. The test requires
 verification diagnostics and failure exit codes.
 
 
+`python3 tests/pathfinder_input_ranges.py --compiler clang++` runs the actual
+Pathfinder parameter prefix, allocation-size arithmetic and kernel column-index
+expressions under fatal host sanitizers, without allocation or GPU access. Its
+414 cases cover all 240 declared combinations, partial-pyramid index boundaries,
+positive dimensions/heights, maximum accumulated costs, argv fallback and
+environment precedence. Rejections require the exact intended diagnostic; valid
+host cases require empty stderr. The one-row arithmetic control preserves the
+existing absence of a traversal launch and is outside the performance sweep.
+Passing these checks establishes arithmetic validity, not memory availability
+or a runtime budget. CI runs the test with g++.
+
 `python3 tests/npb_ep_input_ranges.py --compiler clang++` executes the actual EP
 parameter and geometry prefix with host sanitizers. It checks exponent/thread
 and per-block histogram index limits, positive block sizes, all declared

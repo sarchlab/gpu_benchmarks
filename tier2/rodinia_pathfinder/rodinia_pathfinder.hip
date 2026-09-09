@@ -181,10 +181,19 @@ int main(int argc, char** argv) {
     env_val = getenv("BENCH_PARAM_rows");           if (env_val) rows = atoi(env_val);
     env_val = getenv("BENCH_PARAM_pyramid_height"); if (env_val) pyramid_height = atoi(env_val);
 
-    // pyramid_height must keep the small-block size positive.
-    if (pyramid_height * HALO * 2 >= BLOCK_SIZE) {
+    if (cols <= 0 || rows <= 0 || pyramid_height <= 0) {
+        fprintf(stderr, "cols, rows and pyramid_height must be positive\n");
+        return EXIT_FAILURE;
+    }
+    // Check before multiplying: the small-block size and row progress must be positive.
+    if (pyramid_height >= BLOCK_SIZE / (2 * HALO)) {
         fprintf(stderr, "pyramid_height too large for BLOCK_SIZE=%d (need pyramid_height < %d)\n",
                 BLOCK_SIZE, BLOCK_SIZE / (2 * HALO));
+        return EXIT_FAILURE;
+    }
+    // Every generated cell costs at most 9; GPU and CPU sums use int.
+    if (rows > INT_MAX / 9) {
+        fprintf(stderr, "Accumulated path costs may exceed INT_MAX\n");
         return EXIT_FAILURE;
     }
 
@@ -192,6 +201,18 @@ int main(int argc, char** argv) {
     int borderCols    = (pyramid_height) * HALO;
     int smallBlockCol = BLOCK_SIZE - (pyramid_height) * HALO * 2;
     int blockCols     = cols / smallBlockCol + ((cols % smallBlockCol == 0) ? 0 : 1);
+
+    if (rows > 1) {
+        // A shorter final launch uses wider block spacing than full-height launches.
+        const int last_iteration = (rows - 2) % pyramid_height + 1;
+        const long long last_column =
+            (long long)(BLOCK_SIZE - last_iteration * HALO * 2) * (blockCols - 1)
+            - borderCols + BLOCK_SIZE - 1;
+        if (last_column > INT_MAX) {
+            fprintf(stderr, "Pathfinder padded column indices exceed INT_MAX\n");
+            return EXIT_FAILURE;
+        }
+    }
 
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));

@@ -43,8 +43,21 @@ the last advances `min(20, rows-t-1)` rows. Repetition is the harness's job
 | `BENCH_PARAM_vector_add_warmup` | `true` | cold-cache calibration before the timed traversal |
 
 `BLOCK_SIZE` is a fixed compile-time `256` in the original kernel; the emitted
-`block_size` descriptor reflects that fixed value. `pyramid_height` must be
-`< BLOCK_SIZE/2 = 128`.
+`block_size` descriptor reflects that fixed value. Resolved `cols` and `rows`
+must be positive, and `pyramid_height` must be in `1..127`. These checks run
+before device access, including for environment overrides.
+
+Admission also requires `9*rows <= INT_MAX`, so the generated costs in `0..9`
+cannot overflow the integer path sums. The widest padded column coordinate,
+including the final partial-height launch, must fit `int`. The existing kernel
+and CPU recurrence are unchanged. A direct one-row input retains its existing
+behavior without a traversal-kernel launch; the declared performance sweep uses at least 100 rows.
+
+These bounds establish arithmetic validity. The existing device-total-memory
+and host-physical-memory checks still apply afterward; passing them does not
+guarantee that a configuration fits currently available memory or finishes
+within the collection budget. General capacity admission and supported H100
+profiles remain under [R-15/R-22](https://github.com/sarchlab/gpu_benchmarks/issues/71).
 
 ## Files
 

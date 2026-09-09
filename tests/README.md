@@ -251,7 +251,7 @@ test and retains completed-case logs and a partial report. The test requires
 verification diagnostics and failure exit codes.
 
 
-`bfs_reference_test.cpp` compares every CPU distance with an independent
+`bfs_reference_test.cpp` compares CPU distances and logical work with an independent
 Floyd-Warshall oracle on 66,066 exhaustive directed graphs and 25 structured
 cases, including self-loops, duplicates, deep chains and unreachable nodes.
 Run `c++ -O2 -std=c++14 -fsanitize=address,undefined tests/bfs_reference_test.cpp
@@ -263,8 +263,27 @@ tail. It requires exact result diagnostics, failure exits and `full_cpu_v1` in
 both kernel rows. Run `python3 tests/bfs_measured_result.py --platform cuda
 --work-dir /tmp/bfs-check` (or `rocm`) with a new, nonexistent output directory.
 CI compiles this test; execution requires a GPU. A timeout fails and retains
-completed-case logs plus a partial report. Result correctness does not qualify
-the existing GPU concurrent accesses or upstream fidelity.
+completed-case logs plus a partial report.
+
+`python3 tests/bfs_concurrent_kernels.py --compiler clang++ --sanitizer thread`
+executes the actual kernel bodies concurrently through a host adapter. Competing
+discoveries and completion-flag updates exercise the access-ownership and atomic
+exchange policy. CI uses the default AddressSanitizer/UndefinedBehaviorSanitizer
+mode; this host check supplements the source argument and GPU tests, and does
+not claim that GPU Racecheck proves freedom from global-memory races.
+
+`python3 tests/bfs_work_counts.py --platform cuda --work-dir /tmp/bfs-work-check`
+(or `rocm`) instruments test copies and checks every level's actual edge,
+discovery-atomic and promotion-atomic counts against independent CPU frontier
+snapshots. It covers 165 cases across graph shapes, block sizes and repetitions.
+CI compiles the GPU test. Counters and observation copies are absent from the
+production benchmark. `python3 tests/bfs_work_counts_test.py` runs in CI without
+a GPU and rejects missing or duplicate instrumentation anchors explicitly.
+
+The [BFS benchmark notes](../tier2/rodinia_bfs/README.md) describe the immutable
+level-entry visited mask, race-free atomic stores, pinned upstream stages and
+intentional instruction/traffic changes. Logical operation counts are not
+physical memory-traffic measurements; AMD execution remains deferred.
 
 ## Parboil stencil measured-output verification
 

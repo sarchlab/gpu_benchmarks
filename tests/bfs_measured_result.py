@@ -143,7 +143,13 @@ def main():
         try:
             records=[json.loads(line) for line in proc.stdout.splitlines()]
             if len(records)!=3 or records[-1].get("type")!="summary":raise ValueError("expected two kernels and summary")
-            params=dict(num_nodes=n,edges_per_node=degree,block_size=256,verification="full_cpu_v1")
+            params=dict(num_nodes=n,edges_per_node=degree,block_size=256,verification="full_cpu_v1",
+                        discovery_policy="level_visited_atomic_v1")
+            work=records[0]["params"]
+            for key in ("bfs_levels","frontier_edges","discovery_atomics","promotion_atomics"):
+                if not isinstance(work.get(key),int) or work[key]<(1 if key=="bfs_levels" else 0):
+                    raise ValueError("invalid logical work descriptor")
+                params[key]=work[key]
             for kernel,name in zip(records[:2],("bfs_kernel","bfs_update")):
                 if kernel.get("type")!="kernel" or kernel.get("name")!=name or kernel.get("iter")!=0 or kernel.get("params")!=params:
                     raise ValueError("incorrect kernel/workload/verification identity")

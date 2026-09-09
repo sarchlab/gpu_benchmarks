@@ -2,15 +2,30 @@
 
 Iterative BFS on a randomly-generated CSR (Compressed Sparse Row) graph.
 Two GPU kernels are launched per BFS level, iterated until the traversal
-completes. Measures effective memory bandwidth of irregular graph traversal.
+completes. Reports GPU event time for irregular graph traversal.
 
 ## Provenance & fidelity
 
-Derived from the [Rodinia benchmark suite](http://lava.cs.virginia.edu/Rodinia/) — the `bfs` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+The algorithm reference is Rodinia 3.1 at commit
+`366b283456506ef2fe2c2b7dc5e83e941ffc5524`:
+[expansion kernel](https://github.com/HPC-FAIR/rodinia_3.1/blob/366b283456506ef2fe2c2b7dc5e83e941ffc5524/cuda/bfs/kernel.cu),
+[frontier promotion](https://github.com/HPC-FAIR/rodinia_3.1/blob/366b283456506ef2fe2c2b7dc5e83e941ffc5524/cuda/bfs/kernel2.cu), and
+[driver](https://github.com/HPC-FAIR/rodinia_3.1/blob/366b283456506ef2fe2c2b7dc5e83e941ffc5524/cuda/bfs/bfs.cu).
+This independent implementation retains source-0, unit-edge breadth-first
+traversal, expansion followed by frontier promotion at each level, and
+termination when no new vertices are found. The pinned expansion tests the
+visited mask from level entry; this implementation does the same.
 
-- Mask arrays eliminated, frontier cleared differently, int vs bool masks (~4× mask traffic) vs Rodinia BFS. Concretely, this port eliminates the upstream `g_updating_graph_mask` array (pass 2 detects newly-discovered nodes from `cost ≥ 0 && !visited` instead) and uses `int` masks rather than the original `bool` arrays.
-
-Read this as "a BFS benchmark in the spirit of Rodinia," not Rodinia's `bfs`.
+The local driver generates a directed random CSR graph instead of reading the
+pinned input format. It stores offsets rather than Node records and uses int
+masks rather than bool masks. The separate updating mask is represented by a
+newly assigned distance together with the visited mask. Frontier clearing occurs
+in promotion. These choices preserve the recurrence and stages but change
+layout and traffic. Competing distance and completion-flag stores use atomic
+exchange to repair the unsynchronized stores in the original algorithm.
+Kernel instructions, memory traffic and performance are therefore not expected
+to match the original implementation. Input portability remains a separate
+qualification requirement.
 
 ## Algorithm
 
@@ -21,7 +36,7 @@ The graph is stored in Compressed Sparse Row (CSR) format:
 
 Each BFS level executes two kernel passes:
 
-**Pass 1 — bfs_kernel**: For each node in the current frontier, write `cost[neighbor] = cost[node] + 1` for all unvisited neighbors.
+**Pass 1 — bfs_kernel**: For each node in the current frontier, atomically store `cost[node] + 1` for every neighbor unvisited at level entry. Eligibility does not change during expansion, so competing parents and duplicate edges each perform their own atomic attempt.
 
 **Pass 2 — bfs_update**: Promote nodes that were just discovered (`cost ≥ 0` but not yet `visited`) into the next frontier and set `visited[v] = 1`.
 
@@ -69,13 +84,15 @@ kernel's GPU event time accumulated over all BFS levels of the traversal,
 then a `summary` whose `total_time_ms` is the sum of the recorded times:
 
 ```
-{"type":"kernel","name":"bfs_kernel","iter":0,"time_ms":...,"host_time_ms":...,"params":{"num_nodes":65536,"edges_per_node":20,"block_size":256,"verification":"full_cpu_v1"}}
+{"type":"kernel","name":"bfs_kernel","iter":0,"time_ms":...,"host_time_ms":...,"params":{"num_nodes":65536,"edges_per_node":20,"block_size":256,"verification":"full_cpu_v1","discovery_policy":"level_visited_atomic_v1","bfs_levels":6,"frontier_edges":1310720,"discovery_atomics":233381,"promotion_atomics":65535}}
 {"type":"kernel","name":"bfs_update","iter":0,"time_ms":...,"host_time_ms":...,"params":{...}}
 {"type":"summary","total_time_ms":...}
 ```
 
-Bandwidth / edges-per-second are derived downstream from `time_ms` and the
-params — the benchmark never computes them.
+The example work counts are for the qualified H100 host input generator;
+other input generators may differ. Rates can be derived downstream from
+`time_ms` and the logical counts. These counts do not measure physical memory
+traffic or bandwidth.
 
 **stderr** — device info, node/edge counts, per-kernel timing, and full-distance
 verification. A mismatch prints `FAIL` and exits nonzero; all distances are
@@ -101,15 +118,24 @@ size. These operations are outside the recorded timing intervals and add no
 GPU kernel launches. Include this host work and transfer in target process
 budgets; AMD runtime qualification remains separate.
 
-Full-distance verification does not establish GPU race freedom or identical
-memory-write counts across runs and devices. The existing expansion kernel
-reads and writes shared costs without atomic synchronization, and multiple
-update threads write the completion flag. Those concurrency/work properties
-need separate qualification; this patch leaves the GPU algorithm unchanged.
-The upstream-fidelity limitations above also remain.
+The discovery policy is `level_visited_atomic_v1`. During expansion the visited
+mask is read-only. Every frontier vertex is already visited, so its cost is only
+read; only unvisited vertices receive cost writes, all through atomic exchange.
+Promotion runs after expansion completes and owns each vertex's frontier and
+visited entries. Its shared completion flag uses atomic exchange. Kernel
+ordering separates all other conflicting accesses between levels.
+
+Both records include the actual `bfs_levels`, checked against the CPU reference,
+and logical work derived from that independent traversal: `frontier_edges`
+counts outgoing edges of reachable vertices, `discovery_atomics` counts edges
+from level d to level d+1 (including duplicates), and `promotion_atomics` counts
+newly reached vertices other than the source. These counts are invariant under
+GPU scheduling for the same graph. They describe algorithm operations, not
+physical cache transactions or a hardware-counter measurement. Changing the
+graph or its input generator can change the counts.
 
 `tests/bfs_reference_test.cpp` checks the CPU reference against an independent
-all-pairs shortest-path oracle on all 66,066 directed graphs through four
+all-pairs shortest-path and logical-work oracle on all 66,066 directed graphs through four
 vertices, including self-loops, plus 25 structured cases with duplicate edges
 and disconnected components. CI runs it under host sanitizers.
 
@@ -121,3 +147,23 @@ tests/bfs_measured_result.py --platform cuda --work-dir /tmp/bfs-check` from the
 repository root with a new, nonexistent output directory (or use `rocm`). CI
 compiles this GPU test; execution requires a GPU. A timeout fails the test and
 retains completed logs and a partial report.
+
+`tests/bfs_work_counts.py` instruments test copies of both kernels and checks
+every level's actual edge, discovery-atomic and promotion-atomic counts against
+an independent CPU frontier/visited snapshot. It covers random and structured
+graphs across five block sizes and three repetitions (165 runs). Run it with
+`--platform cuda --work-dir /tmp/bfs-work-check` (or `rocm`); CI compiles it.
+These test counters and transfers are absent from production timing.
+
+`python3 tests/bfs_concurrent_kernels.py --compiler clang++ --sanitizer thread`
+executes the actual kernel bodies concurrently through a host test adapter. It
+exercises competing discoveries and the shared completion flag; the default
+`address` mode runs AddressSanitizer and UndefinedBehaviorSanitizer. This host
+check supplements the access-ownership argument above. GPU Racecheck alone
+does not establish freedom from global-memory races.
+
+The H100 qualification covers all 81 declared configurations and the default
+with the warmer enabled. Complete distances and dynamic operation counts pass;
+GPU sanitizer and timing-order checks also pass. AMD execution is deferred.
+The atomic repair changes measured GPU work, so recollect BFS performance
+results with this discovery policy recorded.

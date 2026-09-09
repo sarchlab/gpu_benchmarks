@@ -47,11 +47,15 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
 // BFS kernels
 // ---------------------------------------------------------------------------
 
-// Pass 1: for each frontier node, write cost+1 to unvisited neighbors
+// Pass 1: the visited mask is immutable until bfs_update. Frontier vertices
+// are already visited: their costs are only read. Only unvisited costs are
+// written, and all competing stores are atomic and carry the same level+1.
+// This separates ordinary reads from atomic writes by vertex ownership.
 __global__ void bfs_kernel(const int* __restrict__ row_offsets,
                            const int* __restrict__ col_indices,
                            int*       cost,
                            const int* frontier,
+                           const int* visited,
                            int        num_nodes) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < num_nodes && frontier[tid]) {
@@ -60,8 +64,11 @@ __global__ void bfs_kernel(const int* __restrict__ row_offsets,
         int new_cost  = cost[tid] + 1;
         for (int e = row_start; e < row_end; ++e) {
             int nb = col_indices[e];
-            if (cost[nb] < 0) {
-                cost[nb] = new_cost;  // concurrent same-value writes; see qualification limits
+            if (!visited[nb]) {
+                // Eligibility is immutable throughout this BFS level. Every
+                // competing parent makes one atomic attempt; none is skipped
+                // because another thread has already stored the same distance.
+                atomicExch(&cost[nb], new_cost);
             }
         }
     }
@@ -80,7 +87,7 @@ __global__ void bfs_update(int*       frontier,
         if (!was_visited && cost[tid] >= 0) {
             visited[tid]  = 1;
             frontier[tid] = 1;
-            *updated = 1;
+            atomicExch(updated, 1);
         }
     }
 }
@@ -170,10 +177,8 @@ int main(int argc, char** argv) {
     dim3 block(block_size);
     dim3 grid((num_nodes + block_size - 1) / block_size);
 
-    char params[160];
-    snprintf(params, sizeof(params),
-             "\"num_nodes\":%d,\"edges_per_node\":%d,\"block_size\":%d,\"verification\":\"full_cpu_v1\"",
-             num_nodes, edges_per_node, block_size);
+    char params[384];
+    unsigned long long bfs_levels = 0;
 
     // Per-kernel accumulators: each BFS pass launches both kernels once per
     // BFS level; the accumulated GPU/host time of all levels within one pass
@@ -186,6 +191,7 @@ int main(int argc, char** argv) {
     // (untimed), so each pass measures the same traversal regardless of what
     // earlier passes left behind.
     auto run_bfs_pass = [&]() {
+        bfs_levels = 0;
         bench_lap_reset(&acc_kernel);
         bench_lap_reset(&acc_update);
 
@@ -213,7 +219,7 @@ int main(int argc, char** argv) {
             HIP_CHECK(hipMemcpy(d_updated, &h_updated, sizeof(int), hipMemcpyHostToDevice));
 
             bench_lap_add(&acc_kernel, bench_time_op(&timer, [&]() {
-                bfs_kernel<<<grid, block>>>(d_row_offsets, d_col_indices, d_cost, d_frontier, num_nodes);
+                bfs_kernel<<<grid, block>>>(d_row_offsets, d_col_indices, d_cost, d_frontier, d_visited, num_nodes);
             }));
 
             h_updated = 0;
@@ -224,10 +230,40 @@ int main(int argc, char** argv) {
             }));
 
             HIP_CHECK(hipMemcpy(&h_updated, d_updated, sizeof(int), hipMemcpyDeviceToHost));
+            ++bfs_levels;
         }
     };
 
     run_bfs_pass();
+
+    // Verify every distance produced by the measured traversal, after timing.
+    HIP_CHECK(hipMemcpy(h_cost, d_cost, (size_t)num_nodes * sizeof(int), hipMemcpyDeviceToHost));
+    BfsWork work;
+    const std::vector<int> reference = bfs_reference(h_row_offsets, h_col_indices, num_nodes, &work);
+    int errors = 0;
+    for (int v = 0; v < num_nodes; ++v) {
+        if (h_cost[v] != reference[v]) {
+            if (errors < 10)
+                fprintf(stderr, "MISMATCH cost[%d]: gpu=%d cpu=%d\n", v, h_cost[v], reference[v]);
+            ++errors;
+        }
+    }
+    if (bfs_levels != work.levels) {
+        if (errors < 10)
+            fprintf(stderr, "MISMATCH BFS levels: gpu=%llu cpu=%llu\n", bfs_levels, work.levels);
+        ++errors;
+    }
+    fprintf(stderr, "BFS verification: %s (%d distances, %d mismatches)\n",
+            errors ? "FAIL" : "PASS", num_nodes, errors);
+
+    snprintf(params, sizeof(params),
+             "\"num_nodes\":%d,\"edges_per_node\":%d,\"block_size\":%d,"
+             "\"verification\":\"full_cpu_v1\",\"discovery_policy\":\"level_visited_atomic_v1\","
+             "\"bfs_levels\":%llu,\"frontier_edges\":%llu,\"discovery_atomics\":%llu,\"promotion_atomics\":%llu",
+             num_nodes, edges_per_node, block_size, bfs_levels,
+             work.frontier_edges, work.discovery_atomics, work.promotion_atomics);
+    fprintf(stderr, "BFS work: levels=%llu frontier_edges=%llu discovery_atomics=%llu promotion_atomics=%llu\n",
+            bfs_levels, work.frontier_edges, work.discovery_atomics, work.promotion_atomics);
 
     double total_gpu_ms = 0.0;
     bench_emit_iter("bfs_kernel", 0, &acc_kernel, params);
@@ -240,20 +276,6 @@ int main(int argc, char** argv) {
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms over 1 pass\n",
             total_gpu_ms);
-
-    // Verify every distance produced by the measured traversal, after timing.
-    HIP_CHECK(hipMemcpy(h_cost, d_cost, (size_t)num_nodes * sizeof(int), hipMemcpyDeviceToHost));
-    const std::vector<int> reference = bfs_reference(h_row_offsets, h_col_indices, num_nodes);
-    int errors = 0;
-    for (int v = 0; v < num_nodes; ++v) {
-        if (h_cost[v] != reference[v]) {
-            if (errors < 10)
-                fprintf(stderr, "MISMATCH cost[%d]: gpu=%d cpu=%d\n", v, h_cost[v], reference[v]);
-            ++errors;
-        }
-    }
-    fprintf(stderr, "BFS verification: %s (%d distances, %d mismatches)\n",
-            errors ? "FAIL" : "PASS", num_nodes, errors);
 
     // Cleanup
     HIP_CHECK(hipFree(d_row_offsets));

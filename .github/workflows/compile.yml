@@ -176,6 +176,12 @@ jobs:
       - name: Compile measured BFS verification regression
         run: python3 tests/bfs_measured_result.py --platform cuda --work-dir /tmp/bfs-measured-result --compile-only
 
+      - name: Check concurrent BFS kernels (no GPU required)
+        run: python3 tests/bfs_concurrent_kernels.py --compiler g++
+
+      - name: Compile BFS operation-count regression
+        run: python3 tests/bfs_work_counts.py --platform cuda --work-dir /tmp/bfs-work-counts --compile-only
+
       - name: Check full LU residual arithmetic (no GPU required)
         run: |
           g++ -O3 -std=c++14 -fsanitize=address,undefined tests/lud_residual_test.cpp -o /tmp/lud_residual_test

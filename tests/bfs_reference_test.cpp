@@ -18,7 +18,22 @@ static bool check(const std::vector<std::vector<int>>& edges) {
         for (int u = 0; u < n; ++u)
             for (int v = 0; v < n; ++v)
                 paths[u*n+v] = std::min(paths[u*n+v], paths[u*n+k] + paths[k*n+v]);
-    const auto actual = bfs_reference(row.data(), col.data(), n);
+    BfsWork work;
+    const auto actual = bfs_reference(row.data(), col.data(), n, &work);
+    BfsWork expected_work;
+    for (int u=0;u<n;++u) if (paths[u]!=infinity) {
+        expected_work.levels=std::max(expected_work.levels,static_cast<unsigned long long>(paths[u])+1);
+        if (u) ++expected_work.promotion_atomics;
+        for (int v : edges[u]) {
+            ++expected_work.frontier_edges;
+            if (paths[v]==paths[u]+1) ++expected_work.discovery_atomics;
+        }
+    }
+    if (work.levels!=expected_work.levels || work.frontier_edges!=expected_work.frontier_edges
+        || work.discovery_atomics!=expected_work.discovery_atomics
+        || work.promotion_atomics!=expected_work.promotion_atomics) {
+        std::fprintf(stderr,"Work-count mismatch n=%d\n",n);return false;
+    }
     if (actual.size() != static_cast<size_t>(n)) return false;
     for (int v = 0; v < n; ++v) {
         const int expected = paths[v] == infinity ? -1 : paths[v];
@@ -69,6 +84,6 @@ int main() {
         }
     }
     if (cases != 66091) return 1;
-    std::printf("%u directed-graph distance comparisons pass (66066 exhaustive,25 structured)\n", cases);
+    std::printf("%u directed-graph distance and logical-work comparisons pass (66066 exhaustive,25 structured)\n", cases);
     return 0;
 }

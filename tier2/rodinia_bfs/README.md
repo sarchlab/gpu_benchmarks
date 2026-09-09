@@ -6,11 +6,26 @@ completes. Measures effective memory bandwidth of irregular graph traversal.
 
 ## Provenance & fidelity
 
-Derived from the [Rodinia benchmark suite](http://lava.cs.virginia.edu/Rodinia/) — the `bfs` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+The algorithm reference is Rodinia 3.1 at commit
+`366b283456506ef2fe2c2b7dc5e83e941ffc5524`:
+[expansion kernel](https://github.com/HPC-FAIR/rodinia_3.1/blob/366b283456506ef2fe2c2b7dc5e83e941ffc5524/cuda/bfs/kernel.cu),
+[frontier promotion](https://github.com/HPC-FAIR/rodinia_3.1/blob/366b283456506ef2fe2c2b7dc5e83e941ffc5524/cuda/bfs/kernel2.cu), and
+[driver](https://github.com/HPC-FAIR/rodinia_3.1/blob/366b283456506ef2fe2c2b7dc5e83e941ffc5524/cuda/bfs/bfs.cu).
+This independent implementation retains source-0, unit-edge breadth-first
+traversal, expansion followed by frontier promotion at each level, and
+termination when no new vertices are found. The pinned expansion tests the
+visited mask from level entry; this implementation does the same.
 
-- Mask arrays eliminated, frontier cleared differently, int vs bool masks (~4× mask traffic) vs Rodinia BFS. Concretely, this port eliminates the upstream `g_updating_graph_mask` array (pass 2 detects newly-discovered nodes from `cost ≥ 0 && !visited` instead) and uses `int` masks rather than the original `bool` arrays.
-
-Read this as "a BFS benchmark in the spirit of Rodinia," not Rodinia's `bfs`.
+The local driver generates a directed random CSR graph instead of reading the
+pinned input format. It stores offsets rather than Node records and uses int
+masks rather than bool masks. The separate updating mask is represented by a
+newly assigned distance together with the visited mask. Frontier clearing occurs
+in promotion. These choices preserve the recurrence and stages but change
+layout and traffic. Competing distance and completion-flag stores use atomic
+exchange to repair the unsynchronized stores in the original algorithm.
+Kernel instructions, memory traffic and performance are therefore not expected
+to match the original implementation. Input portability remains a separate
+qualification requirement.
 
 ## Algorithm
 
@@ -21,7 +36,7 @@ The graph is stored in Compressed Sparse Row (CSR) format:
 
 Each BFS level executes two kernel passes:
 
-**Pass 1 — bfs_kernel**: For each node in the current frontier, write `cost[neighbor] = cost[node] + 1` for all unvisited neighbors.
+**Pass 1 — bfs_kernel**: For each node in the current frontier, atomically store `cost[node] + 1` for every neighbor unvisited at level entry. Eligibility does not change during expansion, so competing parents and duplicate edges each perform their own atomic attempt.
 
 **Pass 2 — bfs_update**: Promote nodes that were just discovered (`cost ≥ 0` but not yet `visited`) into the next frontier and set `visited[v] = 1`.
 
@@ -101,15 +116,24 @@ size. These operations are outside the recorded timing intervals and add no
 GPU kernel launches. Include this host work and transfer in target process
 budgets; AMD runtime qualification remains separate.
 
-Full-distance verification does not establish GPU race freedom or identical
-memory-write counts across runs and devices. The existing expansion kernel
-reads and writes shared costs without atomic synchronization, and multiple
-update threads write the completion flag. Those concurrency/work properties
-need separate qualification; this patch leaves the GPU algorithm unchanged.
-The upstream-fidelity limitations above also remain.
+The discovery policy is `level_visited_atomic_v1`. During expansion the visited
+mask is read-only. Every frontier vertex is already visited, so its cost is only
+read; only unvisited vertices receive cost writes, all through atomic exchange.
+Promotion runs after expansion completes and owns each vertex's frontier and
+visited entries. Its shared completion flag uses atomic exchange. Kernel
+ordering separates all other conflicting accesses between levels.
+
+Both records include the actual `bfs_levels`, checked against the CPU reference,
+and logical work derived from that independent traversal: `frontier_edges`
+counts outgoing edges of reachable vertices, `discovery_atomics` counts edges
+from level d to level d+1 (including duplicates), and `promotion_atomics` counts
+newly reached vertices other than the source. These counts are invariant under
+GPU scheduling for the same graph. They describe algorithm operations, not
+physical cache transactions or a hardware-counter measurement. Changing the
+graph or its input generator can change the counts.
 
 `tests/bfs_reference_test.cpp` checks the CPU reference against an independent
-all-pairs shortest-path oracle on all 66,066 directed graphs through four
+all-pairs shortest-path and logical-work oracle on all 66,066 directed graphs through four
 vertices, including self-loops, plus 25 structured cases with duplicate edges
 and disconnected components. CI runs it under host sanitizers.
 

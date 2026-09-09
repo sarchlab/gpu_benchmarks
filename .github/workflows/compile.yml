@@ -221,6 +221,11 @@ jobs:
       - name: Compile exact triangle-total verification regression
         run: python3 tests/triangle_total_verification.py --platform cuda --work-dir /tmp/triangle-total-verification --compile-only
 
+      - name: Check cache-bandwidth geometry and compile GPU topology test
+        run: |
+          python3 tests/cache_bandwidth_geometry.py --compiler g++
+          python3 tests/cache_bandwidth_gpu.py --compile-only --work-dir /tmp/cache-bandwidth-gpu
+
       - name: Check SpMV execution-control records (no GPU required)
         run: python3 tests/parboil_spmv_controls.py --compiler g++
 

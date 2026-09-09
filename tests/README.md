@@ -62,6 +62,18 @@ issues under R-13; this test does not establish their correctness.
 CUDA execution and ROCm execution must be reported separately. A CUDA pass or
 ROCm compile alone does not establish AMD runtime qualification (R-19).
 
+`python3 tests/cache_bandwidth_geometry.py --compiler clang++` checks 230
+production geometry and JSON cases under fatal host sanitizers, including the
+private allocation cap and integer boundaries without allocating large buffers.
+`python3 tests/cache_bandwidth_gpu.py --work-dir /tmp/cache-bandwidth-gpu`
+requires a new output directory and CUDA GPU. It checks 96 complete kernel
+outputs with distinct, nonuniform window inputs and 50 production success/refusal
+cases, including all 42 declared configurations with the default warmer.
+`--compile-only` builds both executables without claiming hardware qualification;
+CI uses this mode. The production kernel is preserved, and ordinary timing runs
+do not add output verification. CUDA results do not qualify AMD hardware or
+establish physical cache hit rates.
+
 `python3 tests/cache_latency_input_ranges.py --compiler clang++` runs the actual
 parameter prefix under host sanitizers without allocation or GPU access. Its 64
 cases cover word alignment, chain-count/index boundaries, positive timed work,

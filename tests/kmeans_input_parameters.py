@@ -138,9 +138,12 @@ def main():
                 row = run(args.binary.resolve(), case, clean,
                           warm=case[0]=="default" or case[0].startswith("declared-"))
                 passed = row["exit"] == 0 and row["seconds"] < 60
+                n,d,k,t = case[3]
+                passed &= f"K-means verification: PASS ({n*d+n*t+k*d} values, 0 mismatches)" in row["stderr"]
                 try:
                     first, second, summary = [json.loads(line) for line in row["stdout"].splitlines()]
-                    params = dict(zip(NAMES, case[3]), threads_per_block=256)
+                    params = dict(zip(NAMES, case[3]), threads_per_block=256,
+                                  verification="full_cpu_fma_trajectory_v1")
                     for kernel, name in zip((first, second), ("invert_mapping", "kmeansPoint")):
                         passed &= kernel["type"]=="kernel" and kernel["name"]==name and kernel["iter"]==0
                         passed &= kernel["params"]==params

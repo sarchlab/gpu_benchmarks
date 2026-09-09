@@ -41,8 +41,9 @@ This is an adapted port with the following driver differences:
   per-kernel JSON timings, including feature inversion. These records describe
   the local measured work, not the pinned program's end-to-end runtime.
 
-Source comparison does not establish full measured-result or AMD qualification;
-those remain open in [the readiness tracker](https://github.com/sarchlab/gpu_benchmarks/issues/71).
+Source comparison and result verification are distinct checks. The complete
+measured-result policy is described below; AMD qualification remains open in
+[the readiness tracker](https://github.com/sarchlab/gpu_benchmarks/issues/71).
 
 ## Algorithm
 
@@ -60,6 +61,7 @@ those remain open in [the readiness tracker](https://github.com/sarchlab/gpu_ben
 | File | Description |
 |------|-------------|
 | `rodinia_kmeans.hip` | HIP/CUDA source — adapted `invert_mapping`/`kmeansPoint` kernels + timing driver |
+| `cpu_reference.h` | Independent complete fused-arithmetic CPU trajectory |
 | `Makefile` | Platform auto-detect build system |
 | `params.json` | Parameter specification |
 
@@ -108,7 +110,7 @@ is the harness's job (`gpubench run --reps N`).
 `total_time_ms` is the sum of all recorded GPU event times:
 
 ```json
-{"type":"kernel","name":"invert_mapping","iter":0,"time_ms":0.412,"host_time_ms":0.480,"params":{"points":100000,"features":34,"clusters":5,"max_iter":10,"threads_per_block":256}}
+{"type":"kernel","name":"invert_mapping","iter":0,"time_ms":0.412,"host_time_ms":0.480,"params":{"points":100000,"features":34,"clusters":5,"max_iter":10,"threads_per_block":256,"verification":"full_cpu_fma_trajectory_v1"}}
 {"type":"kernel","name":"kmeansPoint","iter":0,"time_ms":8.123,"host_time_ms":9.500,"params":{...}}
 {"type":"summary","total_time_ms":8.535}
 ```
@@ -123,3 +125,31 @@ is the harness's job (`gpubench run --reps N`).
 ## Reference
 
 Rodinia: A Benchmark Suite for Heterogeneous Computing. S. Che et al., IEEE IISWC 2009.
+
+## Result verification
+
+Both kernel records carry `verification: full_cpu_fma_trajectory_v1`. After all
+timed work, the driver checks every inverted feature, every point assignment at
+every iteration, and every final centroid component. Float comparisons require
+finite values and identical bits; assignments require exact equality. A mismatch
+or unavailable reference exits nonzero, with at most ten mismatch details.
+Invalid measured cluster IDs fail before they can index host centroid arrays.
+
+The independent CPU trajectory starts from pristine row-major features and the
+original initial centers. It uses float subtraction and explicit float FMA for
+each squared-distance accumulation, ascending feature order and the first
+minimum on ties. Centroids use ascending-point float sums and retain empty
+cluster centers. This is the selected acceptance recipe for the current H100
+build; another arithmetic trajectory is not accepted. GPU kernels and their
+timed work are unchanged. AMD qualification remains pending.
+
+The existing per-iteration membership download writes into a retained history;
+no in-loop transfer is added. Inversion checks download one feature column at a
+time after timing. Assignment reference work uses at most sixteen CPU threads,
+with disjoint point ranges and caller fallback if thread creation fails; centroid
+updates remain serial. At the largest declared N=4194304, D=34, K=5, T=10,
+measured history occupies 160 MiB (previously 16 MiB), reference history adds
+160 MiB, and the 16 MiB column scratch is freed before reference allocation.
+The pristine features occupy 544 MiB. Host allocation failures are explicit;
+available-memory admission and process-budget qualification on other hosts
+remain separate requirements. Verification time is outside GPU event totals.

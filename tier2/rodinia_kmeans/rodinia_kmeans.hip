@@ -41,6 +41,7 @@
 #include <cmath>
 #include <cfloat>
 #include <climits>
+#include "cpu_reference.h"
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -210,7 +211,20 @@ int main(int argc, char** argv) {
     float* h_features    = (float*)malloc(feat_bytes);
     float* h_centers     = (float*)malloc(centers_bytes);
     float* h_centers_ini = (float*)malloc(centers_bytes);
-    int*   h_membership  = (int*)malloc((size_t)npoints * sizeof(int));
+    size_t membership_elements = 0;
+    try { membership_elements = kmeans_reference::history_elements(npoints, max_iter); }
+    catch (const std::exception& error) {
+        fprintf(stderr, "K-means allocation failed: %s\n", error.what());
+        free(h_features); free(h_centers); free(h_centers_ini);
+        return EXIT_FAILURE;
+    }
+    int* h_membership_all = (int*)malloc(membership_elements * sizeof(int));
+    if (!h_features || !h_centers || !h_centers_ini || !h_membership_all) {
+        fprintf(stderr, "K-means host allocation failed for points=%d features=%d clusters=%d max_iter=%d\n",
+                npoints, nfeatures, nclusters, max_iter);
+        free(h_features); free(h_centers); free(h_centers_ini); free(h_membership_all);
+        return EXIT_FAILURE;
+    }
 
     unsigned int seed = 42;
     for (int i = 0; i < npoints * nfeatures; ++i) {
@@ -234,9 +248,9 @@ int main(int argc, char** argv) {
     dim3 grid(num_blocks_perdim, num_blocks_perdim);
     dim3 threads(num_threads);
 
-    char params[192];
+    char params[256];
     snprintf(params, sizeof(params),
-             "\"points\":%d,\"features\":%d,\"clusters\":%d,\"max_iter\":%d,\"threads_per_block\":%d",
+             "\"points\":%d,\"features\":%d,\"clusters\":%d,\"max_iter\":%d,\"threads_per_block\":%d,\"verification\":\"full_cpu_fma_trajectory_v1\"",
              npoints, nfeatures, nclusters, max_iter, num_threads);
 
     bench_timer_t timer;
@@ -251,7 +265,7 @@ int main(int argc, char** argv) {
     // centers as per-cluster means on the CPU (untimed). invert_mapping reads
     // immutable features; it is re-run each pass only so it emits a timing
     // record — the result is identical every pass.
-    auto run_pass = [&]() {
+    auto run_pass = [&]() -> bool {
         bench_lap_reset(&acc_invert);
         bench_lap_reset(&acc_assign);
         memcpy(h_centers, h_centers_ini, centers_bytes);
@@ -276,15 +290,26 @@ int main(int argc, char** argv) {
                                                membership_d, clusters_d, nullptr, nullptr);
             }));
 
+            // Retain each measured assignment without adding an in-loop copy.
+            int* h_membership = h_membership_all + static_cast<size_t>(iter) * npoints;
             // Copy membership back and recompute centroids on the CPU (untimed).
             HIP_CHECK(hipMemcpy(h_membership, membership_d,
                                 (size_t)npoints * sizeof(int), hipMemcpyDeviceToHost));
 
             float* new_centers = (float*)calloc((size_t)nclusters * nfeatures, sizeof(float));
             int*   counts      = (int*)calloc((size_t)nclusters, sizeof(int));
+            if (!new_centers || !counts) {
+                fprintf(stderr, "K-means centroid allocation failed at iteration %d\n", iter);
+                free(new_centers); free(counts);
+                return false;
+            }
             for (int p = 0; p < npoints; ++p) {
                 int c = h_membership[p];
-                if (c < 0) continue;
+                if (c < 0 || c >= nclusters) {
+                    fprintf(stderr, "K-means verification: FAIL invalid membership[%d][%d]=%d\n", iter, p, c);
+                    free(new_centers); free(counts);
+                    return false;
+                }
                 counts[c]++;
                 for (int f = 0; f < nfeatures; ++f)
                     new_centers[c * nfeatures + f] += h_features[p * nfeatures + f];
@@ -300,9 +325,54 @@ int main(int argc, char** argv) {
             free(counts);
         }
         HIP_CHECK(hipGetLastError());
+        return true;
     };
 
-    run_pass();
+    bool verified = run_pass();
+    // All verification is after measured work. References consume only pristine
+    // row-major features and initial centers; no GPU output feeds the oracle.
+    if (verified) {
+        size_t values = 0, mismatches = 0;
+        auto check_float = [&](const char* field, size_t at, float actual, float expected) {
+            ++values;
+            if (!kmeans_reference::value_matches(actual, expected)) {
+                if (mismatches < 10)
+                    fprintf(stderr, "MISMATCH %s[%zu]: actual=%.9g expected=%.9g\n", field, at, actual, expected);
+                ++mismatches;
+            }
+        };
+        try {
+            {
+                std::vector<float> column(npoints);
+                for (int f = 0; f < nfeatures; ++f) {
+                    HIP_CHECK(hipMemcpy(column.data(), feature_d + static_cast<size_t>(f) * npoints,
+                                        static_cast<size_t>(npoints) * sizeof(float), hipMemcpyDeviceToHost));
+                    for (int p = 0; p < npoints; ++p)
+                        check_float("inversion", static_cast<size_t>(f) * npoints + p,
+                                    column[p], h_features[static_cast<size_t>(p) * nfeatures + f]);
+                }
+            }
+            const auto reference = kmeans_reference::trajectory(h_features, h_centers_ini,
+                                                                 npoints, nfeatures, nclusters, max_iter);
+            for (size_t at = 0; at < membership_elements; ++at) {
+                ++values;
+                if (h_membership_all[at] != reference.membership[at]) {
+                    if (mismatches < 10)
+                        fprintf(stderr, "MISMATCH membership[%zu][%zu]: actual=%d expected=%d\n",
+                                at / npoints, at % npoints, h_membership_all[at], reference.membership[at]);
+                    ++mismatches;
+                }
+            }
+            for (size_t at = 0; at < static_cast<size_t>(nclusters) * nfeatures; ++at)
+                check_float("centers", at, h_centers[at], reference.centers[at]);
+            verified = mismatches == 0;
+            fprintf(stderr, "K-means verification: %s (%zu values, %zu mismatches)\n",
+                    verified ? "PASS" : "FAIL", values, mismatches);
+        } catch (const std::exception& error) {
+            fprintf(stderr, "K-means verification: FAIL reference unavailable: %s\n", error.what());
+            verified = false;
+        }
+    }
 
     double total_gpu_ms = 0.0;
     bench_emit_iter("invert_mapping", 0, &acc_invert, params);
@@ -323,7 +393,7 @@ int main(int argc, char** argv) {
     free(h_features);
     free(h_centers);
     free(h_centers_ini);
-    free(h_membership);
+    free(h_membership_all);
 
-    return 0;
+    return verified ? EXIT_SUCCESS : EXIT_FAILURE;
 }

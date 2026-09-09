@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <climits>
 #include "cpu_reference.h"
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
@@ -100,7 +101,7 @@ static void generate_random_graph(int num_nodes, int edges_per_node,
                                   int** h_row_offsets, int** h_col_indices,
                                   int*  num_edges_out) {
     int num_edges = num_nodes * edges_per_node;
-    *h_row_offsets = (int*)malloc((size_t)(num_nodes + 1) * sizeof(int));
+    *h_row_offsets = (int*)malloc(((size_t)num_nodes + 1) * sizeof(int));
     *h_col_indices = (int*)malloc((size_t)num_edges * sizeof(int));
 
     srand(42);
@@ -135,6 +136,26 @@ int main(int argc, char** argv) {
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
 
+    if (num_nodes <= 0 || edges_per_node < 0 || block_size <= 0) {
+        fprintf(stderr, "Invalid BFS parameters: num_nodes and block_size must be positive; "
+                        "edges_per_node must be nonnegative\n");
+        return EXIT_FAILURE;
+    }
+    const unsigned long long edge_count =
+        (unsigned long long)num_nodes * (unsigned long long)edges_per_node;
+    if (edge_count > (unsigned long long)INT_MAX) {
+        fprintf(stderr, "BFS edge count exceeds INT_MAX\n");
+        return EXIT_FAILURE;
+    }
+    const unsigned long long grid_blocks =
+        ((unsigned long long)num_nodes + (unsigned long long)block_size - 1) /
+        (unsigned long long)block_size;
+    // Inactive padded threads also compute tid before the bounds check.
+    if (grid_blocks * (unsigned long long)block_size - 1 > (unsigned long long)INT_MAX) {
+        fprintf(stderr, "BFS padded vertex indices exceed INT_MAX\n");
+        return EXIT_FAILURE;
+    }
+
     // Generate random graph
     int* h_row_offsets = nullptr;
     int* h_col_indices = nullptr;
@@ -151,7 +172,7 @@ int main(int argc, char** argv) {
     int *d_row_offsets, *d_col_indices;
     int *d_cost, *d_frontier, *d_visited, *d_updated;
 
-    HIP_CHECK(hipMalloc(&d_row_offsets, (size_t)(num_nodes + 1) * sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_row_offsets, ((size_t)num_nodes + 1) * sizeof(int)));
     HIP_CHECK(hipMalloc(&d_col_indices, (size_t)num_edges        * sizeof(int)));
     HIP_CHECK(hipMalloc(&d_cost,        (size_t)num_nodes        * sizeof(int)));
     HIP_CHECK(hipMalloc(&d_frontier,    (size_t)num_nodes        * sizeof(int)));
@@ -160,7 +181,7 @@ int main(int argc, char** argv) {
 
     // Copy graph structure to device (constant across iterations)
     HIP_CHECK(hipMemcpy(d_row_offsets, h_row_offsets,
-                        (size_t)(num_nodes + 1) * sizeof(int),
+                        ((size_t)num_nodes + 1) * sizeof(int),
                         hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_col_indices, h_col_indices,
                         (size_t)num_edges * sizeof(int),
@@ -175,7 +196,7 @@ int main(int argc, char** argv) {
             num_nodes, num_edges, block_size);
 
     dim3 block(block_size);
-    dim3 grid((num_nodes + block_size - 1) / block_size);
+    dim3 grid((unsigned int)grid_blocks);
 
     char params[384];
     unsigned long long bfs_levels = 0;

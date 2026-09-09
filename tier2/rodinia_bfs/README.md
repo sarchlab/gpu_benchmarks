@@ -53,6 +53,15 @@ harness's job (`gpubench run --reps N`).
 | `block_size` | `BENCH_PARAM_block_size` (or `--block_size B`) | 256 | GPU thread-block size |
 | `vector_add_warmup` | `BENCH_PARAM_vector_add_warmup` | `true` | cold-cache calibration before the timed traversal |
 
+Resolved `num_nodes` and `block_size` must be positive, and
+`edges_per_node` must be nonnegative. Zero-edge graphs remain supported through
+the environment override; the existing CLI parser still falls back to its
+default for nonpositive flags. The edge count and every padded launch thread's
+vertex index must fit signed `int`; invalid ranges fail before allocation or
+device access. Row-offset byte sizes and launch rounding use wide arithmetic.
+These checks establish representable indexing, not available host/device memory
+or hardware support for an arbitrary block size.
+
 ## Files
 
 | File | Description |

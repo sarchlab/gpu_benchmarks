@@ -87,7 +87,7 @@ def main():
             (root / 'ranges.cpp').write_text(host_source(args.source.read_text()))
         except ValueError as exc:
             raise ValueError(f'{args.source}: {exc}') from exc
-        subprocess.run([args.compiler, '-std=c++14', '-O1', '-g', '-fsanitize=address,undefined',
+        subprocess.run([args.compiler, '-std=c++14', '-O1', '-g', '-fsanitize=address,undefined', '-fno-sanitize-recover=all',
                         str(root / 'ranges.cpp'), '-o', str(root / 'ranges')], check=True, timeout=60)
         for argv, overrides, want in cases:
             env = dict(clean, **{'BENCH_PARAM_' + k: v for k, v in overrides.items()})

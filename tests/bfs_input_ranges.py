@@ -58,7 +58,7 @@ def main():
         root=Path(temp);cpp=root/'ranges.cpp';binary=root/'ranges'
         try:cpp.write_text(host_source(args.source.read_text()))
         except ValueError as exc:raise ValueError(f'{args.source}: {exc}') from exc
-        subprocess.run([args.compiler,'-std=c++14','-O1','-g','-fsanitize=address,undefined',str(cpp),'-o',str(binary)],check=True,timeout=60)
+        subprocess.run([args.compiler,'-std=c++14','-O1','-g','-fsanitize=address,undefined','-fno-sanitize-recover=all',str(cpp),'-o',str(binary)],check=True,timeout=60)
         for argv,overrides,(n,e,b) in cases:
             env=dict(clean,**{'BENCH_PARAM_'+k:v for k,v in overrides.items()})
             p=subprocess.run([str(binary),*argv],env=env,capture_output=True,text=True,timeout=30)

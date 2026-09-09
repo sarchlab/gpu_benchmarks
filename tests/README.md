@@ -1,5 +1,9 @@
 # GPU regression checks
 
+The CI CPU-reference builds and Python host sanitizer checks use
+`-fno-sanitize-recover=all`, so detected sanitizer errors fail the check. Include
+this flag when compiling a sanitized host test manually.
+
 `finite_verification.py` exercises the actual verification paths of 27 Tier 2
 benchmarks. It makes isolated source copies, injects values immediately before
 the existing comparisons, and builds those copies with the benchmark Makefiles.

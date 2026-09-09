@@ -68,7 +68,7 @@ def main():
         root=Path(temp);cpp=root/'test.cpp';binary=root/'test'
         cpp.write_text(HEADER+kernels+MAIN)
         sanitizer='thread' if args.sanitizer=='thread' else 'address,undefined'
-        subprocess.run([args.compiler,'-O1','-g','-std=c++14','-pthread','-fsanitize='+sanitizer,str(cpp),'-o',str(binary)],check=True,timeout=60)
+        subprocess.run([args.compiler,'-O1','-g','-std=c++14','-pthread','-fsanitize='+sanitizer,'-fno-sanitize-recover=all',str(cpp),'-o',str(binary)],check=True,timeout=60)
         subprocess.run([str(binary)],check=True,timeout=60)
     return 0
 

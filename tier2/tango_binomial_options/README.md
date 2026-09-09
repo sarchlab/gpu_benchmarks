@@ -106,6 +106,11 @@ largest declared size), plus approximately 12 KiB of scratch per active worker.
 All reference work occurs after the timed GPU launch. The kernel, input sequence,
 33 declared sizes and 60-second collection budget are unchanged.
 
+The process budget includes CPU verification. On the qualified H100 host using
+16 CPU workers, the largest declared size completes in about 26 seconds end to
+end. Fewer available CPU workers or host contention can exceed that budget;
+supported host/size profiles remain part of R-17/R-22 in the readiness tracker.
+
 The host regression compares against the original per-node-power recurrence,
 including early exercise, extreme generated inputs, complete parallel results
 and NaN/infinity selection. The measured-result regression corrupts actual GPU

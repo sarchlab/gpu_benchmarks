@@ -38,18 +38,18 @@ int main(int argc, char** argv) {
 def expected(size, spacing=64, laps=4, seed=42, accesses=None):
     spacing, laps, seed = (v & UINT32_MAX for v in (spacing, laps, seed))
     if size <= 0:
-        return 'Invalid array_bytes'
+        return 'Invalid array_bytes\n'
     if size % 4 or spacing % 4:
-        return 'must be word-aligned'
+        return 'array_bytes and cacheline_bytes must be word-aligned\n'
     stride = spacing // 4
     if not stride or size // 4 < stride * 2:
-        return 'too small for cacheline_bytes'
+        return f'array_bytes ({size}) too small for cacheline_bytes ({spacing}); need >= 2 cachelines\n'
     nodes = size // spacing
     if nodes > UINT32_MAX or (nodes - 1) * stride > UINT32_MAX:
-        return 'Chain node count or index exceeds uint32_t'
+        return 'Chain node count or index exceeds uint32_t\n'
     timed = max(131072, min(16000000, laps * nodes)) if accesses is None else accesses
     if timed == 0:
-        return 'num_accesses must be positive'
+        return 'num_accesses must be positive\n'
     return dict(array_bytes=size, cacheline_bytes=spacing, nodes=nodes, stride=stride,
                 timed=timed, primer=max(1, min(nodes, (256 << 20) // spacing)),
                 laps=laps, seed=seed)
@@ -94,9 +94,9 @@ def main():
             p = subprocess.run([str(root / 'ranges'), *argv], env=env,
                                capture_output=True, text=True, timeout=30)
             if isinstance(want, str):
-                if p.returncode != 1 or want not in p.stderr or p.stdout:
+                if p.returncode != 1 or p.stderr != want or p.stdout:
                     raise AssertionError((argv, overrides, want, p.returncode, p.stdout, p.stderr))
-            elif p.returncode or json.loads(p.stdout) != want:
+            elif p.returncode or p.stderr or json.loads(p.stdout) != want:
                 raise AssertionError((argv, overrides, want, p.returncode, p.stdout, p.stderr))
     print(f'{len(cases)} actual cache-latency layout/access cases pass (no allocation or GPU access)')
 

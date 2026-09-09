@@ -68,7 +68,7 @@ jobs:
 
       - name: Check complete k-means CPU reference (no GPU required)
         run: |
-          g++ -O3 -std=c++14 -pthread -fsanitize=address,undefined tests/kmeans_reference_test.cpp -o /tmp/kmeans_reference_test
+          g++ -O3 -std=c++14 -pthread -fsanitize=address,undefined -fno-sanitize-recover=all tests/kmeans_reference_test.cpp -o /tmp/kmeans_reference_test
           /tmp/kmeans_reference_test
 
       - name: Compile measured k-means verification regression
@@ -76,7 +76,7 @@ jobs:
 
       - name: Check complete matrix-vector CPU references (no GPU required)
         run: |
-          g++ -O2 -std=c++14 -fsanitize=address,undefined tests/matvec_reference_test.cpp -o /tmp/matvec_reference_test
+          g++ -O2 -std=c++14 -fsanitize=address,undefined -fno-sanitize-recover=all tests/matvec_reference_test.cpp -o /tmp/matvec_reference_test
           /tmp/matvec_reference_test
 
       - name: Compile measured matrix-vector verification regression
@@ -84,7 +84,7 @@ jobs:
 
       - name: Check complete SRAD CPU reference (no GPU required)
         run: |
-          g++ -O3 -std=c++14 -pthread -fsanitize=address,undefined tests/srad_reference_test.cpp -o /tmp/srad_reference_test
+          g++ -O3 -std=c++14 -pthread -fsanitize=address,undefined -fno-sanitize-recover=all tests/srad_reference_test.cpp -o /tmp/srad_reference_test
           /tmp/srad_reference_test
 
       - name: Compile measured SRAD verification regression
@@ -98,7 +98,7 @@ jobs:
 
       - name: Check complete FDTD CPU reference (no GPU required)
         run: |
-          g++ -O3 -std=c++14 -pthread -fsanitize=address,undefined tests/fdtd_reference_test.cpp -o /tmp/fdtd_reference_test
+          g++ -O3 -std=c++14 -pthread -fsanitize=address,undefined -fno-sanitize-recover=all tests/fdtd_reference_test.cpp -o /tmp/fdtd_reference_test
           /tmp/fdtd_reference_test
 
       - name: Compile measured FDTD verification regression
@@ -106,7 +106,7 @@ jobs:
 
       - name: Check complete 3MM CPU references (no GPU required)
         run: |
-          g++ -O3 -std=c++14 -pthread -fsanitize=address,undefined tests/mm3_reference_test.cpp -o /tmp/mm3_reference_test
+          g++ -O3 -std=c++14 -pthread -fsanitize=address,undefined -fno-sanitize-recover=all tests/mm3_reference_test.cpp -o /tmp/mm3_reference_test
           /tmp/mm3_reference_test
 
       - name: Compile measured 3MM verification regression
@@ -114,7 +114,7 @@ jobs:
 
       - name: Check complete GEMM CPU reference (no GPU required)
         run: |
-          g++ -O3 -std=c++14 -pthread -fsanitize=address,undefined tests/gemm_reference_test.cpp -o /tmp/gemm_reference_test
+          g++ -O3 -std=c++14 -pthread -fsanitize=address,undefined -fno-sanitize-recover=all tests/gemm_reference_test.cpp -o /tmp/gemm_reference_test
           /tmp/gemm_reference_test
 
       - name: Compile measured GEMM verification regression
@@ -122,7 +122,7 @@ jobs:
 
       - name: Check complete correlation CPU reference (no GPU required)
         run: |
-          g++ -O3 -std=c++14 -fsanitize=address,undefined tests/correlation_reference_test.cpp -o /tmp/correlation_reference_test
+          g++ -O3 -std=c++14 -fsanitize=address,undefined -fno-sanitize-recover=all tests/correlation_reference_test.cpp -o /tmp/correlation_reference_test
           /tmp/correlation_reference_test
 
       - name: Compile measured correlation verification regression
@@ -130,7 +130,7 @@ jobs:
 
       - name: Check complete LavaMD CPU reference (no GPU required)
         run: |
-          g++ -O3 -std=c++14 -fsanitize=address,undefined tests/lavamd_reference_test.cpp -o /tmp/lavamd_reference_test
+          g++ -O3 -std=c++14 -fsanitize=address,undefined -fno-sanitize-recover=all tests/lavamd_reference_test.cpp -o /tmp/lavamd_reference_test
           /tmp/lavamd_reference_test
 
       - name: Compile measured LavaMD verification regression
@@ -138,7 +138,7 @@ jobs:
 
       - name: Check complete SYR2K CPU reference (no GPU required)
         run: |
-          g++ -O3 -std=c++14 -fsanitize=address,undefined tests/syr2k_reference_test.cpp -o /tmp/syr2k_reference_test
+          g++ -O3 -std=c++14 -fsanitize=address,undefined -fno-sanitize-recover=all tests/syr2k_reference_test.cpp -o /tmp/syr2k_reference_test
           /tmp/syr2k_reference_test
 
       - name: Compile measured SYR2K verification regression
@@ -146,7 +146,7 @@ jobs:
 
       - name: Check complete 2MM CPU reference (no GPU required)
         run: |
-          g++ -O3 -std=c++14 -fsanitize=address,undefined tests/two_mm_reference_test.cpp -o /tmp/two_mm_reference_test
+          g++ -O3 -std=c++14 -fsanitize=address,undefined -fno-sanitize-recover=all tests/two_mm_reference_test.cpp -o /tmp/two_mm_reference_test
           /tmp/two_mm_reference_test
 
       - name: Compile measured 2MM verification regression
@@ -154,7 +154,7 @@ jobs:
 
       - name: Check complete SHOC Stencil2D CPU reference (no GPU required)
         run: |
-          g++ -O3 -std=c++14 -fsanitize=address,undefined tests/shoc_stencil_reference_test.cpp -o /tmp/shoc_stencil_reference_test
+          g++ -O3 -std=c++14 -fsanitize=address,undefined -fno-sanitize-recover=all tests/shoc_stencil_reference_test.cpp -o /tmp/shoc_stencil_reference_test
           /tmp/shoc_stencil_reference_test
 
       - name: Compile measured SHOC Stencil2D verification regression
@@ -162,7 +162,7 @@ jobs:
 
       - name: Check full stencil CPU reference (no GPU required)
         run: |
-          g++ -O2 -std=c++14 -fsanitize=address,undefined tests/stencil_reference_test.cpp -o /tmp/stencil_reference_test
+          g++ -O2 -std=c++14 -fsanitize=address,undefined -fno-sanitize-recover=all tests/stencil_reference_test.cpp -o /tmp/stencil_reference_test
           /tmp/stencil_reference_test
 
       - name: Compile measured stencil verification regression
@@ -170,7 +170,7 @@ jobs:
 
       - name: Check full BFS CPU distances (no GPU required)
         run: |
-          g++ -O2 -std=c++14 -fsanitize=address,undefined tests/bfs_reference_test.cpp -o /tmp/bfs_reference_test
+          g++ -O2 -std=c++14 -fsanitize=address,undefined -fno-sanitize-recover=all tests/bfs_reference_test.cpp -o /tmp/bfs_reference_test
           /tmp/bfs_reference_test
 
       - name: Compile measured BFS verification regression
@@ -196,7 +196,7 @@ jobs:
 
       - name: Check full LU residual arithmetic (no GPU required)
         run: |
-          g++ -O3 -std=c++14 -fsanitize=address,undefined tests/lud_residual_test.cpp -o /tmp/lud_residual_test
+          g++ -O3 -std=c++14 -fsanitize=address,undefined -fno-sanitize-recover=all tests/lud_residual_test.cpp -o /tmp/lud_residual_test
           /tmp/lud_residual_test
 
       - name: Compile measured LUD verification regression
@@ -204,7 +204,7 @@ jobs:
 
       - name: Check graph input and full triangle-reference equivalence
         run: |
-          g++ -O3 -std=c++14 -fsanitize=address,undefined tests/triangle_host_test.cpp -o /tmp/triangle_host_test
+          g++ -O3 -std=c++14 -fsanitize=address,undefined -fno-sanitize-recover=all tests/triangle_host_test.cpp -o /tmp/triangle_host_test
           /tmp/triangle_host_test
 
       - name: Compile exact triangle-total verification regression

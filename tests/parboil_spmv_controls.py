@@ -66,7 +66,7 @@ def main():
             cpp.write_text(host_source(args.source.read_text()))
         except ValueError as exc:
             raise ValueError(f'{args.source}: {exc}') from exc
-        subprocess.run([args.compiler,'-std=c++14','-O1','-g','-fsanitize=address,undefined',str(cpp),'-o',str(binary)],check=True,timeout=60)
+        subprocess.run([args.compiler,'-std=c++14','-O1','-g','-fsanitize=address,undefined','-fno-sanitize-recover=all',str(cpp),'-o',str(binary)],check=True,timeout=60)
         for device in devices:
             for argv, overrides, n, nnz, requested, seed in cases:
                 env = dict(clean,SPMV_TEST_DEVICE=','.join(map(str,device)))

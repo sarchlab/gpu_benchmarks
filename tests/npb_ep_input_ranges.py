@@ -40,15 +40,15 @@ int main(int argc, char** argv) {
 
 def expected(m, block):
     if m <= 16:
-        return 'M must be > 16'
+        return 'M must be > 16 (M-MK = number-of-groups exponent must be >= 1)\n'
     if m > 46:
-        return 'thread count that cannot fit int'
+        return 'M produces a thread count that cannot fit int\n'
     if block <= 0:
-        return 'block_size must be positive'
+        return 'block_size must be positive\n'
     nn = 2 ** (m - 16)
     grid = (nn + block - 1) // block
     if grid * 10 - 1 > INT_MAX:
-        return 'Per-block histogram index cannot fit int'
+        return 'Per-block histogram index cannot fit int\n'
     assert grid * block - 1 <= INT_MAX
     return dict(m=m, block_size=block, nn=nn, grid=grid)
 
@@ -89,9 +89,9 @@ def main():
             p = subprocess.run([str(root / 'ranges'), *argv], env=env,
                                capture_output=True, text=True, timeout=30)
             if isinstance(want, str):
-                if p.returncode != 1 or want not in p.stderr or p.stdout:
+                if p.returncode != 1 or p.stderr != want or p.stdout:
                     raise AssertionError((argv, overrides, want, p.returncode, p.stdout, p.stderr))
-            elif p.returncode or json.loads(p.stdout) != want:
+            elif p.returncode or p.stderr or json.loads(p.stdout) != want:
                 raise AssertionError((argv, overrides, want, p.returncode, p.stdout, p.stderr))
     print(f'{len(cases)} actual NPB EP input/geometry cases pass (no allocation or GPU access)')
 

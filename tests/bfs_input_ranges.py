@@ -58,19 +58,19 @@ def main():
         root=Path(temp);cpp=root/'ranges.cpp';binary=root/'ranges'
         try:cpp.write_text(host_source(args.source.read_text()))
         except ValueError as exc:raise ValueError(f'{args.source}: {exc}') from exc
-        subprocess.run([args.compiler,'-std=c++14','-O1','-g','-fsanitize=address,undefined',str(cpp),'-o',str(binary)],check=True,timeout=60)
+        subprocess.run([args.compiler,'-std=c++14','-O1','-g','-fsanitize=address,undefined','-fno-sanitize-recover=all',str(cpp),'-o',str(binary)],check=True,timeout=60)
         for argv,overrides,(n,e,b) in cases:
             env=dict(clean,**{'BENCH_PARAM_'+k:v for k,v in overrides.items()})
             p=subprocess.run([str(binary),*argv],env=env,capture_output=True,text=True,timeout=30)
             message=None
-            if n<=0 or e<0 or b<=0:message='Invalid BFS parameters'
-            elif n*e>INT_MAX:message='BFS edge count exceeds INT_MAX'
-            elif ((n+b-1)//b)*b-1>INT_MAX:message='BFS padded vertex indices exceed INT_MAX'
+            if n<=0 or e<0 or b<=0:message='Invalid BFS parameters: num_nodes and block_size must be positive; edges_per_node must be nonnegative\n'
+            elif n*e>INT_MAX:message='BFS edge count exceeds INT_MAX\n'
+            elif ((n+b-1)//b)*b-1>INT_MAX:message='BFS padded vertex indices exceed INT_MAX\n'
             if message:
-                if p.returncode!=1 or message not in p.stderr or p.stdout:raise AssertionError((argv,overrides,p.returncode,p.stdout,p.stderr))
+                if p.returncode!=1 or p.stderr!=message or p.stdout:raise AssertionError((argv,overrides,p.returncode,p.stdout,p.stderr))
             else:
                 expected=dict(num_nodes=n,edges_per_node=e,block_size=b,grid_blocks=(n+b-1)//b,row_bytes=(n+1)*4)
-                if p.returncode or json.loads(p.stdout)!=expected:raise AssertionError((argv,overrides,p.returncode,p.stdout,p.stderr,expected))
+                if p.returncode or p.stderr or json.loads(p.stdout)!=expected:raise AssertionError((argv,overrides,p.returncode,p.stdout,p.stderr,expected))
     print(f'{len(cases)} BFS resolved-range/size cases pass (no graph allocation or GPU access)')
     return 0
 

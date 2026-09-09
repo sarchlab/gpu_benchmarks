@@ -22,9 +22,9 @@ type PlatformInfo struct {
 	GPUVramGB      *float64 `json:"gpu_vram_gb"`
 	GPUCount       int      `json:"gpu_count"`
 	DriverVersion  *string  `json:"driver_version"`
-	RuntimeVersion *string  `json:"runtime_version"`
-	Compiler       *string  `json:"compiler"`
-	PythonVersion  string   `json:"python_version"` // stores Go version for schema compat
+	RuntimeVersion *string  `json:"runtime_version"` // unknown without observing the benchmark runtime
+	Compiler       *string  `json:"compiler"`        // installed tool, not necessarily the binary's compiler
+	PythonVersion  string   `json:"python_version"`  // stores Go version for schema compat
 }
 
 var (
@@ -147,7 +147,6 @@ func collectPlatformInfo(platformType string) *PlatformInfo {
 			info.DriverVersion = strPtr(drv)
 			nvcc := runCmd("nvcc --version 2>/dev/null | grep 'release'")
 			if nvcc != "" {
-				info.RuntimeVersion = strPtr(strings.TrimSpace(nvcc))
 				info.Compiler = strPtr(strings.TrimSpace(nvcc))
 			}
 			cnt := runCmd("nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l")
@@ -162,11 +161,11 @@ func collectPlatformInfo(platformType string) *PlatformInfo {
 			if gpu != "" {
 				info.GPUModel = gpu
 			}
-			drv := runCmd("cat /opt/rocm/.info/version 2>/dev/null")
-			info.DriverVersion = strPtr(drv)
+			// A ROCm release is not a driver version. Likewise, compiler
+			// output cannot identify the runtime loaded by a benchmark.
+			// Leave those unobserved versions unknown.
 			hipcc := runCmd("hipcc --version 2>/dev/null | head -1")
 			if hipcc != "" {
-				info.RuntimeVersion = strPtr(hipcc)
 				info.Compiler = strPtr(hipcc)
 			}
 		}

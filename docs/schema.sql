@@ -17,7 +17,9 @@ PRAGMA foreign_keys = ON;
 -- platforms — One row per unique hardware/software environment
 -- -----------------------------------------------------------------------------
 -- Captured once per execution session. If the CLI detects the same platform
--- fingerprint (hostname + gpu_model + driver_version + os), it reuses the row.
+-- fingerprint (hostname, gpu_model, driver_version, os, platform_type,
+-- runtime_version, compiler), it reuses the row. These are observed host metadata,
+-- not proof of the selected device or the executable's build/runtime identity.
 
 CREATE TABLE IF NOT EXISTS platforms (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,17 +32,20 @@ CREATE TABLE IF NOT EXISTS platforms (
     gpu_vram_gb     REAL,                           -- GPU memory in GiB
     gpu_count       INTEGER DEFAULT 1,              -- number of GPUs (benchmark uses 1)
     driver_version  TEXT,                           -- e.g., "535.183.01", "3.4.1 Metal"
-    runtime_version TEXT,                           -- e.g., "CUDA 12.2", "ROCm 6.0", "Metal 3"
-    compiler        TEXT,                           -- e.g., "nvcc 12.2.140", "hipcc 6.0.2"
+    runtime_version TEXT,                           -- NULL when the benchmark runtime is unobserved
+    compiler        TEXT,                           -- installed nvcc/hipcc description, not build provenance
     platform_type   TEXT    NOT NULL,               -- "cuda", "rocm", or "metal"
     python_version  TEXT,                           -- e.g., "3.11.5" (for Tier 4/5)
     extra_json      TEXT,                           -- arbitrary JSON for additional platform info
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
--- Unique constraint: same physical setup = same platform row
-CREATE UNIQUE INDEX IF NOT EXISTS idx_platform_fingerprint
-    ON platforms (hostname, gpu_model, driver_version, os, platform_type);
+-- Version observations distinguish new sessions from legacy mislabeled rows.
+-- Replace only the owned index; preserve historical rows and session links.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_platform_fingerprint_v2
+    ON platforms (hostname, gpu_model, driver_version, os, platform_type,
+                  runtime_version, compiler);
+DROP INDEX IF EXISTS idx_platform_fingerprint;
 
 -- -----------------------------------------------------------------------------
 -- sessions — One row per CLI invocation (gpubench run ...)

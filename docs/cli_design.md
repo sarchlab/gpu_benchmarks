@@ -156,7 +156,6 @@ Platform Information
   GPU:         NVIDIA A100-SXM4-80GB
   GPU VRAM:    80 GiB
   Driver:      535.183.01
-  Runtime:     CUDA 12.2
   Compiler:    nvcc 12.2.140
   OS:          Linux 6.5.0-44-generic x86_64
   CPU:         AMD EPYC 7763 64-Core (128 cores)
@@ -206,15 +205,30 @@ The CLI gathers platform info from system commands:
 | Info | CUDA | ROCm |
 |------|------|------|
 | GPU model | `nvidia-smi --query-gpu=name --format=csv,noheader` | `rocm-smi --showproductname` |
-| GPU VRAM | `nvidia-smi --query-gpu=memory.total --format=csv,noheader` | `rocm-smi --showmeminfo vram` |
-| Driver | `nvidia-smi --query-gpu=driver_version --format=csv,noheader` | `cat /opt/rocm/.info/version` |
-| Runtime | `nvcc --version` | `hipcc --version` |
-| Compiler | `nvcc --version` | `hipcc --version` |
-| OS | `uname -srm` | `uname -srm` | `uname -srm` |
-| CPU | `/proc/cpuinfo` or `lscpu` | `/proc/cpuinfo` or `lscpu` | `sysctl -n machdep.cpu.brand_string` |
-| RAM | `/proc/meminfo` | `/proc/meminfo` | `sysctl -n hw.memsize` |
+| GPU VRAM | `nvidia-smi --query-gpu=memory.total --format=csv,noheader` | Unknown (`null`) |
+| Driver | `nvidia-smi --query-gpu=driver_version --format=csv,noheader` | Unknown (`null`) |
+| Benchmark runtime | Unknown (`null`) | Unknown (`null`) |
+| Installed compiler | `nvcc --version` | `hipcc --version` |
+| OS | `uname -srm` | `uname -srm` |
+| CPU | OS-specific host queries | OS-specific host queries |
+| RAM | OS-specific host queries | OS-specific host queries |
 
-If any detection fails, the field is stored as `null` — the tool should not crash due to missing platform info.
+Optional unavailable version fields are stored as `null` in SQLite and JSON;
+the text `info` display omits them. Compiler output
+describes the installed tool; it does not identify the tool or flags that built
+the benchmark, or the runtime loaded by that executable. The ROCm release file
+does not identify the driver. Actual per-executable build/runtime provenance and
+visible-device mapping require separate qualification.
+
+Platform row reuse includes the observed runtime and compiler fields. Opening an
+existing database replaces the old fingerprint index while preserving historical
+rows and session links. New sessions with corrected unknown version fields get a
+different row from legacy sessions with compiler/ROCm-release strings in those
+fields. Old values remain historical, unqualified observations; the migration
+does not reinterpret them as verified runtime or driver versions.
+Continue writing with the updated CLI: older writers recreate the narrower
+unique index and can reject a database containing distinct version observations.
+Existing read-only exports remain compatible because table columns are unchanged.
 
 ## Benchmark Discovery
 

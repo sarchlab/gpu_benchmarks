@@ -15,8 +15,10 @@ CREATE TABLE IF NOT EXISTS platforms (
     extra_json TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_platform_fingerprint
-    ON platforms (hostname, gpu_model, driver_version, os, platform_type);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_platform_fingerprint_v2
+    ON platforms (hostname, gpu_model, driver_version, os, platform_type,
+                  runtime_version, compiler);
+DROP INDEX IF EXISTS idx_platform_fingerprint;
 CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     platform_id INTEGER NOT NULL REFERENCES platforms(id),

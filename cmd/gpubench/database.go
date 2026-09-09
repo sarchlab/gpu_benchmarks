@@ -51,9 +51,11 @@ func getOrCreatePlatform(db *sql.DB, info *PlatformInfo) int64 {
 	var id int64
 	err := db.QueryRow(
 		"SELECT id FROM platforms WHERE hostname=? AND gpu_model=? "+
-			"AND driver_version IS ? AND os=? AND platform_type=?",
+			"AND driver_version IS ? AND os=? AND platform_type=? "+
+			"AND runtime_version IS ? AND compiler IS ?",
 		info.Hostname, info.GPUModel, ptrToNullString(info.DriverVersion),
 		info.OS, info.PlatformType,
+		ptrToNullString(info.RuntimeVersion), ptrToNullString(info.Compiler),
 	).Scan(&id)
 	if err == nil {
 		return id

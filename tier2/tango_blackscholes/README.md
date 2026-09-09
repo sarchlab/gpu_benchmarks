@@ -66,7 +66,7 @@ BENCH_PARAM_size=1048576 ./tango_blackscholes     # env vars override argv
 and host wall-clock time (`host_time_ms`), then a summary whose `total_time_ms`
 equals that record's GPU event time:
 ```
-{"type":"kernel","name":"blackscholes_kernel","iter":0,"time_ms":2.345600,"host_time_ms":2.401000,"params":{"size":4194304,"block_size":256}}
+{"type":"kernel","name":"blackscholes_kernel","iter":0,"time_ms":2.345600,"host_time_ms":2.401000,"params":{"size":4194304,"block_size":256,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":2.345600}
 ```
 
@@ -80,16 +80,26 @@ Options: 4194304
 
 blackscholes_kernel: gpu = 2.346 ms, host = 2.401 ms
 Total GPU time: 2.346 ms
-PASS
+Black-Scholes verification: PASS (4194304 options, 8388608 prices, 0 mismatching options)
 ```
 
 ## Verification
 
-After the timed run (measurements already emitted), GPU results are compared
-against a CPU reference for the first 10,000 options — both call and put
-prices, with relative tolerance. On FAIL the process exits non-zero, so the
-harness marks the run as failed without losing the measurements. There is no
-verification on/off parameter.
+After timing, the separate scalar CPU reference checks **every measured call
+and put price**, recording `verification="full_cpu_v1"`. For each option, both
+differences must be at most
+`1e-3 * (abs(reference_call) + abs(reference_put)) + 1e-5`; non-finite outputs,
+references and tolerances fail. The formula and tolerance are unchanged from
+the former 10,000-option prefix check. The diagnostic reports the full option
+and price counts, with at most ten mismatch details.
+
+The two reference arrays require `8*N` host bytes (64 MiB at the largest
+declared size); their allocation and calculation are outside GPU timing but
+inside the process budget. A missing reference allocation reports unavailable
+verification and exits nonzero. A mismatch also exits nonzero, so the harness
+marks the run as failed while retaining timing records. There is no verification
+bypass. This checks the local measured formula; upstream attribution remains
+the separate R-09 issue in [the readiness tracker](https://github.com/sarchlab/gpu_benchmarks/issues/71).
 
 ## Platform Notes
 

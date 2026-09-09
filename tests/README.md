@@ -386,3 +386,18 @@ The existing finite-value regression also checks the new actual-result
 comparator's CPU-reference rejection. Output directories must be new; logs and
 reports remain there. CI executes the host test and compiles the GPU tests.
 Use `--platform rocm` for AMD or `--compile-only` without GPU execution.
+
+`blackscholes_measured_result.py` checks all actual call/put prices after timing.
+It corrupts the first, middle and last outputs and positions 9,999 and 10,000,
+checks finite and non-finite failures, exercises both reference-allocation
+failures and bounds mismatch logging. Run on a CUDA GPU with a new output
+directory:
+
+```bash
+python3 tests/blackscholes_measured_result.py --platform cuda --work-dir /tmp/blackscholes-check --largest
+```
+
+Use `rocm` for an AMD run. The default 60 cases gain eight largest-size tail
+faults with `--largest`. Each process retains the 60-second budget; a timeout
+stops the test with logs and a partial report. CI uses `--compile-only` and does
+not claim GPU qualification.

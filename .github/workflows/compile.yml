@@ -133,6 +133,9 @@ jobs:
           g++ -O3 -std=c++14 -fsanitize=address,undefined -fno-sanitize-recover=all tests/lavamd_reference_test.cpp -o /tmp/lavamd_reference_test
           /tmp/lavamd_reference_test
 
+      - name: Compile measured Black-Scholes verification regression
+        run: python3 tests/blackscholes_measured_result.py --platform cuda --work-dir /tmp/blackscholes-measured-result --compile-only
+
       - name: Compile measured LavaMD verification regression
         run: python3 tests/lavamd_measured_result.py --platform cuda --work-dir /tmp/lavamd-measured-result --compile-only
 

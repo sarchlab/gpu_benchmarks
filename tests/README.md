@@ -251,6 +251,13 @@ test and retains completed-case logs and a partial report. The test requires
 verification diagnostics and failure exit codes.
 
 
+`python3 tests/bfs_input_ranges.py --compiler clang++` executes the actual
+BFS parameter prefix and row-size expression under host sanitizers. It checks
+positive vertex/block counts, nonnegative out-degree, signed edge/index limits,
+wide row sizing and CLI/environment precedence without allocating the graph or
+accessing a GPU. Representable host-test cases do not establish memory capacity
+or legal hardware launch dimensions. CI runs this test with g++.
+
 `bfs_reference_test.cpp` compares CPU distances and logical work with an independent
 Floyd-Warshall oracle on 66,066 exhaustive directed graphs and 25 structured
 cases, including self-loops, duplicates, deep chains and unreachable nodes.

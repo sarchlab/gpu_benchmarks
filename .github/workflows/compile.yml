@@ -66,6 +66,14 @@ jobs:
           make -C tier2/rodinia_kmeans PLATFORM=cuda
           python3 tests/kmeans_input_parameters.py --compiler g++ --binary tier2/rodinia_kmeans/rodinia_kmeans
 
+      - name: Check complete k-means CPU reference (no GPU required)
+        run: |
+          g++ -O3 -std=c++14 -pthread -fsanitize=address,undefined tests/kmeans_reference_test.cpp -o /tmp/kmeans_reference_test
+          /tmp/kmeans_reference_test
+
+      - name: Compile measured k-means verification regression
+        run: python3 tests/kmeans_measured_result.py --platform cuda --work-dir /tmp/kmeans-measured-result --compile-only
+
       - name: Check complete matrix-vector CPU references (no GPU required)
         run: |
           g++ -O2 -std=c++14 -fsanitize=address,undefined tests/matvec_reference_test.cpp -o /tmp/matvec_reference_test

@@ -223,7 +223,7 @@ int main(int argc, char** argv) {
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d",
+             "\"size\":%d,\"block_size\":%d,\"verification\":\"full_cpu_v1\"",
              size, block_size);
 
     // Single timed launch (bench_run_once: optional cold-cache warmer, then
@@ -245,35 +245,36 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(h_call, d_call, bytes, hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(h_put,  d_put,  bytes, hipMemcpyDeviceToHost));
 
-    // CPU reference (verify first 10000 elements)
-    int verifyN = (N < 10000) ? N : 10000;
+    // Check every measured call and put price after timing.
+    int verifyN = N;
     float* ref_call = (float*)malloc((size_t)verifyN * sizeof(float));
     float* ref_put  = (float*)malloc((size_t)verifyN * sizeof(float));
-    blackscholes_cpu(h_S, h_K, h_T, h_sigma, r, ref_call, ref_put, verifyN);
-
+    const bool reference_available = ref_call && ref_put;
     int errors = 0;
-    for (int i = 0; i < verifyN; ++i) {
-        float tol = 1e-3f * (fabsf(ref_call[i]) + fabsf(ref_put[i])) + 1e-5f;
-        if (!std::isfinite(h_call[i]) ||
-            !std::isfinite(ref_call[i]) ||
-            !std::isfinite(h_put[i]) ||
-            !std::isfinite(ref_put[i]) ||
-            !std::isfinite(tol) ||
-            fabsf(h_call[i] - ref_call[i]) > tol ||
-            fabsf(h_put[i]  - ref_put[i])  > tol) {
-            if (errors < 10) {
-                fprintf(stderr,
-                    "Mismatch at %d: GPU call=%.6f put=%.6f, CPU call=%.6f put=%.6f\n",
-                    i, h_call[i], h_put[i], ref_call[i], ref_put[i]);
+    if (!reference_available) {
+        fprintf(stderr, "Verification unavailable: CPU reference allocation failed for %d options\n", verifyN);
+    } else {
+        blackscholes_cpu(h_S, h_K, h_T, h_sigma, r, ref_call, ref_put, verifyN);
+        for (int i = 0; i < verifyN; ++i) {
+            float tol = 1e-3f * (fabsf(ref_call[i]) + fabsf(ref_put[i])) + 1e-5f;
+            if (!std::isfinite(h_call[i]) ||
+                !std::isfinite(ref_call[i]) ||
+                !std::isfinite(h_put[i]) ||
+                !std::isfinite(ref_put[i]) ||
+                !std::isfinite(tol) ||
+                fabsf(h_call[i] - ref_call[i]) > tol ||
+                fabsf(h_put[i]  - ref_put[i])  > tol) {
+                if (errors < 10) {
+                    fprintf(stderr,
+                        "Mismatch at %d: GPU call=%.6f put=%.6f, CPU call=%.6f put=%.6f\n",
+                        i, h_call[i], h_put[i], ref_call[i], ref_put[i]);
+                }
+                errors++;
             }
-            errors++;
         }
+        fprintf(stderr, "Black-Scholes verification: %s (%d options, %llu prices, %d mismatching options)\n",
+                errors ? "FAIL" : "PASS", verifyN, 2ULL * (unsigned long long)verifyN, errors);
     }
-
-    if (errors > 0)
-        fprintf(stderr, "FAIL: %d errors out of %d verified\n", errors, verifyN);
-    else
-        fprintf(stderr, "PASS\n");
 
     free(ref_call);
     free(ref_put);
@@ -291,5 +292,5 @@ int main(int argc, char** argv) {
     free(h_call);
     free(h_put);
 
-    return (errors > 0) ? EXIT_FAILURE : EXIT_SUCCESS;
+    return (!reference_available || errors > 0) ? EXIT_FAILURE : EXIT_SUCCESS;
 }

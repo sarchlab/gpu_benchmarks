@@ -16,7 +16,7 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_size
 //   BENCH_PARAM_verify=false|0|skip skips CPU verification (debug knob, not a
-//   declared parameter; it is not echoed into records)
+//   declared parameter; records include the resolved verification_enabled)
 //
 // Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
 // kernel (scan_block_kernel, add_block_sums_kernel) carrying that kernel's
@@ -236,7 +236,8 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMalloc(&d_data, bytes));
 
     char params[160];
-    snprintf(params, sizeof(params), "\"size\":%d", size);
+    snprintf(params, sizeof(params), "\"size\":%d,\"verification_enabled\":%s",
+             size, run_verify ? "true" : "false");
 
     // Per-kernel accumulators: each pass runs one full hierarchical scan; the
     // accumulated GPU/host time across all recursion levels within one pass

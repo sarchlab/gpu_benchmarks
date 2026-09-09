@@ -39,7 +39,10 @@ def check_output(result, size, block, verify):
     assert len(records) == 7 and len(summaries) == 1, records
     assert Counter(r["name"] for r in kernels) == Counter(KERNELS), records
     for record in kernels:
-        assert record["params"] == {"size": size, "block_size": block}, record
+        assert record["params"] == {
+            "size": size, "block_size": block, "verification_enabled": verify,
+        }, record
+        assert type(record["params"]["verification_enabled"]) is bool, record
         assert math.isfinite(record["time_ms"]) and record["time_ms"] >= 0, record
     total = summaries[0]["total_time_ms"]
     assert math.isfinite(total) and total >= 0, summaries

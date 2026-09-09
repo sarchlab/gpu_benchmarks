@@ -104,6 +104,15 @@ Every run has exactly 60 measured algorithm launches: six kernels per
 iteration. Trace collection disables the shared warmer and therefore sees
 exactly those launches, with verification either on or off.
 
+Each kernel record includes the JSON boolean `verification_enabled`, resolved
+from the existing debug flag. Verification is enabled by default; only the
+case-sensitive values `false`, `0`, and `skip` disable it. An inherited harness
+environment can set this unswept control. The boolean reports whether checks
+are enabled, not whether they passed: verification failures still exit nonzero.
+A successful process with `verification_enabled: false` is unchecked and must
+not be treated as verified collection evidence. Older records missing the field
+have unknown verification status.
+
 ## Output
 
 **stdout** — JSON lines: one kernel record per rank-phase kernel
@@ -113,7 +122,7 @@ that kernel's GPU event time (`time_ms`) and host time (`host_time_ms`)
 **accumulated across the 10 timed rank iterations**, then a summary whose
 `total_time_ms` is the sum of the six accumulated GPU event times:
 ```
-{"type":"kernel","name":"modify_keys_kernel","iter":0,"time_ms":0.021,"host_time_ms":0.19,"params":{"size":8388608,"block_size":256}}
+{"type":"kernel","name":"modify_keys_kernel","iter":0,"time_ms":0.021,"host_time_ms":0.19,"params":{"size":8388608,"block_size":256,"verification_enabled":true}}
 {"type":"kernel","name":"clear_kernel","iter":0,"time_ms":0.11,"host_time_ms":0.24,"params":{...}}
 {"type":"kernel","name":"histogram_kernel","iter":0,"time_ms":14.9,"host_time_ms":15.1,"params":{...}}
 {"type":"kernel","name":"scan_blocks_kernel","iter":0,"time_ms":0.33,"host_time_ms":0.45,"params":{...}}

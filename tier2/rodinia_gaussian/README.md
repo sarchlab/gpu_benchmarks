@@ -68,6 +68,15 @@ FAILs, the benchmark exits with a non-zero status.
 The forward elimination runs **exactly once**; repetition is the harness's
 job (`gpubench run --reps N`).
 
+Each kernel record includes the JSON boolean `verification_enabled`, resolved
+from the existing debug flag. Verification is enabled by default; only the
+case-sensitive values `false`, `0`, and `skip` disable it. An inherited harness
+environment can set this unswept control. The boolean reports whether checks
+are enabled, not whether they passed: verification failures still exit nonzero.
+A successful process with `verification_enabled: false` is unchecked and must
+not be treated as verified collection evidence. Older records missing the field
+have unknown verification status.
+
 ## Output
 
 **stdout** — JSON lines: one `kernel` record per kernel
@@ -75,8 +84,8 @@ job (`gpubench run --reps N`).
 and host time (`host_time_ms`) across all `N-1` pivot steps, then a summary
 whose `total_time_ms` is the sum of all recorded GPU event times:
 ```json
-{"type":"kernel","name":"fan1","iter":0,"time_ms":10.123,"host_time_ms":12.456,"params":{"size":512}}
-{"type":"kernel","name":"fan2","iter":0,"time_ms":35.000,"host_time_ms":38.100,"params":{"size":512}}
+{"type":"kernel","name":"fan1","iter":0,"time_ms":10.123,"host_time_ms":12.456,"params":{"size":512,"verification_enabled":true}}
+{"type":"kernel","name":"fan2","iter":0,"time_ms":35.000,"host_time_ms":38.100,"params":{"size":512,"verification_enabled":true}}
 {"type":"summary","total_time_ms":45.123}
 ```
 

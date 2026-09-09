@@ -179,8 +179,8 @@ int main(int argc, char** argv)
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"size\":%d",
-             N);
+             "\"size\":%d,\"verification_enabled\":%s",
+             N, do_verify ? "true" : "false");
 
     // Per-kernel accumulators: each elimination pass launches fan1 and fan2
     // once per pivot step; the accumulated GPU/host time of all N-1 steps

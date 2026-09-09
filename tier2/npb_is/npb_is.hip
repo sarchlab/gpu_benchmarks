@@ -482,7 +482,8 @@ int main(int argc, char** argv) {
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d", N, block_size);
+             "\"size\":%d,\"block_size\":%d,\"verification_enabled\":%s",
+             N, block_size, do_verify ? "true" : "false");
 
     // Per-kernel accumulators across the 10 timed rank iterations.
     bench_timer_t timer;

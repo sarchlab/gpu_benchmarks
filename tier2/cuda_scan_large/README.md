@@ -61,6 +61,15 @@ make PLATFORM=rocm
 BENCH_PARAM_size=1048576 ./cuda_scan_large     # env overrides argv
 ```
 
+Each kernel record includes the JSON boolean `verification_enabled`, resolved
+from the existing debug flag. Verification is enabled by default; only the
+case-sensitive values `false`, `0`, and `skip` disable it. An inherited harness
+environment can set this unswept control. The boolean reports whether checks
+are enabled, not whether they passed: verification failures still exit nonzero.
+A successful process with `verification_enabled: false` is unchecked and must
+not be treated as verified collection evidence. Older records missing the field
+have unknown verification status.
+
 ## Output
 
 **stdout** — JSON lines: one `{"type":"kernel",...}` record (`iter:0`) per

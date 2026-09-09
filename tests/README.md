@@ -305,6 +305,16 @@ reports and process output remain there. CI runs the host oracle and compiles
 the GPU regression. Use `--compile-only` without a GPU or `--platform rocm` on
 AMD. The existing `two_mm_output_test.hip` keeps its independent oracle.
 
+## Verification-control records
+
+`python3 tests/verification_control_records.py --compiler clang++` checks
+NPB IS, Rodinia Gaussian and large scan's actual flag parsing and JSON
+formatting without a GPU. Its 78 cases cover default/empty values, the three
+case-sensitive bypass values, other spellings and integer formatting bounds.
+CI runs the test with g++ and host sanitizers. Every kernel row records the
+resolved JSON boolean `verification_enabled`; enabled is not a success verdict,
+and a successful process with checks disabled is not verified evidence.
+
 ## SHOC Stencil2D measured final state
 
 ```sh

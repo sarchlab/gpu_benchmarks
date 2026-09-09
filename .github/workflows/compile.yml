@@ -260,6 +260,9 @@ jobs:
       - name: Compile finite-verification fault-injection tests (GPU required to run)
         run: python3 tests/finite_verification.py --platform cuda --work-dir /tmp/finite-verification --compile-only
 
+      - name: Check verification-control records (no GPU required)
+        run: python3 tests/verification_control_records.py --compiler g++
+
       - name: Compile Tier 3 (CUDA)
         run: ./gpubench compile --tier 3 --platform cuda
 

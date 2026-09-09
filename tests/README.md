@@ -20,7 +20,14 @@ Each compared output/reference pair receives a single NaN, positive infinity,
 and negative infinity, independently. An incorrect finite output control affects
 all compared samples so it exceeds Barnes–Hut's existing approximation allowance.
 A normal finite run must still pass. FFT checks both float and double precision;
-Parboil SpMV checks its host self-test and actual GPU result. Complex/vector
+Parboil SpMV checks its host self-test and actual GPU result.
+`python3 tests/parboil_spmv_controls.py --compiler clang++` also checks its
+resolved seed, requested/effective launch geometry and JSON identity without a
+GPU. Its 72 cases cover CLI/environment precedence and simulated device
+geometry branches under host sanitizers. CI runs the test with g++; simulated
+properties do not qualify hardware support for arbitrary block sizes.
+Missing or duplicated extraction anchors report the source file and anchor.
+ Complex/vector
 comparisons cover each compared component independently. CG/MG injection targets
 the reduced residual and reference norms that their verifiers actually compare.
 

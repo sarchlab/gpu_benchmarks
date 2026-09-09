@@ -9,8 +9,10 @@ import tempfile
 
 
 def between(source, start, end):
-    if source.count(start) != 1 or source.count(end) != 1:
-        raise ValueError('expected unique source anchors')
+    for anchor in (start, end):
+        count = source.count(anchor)
+        if count != 1:
+            raise ValueError(f'expected one occurrence of source anchor {anchor!r}, found {count}')
     return source.split(start, 1)[1].split(end, 1)[0]
 
 
@@ -60,7 +62,10 @@ def main():
     clean = {k:v for k,v in os.environ.items() if not k.startswith(('BENCH_PARAM_','SPMV_TEST_'))}
     with tempfile.TemporaryDirectory(prefix='spmv-controls-') as temp:
         root = Path(temp); cpp=root/'controls.cpp'; binary=root/'controls'
-        cpp.write_text(host_source(args.source.read_text()))
+        try:
+            cpp.write_text(host_source(args.source.read_text()))
+        except ValueError as exc:
+            raise ValueError(f'{args.source}: {exc}') from exc
         subprocess.run([args.compiler,'-std=c++14','-O1','-g','-fsanitize=address,undefined',str(cpp),'-o',str(binary)],check=True,timeout=60)
         for device in devices:
             for argv, overrides, n, nnz, requested, seed in cases:

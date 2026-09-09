@@ -4,14 +4,10 @@
  * HIP port of the cache_bandwidth microbenchmark.
  * Compiles for both AMD (ROCm) and NVIDIA (HIP-on-CUDA) targets.
  *
- * Microbenchmark for per-cache-level read bandwidth.
- *
- * Methodology:
- *   Each thread block streams (vectorized float4 reads) over a window of
- *   `working_set_bytes`, repeated `iters` times so the window stays resident
- *   in whichever cache level holds it. Sweeping the working-set size traces a
- *   bandwidth-vs-size curve that plateaus per level (L1 -> L2 -> last-level
- *   cache -> DRAM), with knees at each cache capacity.
+ * Microbenchmark for repeated-window logical read bandwidth.
+ * Each block streams float4 reads over working_set_bytes, repeated iters times.
+ * All passes, including the first fill, are timed. Window-size sweeps study
+ * memory-hierarchy behavior; timing alone does not establish cache residency.
  *
  *   mode = "shared":  every block reads the SAME window (one shared buffer).
  *                     Measures the bandwidth a resident buffer delivers to the
@@ -19,8 +15,8 @@
  *                     across each unit's private cache; larger windows are served
  *                     by the shared levels.
  *   mode = "private": each block reads its OWN window (distinct sub-buffers).
- *                     Measures per-unit bandwidth without cross-unit sharing;
- *                     report bandwidth_gbps / num_blocks for the per-unit figure.
+ *                     Reduce the grid when the allocation cap cannot fit all
+ *                     requested windows. Distinct blocks do not imply CU placement.
  *
  * Usage:
  *   ./cache_bandwidth [working_set_bytes]
@@ -52,7 +48,7 @@
 
 static const size_t   DEFAULT_WORKING_SET   = 1ULL * 1024 * 1024;  // 1 MB
 static const int      SHARED_BLOCKS_PER_CU      = 8;     // saturate the device (global BW)
-static const int      PRIVATE_BLOCKS_PER_CU     = 1;     // 1 block/CU so each owns its L1 (per-unit BW)
+static const int      PRIVATE_BLOCKS_PER_CU     = 1;     // request one distinct-window block per CU
 static const int      SHARED_THREADS_PER_BLOCK  = 256;   // 8 x 256 = 2048 threads/CU
 static const int      PRIVATE_THREADS_PER_BLOCK = 1024;  // max single-block occupancy to saturate one CU
 static const size_t   TARGET_TRAFFIC_BYTES  = 8ULL * 1024 * 1024 * 1024;  // 8 GB
@@ -126,13 +122,25 @@ int main(int argc, char *argv[])
         int bpc = atoi(env_val);
         if (bpc > 0) blocks_per_cu = bpc;
     }
-    const int num_blocks = blocks_per_cu * prop.multiProcessorCount;
+    if (prop.multiProcessorCount <= 0 || prop.maxGridSize[0] <= 0 ||
+        tpb > prop.maxThreadsPerBlock) {
+        fprintf(stderr, "Unsupported device launch limits\n");
+        return EXIT_FAILURE;
+    }
+    const uint64_t requested_num_blocks =
+        (uint64_t)blocks_per_cu * (uint64_t)prop.multiProcessorCount;
+    // The last loop increment must not wrap its uint32_t index.
+    if (working_set_bytes / sizeof(float4) > UINT32_MAX - (uint32_t)(tpb - 1)) {
+        fprintf(stderr, "Working-set traversal exceeds uint32_t\n");
+        return EXIT_FAILURE;
+    }
 
     size_t free_bytes = 0, total_bytes = 0;
     HIP_CHECK(hipMemGetInfo(&free_bytes, &total_bytes));
     const size_t budget = free_bytes / 2;  // stay well under free memory
 
-    // Decide how many distinct windows to allocate.
+    // Decide the actual grid and distinct-window allocation together.
+    uint64_t effective_blocks = requested_num_blocks;
     uint32_t windows;
     size_t   alloc_bytes;
     if (shared_mode) {
@@ -153,10 +161,25 @@ int main(int argc, char *argv[])
             printf("{\"type\":\"error\",\"message\":\"working set too large for private mode\"}\n");
             return EXIT_FAILURE;
         }
-        windows     = (uint32_t)std::min((size_t)num_blocks, max_windows);
+        effective_blocks = std::min(requested_num_blocks, (uint64_t)max_windows);
+        // Also checked below before launch; never truncate the window count.
+        if (effective_blocks > UINT32_MAX) {
+            fprintf(stderr, "Private window count exceeds uint32_t\n");
+            return EXIT_FAILURE;
+        }
+        windows     = (uint32_t)effective_blocks;
         alloc_bytes = (size_t)windows * working_set_bytes;
     }
 
+    // Keep grid, sink indices and byte accounting representable.
+    if (effective_blocks > (uint64_t)prop.maxGridSize[0] ||
+        effective_blocks > ((uint64_t)UINT32_MAX + 1) / (uint32_t)tpb ||
+        effective_blocks > SIZE_MAX / working_set_bytes ||
+        effective_blocks > SIZE_MAX / ((size_t)tpb * sizeof(float))) {
+        fprintf(stderr, "Effective launch geometry exceeds supported indices or sizes\n");
+        return EXIT_FAILURE;
+    }
+    const uint32_t num_blocks = (uint32_t)effective_blocks;
     const uint32_t vecs_per_window = (uint32_t)(working_set_bytes / sizeof(float4));
 
     // Auto-tune iters so each timed launch moves ~TARGET_TRAFFIC_BYTES.
@@ -169,14 +192,21 @@ int main(int argc, char *argv[])
         iters = (uint32_t)std::min((size_t)MAX_ITERS, std::max((size_t)MIN_ITERS, want));
     }
 
+    if (per_iter_bytes > UINT64_MAX / iters) {
+        fprintf(stderr, "Launch byte count exceeds uint64_t\n");
+        return EXIT_FAILURE;
+    }
+    const uint64_t bytes_read = (uint64_t)per_iter_bytes * iters;
+
     fprintf(stderr, "=== cache_bandwidth microbenchmark ===\n");
     fprintf(stderr, "Device          : %s (id=%d, %d CUs)\n",
             prop.name, device_id, prop.multiProcessorCount);
     fprintf(stderr, "Mode            : %s\n", shared_mode ? "shared" : "private");
     fprintf(stderr, "Working set     : %zu bytes (%zu KB)\n",
             working_set_bytes, working_set_bytes / 1024);
-    fprintf(stderr, "Grid            : %d blocks (%d/CU) x %d threads\n",
-            num_blocks, blocks_per_cu, tpb);
+    fprintf(stderr, "Requested grid  : %llu blocks (%d per reported CU)\n",
+            (unsigned long long)requested_num_blocks, blocks_per_cu);
+    fprintf(stderr, "Effective grid  : %u blocks x %d threads\n", num_blocks, tpb);
     fprintf(stderr, "Windows / alloc : %u window(s), %zu MB allocated\n",
             windows, alloc_bytes / (1024 * 1024));
     fprintf(stderr, "Iters / launch  : %u\n\n", iters);
@@ -188,12 +218,18 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipMalloc(&d_sink, (size_t)num_blocks * tpb * sizeof(float)));
     HIP_CHECK(hipMemset(d_buf, 1, alloc_bytes));
 
-    char params[256];
+    char params[768];
     snprintf(params, sizeof(params),
              "\"working_set_bytes\":%zu,\"mode\":\"%s\","
-             "\"blocks_per_cu\":%d,\"num_blocks\":%d,\"iters\":%u",
+             "\"blocks_per_cu\":%d,\"requested_num_blocks\":%llu,"
+             "\"num_blocks\":%u,\"threads_per_block\":%d,\"windows\":%u,"
+             "\"allocation_bytes\":%zu,\"iters\":%u,\"bytes_per_iter\":%zu,"
+             "\"bytes_read\":%llu,\"launch_policy\":\"%s\"",
              working_set_bytes, shared_mode ? "shared" : "private",
-             blocks_per_cu, num_blocks, iters);
+             blocks_per_cu, (unsigned long long)requested_num_blocks,
+             num_blocks, tpb, windows, alloc_bytes, iters, per_iter_bytes,
+             (unsigned long long)bytes_read,
+             shared_mode ? "shared_window_v1" : "distinct_windows_v1");
 
     double total_gpu_ms =
         bench_run_once("bw_read_kernel", params, [&]() {

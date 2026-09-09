@@ -470,3 +470,21 @@ then corrupts actual measured cells and uploaded scores and injects reference
 allocation failure. It checks per-kernel and whole-problem descriptors, timing
 sums and complete verification counts. Use a fresh directory. `--compile-only`
 compiles hooks without claiming GPU execution; CI uses that mode.
+
+## Altis GUPS
+
+`python3 tests/gups_reference.py --compiler clang++` checks the actual production
+LFSR, large-offset jump, partitioned kernel bodies with host atomic stubs, full
+CPU reference, every-word failures and input/geometry admission under fatal
+ASan/UBSan. Independent polynomial and matrix oracles check stream identity.
+The host stubs check logical work and atomic counts; they do not model concurrent
+GPU atomics.
+
+`python3 tests/gups_measured_result.py --platform cuda --sweep --work-dir /tmp/gups-check`
+executes both real atomic variants across all declared configurations and extra
+launch controls. It corrupts first/middle/last measured words in both 32-bit halves,
+checks the ten-diagnostic cap and complete counts, and injects host storage failure.
+Each process has a 60-second budget. Use a fresh output directory; logs and the
+incremental report remain there. `--platform rocm` selects AMD;
+`--compile-only` checks the hooks without claiming GPU execution. CI runs the host
+oracles and compiles the GPU regression.

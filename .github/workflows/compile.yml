@@ -66,6 +66,12 @@ jobs:
           make -C tier2/rodinia_kmeans PLATFORM=cuda
           python3 tests/kmeans_input_parameters.py --compiler g++ --binary tier2/rodinia_kmeans/rodinia_kmeans
 
+      - name: Check N-body CPU comparison and compile measured-state regression
+        run: |
+          python3 tests/nbody_reference.py --compiler g++
+          python3 tests/nbody_profile_records.py
+          python3 tests/nbody_measured_result.py --platform cuda --work-dir /tmp/nbody-measured --compile-only
+
       - name: Check complete k-means CPU reference (no GPU required)
         run: |
           g++ -O3 -std=c++14 -pthread -fsanitize=address,undefined -fno-sanitize-recover=all tests/kmeans_reference_test.cpp -o /tmp/kmeans_reference_test

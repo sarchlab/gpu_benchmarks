@@ -28,6 +28,21 @@ Parboil SpMV checks its host self-test and actual GPU result. Complex/vector
 comparisons cover each compared component independently. CG/MG injection targets
 the reduced residual and reference norms that their verifiers actually compare.
 
+`python3 tests/nbody_reference.py --compiler clang++` checks the production
+N-body comparator and CPU recurrence with 59 analytic/boundary checks, plus
+54 production parsing/index cases under fatal host sanitizers.
+`python3 tests/nbody_measured_result.py --platform cuda --work-dir /tmp/nbody-measured`
+uses a new directory and runs 203 actual measured-state cases: ten controls,
+192 GPU-buffer faults spanning all position/velocity components and three body
+locations, and one unavailable-reference case. It covers odd/even timestep
+buffers and bodies beyond the former subset. CI compiles the hooks only.
+`nbody_h100_profile.py` builds an isolated H100 binary, qualifies a bounded
+configuration list with complete checks and the 60-second process limit, records
+all exclusions, and generates workspaces containing only admitted combinations
+for the existing harness. `python3 tests/nbody_profile_records.py` checks 28
+qualification classifications, including malformed timing/verification evidence,
+explicit completed-process overruns and unexpected failures. See the [N-body README](../tier2/cuda_nbody/README.md).
+
 `python3 tests/parboil_spmv_controls.py --compiler clang++` checks SpMV’s
 resolved seed, requested/effective launch geometry and JSON identity without a
 GPU. Its 72 cases cover CLI/environment precedence and simulated device

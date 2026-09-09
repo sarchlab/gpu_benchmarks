@@ -458,3 +458,15 @@ The test requires exact counts, verification identity, finite timing records and
 appropriate process status within 60 seconds; a timeout preserves partial logs
 and stops the run. Use `--platform rocm` on AMD or `--compile-only` for CI without
 a GPU. The existing finite-value test also covers the production comparator.
+
+## Rodinia Needleman–Wunsch
+
+`python3 tests/nw_reference.py --compiler clang++` checks the pinned BLOSUM62
+table, ordered seed-7 input recipe, independent dense integer oracles, every-cell
+verification failures and actual production input/index/score guards under fatal
+ASan/UBSan. `python3 tests/nw_measured_result.py --platform cuda --sweep
+--work-dir /tmp/nw-check` runs complete production configurations and controls,
+then corrupts actual measured cells and uploaded scores and injects reference
+allocation failure. It checks per-kernel and whole-problem descriptors, timing
+sums and complete verification counts. Use a fresh directory. `--compile-only`
+compiles hooks without claiming GPU execution; CI uses that mode.

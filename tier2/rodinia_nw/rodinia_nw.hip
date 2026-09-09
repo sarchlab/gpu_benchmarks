@@ -1,39 +1,37 @@
-// rodinia_nw.hip — Rodinia Needleman-Wunsch benchmark (HIP, self-contained)
-//
-// Dynamic programming sequence alignment using the Needleman-Wunsch algorithm.
-// The NxN scoring matrix is filled using block-based anti-diagonal wavefront
-// parallelism with shared memory. Two kernels cover the upper-left and
-// lower-right triangles of the block dependency graph.
-//
-// Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
-//
-// Usage:
-//   ./rodinia_nw [--sequence_length N] [--block_size B] [--penalty P]
-//
-//   --sequence_length N  Sequence length (scoring matrix is NxN) (default: 2048)
-//   --block_size B       Block size (threads per block)          (default: 16)
-//   --penalty P          Gap penalty                             (default: 2)
-//
-// Environment variables (override argv):
-//   BENCH_PARAM_sequence_length, BENCH_PARAM_block_size, BENCH_PARAM_penalty
-//
-// Output (stdout): one {"type":"kernel",...} JSON line per
-// kernel (nw_kernel1, nw_kernel2) carrying that kernel's accumulated GPU
-// event time and host time within the pass (summed over the wavefront
-// diagonals), then a summary whose total_time_ms is the SUM of all recorded
-// GPU event times. GCUPS / GB/s are derived downstream from time_ms + params.
-// Output (stderr): device info, per-pass timing
+// Rodinia 3.1 Needleman-Wunsch: two seed-7 sequences, BLOSUM62 scoring,
+// and a complete tiled DP wavefront. Independent HIP/CUDA implementation.
+// Input setup, result download and full integer CPU verification are untimed.
+// One entry warmer precedes the first timed launch; both dependent phases are
+// accumulated per kernel and their GPU event times are summed in the summary.
+// --sequence_length N, --block_size B, --penalty P; BENCH_PARAM_* overrides argv.
+// Defaults: N=2048, B=16, P=2. Manual N rounds up to a multiple of B.
+// See README for the pinned source, effective work, verification and limits.
 
 #include "../../common/bench_timing.h"
+#include <algorithm>
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-
-// ---------------------------------------------------------------------------
-// Inlined utilities
-// ---------------------------------------------------------------------------
+#include <exception>
+#include <vector>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
+
+/* BLOSUM62 table from Rodinia 3.1, pin366b283456506ef2fe2c2b7dc5e83e941ffc5524.
+LICENSE TERMS
+
+Copyright (c)2008-2011 University of Virginia
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted without royalty fees or other restrictions, provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+    * Neither the name of the University of Virginia, the Dept. of Computer Science, nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE UNIVERSITY OF VIRGINIA OR THE SOFTWARE AUTHORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
 
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -46,14 +44,109 @@ static int parseIntParam(int argc, char** argv, const char* name, int defaultVal
     return defaultVal;
 }
 
-// ---------------------------------------------------------------------------
-// NW scoring constants
-// ---------------------------------------------------------------------------
-#define MATCH_SCORE    1
-#define MISMATCH_SCORE (-1)
+static const int blosum62[24][24] = {
+{ 4, -1, -2, -2,  0, -1, -1,  0, -2, -1, -1, -1, -1, -2, -1,  1,  0, -3, -2,  0, -2, -1,  0, -4},
+{-1,  5,  0, -2, -3,  1,  0, -2,  0, -3, -2,  2, -1, -3, -2, -1, -1, -3, -2, -3, -1,  0, -1, -4},
+{-2,  0,  6,  1, -3,  0,  0,  0,  1, -3, -3,  0, -2, -3, -2,  1,  0, -4, -2, -3,  3,  0, -1, -4},
+{-2, -2,  1,  6, -3,  0,  2, -1, -1, -3, -4, -1, -3, -3, -1,  0, -1, -4, -3, -3,  4,  1, -1, -4},
+{ 0, -3, -3, -3,  9, -3, -4, -3, -3, -1, -1, -3, -1, -2, -3, -1, -1, -2, -2, -1, -3, -3, -2, -4},
+{-1,  1,  0,  0, -3,  5,  2, -2,  0, -3, -2,  1,  0, -3, -1,  0, -1, -2, -1, -2,  0,  3, -1, -4},
+{-1,  0,  0,  2, -4,  2,  5, -2,  0, -3, -3,  1, -2, -3, -1,  0, -1, -3, -2, -2,  1,  4, -1, -4},
+{ 0, -2,  0, -1, -3, -2, -2,  6, -2, -4, -4, -2, -3, -3, -2,  0, -2, -2, -3, -3, -1, -2, -1, -4},
+{-2,  0,  1, -1, -3,  0,  0, -2,  8, -3, -3, -1, -2, -1, -2, -1, -2, -2,  2, -3,  0,  0, -1, -4},
+{-1, -3, -3, -3, -1, -3, -3, -4, -3,  4,  2, -3,  1,  0, -3, -2, -1, -3, -1,  3, -3, -3, -1, -4},
+{-1, -2, -3, -4, -1, -2, -3, -4, -3,  2,  4, -2,  2,  0, -3, -2, -1, -2, -1,  1, -4, -3, -1, -4},
+{-1,  2,  0, -1, -3,  1,  1, -2, -1, -3, -2,  5, -1, -3, -1,  0, -1, -3, -2, -2,  0,  1, -1, -4},
+{-1, -1, -2, -3, -1,  0, -2, -3, -2,  1,  2, -1,  5,  0, -2, -1, -1, -1, -1,  1, -3, -1, -1, -4},
+{-2, -3, -3, -3, -2, -3, -3, -3, -1,  0,  0, -3,  0,  6, -4, -2, -2,  1,  3, -1, -3, -3, -1, -4},
+{-1, -2, -2, -1, -3, -1, -1, -2, -2, -3, -3, -1, -2, -4,  7, -1, -1, -4, -3, -2, -2, -1, -2, -4},
+{ 1, -1,  1,  0, -1,  0,  0,  0, -1, -2, -2,  0, -1, -2, -1,  4,  1, -3, -2, -2,  0,  0,  0, -4},
+{ 0, -1,  0, -1, -1, -1, -1, -2, -2, -1, -1, -1, -1, -2, -1,  1,  5, -2, -2,  0, -1, -1,  0, -4},
+{-3, -3, -4, -4, -2, -2, -3, -2, -2, -3, -2, -3, -1,  1, -4, -3, -2, 11,  2, -3, -4, -3, -2, -4},
+{-2, -2, -2, -3, -2, -1, -2, -3,  2, -1, -1, -2, -1,  3, -3, -2, -2,  2,  7, -1, -3, -2, -1, -4},
+{ 0, -3, -3, -3, -1, -2, -2, -3, -3,  3,  1, -2,  1, -1, -2, -2,  0, -3, -1,  4, -3, -2, -1, -4},
+{-2, -1,  3,  4, -3,  0,  1, -1,  0, -3, -4,  0, -3, -3, -2,  0, -1, -4, -3, -3,  4,  1, -1, -4},
+{-1,  0,  0,  1, -3,  3,  4, -2,  0, -3, -3,  1, -1, -3, -1,  0, -1, -3, -2, -2,  1,  4, -1, -4},
+{ 0, -1, -1, -1, -2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -2,  0,  0, -2, -1, -1, -1, -1, -1, -4},
+{-4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4,  1}
+};
 
-__device__ static inline int nw_score(int a, int b) {
-    return (a == b) ? MATCH_SCORE : MISMATCH_SCORE;
+struct NwGeometry {
+    int blocks;
+    int length;
+    int columns;
+    size_t cells;
+    size_t shared_bytes;
+};
+
+// Keep every linear kernel index and every candidate score in signed-int range.
+static bool nw_geometry(int requested, int block, int penalty, NwGeometry* out) {
+    if (requested <= 0 || block <= 0 || penalty <= 0) return false;
+    const long long blocks = (static_cast<long long>(requested) + block - 1) / block;
+    const long long length = blocks * block;
+    const long long columns = length + 1;
+    if (columns > INT_MAX / columns) return false;
+    // A diagonal path plus edge gaps bounds each DP value below by
+    // -length*max(penalty,4), and above by 11*length. Include one further
+    // gap/substitution so even losing recurrence candidates cannot overflow.
+    if (columns * std::max(penalty, 11) > INT_MAX) return false;
+    out->blocks = static_cast<int>(blocks);
+    out->length = static_cast<int>(length);
+    out->columns = static_cast<int>(columns);
+    out->cells = static_cast<size_t>(columns * columns);
+    out->shared_bytes = (static_cast<size_t>(block + 1) * (block + 1)
+                         + static_cast<size_t>(block) * block) * sizeof(int);
+    return true;
+}
+
+static void nw_initialize(int length, int penalty, int* row_sequence,
+                          int* column_sequence, int* reference, int* matrix) {
+    const int columns = length + 1;
+    std::fill(matrix, matrix + static_cast<size_t>(columns) * columns, 0);
+    std::fill(reference, reference + static_cast<size_t>(columns) * columns, 0);
+    row_sequence[0] = column_sequence[0] = 0;
+    // Preserve the pinned driver's order: all row draws, then all column draws.
+    srand(7);
+    for (int i = 1; i <= length; ++i) row_sequence[i] = rand() % 10 + 1;
+    for (int j = 1; j <= length; ++j) column_sequence[j] = rand() % 10 + 1;
+    for (int i = 1; i <= length; ++i) {
+        matrix[i * columns] = -i * penalty;
+        matrix[i] = -i * penalty;
+        for (int j = 1; j <= length; ++j)
+            reference[i * columns + j] = blosum62[row_sequence[i]][column_sequence[j]];
+    }
+}
+
+// Independent row-major CPU recurrence: use the retained sequences directly,
+// not the uploaded reference matrix or any measured DP value as recurrence input.
+static size_t nw_verify(const int* measured, const int* row_sequence,
+                        const int* column_sequence, int length, int penalty) {
+    const int columns = length + 1;
+    std::vector<int> previous(columns), current(columns);
+    size_t errors = 0;
+    auto compare = [&](int i, int j, int expected) {
+        const int actual = measured[i * columns + j];
+        if (actual != expected) {
+            if (errors < 10)
+                fprintf(stderr, "Mismatch at (%d,%d): GPU=%d CPU=%d\n", i, j, actual, expected);
+            ++errors;
+        }
+    };
+    for (int j = 0; j <= length; ++j) {
+        previous[j] = -j * penalty;
+        compare(0, j, previous[j]);
+    }
+    for (int i = 1; i <= length; ++i) {
+        current[0] = -i * penalty;
+        compare(i, 0, current[0]);
+        for (int j = 1; j <= length; ++j) {
+            const int diagonal = previous[j - 1] + blosum62[row_sequence[i]][column_sequence[j]];
+            current[j] = std::max(diagonal, std::max(previous[j] - penalty, current[j - 1] - penalty));
+            compare(i, j, current[j]);
+        }
+        previous.swap(current);
+    }
+    return errors;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,7 +156,7 @@ __device__ static inline int nw_score(int a, int b) {
 // Block bx handles block position (row = block_idx - bx, col = bx).
 // Each block uses shared memory to fill its (block_size x block_size) tile.
 // ---------------------------------------------------------------------------
-__global__ void nw_kernel1(int* __restrict__ d_seq,
+__global__ void nw_kernel1(const int* __restrict__ d_reference,
                             int* __restrict__ d_matrix,
                             int cols,
                             int penalty,
@@ -85,15 +178,15 @@ __global__ void nw_kernel1(int* __restrict__ d_seq,
 
     // Shared memory layout:
     //   temp[0..(block_size+1)^2-1] : local DP tile (block_size+1 x block_size+1)
-    //   ref_shared[0..block_size-1] : column sequence slice
+    //   ref_shared[0..block_size^2-1] : BLOSUM62 reference tile
     extern __shared__ int shared[];
     int* temp       = shared;
     int* ref_shared = &shared[(block_size + 1) * (block_size + 1)];
 
-    // Load column sequence into shared memory
-    if (tx < block_size) {
-        ref_shared[tx] = d_seq[begin_col + tx];
-    }
+    // Cooperatively load the precomputed BLOSUM62 tile, as in Rodinia.
+    for (int row = 0; row < block_size; ++row)
+        ref_shared[row * block_size + tx] =
+            d_reference[(begin_row + row) * cols + begin_col + tx];
     __syncthreads();
 
     // Thread 0 loads the border row and column from global memory
@@ -123,9 +216,8 @@ __global__ void nw_kernel1(int* __restrict__ d_seq,
             int idx_left   = i * (block_size + 1) + (j - 1);
             int idx_upleft = (i - 1) * (block_size + 1) + (j - 1);
 
-            // Row sequence character is loaded directly from global memory
             int match = temp[idx_upleft] +
-                        nw_score(d_seq[begin_row + i - 1], ref_shared[j - 1]);
+                        ref_shared[(i - 1) * block_size + j - 1];
             int del   = temp[idx_up]   - penalty;
             int ins   = temp[idx_left] - penalty;
 
@@ -152,7 +244,7 @@ __global__ void nw_kernel1(int* __restrict__ d_seq,
 // For diagonal block_idx = 0..num_blocks-2, dispatches (num_blocks-1-block_idx) blocks.
 // Block bx handles block position (row = num_blocks-1-bx, col = block_idx+1+bx).
 // ---------------------------------------------------------------------------
-__global__ void nw_kernel2(int* __restrict__ d_seq,
+__global__ void nw_kernel2(const int* __restrict__ d_reference,
                             int* __restrict__ d_matrix,
                             int cols,
                             int penalty,
@@ -176,9 +268,9 @@ __global__ void nw_kernel2(int* __restrict__ d_seq,
     int* temp       = shared;
     int* ref_shared = &shared[(block_size + 1) * (block_size + 1)];
 
-    if (tx < block_size) {
-        ref_shared[tx] = d_seq[begin_col + tx];
-    }
+    for (int row = 0; row < block_size; ++row)
+        ref_shared[row * block_size + tx] =
+            d_reference[(begin_row + row) * cols + begin_col + tx];
     __syncthreads();
 
     if (tx == 0) {
@@ -204,7 +296,7 @@ __global__ void nw_kernel2(int* __restrict__ d_seq,
             int idx_upleft = (i - 1) * (block_size + 1) + (j - 1);
 
             int match = temp[idx_upleft] +
-                        nw_score(d_seq[begin_row + i - 1], ref_shared[j - 1]);
+                        ref_shared[(i - 1) * block_size + j - 1];
             int del   = temp[idx_up]   - penalty;
             int ins   = temp[idx_left] - penalty;
 
@@ -224,141 +316,101 @@ __global__ void nw_kernel2(int* __restrict__ d_seq,
     }
 }
 
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-int main(int argc, char** argv) {
+int main(int argc, char** argv) try {
     setvbuf(stdout, NULL, _IONBF, 0);
+    int seq_len = parseIntParam(argc, argv, "--sequence_length", 2048);
+    int block_size = parseIntParam(argc, argv, "--block_size", 16);
+    int penalty = parseIntParam(argc, argv, "--penalty", 2);
+    if (const char* value = getenv("BENCH_PARAM_sequence_length")) seq_len = atoi(value);
+    if (const char* value = getenv("BENCH_PARAM_block_size")) block_size = atoi(value);
+    if (const char* value = getenv("BENCH_PARAM_penalty")) penalty = atoi(value);
 
-    // Defaults
-    int seq_len    = 2048;
-    int block_size = 16;
-    int penalty    = 2;
-
-    // Command-line fallback
-    seq_len    = parseIntParam(argc, argv, "--sequence_length", seq_len);
-    block_size = parseIntParam(argc, argv, "--block_size", block_size);
-    penalty    = parseIntParam(argc, argv, "--penalty", penalty);
-
-    // Environment variable overrides
-    const char* env_val;
-    env_val = getenv("BENCH_PARAM_sequence_length");
-    if (env_val) seq_len = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_penalty");
-    if (env_val) penalty = atoi(env_val);
-
-    // Round sequence length up to a multiple of block_size
-    int num_blocks = (seq_len + block_size - 1) / block_size;
-    int padded_len = num_blocks * block_size;
-
-    // Matrix is (padded_len+1) x (padded_len+1); row 0 and col 0 are borders
-    int cols = padded_len + 1;
-    int rows = padded_len + 1;
-    long matrix_elems = (long)rows * cols;
-
-    // Allocate host arrays
-    int* h_seq    = (int*)malloc((padded_len + 1) * sizeof(int));
-    int* h_matrix = (int*)malloc(matrix_elems * sizeof(int));
-
-    // Generate synthetic sequences (alphabet size 10, reproducible)
-    srand(42);
-    for (int i = 0; i <= padded_len; i++) {
-        h_seq[i] = rand() % 10;
+    NwGeometry geometry;
+    if (!nw_geometry(seq_len, block_size, penalty, &geometry)) {
+        fprintf(stderr, "Invalid NW dimensions/penalty or signed index/score range\n");
+        return EXIT_FAILURE;
     }
-
-    // Initialize DP border: row 0 and column 0
-    for (int i = 0; i < rows; i++) {
-        h_matrix[i * cols + 0] = -i * penalty;
-    }
-    for (int j = 0; j < cols; j++) {
-        h_matrix[0 * cols + j] = -j * penalty;
-    }
-
-    // Print device info
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
+    if (block_size > prop.maxThreadsPerBlock || block_size > prop.maxThreadsDim[0] ||
+        geometry.blocks > prop.maxGridSize[0] || geometry.shared_bytes > prop.sharedMemPerBlock) {
+        fprintf(stderr, "NW block/grid/shared-memory geometry exceeds device limits\n");
+        return EXIT_FAILURE;
+    }
+    const int num_blocks = geometry.blocks;
+    const int padded_len = geometry.length;
+    const int cols = geometry.columns;
+    const size_t matrix_bytes = geometry.cells * sizeof(int);
     fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Sequence length: %d  |  Block size: %d  |  Penalty: %d\n\n",
-            seq_len, block_size, penalty);
+    fprintf(stderr, "Sequence length: %d (effective %d) | Block size: %d | Penalty: %d\n",
+            seq_len, padded_len, block_size, penalty);
 
-    // Device allocations
-    int *d_seq, *d_matrix;
-    HIP_CHECK(hipMalloc(&d_seq,    (padded_len + 1) * sizeof(int)));
-    HIP_CHECK(hipMalloc(&d_matrix, matrix_elems * sizeof(int)));
+    std::vector<int> row_sequence(cols), column_sequence(cols);
+    std::vector<int> h_reference(geometry.cells), h_matrix(geometry.cells);
+    nw_initialize(padded_len, penalty, row_sequence.data(), column_sequence.data(),
+                  h_reference.data(), h_matrix.data());
+    int *d_reference, *d_matrix;
+    HIP_CHECK(hipMalloc(&d_reference, matrix_bytes));
+    HIP_CHECK(hipMalloc(&d_matrix, matrix_bytes));
+    HIP_CHECK(hipMemcpy(d_reference, h_reference.data(), matrix_bytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_matrix, h_matrix.data(), matrix_bytes, hipMemcpyHostToDevice));
 
-    HIP_CHECK(hipMemcpy(d_seq, h_seq, (padded_len + 1) * sizeof(int), hipMemcpyHostToDevice));
-
-    // Shared memory per block: tile + ref slice
-    size_t shared_mem = (size_t)(block_size + 1) * (block_size + 1) * sizeof(int)
-                      + (size_t)block_size * sizeof(int);
-
-    char params[128];
+    char params[512];
     snprintf(params, sizeof(params),
-             "\"sequence_length\":%d,\"block_size\":%d,\"penalty\":%d",
-             seq_len, block_size, penalty);
+             "\"sequence_length\":%d,\"block_size\":%d,\"penalty\":%d,"
+             "\"effective_sequence_length\":%d,\"matrix_cells\":%zu,\"total_cell_updates\":%lld,"
+             "\"input_seed\":7,\"algorithm\":\"rodinia31_blosum62_v1\","
+             "\"verification\":\"full_dp_cpu_v1\"",
+             seq_len, block_size, penalty, padded_len, geometry.cells,
+             static_cast<long long>(padded_len) * padded_len);
 
-    // Per-kernel accumulators: each pass fills the whole DP matrix; the
-    // accumulated GPU/host time of all wavefront diagonals within one pass
-    // becomes that pass's record for the kernel.
     bench_timer_t timer;
     bench_timer_create(&timer);
     bench_lap_t acc_k1, acc_k2;
-
-    // One full NW pass. The DP matrix (with its borders) is re-uploaded at
-    // the start of every pass (untimed): the kernels fill it in place, so
-    // this keeps every pass computing from identical initial state.
-    auto run_nw_pass = [&]() {
-        bench_lap_reset(&acc_k1);
-        bench_lap_reset(&acc_k2);
-
-        HIP_CHECK(hipMemcpy(d_matrix, h_matrix,
-                            matrix_elems * sizeof(int),
-                            hipMemcpyHostToDevice));
-
-        /* Cold-cache calibration: evict the LLC and hold the clock high before
-         * the pass's first timed launch, so it runs cold. No-op when
-         * BENCH_PARAM_vector_add_warmup is disabled. */
-        bench_pass_warm();
-
-        // Phase 1: upper-left triangle (nw_kernel1)
-        for (int diag = 0; diag < num_blocks; diag++) {
-            int n_blocks = diag + 1;
-            bench_lap_add(&acc_k1, bench_time_op(&timer, [&]() {
-                nw_kernel1<<<dim3(n_blocks), dim3(block_size), shared_mem, 0>>>(
-                    d_seq, d_matrix, cols, penalty, diag, block_size);
-            }));
-        }
-
-        // Phase 2: lower-right triangle (nw_kernel2)
-        for (int diag = 0; diag < num_blocks - 1; diag++) {
-            int n_blocks = num_blocks - 1 - diag;
-            bench_lap_add(&acc_k2, bench_time_op(&timer, [&]() {
-                nw_kernel2<<<dim3(n_blocks), dim3(block_size), shared_mem, 0>>>(
-                    d_seq, d_matrix, cols, penalty, diag, num_blocks, block_size);
-            }));
-        }
-    };
-
-    double total_gpu_ms = 0.0;
-    run_nw_pass();
-    bench_emit_iter("nw_kernel1", 0, &acc_k1, params);
-    bench_emit_iter("nw_kernel2", 0, &acc_k2, params);
-    total_gpu_ms += acc_k1.gpu_ms + acc_k2.gpu_ms;
-    fprintf(stderr, "nw_kernel1 gpu = %.3f ms, nw_kernel2 gpu = %.3f ms\n",
-            acc_k1.gpu_ms, acc_k2.gpu_ms);
-
+    bench_lap_reset(&acc_k1);
+    bench_lap_reset(&acc_k2);
+    // One complete fill; preserve dependencies and cache reuse between phases.
+    bench_pass_warm();
+    for (int diag = 0; diag < num_blocks; ++diag) {
+        bench_lap_add(&acc_k1, bench_time_op(&timer, [&]() {
+            nw_kernel1<<<dim3(diag + 1), dim3(block_size), geometry.shared_bytes, 0>>>(
+                d_reference, d_matrix, cols, penalty, diag, block_size);
+        }));
+    }
+    for (int diag = 0; diag < num_blocks - 1; ++diag) {
+        bench_lap_add(&acc_k2, bench_time_op(&timer, [&]() {
+            nw_kernel2<<<dim3(num_blocks - 1 - diag), dim3(block_size), geometry.shared_bytes, 0>>>(
+                d_reference, d_matrix, cols, penalty, diag, num_blocks, block_size);
+        }));
+    }
+    char kernel_params[640];
+    const long long upper_tiles = static_cast<long long>(num_blocks) * (num_blocks + 1) / 2;
+    const long long lower_tiles = static_cast<long long>(num_blocks) * (num_blocks - 1) / 2;
+    snprintf(kernel_params, sizeof(kernel_params), "%s,\"kernel_launches\":%d,\"cell_updates\":%lld",
+             params, num_blocks, upper_tiles * block_size * block_size);
+    bench_emit_iter("nw_kernel1", 0, &acc_k1, kernel_params);
+    if (num_blocks > 1) {
+        snprintf(kernel_params, sizeof(kernel_params), "%s,\"kernel_launches\":%d,\"cell_updates\":%lld",
+                 params, num_blocks - 1, lower_tiles * block_size * block_size);
+        bench_emit_iter("nw_kernel2", 0, &acc_k2, kernel_params);
+    }
+    const double total_gpu_ms = acc_k1.gpu_ms + acc_k2.gpu_ms;
     bench_timer_destroy(&timer);
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
-    HIP_CHECK(hipFree(d_seq));
+    // Download the actual measured matrix; no second GPU verification run.
+    HIP_CHECK(hipMemcpy(h_matrix.data(), d_matrix, matrix_bytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(d_reference));
     HIP_CHECK(hipFree(d_matrix));
-    free(h_seq);
-    free(h_matrix);
-
-    return 0;
+    const size_t errors = nw_verify(h_matrix.data(), row_sequence.data(),
+                                   column_sequence.data(), padded_len, penalty);
+    fprintf(stderr, "%s (verified %zu DP cells including borders, %zu mismatches)\n",
+            errors == 0 ? "PASS" : "FAIL", geometry.cells, errors);
+    return errors == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+} catch (const std::exception& error) {
+    fprintf(stderr, "FAIL: NW host/reference storage unavailable: %s\n", error.what());
+    return EXIT_FAILURE;
 }

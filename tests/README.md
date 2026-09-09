@@ -309,7 +309,7 @@ AMD. The existing `two_mm_output_test.hip` keeps its independent oracle.
 
 `python3 tests/verification_control_records.py --compiler clang++` checks
 NPB IS, Rodinia Gaussian and large scan's actual flag parsing and JSON
-formatting without a GPU. Its 78 cases cover default/empty values, the three
+formatting without a GPU. Its 117 cases cover default/empty values, the three
 case-sensitive bypass values, other spellings and integer formatting bounds.
 CI runs the test with g++ and host sanitizers. Every kernel row records the
 resolved JSON boolean `verification_enabled`; enabled is not a success verdict,

@@ -57,7 +57,7 @@ def main():
             except ValueError as exc:
                 raise ValueError(f'{path}: {exc}') from exc
             subprocess.run([args.compiler,'-std=c++14','-O1','-g','-fsanitize=address,undefined',str(cpp),'-o',str(binary)],check=True,timeout=60)
-            for size in (12345,2147483647):
+            for size in (12345,2147483647,-2147483648):
                 for value in values:
                     env=clean.copy()
                     if value is not None:env['BENCH_PARAM_verify']=value

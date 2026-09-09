@@ -2,10 +2,10 @@
   "benchmark": "rodinia_nw",
   "tier": 2,
   "suite": "rodinia",
-  "description": "Needleman-Wunsch dynamic programming sequence alignment. Block-based anti-diagonal wavefront parallelism with shared memory.",
+  "description": "Rodinia 3.1 Needleman-Wunsch: two seed-7 sequences, BLOSUM62 scores, tiled DP wavefront and complete measured-matrix verification.",
   "scaling_param": {
     "name": "sequence_length",
-    "description": "Sequence length N (scoring matrix is NxN)",
+    "description": "Requested sequence length N, rounded up to a multiple of block_size; DP matrix includes one border row and column.",
     "type": "int",
     "values": [
       64,

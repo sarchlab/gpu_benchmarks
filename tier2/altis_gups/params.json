@@ -2,37 +2,20 @@
   "benchmark": "altis_gups",
   "tier": 2,
   "suite": "altis",
-  "description": "GUPS (Giga Updates Per Second) random memory access throughput benchmark. Performs random read-modify-write (XOR) operations on a large table of 64-bit entries using xorshift64 PRNG for index generation.",
+  "description": "Altis RandomAccess: exactly 4*N LFSR XOR updates to a power-of-two table, using retrying 64-bit CAS or paired 32-bit XOR atomics; full measured-table CPU verification.",
   "scaling_param": {
     "name": "table_size",
-    "description": "Number of 64-bit entries in the table",
+    "description": "Number of 64-bit table entries; must be a positive power of two. Logical update count is exactly four times this size.",
     "type": "int",
     "values": [
       65536,
-      81920,
-      98304,
       131072,
-      163840,
-      196608,
       262144,
-      327680,
-      393216,
       524288,
-      655360,
-      786432,
       1048576,
-      1310720,
-      1572864,
       2097152,
-      2621440,
-      3145728,
       4194304,
-      5242880,
-      6291456,
       8388608,
-      10485760,
-      12582912,
-      14680064,
       16777216
     ]
   },
@@ -47,19 +30,18 @@
       ]
     },
     {
-      "name": "num_updates",
-      "description": "Number of random updates per thread",
-      "type": "int",
-      "default": 128,
+      "name": "atomic_mode",
+      "description": "Pinned atomic implementation: retrying 64-bit CAS or paired 32-bit XOR operations.",
+      "type": "enum",
+      "default": "xor",
       "values": [
-        32,
-        128,
-        512
+        "cas",
+        "xor"
       ]
     },
     {
       "name": "num_threads",
-      "description": "Total number of threads launched",
+      "description": "Requested GPU thread count; rounds up to full blocks and partitions the same fixed 4*N logical update stream.",
       "type": "int",
       "default": 65536,
       "values": [
@@ -80,6 +62,7 @@
     }
   ],
   "kernels": [
-    "gups_kernel"
+    "gups_cas_kernel",
+    "gups_xor_kernel"
   ]
 }

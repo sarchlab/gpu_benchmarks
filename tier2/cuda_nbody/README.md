@@ -149,11 +149,15 @@ runs complete checks with the default warmer, and writes raw logs and
 `profile.json`. Only a profile with `complete: true` is ready to use; a stopped
 qualification leaves an incomplete checkpoint. It creates a `collection/timesteps-T` workspace for each
 admitted timestep value, containing only its admitted body counts and a copy
-of the exact qualified binary. The unchanged harness can run each workspace:
+of the exact qualified binary. Copy `gpubench` into each workspace before running
+it: the harness prefers the executable's directory over the current directory
+when locating a benchmark tree. Invoking a CLI inside another checkout can
+select that checkout's full manifest and a different benchmark binary.
 
 ```bash
 cd /tmp/nbody-h100-qualification/collection/timesteps-1
-CUDA_VISIBLE_DEVICES=GPU-YOUR-H100-UUID /absolute/path/to/gpubench run \
+cp /absolute/path/to/gpubench ./gpubench
+CUDA_VISIBLE_DEVICES=GPU-YOUR-H100-UUID ./gpubench run \
   --tier 2 --benchmark cuda_nbody --platform cuda --reps 7 --db results.sqlite
 ```
 

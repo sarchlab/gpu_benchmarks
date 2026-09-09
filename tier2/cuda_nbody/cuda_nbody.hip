@@ -308,9 +308,18 @@ int main(int argc, char** argv) {
             const bool position_ok = nbody_vector_matches(h_pos[i], h_pos_orig[i]);
             const bool velocity_ok = nbody_vector_matches(h_vel[i], h_vel_orig[i]);
             if (!position_ok || !velocity_ok) {
-                if (errors < 10)
+                if (errors < 10) {
                     fprintf(stderr, "Mismatch at body %d: position=%s velocity=%s\n",
                             i, position_ok ? "ok" : "bad", velocity_ok ? "ok" : "bad");
+                    if (!position_ok)
+                        fprintf(stderr, "  position GPU=(%.9g,%.9g,%.9g,%.9g) CPU=(%.9g,%.9g,%.9g,%.9g)\n",
+                                h_pos[i].x, h_pos[i].y, h_pos[i].z, h_pos[i].w,
+                                h_pos_orig[i].x, h_pos_orig[i].y, h_pos_orig[i].z, h_pos_orig[i].w);
+                    if (!velocity_ok)
+                        fprintf(stderr, "  velocity GPU=(%.9g,%.9g,%.9g,%.9g) CPU=(%.9g,%.9g,%.9g,%.9g)\n",
+                                h_vel[i].x, h_vel[i].y, h_vel[i].z, h_vel[i].w,
+                                h_vel_orig[i].x, h_vel_orig[i].y, h_vel_orig[i].z, h_vel_orig[i].w);
+                }
                 ++errors;
             }
         }

@@ -21,27 +21,33 @@ static void bfs_test_dump(int n,int edges,const int* row,const int* col) {
 '''
 
 
+def replace_checked(source, old, new, expected=1):
+    count = source.count(old)
+    if count != expected:
+        raise ValueError(f"expected {expected} occurrences of production anchor {old!r}, found {count}")
+    return source.replace(old, new)
+
+
 def instrument(source,graph_hook):
     header='#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)\n'
-    source=source.replace(header,header+graph_hook+DUMP)
-    source=source.replace('    // Host arrays for BFS state','    bfs_test_graph(num_nodes,h_row_offsets,&h_col_indices,&num_edges);\n    bfs_test_dump(num_nodes,num_edges,h_row_offsets,h_col_indices);\n\n    // Host arrays for BFS state')
+    source=replace_checked(source,header,header+graph_hook+DUMP)
+    source=replace_checked(source,'    // Host arrays for BFS state','    bfs_test_graph(num_nodes,h_row_offsets,&h_col_indices,&num_edges);\n    bfs_test_dump(num_nodes,num_edges,h_row_offsets,h_col_indices);\n\n    // Host arrays for BFS state')
     signature='int        num_nodes) {'
-    if source.count(signature)!=2:raise ValueError('expected both kernel signatures')
-    source=source.replace(signature,'int        num_nodes, unsigned long long* work_counts) {')
-    source=source.replace('            int nb = col_indices[e];','            atomicAdd(work_counts,1ULL);\n            int nb = col_indices[e];')
-    source=source.replace('                atomicExch(&cost[nb], new_cost);','                atomicAdd(work_counts+1,1ULL);\n                atomicExch(&cost[nb], new_cost);')
-    source=source.replace('            atomicExch(updated, 1);','            atomicAdd(work_counts+2,1ULL);\n            atomicExch(updated, 1);')
-    source=source.replace('    // Device allocations','''    unsigned long long* d_test_counts;
+    source=replace_checked(source,signature,'int        num_nodes, unsigned long long* work_counts) {',expected=2)
+    source=replace_checked(source,'            int nb = col_indices[e];','            atomicAdd(work_counts,1ULL);\n            int nb = col_indices[e];')
+    source=replace_checked(source,'                atomicExch(&cost[nb], new_cost);','                atomicAdd(work_counts+1,1ULL);\n                atomicExch(&cost[nb], new_cost);')
+    source=replace_checked(source,'            atomicExch(updated, 1);','            atomicAdd(work_counts+2,1ULL);\n            atomicExch(updated, 1);')
+    source=replace_checked(source,'    // Device allocations','''    unsigned long long* d_test_counts;
     HIP_CHECK(hipMalloc(&d_test_counts,3*sizeof(unsigned long long)));
     HIP_CHECK(hipMemset(d_test_counts,0,3*sizeof(unsigned long long)));
     // Device allocations''')
-    source=source.replace('d_frontier, d_visited, num_nodes);','d_frontier, d_visited, num_nodes, d_test_counts);')
-    source=source.replace('d_visited, d_updated, num_nodes);','d_visited, d_updated, num_nodes, d_test_counts);')
-    source=source.replace('            ++bfs_levels;','''            ++bfs_levels;
+    source=replace_checked(source,'d_frontier, d_visited, num_nodes);','d_frontier, d_visited, num_nodes, d_test_counts);')
+    source=replace_checked(source,'d_visited, d_updated, num_nodes);','d_visited, d_updated, num_nodes, d_test_counts);')
+    source=replace_checked(source,'            ++bfs_levels;','''            ++bfs_levels;
             unsigned long long observed[3];
             HIP_CHECK(hipMemcpy(observed,d_test_counts,sizeof(observed),hipMemcpyDeviceToHost));
             fprintf(stderr,"BFS_TEST_WORK %llu %llu %llu %llu\\n",bfs_levels,observed[0],observed[1],observed[2]);''')
-    source=source.replace('    // Cleanup','    HIP_CHECK(hipFree(d_test_counts));\n    // Cleanup')
+    source=replace_checked(source,'    // Cleanup','    HIP_CHECK(hipFree(d_test_counts));\n    // Cleanup')
     return source
 
 

@@ -92,6 +92,18 @@ Environment values take priority over the positional size:
 | `BENCH_PARAM_rng_seed` | 42 | Chain permutation seed |
 | `BENCH_PARAM_vector_add_warmup` | true | Clock/cache warmer before the retained primer |
 
+Array size and node spacing must be multiples of a `uint32_t` word (4 bytes),
+with at least two nodes. The node count and last node's word index must fit
+`uint32_t`; invalid layouts fail before allocation or device access. An aligned
+array may retain an unused tail smaller than the node spacing. These checks
+establish representable layout, not available host/device memory.
+
+`num_accesses` is a positive, unswept direct-binary override. The inherited
+environment can also apply it to harness runs. It replaces the computed timed
+count, is recorded in every kernel result, and leaves the untimed primer count
+unchanged. Zero effective accesses are rejected. Compare or derive latency using
+the recorded count, including when an override differs from the requested laps.
+
 Illustrative JSON for a 16 KiB chain (times are not performance claims):
 
 ```json

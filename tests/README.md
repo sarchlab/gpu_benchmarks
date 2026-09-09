@@ -62,6 +62,13 @@ issues under R-13; this test does not establish their correctness.
 CUDA execution and ROCm execution must be reported separately. A CUDA pass or
 ROCm compile alone does not establish AMD runtime qualification (R-19).
 
+`python3 tests/cache_latency_input_ranges.py --compiler clang++` runs the actual
+parameter prefix under host sanitizers without allocation or GPU access. Its 64
+cases cover word alignment, chain-count/index boundaries, positive timed work,
+all declared sizes, and existing precedence/clamp/override behavior. Large valid
+host cases establish representable layout, not available memory or a supported
+process budget. CI runs this test with g++.
+
 `cache_latency_order.py` checks the actual warmer → untimed primer → timed chase
 sequence and CUDA event boundaries using Nsight Systems. It requires an NVIDIA
 GPU, `nsys`, a built `cache_latency` binary, and a new output directory:
@@ -261,6 +268,13 @@ test and retains completed-case logs and a partial report. The test requires
 `full_cpu_v1` in both kernel records and checks exact workload identity, normal
 verification diagnostics and failure exit codes.
 
+
+`python3 tests/npb_ep_input_ranges.py --compiler clang++` executes the actual EP
+parameter and geometry prefix with host sanitizers. It checks exponent/thread
+and per-block histogram index limits, positive block sizes, all declared
+configurations, and existing argv/environment precedence without allocating
+large inputs. Host acceptance establishes representable indices, not device
+support, verification coverage or runtime feasibility. CI runs it with g++.
 
 `python3 tests/bfs_input_ranges.py --compiler clang++` executes the actual
 BFS parameter prefix and row-size expression under host sanitizers. It checks

@@ -42,6 +42,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <limits>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -258,11 +259,23 @@ int main(int argc, char** argv) {
         fprintf(stderr, "M must be > %d (M-MK = number-of-groups exponent must be >= 1)\n", MK);
         return EXIT_FAILURE;
     }
+    if (m - MK >= std::numeric_limits<int>::digits) {
+        fprintf(stderr, "M produces a thread count that cannot fit int\n");
+        return EXIT_FAILURE;
+    }
+    if (block_size <= 0) {
+        fprintf(stderr, "block_size must be positive\n");
+        return EXIT_FAILURE;
+    }
 
     // Grid geometry (original setup_gpu): NN = 2^(M-MK) total threads.
     long long nn = 1LL << (m - MK);
     int threads_per_block = block_size;
     int blocks_per_grid   = (int)((nn + threads_per_block - 1) / threads_per_block);
+    if ((long long)blocks_per_grid * NQ - 1 > std::numeric_limits<int>::max()) {
+        fprintf(stderr, "Per-block histogram index cannot fit int\n");
+        return EXIT_FAILURE;
+    }
 
     // an = A^(2^MK): MK+1 randlc iterations from A (original main setup).
     double t1 = A;

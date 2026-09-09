@@ -2,7 +2,7 @@
 
 Iterative BFS on a randomly-generated CSR (Compressed Sparse Row) graph.
 Two GPU kernels are launched per BFS level, iterated until the traversal
-completes. Measures effective memory bandwidth of irregular graph traversal.
+completes. Reports GPU event time for irregular graph traversal.
 
 ## Provenance & fidelity
 
@@ -84,13 +84,15 @@ kernel's GPU event time accumulated over all BFS levels of the traversal,
 then a `summary` whose `total_time_ms` is the sum of the recorded times:
 
 ```
-{"type":"kernel","name":"bfs_kernel","iter":0,"time_ms":...,"host_time_ms":...,"params":{"num_nodes":65536,"edges_per_node":20,"block_size":256,"verification":"full_cpu_v1"}}
+{"type":"kernel","name":"bfs_kernel","iter":0,"time_ms":...,"host_time_ms":...,"params":{"num_nodes":65536,"edges_per_node":20,"block_size":256,"verification":"full_cpu_v1","discovery_policy":"level_visited_atomic_v1","bfs_levels":6,"frontier_edges":1310720,"discovery_atomics":233381,"promotion_atomics":65535}}
 {"type":"kernel","name":"bfs_update","iter":0,"time_ms":...,"host_time_ms":...,"params":{...}}
 {"type":"summary","total_time_ms":...}
 ```
 
-Bandwidth / edges-per-second are derived downstream from `time_ms` and the
-params — the benchmark never computes them.
+The example work counts are for the qualified H100 host input generator;
+other input generators may differ. Rates can be derived downstream from
+`time_ms` and the logical counts. These counts do not measure physical memory
+traffic or bandwidth.
 
 **stderr** — device info, node/edge counts, per-kernel timing, and full-distance
 verification. A mismatch prints `FAIL` and exits nonzero; all distances are
@@ -145,3 +147,23 @@ tests/bfs_measured_result.py --platform cuda --work-dir /tmp/bfs-check` from the
 repository root with a new, nonexistent output directory (or use `rocm`). CI
 compiles this GPU test; execution requires a GPU. A timeout fails the test and
 retains completed logs and a partial report.
+
+`tests/bfs_work_counts.py` instruments test copies of both kernels and checks
+every level's actual edge, discovery-atomic and promotion-atomic counts against
+an independent CPU frontier/visited snapshot. It covers random and structured
+graphs across five block sizes and three repetitions (165 runs). Run it with
+`--platform cuda --work-dir /tmp/bfs-work-check` (or `rocm`); CI compiles it.
+These test counters and transfers are absent from production timing.
+
+`python3 tests/bfs_concurrent_kernels.py --compiler clang++ --sanitizer thread`
+executes the actual kernel bodies concurrently through a host test adapter. It
+exercises competing discoveries and the shared completion flag; the default
+`address` mode runs AddressSanitizer and UndefinedBehaviorSanitizer. This host
+check supplements the access-ownership argument above. GPU Racecheck alone
+does not establish freedom from global-memory races.
+
+The H100 qualification covers all 81 declared configurations and the default
+with the warmer enabled. Complete distances and dynamic operation counts pass;
+GPU sanitizer and timing-order checks also pass. AMD execution is deferred.
+The atomic repair changes measured GPU work, so recollect BFS performance
+results with this discovery policy recorded.

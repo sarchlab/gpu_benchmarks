@@ -46,6 +46,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
 #include <vector>
 #include <numeric>
 #include <algorithm>
@@ -169,6 +170,11 @@ int main(int argc, char *argv[])
     env_val = getenv("BENCH_PARAM_rng_seed");
     if (env_val) rng_seed = (uint32_t)atoi(env_val);
 
+    if (array_bytes % sizeof(uint32_t) != 0 ||
+        cacheline_bytes % sizeof(uint32_t) != 0) {
+        fprintf(stderr, "array_bytes and cacheline_bytes must be word-aligned\n");
+        return EXIT_FAILURE;
+    }
     const size_t N = array_bytes / sizeof(uint32_t);
 
     /* Pointer-chase nodes at the configured byte spacing. */
@@ -178,7 +184,13 @@ int main(int argc, char *argv[])
                         "need >= 2 cachelines\n", array_bytes, cacheline_bytes);
         return EXIT_FAILURE;
     }
-    const uint32_t M = (uint32_t)(N / stride);   // number of configured chase nodes
+    const size_t node_count = N / stride;
+    if (node_count > UINT32_MAX ||
+        (uint64_t)(node_count - 1) * stride > UINT32_MAX) {
+        fprintf(stderr, "Chain node count or index exceeds uint32_t\n");
+        return EXIT_FAILURE;
+    }
+    const uint32_t M = (uint32_t)node_count;   // number of configured chase nodes
 
     /* Prime one lap when within the fixed cap; bound setup cost for larger
      * chains. This access count does not establish a target's cache capacity. */
@@ -195,6 +207,10 @@ int main(int argc, char *argv[])
     if (num_timed > MAX_TIMED_ACCESSES) num_timed = MAX_TIMED_ACCESSES;
     env_val = getenv("BENCH_PARAM_num_accesses");
     if (env_val) num_timed = strtoull(env_val, nullptr, 10);
+    if (num_timed == 0) {
+        fprintf(stderr, "num_accesses must be positive\n");
+        return EXIT_FAILURE;
+    }
 
     /* Print device information to stderr. */
     int device_id = 0;

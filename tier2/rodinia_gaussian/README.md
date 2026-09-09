@@ -84,8 +84,8 @@ have unknown verification status.
 and host time (`host_time_ms`) across all `N-1` pivot steps, then a summary
 whose `total_time_ms` is the sum of all recorded GPU event times:
 ```json
-{"type":"kernel","name":"fan1","iter":0,"time_ms":10.123,"host_time_ms":12.456,"params":{"verification_enabled":true,"size":512}}
-{"type":"kernel","name":"fan2","iter":0,"time_ms":35.000,"host_time_ms":38.100,"params":{"verification_enabled":true,"size":512}}
+{"type":"kernel","name":"fan1","iter":0,"time_ms":10.123,"host_time_ms":12.456,"params":{"size":512,"verification_enabled":true}}
+{"type":"kernel","name":"fan2","iter":0,"time_ms":35.000,"host_time_ms":38.100,"params":{"size":512,"verification_enabled":true}}
 {"type":"summary","total_time_ms":45.123}
 ```
 

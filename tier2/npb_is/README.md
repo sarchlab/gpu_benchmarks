@@ -122,7 +122,7 @@ that kernel's GPU event time (`time_ms`) and host time (`host_time_ms`)
 **accumulated across the 10 timed rank iterations**, then a summary whose
 `total_time_ms` is the sum of the six accumulated GPU event times:
 ```
-{"type":"kernel","name":"modify_keys_kernel","iter":0,"time_ms":0.021,"host_time_ms":0.19,"params":{"verification_enabled":true,"size":8388608,"block_size":256}}
+{"type":"kernel","name":"modify_keys_kernel","iter":0,"time_ms":0.021,"host_time_ms":0.19,"params":{"size":8388608,"block_size":256,"verification_enabled":true}}
 {"type":"kernel","name":"clear_kernel","iter":0,"time_ms":0.11,"host_time_ms":0.24,"params":{...}}
 {"type":"kernel","name":"histogram_kernel","iter":0,"time_ms":14.9,"host_time_ms":15.1,"params":{...}}
 {"type":"kernel","name":"scan_blocks_kernel","iter":0,"time_ms":0.33,"host_time_ms":0.45,"params":{...}}

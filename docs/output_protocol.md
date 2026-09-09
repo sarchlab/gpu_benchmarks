@@ -48,6 +48,30 @@ Emit one record per timed kernel name in the complete run. Accumulate GPU event 
 - Tier 1/Tier 2 producers do not need host timing or `iter`. Compatibility fields do not change the one-record-per-name contract.
 - Higher-tier producers may use their documented timing instrumentation, but all tiers must satisfy the validator’s finite-time and summary-sum rules.
 
+#### Verification descriptors in `params`
+
+Verification metadata currently has two forms. Policy-bearing benchmarks use
+`"verification":"<check-id>"`, with `"verification":"disabled"` for a bypass.
+NPB IS, Rodinia Gaussian and large scan use the JSON boolean
+`"verification_enabled":true` or `false` to report their existing check switch
+without assigning a new numerical policy identifier. These are additional
+result descriptors, not swept workload parameters.
+
+Consumers assessing verified collection evidence must handle both forms:
+`verification == "disabled"` **or** `verification_enabled == false` means
+unchecked, even when the process exits successfully. Neither a policy identifier
+nor `verification_enabled: true` proves that verification passed; the process
+must succeed and the benchmark's checks must have been qualified for that input
+and target. A missing descriptor leaves the verification setting unknown in
+that record. Do not infer verified status merely because neither disable marker
+is present.
+
+The CLI currently preserves these descriptors in `kernel_results.params_json`
+and exports them without interpreting their verification meaning. Its `ok`
+status means successful execution and valid output protocol, not proof of
+numerical qualification. A collection consumer must make that distinction when
+selecting results.
+
 ### 2. `summary` — Run Summary
 
 Emitted once at the end of a benchmark run. Provides the sum of the per-kernel GPU times.

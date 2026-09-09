@@ -61,6 +61,16 @@ make PLATFORM=rocm
 | `BENCH_PARAM_block_size` | 256 | Threads per block |
 | `BENCH_PARAM_vector_add_warmup` | true | Cold-cache calibration: boost the clock and evict the LLC before the timed launch; set `false` to time as-is |
 
+Resolved `M` must be greater than 16, and `2^(M-16)` must fit the positive
+`int` thread-count argument (M=17 through 46 with 32-bit `int`). The block size
+must be positive, and the last per-block histogram index,
+`ceil(2^(M-16) / block_size) * 10 - 1`, must also fit `int`. Invalid inputs fail
+before allocation or device access. These are representation checks; they do
+not establish device block-size support, available memory, or a process budget
+for large direct overrides. All 15 declared configurations remain supported by
+these checks. Nonstandard M values without reference sums retain the existing
+verification-skipped behavior and are not qualified by passing the input checks.
+
 ## Timing model
 
 EP is embarrassingly parallel: the benchmark times **one `gpu_kernel` launch per execution** (the per-block partial reduction is inside the kernel); repetition across fresh processes is the harness's job (`gpubench run --reps N`). The RNG seeds are derived from fixed constants inside the kernel, so every launch performs identical work — no input reset is needed. The per-block output accumulators are written via `atomicAdd`, so they are zeroed (untimed, **outside** the timed bracket) before the launch to keep the final NAS verification meaningful.

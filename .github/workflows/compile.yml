@@ -179,6 +179,9 @@ jobs:
       - name: Check BFS input ranges (no GPU required)
         run: python3 tests/bfs_input_ranges.py --compiler g++
 
+      - name: Check NPB EP input ranges (no GPU required)
+        run: python3 tests/npb_ep_input_ranges.py --compiler g++
+
       - name: Check concurrent BFS kernels (no GPU required)
         run: python3 tests/bfs_concurrent_kernels.py --compiler g++
 

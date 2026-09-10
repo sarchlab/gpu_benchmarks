@@ -76,6 +76,12 @@ jobs:
           python3 tests/mg_host.py --compiler g++
           python3 tests/mg_measured_result.py --platform cuda --work-dir /tmp/mg-measured --compile-only
 
+      - name: Check pinned Jacobi inputs, complete CPU grids and measured-result hooks
+        run: |
+          python3 tests/jacobi_host.py --compiler g++
+          python3 tests/jacobi_measured_result.py --platform cuda --work-dir /tmp/jacobi-measured --compile-only
+          make -C tier2/polybench_jacobi2d PLATFORM=cuda bench_output_test
+
       - name: Check GUPS stream, complete table verification and controls
         run: |
           python3 tests/gups_reference.py --compiler g++

@@ -528,3 +528,26 @@ a 60-second limit. All records, actual launch geometry/work, full verification
 counts and exit status are checked. `--compile-only` builds the hooks without
 claiming GPU execution; CI uses it alongside the host tests. `--platform rocm`
 selects AMD, whose hardware qualification remains separate.
+
+## PolyBench/GPU Jacobi-2D
+
+`python3 tests/jacobi_host.py --compiler clang++` compares complete initialization
+and CPU trajectories with frozen PolyBench/GPU 1.0 bodies, checks all boundary
+values and CLI/environment precedence, and exercises exact finite comparison
+under fatal ASan/UBSan. `--all-inputs` covers initialization at all 20 declared
+sizes without running their full CPU trajectories under sanitizers.
+
+`python3 tests/jacobi_measured_result.py --platform cuda --work-dir /tmp/jacobi-check`
+builds clean production and isolated test binaries, runs all 60 declared size/step
+pairs and partial-block controls, and checks actual device A/B corruption,
+nonfinite output, diagnostic caps and setup/reference failure. Each process has
+a 60-second limit and must preserve both kernel records, geometry/work metadata,
+timing sums and failure status. `--compile-only` does not claim GPU execution.
+
+`make -C tier2/polybench_jacobi2d PLATFORM=cuda test` compares the actual
+production kernels against frozen upstream GPU bodies under the original 32×8
+mapping, including both entire output grids and inputs. `bench_output_test`
+accepts the same `--n` and `--tsteps` controls for full-domain qualification.
+The shared `finite_verification.py --benchmark polybench_jacobi2d` additionally
+poisons the actual/reference tails of both grids. All injection is confined to
+isolated test copies. AMD and trace qualification remain separate work.

@@ -1,125 +1,70 @@
 # polybench_jacobi2d
 
-PolyBench 2D Jacobi stencil benchmark — GPU implementation for CUDA and ROCm/HIP.
+FP32 Jacobi-2D from PolyBench/GPU 1.0, with portable CUDA/HIP launches and complete measured-output verification.
 
-## Provenance & fidelity
+## Source and workload
 
-Derived from the [PolyBench/GPU benchmark suite](https://sourceforge.net/projects/polybench/) — the `jacobi-2d` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+The numerical source is [cavazos-lab/PolyBench-ACC, commit 70ea4ca9047dc4ec9c3ca79b4c91b3b2cc1510e7, CUDA/stencils/jacobi-2d-imper/jacobi2D.cu](https://github.com/cavazos-lab/PolyBench-ACC/blob/70ea4ca9047dc4ec9c3ca79b4c91b3b2cc1510e7/CUDA/stencils/jacobi-2d-imper/jacobi2D.cu).
+Its author and redistribution notices are in [UPSTREAM_LICENSE](UPSTREAM_LICENSE).
 
-- One sweep per step vs PolyBench's canonical two sweeps (see "Divergence from canonical PolyBench" below).
+Each timestep runs **one stencil from A to B, then an interior copy from B to A**. This is the selected PolyBench/GPU variant; later PolyBench/C versions with two stencil sweeps describe a different workload. There are no buffer swaps. Both grids are initialized at every cell using the source formulas:
 
-Read this as "a Jacobi-2D benchmark in the spirit of PolyBench," not PolyBench's `jacobi-2d`.
-
-## Algorithm
-
-Iterates a 2D Jacobi stencil on an N×N grid for TSTEPS time steps:
-
-```
-B[i][j] = (A[i-1][j] + A[i+1][j] + A[i][j-1] + A[i][j+1] + A[i][j]) / 5.0
+```cpp
+A[i][j] = ((float)i * (j + 2) + 10) / n;
+B[i][j] = ((float)(i - 4) * (j - 1) + 11) / n;
 ```
 
-After each step, the source and destination buffers are swapped (double-buffer technique). Only interior points (`i = 1..N-2`, `j = 1..N-2`) are updated; boundary values remain fixed at 0.
+For every interior cell, each step evaluates the following FP32 expression in the source's center, left, right, down, up addition order, then copies the computed interior back to A:
 
-**Divergence from canonical PolyBench:** each `tstep` here performs ONE stencil sweep followed by a buffer swap, whereas canonical PolyBench jacobi-2d performs TWO sweeps per tstep (A→B then B→A). `tsteps=T` here therefore corresponds to roughly T/2 canonical time steps.
+```cpp
+B[i][j] = 0.2f * (A[i][j] + A[i][j-1] + A[i][j+1]
+                         + A[i+1][j] + A[i-1][j]);
+A[i][j] = B[i][j];  // separate GPU copy kernel after the complete stencil
+```
 
-## Files
+A and B keep their own distinct initialized boundaries for the entire execution. The production mapping assigns one interior cell per thread with a 16×16 block; the pin uses 32×8 and threads covering boundaries. Runtime sizing, mapping, event timing, admission and verification are adaptations. The numerical initialization, operation order and two-stage timestep follow the pin.
 
-| File | Description |
-|------|-------------|
-| `polybench_jacobi2d.hip` | HIP kernel + host code (CUDA and ROCm/HIP) |
-| `Makefile` | Build system with platform auto-detection |
-| `README.md` | This file |
+The manifest retains 20 sizes from 64 through 8192 and 10, 50 or 200 timesteps: **60 suite-selected workloads**. These use the pinned algorithm but are not named upstream presets (whose header selects 20 timesteps). The default is 1024×1024, 50 timesteps. `tsteps` is a workload multiplier, not statistical repetition. Older results from the random-input, zero-boundary, swap implementation have a different workload and should be kept separate.
 
-## Build Instructions
+## Build and run
 
-### Auto-detect platform
 ```bash
-make
-```
-
-### NVIDIA CUDA
-```bash
-make PLATFORM=cuda
-```
-
-### AMD ROCm/HIP
-```bash
+make PLATFORM=cuda CUDA_ARCH=sm_90
+./polybench_jacobi2d --n 1024 --tsteps 50
+# On a ROCm development host:
 make PLATFORM=rocm
 ```
 
-### Clean
-```bash
-make clean
-```
+`BENCH_PARAM_n` and `BENCH_PARAM_tsteps` override the corresponding CLI flags. Repeated CLI flags keep their first value. Malformed values, unknown flags, `n < 3`, `n > 46340`, and nonpositive or out-of-int-range timesteps fail before device initialization. The cell-index bound is `n*n <= INT_MAX`; device geometry and allocation checks may impose tighter limits. Manually admitted sizes outside the manifest are not covered by the declared H100 collection domain.
 
-## Run Instructions
+One entry vector-add warmer runs after input uploads and before the complete algorithm. Set `BENCH_PARAM_vector_add_warmup=false` to disable it. It is intended cache/clock preparation, without a cache-residency or clock guarantee. Each process executes the requested algorithm once; use the harness's `--reps` for separate executions.
 
-```bash
-./polybench_jacobi2d [--n N] [--tsteps T]
-```
+## Timing and interpretation
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--n N` | Grid size (N×N) | 1024 |
-| `--tsteps T` | Number of time steps per execution | 50 |
+Both the stencil and copy are timed GPU kernels. Standard output contains two accumulated kernel records at `iter=0`, followed by a summary equal to the sum of their GPU event times. Each record includes `n`, `tsteps`, actual block/grid dimensions, padded `threads_per_launch`, `interior_cells`, `kernel_launches=tsteps`, `updated_cells=(n-2)^2*tsteps`, and these identifiers:
 
-Environment variables override argv:
+- `precision=fp32`, `boundary=fixed_initial_values`
+- `input=polybench_gpu_jacobi_v1`
+- `algorithm=polybench_gpu_jacobi_copyback_v1`
+- `verification=full_cpu_exact_v1`
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `BENCH_PARAM_n` | Grid size (N×N) | 1024 |
-| `BENCH_PARAM_tsteps` | Time steps per execution | 50 |
-| `BENCH_PARAM_vector_add_warmup` | Vector-add warmer (clock boost + LLC eviction) before the timed pass | true |
+Input generation, uploads, the entry warmer, downloads and CPU verification are outside the reported kernel total. GPU events and host timing follow the shared timing contract. Per-kernel metadata counts that record's work: there are `2*tsteps` timed launches in the complete algorithm.
 
-The TSTEPS-step pass runs exactly once per execution; repetition is the harness's job (`gpubench run --reps N`).
+Use elapsed time or interior updates per second for performance comparisons. Source-level traffic is five float loads plus one store per stencil update, and one load plus one store per copy update. Multiplying those counts by four bytes gives **logical** traffic (24 and 8 bytes per update); it does not measure DRAM traffic because caches reuse values. Compare results only with matching algorithm, input, size, steps and warmer settings.
 
-### Examples
+## Verification and qualification
+
+After timing, the program downloads **both complete measured grids**, including every boundary. An independently regenerated CPU reference executes the full requested recurrence and copy-back. Every GPU and CPU value must be finite and numerically exactly equal. There is no small auxiliary GPU run or sampled verification. Exact equality is justified by the matching FP32 per-cell expression order, without a reduction or fused multiply-add in the stencil. Compiler options that reassociate arithmetic change this contract.
+
+A mismatch, unavailable reference, allocation failure or device error exits nonzero. Mismatch diagnostics show at most ten locations while counting all errors. Timing records can precede a failed verification; the harness must retain their failed run status and exclude them from accepted performance results.
+
+Host regression tests compare initialization and complete trajectories against frozen pinned CPU bodies, check argument bounds and poison both sides of the comparator. The measured-result suite runs every declared workload, partial blocks and odd/even steps, then changes actual device output at boundaries, interiors and the largest grids' tails. Finite one-ULP changes and NaN/infinities must fail. A separate GPU test compares every input/output byte with the pinned GPU kernels under their original 32×8 layout.
 
 ```bash
-# Default run (1024×1024, 50 steps)
-./polybench_jacobi2d
-
-# Large grid
-./polybench_jacobi2d --n 2048 --tsteps 100
-
-# Quick test
-./polybench_jacobi2d --n 512 --tsteps 10
+python3 tests/jacobi_host.py --compiler clang++
+python3 tests/jacobi_host.py --compiler g++ --all-inputs
+python3 tests/jacobi_measured_result.py --platform cuda --work-dir /tmp/jacobi-check
+make -C tier2/polybench_jacobi2d PLATFORM=cuda test
 ```
 
-## Output Format
-
-**stdout** — JSON-lines: one `{"type":"kernel",...}` record for the single pass (TSTEPS kernel launches from the initial state) carrying the accumulated GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`), then a summary whose `total_time_ms` equals that GPU event time:
-```json
-{"type":"kernel","name":"jacobi2d_kernel","iter":0,"time_ms":25.12,"host_time_ms":27.40,"params":{"n":1024,"tsteps":50}}
-{"type":"summary","total_time_ms":25.12}
-```
-
-**stderr** — device info, timing, and correctness check result:
-```
-Device: NVIDIA GeForce RTX 3080 (id=0)
-Grid: 1024×1024  |  TSTEPS: 50  |  single timed pass
-
-gpu = 25.123 ms (50 steps)
-Total GPU time: 25.123 ms over 1 pass
-Correctness check (CPU vs GPU, 64×64, 50 steps): PASS (max_rel=0.00e+00)
-```
-
-## Performance Metric
-
-Memory bandwidth is derived downstream from the emitted `time_ms` and params as:
-
-```
-GB/s = TSTEPS × 2 × N × N × sizeof(float) / time_s / 1e9
-```
-
-Each time step reads the full N×N source array and writes the full N×N destination array. The two grids ping-pong across the TSTEPS steps; the initial state is uploaded (untimed) before the pass, and the step count is fixed, so every execution measures identical work.
-
-## Correctness Verification
-
-A CPU reference computation is run on a small 64×64 grid for the same number of TSTEPS. The GPU result is compared against the CPU result. The test passes if the maximum relative error across all interior points is below 1e-3; on `FAIL` the process exits with a non-zero status.
-
-## Kernel Configuration
-
-- Thread block size: 16×16
-- Grid size: `ceil((N-2)/16) × ceil((N-2)/16)`
-- Each thread computes one interior point per time step
+Run the Python commands from the repository root. CI runs host tests and compiles GPU tests; H100 execution evidence is recorded in the repair PR. AMD hardware validation and trace/capture/replay qualification remain deferred.

@@ -2,7 +2,7 @@
   "benchmark": "polybench_jacobi2d",
   "tier": 2,
   "suite": "polybench",
-  "description": "2D Jacobi 5-point stencil with double buffering. Updates interior NxN grid for TSTEPS iterations. Emits per-pass kernel times; memory bandwidth (GB/s) is derived downstream.",
+  "description": "PolyBench/GPU Jacobi-2D: one FP32 five-point stencil and one interior copy-back per timestep, fixed initialized boundaries, full measured A/B verification.",
   "scaling_param": {
     "name": "n",
     "description": "Grid dimension (NxN grid)",
@@ -33,7 +33,7 @@
   "non_scaling_params": [
     {
       "name": "tsteps",
-      "description": "Number of Jacobi time steps per trial",
+      "description": "Number of complete stencil-plus-copy timesteps per execution (suite-selected workload multiplier).",
       "type": "int",
       "default": 50,
       "values": [
@@ -44,7 +44,7 @@
     },
     {
       "name": "vector_add_warmup",
-      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "description": "Run one entry vector-add warmer after setup and before the complete algorithm; intended cache/clock preparation, not a residency or clock guarantee.",
       "type": "enum",
       "default": "true",
       "values": [
@@ -54,6 +54,7 @@
     }
   ],
   "kernels": [
-    "jacobi2d_kernel"
+    "jacobi2d_kernel",
+    "jacobi2d_copy_kernel"
   ]
 }

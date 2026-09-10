@@ -49,7 +49,9 @@ SITES = {
     "polybench_atax": [("float rel = fabsf(h_y[j]", [("y", "h_y[j]", "y_ref[j]")])],
     "polybench_bicg": [("float rel = fabsf(h_s[j]", [("s", "h_s[j]", "ref")]), ("float rel = fabsf(h_q[i]", [("q", "h_q[i]", "ref")])],
     "polybench_gramschmidt": [("float expected = (ci == cj) ? 1.0f : 0.0f;", [("dot", "dot", "expected")])],
-    "polybench_jacobi2d": [("float rel = fabsf(gpu - ref)", [("grid", "gpu", "ref")])],
+    "polybench_jacobi2d": [("const size_t errors=jacobi::compare(actual,expected);",
+                           [(name, f"actual.{name}.back()", f"expected.{name}.back()")
+                            for name in ("a", "b")])],
     "polybench_mvt": [("float rel1 =", [("x1", "h_x1[i]", "x1_ref[i]")]), ("float rel2 =", [("x2", "h_x2[i]", "x2_ref[i]")])],
     "rodinia_backprop": [
         ("double tolerance = std::max(absolute_tolerance,", [("value", "actual", "expected")]),
@@ -107,6 +109,10 @@ def instrument(source, sites):
         source = source.replace(declaration, declaration.replace("const ", "", 1))
     if any(anchor == "const size_t errors=nas_mg::compare(actual,expected);" for anchor, _ in sites):
         declaration = "const nas_mg::Result expected=nas_mg::reference(c,layout,workers);"
+        assert source.count(declaration) == 1
+        source = source.replace(declaration, declaration.replace("const ", "", 1))
+    if any(anchor == "const size_t errors=jacobi::compare(actual,expected);" for anchor, _ in sites):
+        declaration = "const jacobi::Grids expected=jacobi::reference(problem);"
         assert source.count(declaration) == 1
         source = source.replace(declaration, declaration.replace("const ", "", 1))
     for anchor, pairs in sites:

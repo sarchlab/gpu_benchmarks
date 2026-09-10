@@ -1,499 +1,149 @@
-// npb_mg.hip — NPB Multi-Grid benchmark (HIP/ROCm)
-//
-// V-cycle multigrid with smooth/restrict/prolong on synthetic 3D grid.
-//
-// Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer.
-//
-// Environment variables:
-//   BENCH_PARAM_grid_size, BENCH_PARAM_block_size,
-//   BENCH_PARAM_num_vcycles, BENCH_PARAM_num_smooth_steps
-//
-// Output (stdout): per timed pass (one pass = num_vcycles V-cycles from a
-// zeroed solution), one {"type":"kernel",...} JSON line per kernel
-// (smooth_kernel, restrict_kernel, prolong_kernel, residual_kernel, coarse_zero)
-// carrying that kernel's
-// accumulated GPU event time (time_ms) and host wall-clock time
-// (host_time_ms) within the pass, then a summary whose total_time_ms is the
-// SUM of all recorded GPU event times. Mcells/sec is derived downstream
-// from time_ms and params.
-// Output (stderr): human-readable
-
+// NAS MG S/W/A/B/C. See README.md for the exact upstream and timing contract.
 #include "../../common/bench_timing.h"
-
-#include <cstdio>
-#include <cstdlib>
+#include "mg_reference.h"
+#include "mg_kernels.h"
+#include <cerrno>
+#include <climits>
 #include <cstring>
-#include <cmath>
-#include <vector>
-
-// ---------------------------------------------------------------------------
-// Error-checking macro
-// ---------------------------------------------------------------------------
-
+#include <cstdlib>
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
-// ---------------------------------------------------------------------------
-// 3D indexing helper
-// ---------------------------------------------------------------------------
-
-__device__ __host__ static inline int idx3d(int x, int y, int z, int N) {
-    return x + y * N + z * N * N;
+static int integer(const char* value) {
+    if(!value || !*value)throw std::invalid_argument("empty MG integer parameter");
+    char* end=nullptr;errno=0;const long n=std::strtol(value,&end,10);
+    if(errno || *end || n<INT_MIN || n>INT_MAX)throw std::invalid_argument("invalid MG integer parameter");
+    return static_cast<int>(n);
 }
-
-// ---------------------------------------------------------------------------
-// Kernel: reset every coarse correction value before its next solve
-// ---------------------------------------------------------------------------
-
-__global__ void coarse_zero(float* u, int count) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < count) u[idx] = 0.0f;
-}
-
-// ---------------------------------------------------------------------------
-// Kernel: Jacobi smooth
-// ---------------------------------------------------------------------------
-
-__global__ void smooth_kernel(
-    const float* __restrict__ u,
-    const float* __restrict__ rhs,
-    float*       __restrict__ out,
-    int N,
-    float weight)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int total = N * N * N;
-    if (idx >= total) return;
-
-    int x = idx % N;
-    int y = (idx / N) % N;
-    int z = idx / (N * N);
-
-    if (x == 0 || x == N-1 || y == 0 || y == N-1 || z == 0 || z == N-1) {
-        out[idx] = u[idx];
-        return;
+static const nas_mg::Class* parameters(int argc,char** argv,int* block) {
+    const char* name=std::getenv("BENCH_PARAM_npb_class");if(!name)name="A";
+    *block=256;
+    if(const char* value=std::getenv("BENCH_PARAM_block_size"))*block=integer(value);
+    for(int i=1;i<argc;++i) {
+        if(std::strcmp(argv[i],"--class")!=0 || i+1==argc)
+            throw std::invalid_argument("expected --class S/W/A/B/C; obsolete --size is ambiguous for A/B");
+        name=argv[++i];
     }
-
-    float s = u[idx3d(x-1,y,z,N)] + u[idx3d(x+1,y,z,N)]
-            + u[idx3d(x,y-1,z,N)] + u[idx3d(x,y+1,z,N)]
-            + u[idx3d(x,y,z-1,N)] + u[idx3d(x,y,z+1,N)];
-
-    out[idx] = (s + weight * rhs[idx]) / 6.0f;
+    for(const char* key:{"BENCH_PARAM_grid_size","BENCH_PARAM_num_vcycles","BENCH_PARAM_num_smooth_steps"})
+        if(std::getenv(key))throw std::invalid_argument("obsolete MG controls: npb_class fixes grid, cycles and smoothing");
+    if(std::strlen(name)!=1 || !nas_mg::problem(name[0]))throw std::invalid_argument("MG npb_class must be S/W/A/B/C");
+    if(*block<1 || *block>1024 || (*block&(*block-1)))throw std::invalid_argument("MG block_size must be a power of two in 1..1024");
+    return nas_mg::problem(name[0]);
 }
 
-// ---------------------------------------------------------------------------
-// Kernel: Restriction (fine -> coarse)
-// ---------------------------------------------------------------------------
-
-__global__ void restrict_kernel(
-    const float* __restrict__ fine,
-    float*       __restrict__ coarse,
-    int N_fine,
-    int N_coarse)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int total_coarse = N_coarse * N_coarse * N_coarse;
-    if (idx >= total_coarse) return;
-
-    int cx = idx % N_coarse;
-    int cy = (idx / N_coarse) % N_coarse;
-    int cz = idx / (N_coarse * N_coarse);
-
-    int fx = cx * 2;
-    int fy = cy * 2;
-    int fz = cz * 2;
-
-    float sum = 0.0f;
-    for (int dz = 0; dz < 2; ++dz)
-        for (int dy = 0; dy < 2; ++dy)
-            for (int dx = 0; dx < 2; ++dx)
-                sum += fine[idx3d(fx+dx, fy+dy, fz+dz, N_fine)];
-
-    coarse[idx] = sum * 0.125f;
-}
-
-// ---------------------------------------------------------------------------
-// Kernel: Prolongation (coarse -> fine)
-// ---------------------------------------------------------------------------
-
-__global__ void prolong_kernel(
-    const float* __restrict__ coarse,
-    float*       __restrict__ fine,
-    int N_fine,
-    int N_coarse)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int total_fine = N_fine * N_fine * N_fine;
-    if (idx >= total_fine) return;
-
-    int fx = idx % N_fine;
-    int fy = (idx / N_fine) % N_fine;
-    int fz = idx / (N_fine * N_fine);
-
-    int cx = fx / 2;
-    int cy = fy / 2;
-    int cz = fz / 2;
-
-    if (cx >= N_coarse) cx = N_coarse - 1;
-    if (cy >= N_coarse) cy = N_coarse - 1;
-    if (cz >= N_coarse) cz = N_coarse - 1;
-
-    fine[idx] += coarse[idx3d(cx, cy, cz, N_coarse)];
-}
-
-// ---------------------------------------------------------------------------
-// Kernel: Compute residual r = rhs - A*u
-// ---------------------------------------------------------------------------
-
-__global__ void residual_kernel(
-    const float* __restrict__ u,
-    const float* __restrict__ rhs,
-    float*       __restrict__ r,
-    int N)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int total = N * N * N;
-    if (idx >= total) return;
-
-    int x = idx % N;
-    int y = (idx / N) % N;
-    int z = idx / (N * N);
-
-    if (x == 0 || x == N-1 || y == 0 || y == N-1 || z == 0 || z == N-1) {
-        r[idx] = 0.0f;
-        return;
-    }
-
-    // Operator the smoother inverts: A*u = 6u - Σ(neighbors). Its fixed point
-    // satisfies 6u - Σnb = weight*rhs (weight=1), i.e. A*u = rhs, so the residual
-    // is r = rhs - A*u. The previous form computed rhs + A*u, which at the
-    // smoother's fixed point equals 2*rhs and never decreases — the V-cycle was
-    // not reducing its own error measure (not a functioning multigrid).
-    float Au = 6.0f * u[idx]
-             - u[idx3d(x-1,y,z,N)] - u[idx3d(x+1,y,z,N)]
-             - u[idx3d(x,y-1,z,N)] - u[idx3d(x,y+1,z,N)]
-             - u[idx3d(x,y,z-1,N)] - u[idx3d(x,y,z+1,N)];
-
-    r[idx] = rhs[idx] - Au;
-}
-
-// ---------------------------------------------------------------------------
-// Kernel: Norm squared reduction
-// ---------------------------------------------------------------------------
-
-__global__ void norm_sq_kernel(
-    const float* __restrict__ v,
-    float*       __restrict__ partial,
-    int N_total)
-{
-    extern __shared__ float sdata[];
-    int tid = threadIdx.x;
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    float val = 0.0f;
-    if (idx < N_total) val = v[idx] * v[idx];
-    sdata[tid] = val;
-    __syncthreads();
-
-    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
-        if (tid < s) sdata[tid] += sdata[tid + s];
-        __syncthreads();
-    }
-
-    if (tid == 0) partial[blockIdx.x] = sdata[0];
-}
-
-// ---------------------------------------------------------------------------
-// Host helper
-// ---------------------------------------------------------------------------
-
-static float finish_reduce(float* d_partial, int numBlocks) {
-    std::vector<float> h(numBlocks);
-    HIP_CHECK(hipMemcpy(h.data(), d_partial, numBlocks * sizeof(float),
-                          hipMemcpyDeviceToHost));
-    float sum = 0.0f;
-    for (int i = 0; i < numBlocks; ++i) sum += h[i];
-    return sum;
-}
-
-// ---------------------------------------------------------------------------
-// Simple PRNG
-// ---------------------------------------------------------------------------
-
-static inline unsigned int lcg_rand(unsigned int* state) {
-    *state = *state * 1664525u + 1013904223u;
-    return *state;
-}
-
-static inline float rand_float(unsigned int* state, float lo, float hi) {
-    return lo + (float)(lcg_rand(state) & 0xFFFF) / 65535.0f * (hi - lo);
-}
-
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
-int main(int argc, char** argv) {
-    setvbuf(stdout, NULL, _IONBF, 0);
-
-    int N              = 64;
-    int block_size     = 256;
-    int num_vcycles    = 5;
-    int num_smooth     = 3;
-
-    const char* env_val;
-    env_val = getenv("BENCH_PARAM_grid_size");
-    if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_num_vcycles");
-    if (env_val) num_vcycles = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_num_smooth_steps");
-    if (env_val) num_smooth = atoi(env_val);
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--size") == 0) N = atoi(argv[i+1]);
-    }
-
-    { int p = 4; while (p < N) p *= 2; N = p; }
-
-
-    int device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    hipDeviceProp_t prop;
-    HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
-    fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "NPB MG  |  Grid: %d x %d x %d  |  V-cycles: %d  |  "
-            "Smooth steps: %d\n\n",
-            N, N, N, num_vcycles, num_smooth);
-
-    std::vector<int> levels;
-    { int sz = N; while (sz >= 4) { levels.push_back(sz); sz /= 2; } }
-    int num_levels = (int)levels.size();
-
-    std::vector<float*> d_u(num_levels), d_rhs(num_levels);
-    std::vector<float*> d_r(num_levels), d_temp(num_levels);
-    std::vector<size_t> level_bytes(num_levels);
-
-    for (int lv = 0; lv < num_levels; ++lv) {
-        int sz = levels[lv];
-        size_t bytes = (size_t)sz * sz * sz * sizeof(float);
-        level_bytes[lv] = bytes;
-        HIP_CHECK(hipMalloc(&d_u[lv],    bytes));
-        HIP_CHECK(hipMalloc(&d_rhs[lv],  bytes));
-        HIP_CHECK(hipMalloc(&d_r[lv],    bytes));
-        HIP_CHECK(hipMalloc(&d_temp[lv], bytes));
-    }
-
-    int max_total = N * N * N;
-    int max_blocks = (max_total + block_size - 1) / block_size;
-    float* d_partial;
-    HIP_CHECK(hipMalloc(&d_partial, max_blocks * sizeof(float)));
-
-    {
-        int total = N * N * N;
-        std::vector<float> h_rhs(total);
-        unsigned int seed = 42;
-        for (int i = 0; i < total; ++i) h_rhs[i] = rand_float(&seed, -1.0f, 1.0f);
-        HIP_CHECK(hipMemcpy(d_rhs[0], h_rhs.data(), level_bytes[0], hipMemcpyHostToDevice));
-    }
-
-    for (int lv = 0; lv < num_levels; ++lv) {
-        HIP_CHECK(hipMemset(d_u[lv], 0, level_bytes[lv]));
-        if (lv > 0) HIP_CHECK(hipMemset(d_rhs[lv], 0, level_bytes[lv]));
-    }
-
-    float smooth_weight = 1.0f;
-    int smem = block_size * sizeof(float);
-
-    char params[192];
-    snprintf(params, sizeof(params),
-             "\"grid_size\":%d,\"block_size\":%d,"
-             "\"num_vcycles\":%d,\"num_smooth_steps\":%d",
-             N, block_size, num_vcycles, num_smooth);
-
-    // Per-kernel accumulators, reused across V-cycles within one MG pass.
-    bench_timer_t timer;
-    bench_timer_create(&timer);
-    bench_lap_t acc_smooth, acc_restrict, acc_prolong, acc_residual, acc_zero;
-
-    // One V-cycle. When `timed` is true, every kernel launch is individually
-    // bracketed and accumulated. residual_kernel is a real part of the V-cycle
-    // (it forms the residual that drives restriction), so its GPU time is
-    // bracketed and emitted like the other kernels — leaving it out dropped an
-    // entire kernel's time (~10–15%) from total_time_ms.
-    auto run_vcycle = [&](bool timed) {
-        for (int lv = 0; lv < num_levels - 1; ++lv) {
-            int sz = levels[lv];
-            int total = sz * sz * sz;
-            int grid = (total + block_size - 1) / block_size;
-
-            for (int s = 0; s < num_smooth; ++s) {
-                if (timed) {
-                    bench_lap_add(&acc_smooth, bench_time_op(&timer, [&]() {
-                        smooth_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_temp[lv], sz, smooth_weight);
-                    }));
-                } else {
-                    smooth_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_temp[lv], sz, smooth_weight);
-                }
-                float* tmp = d_u[lv]; d_u[lv] = d_temp[lv]; d_temp[lv] = tmp;
-            }
-
-            if (timed) {
-                bench_lap_add(&acc_residual, bench_time_op(&timer, [&]() {
-                    residual_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_r[lv], sz);
-                }));
-            } else {
-                residual_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_r[lv], sz);
-            }
-
-            int csz = levels[lv + 1];
-            int ctotal = csz * csz * csz;
-            int cgrid = (ctotal + block_size - 1) / block_size;
-            if (timed) {
-                bench_lap_add(&acc_restrict, bench_time_op(&timer, [&]() {
-                    restrict_kernel<<<cgrid, block_size>>>(d_r[lv], d_rhs[lv + 1], sz, csz);
-                }));
-            } else {
-                restrict_kernel<<<cgrid, block_size>>>(d_r[lv], d_rhs[lv + 1], sz, csz);
-            }
-
-            // Zero the coarse-grid correction before coarse smoothing. This is
-            // required work inside the V-cycle: use an explicit GPU kernel so
-            // the launch, event bracket and coarse_zero record agree.
-            if (timed) {
-                bench_lap_add(&acc_zero, bench_time_op(&timer, [&]() {
-                    coarse_zero<<<cgrid, block_size>>>(d_u[lv + 1], ctotal);
-                }));
-            } else {
-                coarse_zero<<<cgrid, block_size>>>(d_u[lv + 1], ctotal);
-            }
-        }
-
-        {
-            int lv = num_levels - 1;
-            int sz = levels[lv];
-            int total = sz * sz * sz;
-            int grid = (total + block_size - 1) / block_size;
-            for (int s = 0; s < num_smooth * 2; ++s) {
-                if (timed) {
-                    bench_lap_add(&acc_smooth, bench_time_op(&timer, [&]() {
-                        smooth_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_temp[lv], sz, smooth_weight);
-                    }));
-                } else {
-                    smooth_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_temp[lv], sz, smooth_weight);
-                }
-                float* tmp = d_u[lv]; d_u[lv] = d_temp[lv]; d_temp[lv] = tmp;
-            }
-        }
-
-        for (int lv = num_levels - 2; lv >= 0; --lv) {
-            int sz = levels[lv];
-            int total = sz * sz * sz;
-            int grid = (total + block_size - 1) / block_size;
-            int csz = levels[lv + 1];
-
-            if (timed) {
-                bench_lap_add(&acc_prolong, bench_time_op(&timer, [&]() {
-                    prolong_kernel<<<grid, block_size>>>(d_u[lv + 1], d_u[lv], sz, csz);
-                }));
-            } else {
-                prolong_kernel<<<grid, block_size>>>(d_u[lv + 1], d_u[lv], sz, csz);
-            }
-
-            for (int s = 0; s < num_smooth; ++s) {
-                if (timed) {
-                    bench_lap_add(&acc_smooth, bench_time_op(&timer, [&]() {
-                        smooth_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_temp[lv], sz, smooth_weight);
-                    }));
-                } else {
-                    smooth_kernel<<<grid, block_size>>>(d_u[lv], d_rhs[lv], d_temp[lv], sz, smooth_weight);
-                }
-                float* tmp = d_u[lv]; d_u[lv] = d_temp[lv]; d_temp[lv] = tmp;
-            }
-        }
+int main(int argc,char** argv) try {
+    setvbuf(stdout,nullptr,_IONBF,0);
+    int block;const nas_mg::Class c=*parameters(argc,argv,&block);
+    const nas_mg::Layout layout(c);
+    const int top=layout.levels()-1,n=c.n+2;
+    const unsigned workers=nas_mg::reference_workers(c.n);
+    int device;HIP_CHECK(hipGetDevice(&device));hipDeviceProp_t prop;
+    HIP_CHECK(hipGetDeviceProperties(&prop,device));
+    // Restriction uses coarse_width-1 threads and interpolation coarse_width.
+    const int required_block=std::max(block,c.n/2+2);
+    const size_t shared=std::max(3*mg_max_width,2*block)*sizeof(double);
+    const size_t max_grid=std::max(nas_mg::Layout::cube(c.n/2+2)/block+1,static_cast<size_t>(n));
+    if(required_block>prop.maxThreadsPerBlock || required_block>prop.maxThreadsDim[0] ||
+       max_grid>static_cast<size_t>(prop.maxGridSize[0]) || n>prop.maxGridSize[1] || shared>prop.sharedMemPerBlock)
+        throw std::invalid_argument("MG launch geometry exceeds device limits");
+    fprintf(stderr,"Device: %s (id=%d)\nNAS MG class %c: interior %d cubed, %d levels, %d cycles\n",prop.name,device,c.name,c.n,layout.levels(),c.iterations);
+    nas_mg::Result actual(layout);actual.v=nas_mg::input(c);
+    double *d_u,*d_r,*d_v,*d_a,*d_c,*d_norm;
+    double a[]={-8.0/3,0.0,1.0/6,1.0/12};auto coefficients=nas_mg::smoother(c);
+    const size_t hierarchy_bytes=layout.cells*sizeof(double),v_bytes=actual.v.size()*sizeof(double);
+    std::vector<double> partial(static_cast<size_t>(2)*c.n*c.n);
+    HIP_CHECK(hipMalloc(&d_u,hierarchy_bytes));HIP_CHECK(hipMalloc(&d_r,hierarchy_bytes));
+    HIP_CHECK(hipMalloc(&d_v,v_bytes));HIP_CHECK(hipMalloc(&d_a,sizeof(a)));HIP_CHECK(hipMalloc(&d_c,sizeof(a)));
+    HIP_CHECK(hipMalloc(&d_norm,partial.size()*sizeof(double)));
+    HIP_CHECK(hipMemset(d_u,0,hierarchy_bytes));HIP_CHECK(hipMemset(d_r,0,hierarchy_bytes));
+    HIP_CHECK(hipMemcpy(d_v,actual.v.data(),v_bytes,hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_a,a,sizeof(a),hipMemcpyHostToDevice));HIP_CHECK(hipMemcpy(d_c,coefficients.data(),sizeof(a),hipMemcpyHostToDevice));
+    auto up=[&](int k){return d_u+layout.offset[k];};auto rp=[&](int k){return d_r+layout.offset[k];};
+    enum { COMM1,COMM2,COMM3,INTERP,NORM,SMOOTH,RESID,RESTRICT,ZERO,KERNELS };
+    const char* names[]={"comm3_gpu_kernel_1","comm3_gpu_kernel_2","comm3_gpu_kernel_3","interp_gpu_kernel","norm2u3_gpu_kernel","psinv_gpu_kernel","resid_gpu_kernel","rprj3_gpu_kernel","coarse_zero"};
+    bench_lap_t laps[KERNELS];for(auto& lap:laps)bench_lap_reset(&lap);
+    unsigned launches[KERNELS]={};unsigned long long threads[KERNELS]={};
+    unsigned min_block[KERNELS]={},max_block[KERNELS]={};
+    bench_timer_t timer;bench_timer_create(&timer);
+    auto timed=[&](int kind,dim3 grid,int bs,auto op) {
+        bench_lap_add(&laps[kind],bench_time_op(&timer,op));
+        if(!launches[kind])min_block[kind]=bs;
+        ++launches[kind];threads[kind]+=static_cast<unsigned long long>(grid.x)*grid.y*grid.z*bs;
+        min_block[kind]=std::min(min_block[kind],static_cast<unsigned>(bs));
+        max_block[kind]=std::max(max_block[kind],static_cast<unsigned>(bs));
     };
-
-    // One full MG pass: the solution grids are zeroed at the start of every
-    // pass (untimed) — the same reset the original code performed — so each
-    // pass solves the identical fixed-count V-cycle workload regardless of
-    // what earlier passes left behind.
-    auto run_mg_pass = [&](bool timed) {
-        if (timed) {
-            bench_lap_reset(&acc_smooth);
-            bench_lap_reset(&acc_restrict);
-            bench_lap_reset(&acc_prolong);
-            bench_lap_reset(&acc_residual);
-            bench_lap_reset(&acc_zero);
-        }
-        for (int lv = 0; lv < num_levels; ++lv)
-            HIP_CHECK(hipMemset(d_u[lv], 0, level_bytes[lv]));
-        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
-         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
-         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
-        bench_pass_warm();
-        for (int v = 0; v < num_vcycles; ++v) run_vcycle(timed);
+    auto comm=[&](double* data,int p) {
+        dim3 g1((p-2+block-1)/block,p-2),g2((p+block-1)/block,p-2),g3(g2.x,p);
+        timed(COMM1,g1,block,[&](){comm3_gpu_kernel_1<<<g1,block>>>(data,p,p,p,g1.x*block);});
+        timed(COMM2,g2,block,[&](){comm3_gpu_kernel_2<<<g2,block>>>(data,p,p,p,g2.x*block);});
+        timed(COMM3,g3,block,[&](){comm3_gpu_kernel_3<<<g3,block>>>(data,p,p,p,g3.x*block);});
     };
-
-    run_mg_pass(true);
-    double total_gpu_ms = 0.0;
-    bench_emit_iter("smooth_kernel",   0, &acc_smooth,   params);
-    bench_emit_iter("restrict_kernel", 0, &acc_restrict, params);
-    bench_emit_iter("prolong_kernel",  0, &acc_prolong,  params);
-    bench_emit_iter("residual_kernel", 0, &acc_residual, params);
-    bench_emit_iter("coarse_zero",     0, &acc_zero,     params);
-    total_gpu_ms += acc_smooth.gpu_ms + acc_restrict.gpu_ms +
-                    acc_prolong.gpu_ms + acc_residual.gpu_ms + acc_zero.gpu_ms;
-    fprintf(stderr, "smooth gpu = %.3f ms, restrict gpu = %.3f ms, "
-            "prolong gpu = %.3f ms, residual gpu = %.3f ms, "
-            "coarse_zero gpu = %.3f ms\n",
-            acc_smooth.gpu_ms, acc_restrict.gpu_ms,
-            acc_prolong.gpu_ms, acc_residual.gpu_ms, acc_zero.gpu_ms);
-
-    bench_timer_destroy(&timer);
-    bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
-
-    // Verification. The timed pass already left the solution in d_u[0], so we
-    // check its residual directly — no second run_mg_pass() (which would re-run
-    // every V-cycle and fire a second untimed warmer). Repetition across
-    // processes is the harness's job.
-    bool verify_ok = true;
-    {
-        HIP_CHECK(hipDeviceSynchronize());
-
-        int total = N * N * N;
-        int grid = (total + block_size - 1) / block_size;
-
-        residual_kernel<<<grid, block_size>>>(d_u[0], d_rhs[0], d_r[0], N);
-
-        norm_sq_kernel<<<grid, block_size, smem>>>(d_r[0], d_partial, total);
-        HIP_CHECK(hipDeviceSynchronize());
-        float res_sq = finish_reduce(d_partial, grid);
-        float res_norm = sqrtf(res_sq);
-
-        norm_sq_kernel<<<grid, block_size, smem>>>(d_rhs[0], d_partial, total);
-        HIP_CHECK(hipDeviceSynchronize());
-        float rhs_sq = finish_reduce(d_partial, grid);
-        float rhs_norm = sqrtf(rhs_sq);
-
-        float rel_res = res_norm / fmaxf(rhs_norm, 1e-20f);
-        fprintf(stderr, "Residual ||r||/||rhs|| = %.6e\n", rel_res);
-
-        if (std::isfinite(res_norm) && std::isfinite(rhs_norm) &&
-            std::isfinite(rel_res) && rel_res < 10.0f) {
-            fprintf(stderr, "PASS\n");
-        } else {
-            fprintf(stderr, "FAIL: relative residual too large\n");
-            verify_ok = false;
+    auto resid=[&](int k,double* rhs) {
+        const int p=layout.width[k],bs=std::min(p,block);dim3 grid(p-2,p-2);
+        timed(RESID,grid,bs,[&](){resid_gpu_kernel<<<grid,bs,2*mg_max_width*sizeof(double)>>>(up(k),rhs,rp(k),d_a,p,p,p,(p-2)*bs);});
+        comm(rp(k),p);
+    };
+    auto smooth=[&](int k) {
+        const int p=layout.width[k],bs=std::min(p,block);dim3 grid(p-2,p-2);
+        timed(SMOOTH,grid,bs,[&](){psinv_gpu_kernel<<<grid,bs,2*mg_max_width*sizeof(double)>>>(rp(k),up(k),d_c,p,p,p,(p-2)*bs);});
+        comm(up(k),p);
+    };
+    auto restrict_level=[&](int k) {
+        const int f=layout.width[k],p=layout.width[k-1],bs=p-1;dim3 grid(p-2,p-2);
+        timed(RESTRICT,grid,bs,[&](){rprj3_gpu_kernel<<<grid,bs,2*mg_max_width*sizeof(double)>>>(rp(k),rp(k-1),f,f,f,p,p,p,1,1,1,(p-2)*bs);});
+        comm(rp(k-1),p);
+    };
+    auto interpolate=[&](int k) {
+        const int p=layout.width[k],q=layout.width[k-1];dim3 grid(q-1,q-1);
+        timed(INTERP,grid,q,[&](){interp_gpu_kernel<<<grid,q,3*mg_max_width*sizeof(double)>>>(up(k-1),up(k),q,q,q,p,p,p,(q-1)*q);});
+    };
+    auto zero=[&](int k) {
+        const int count=static_cast<int>(nas_mg::Layout::cube(layout.width[k]));dim3 grid((count+block-1)/block);
+        timed(ZERO,grid,block,[&](){coarse_zero<<<grid,block>>>(up(k),count);});
+    };
+    auto norm=[&](int slot) {
+        dim3 grid(c.n,c.n);const size_t count=static_cast<size_t>(c.n)*c.n;
+        timed(NORM,grid,block,[&](){norm2u3_gpu_kernel<<<grid,block,2*block*sizeof(double)>>>(rp(top),n,n,n,d_norm,d_norm+count,c.n,c.n*block);});
+        HIP_CHECK(hipMemcpy(partial.data(),d_norm,partial.size()*sizeof(double),hipMemcpyDeviceToHost));
+        double sum=0.0,maximum=0.0;
+        for(size_t i=0;i<count;++i) {
+            if(!std::isfinite(partial[i]) || !std::isfinite(partial[count+i]))throw std::runtime_error("non-finite MG norm partial");
+            sum+=partial[i];maximum=std::max(maximum,partial[count+i]);
         }
+        actual.norms[slot]=std::sqrt(sum/(static_cast<double>(c.n)*c.n*c.n));actual.norms[slot+1]=maximum;
+    };
+    bench_pass_warm();
+    resid(top,d_v);norm(0);
+    for(int it=0;it<c.iterations;++it) {
+        for(int k=top;k>0;--k)restrict_level(k);
+        zero(0);smooth(0);
+        for(int k=1;k<top;++k){zero(k);interpolate(k);resid(k,rp(k));smooth(k);}
+        interpolate(top);resid(top,d_v);smooth(top);resid(top,d_v);
     }
-
-    for (int lv = 0; lv < num_levels; ++lv) {
-        HIP_CHECK(hipFree(d_u[lv]));
-        HIP_CHECK(hipFree(d_rhs[lv]));
-        HIP_CHECK(hipFree(d_r[lv]));
-        HIP_CHECK(hipFree(d_temp[lv]));
+    norm(2);
+    double total=0.0;
+    for(int k=0;k<KERNELS;++k) {
+        char params[1024];snprintf(params,sizeof(params),
+            "\"npb_class\":\"%c\",\"grid_size\":%d,\"padded_grid_size\":%d,\"levels\":%d,\"num_vcycles\":%d,"
+            "\"block_size\":%d,\"min_block_threads\":%u,\"max_block_threads\":%u,\"kernel_launches\":%u,\"launched_threads\":%llu,"
+            "\"hierarchy_cells\":%zu,\"input_seed\":314159265,\"input_multiplier\":1220703125,\"reference_workers\":%u,"
+            "\"precision\":\"fp64\",\"boundary\":\"periodic\",\"algorithm\":\"npb_mg_vcycle_v1\",\"verification\":\"full_cpu_nas_l2_v1\"",
+            c.name,c.n,n,layout.levels(),c.iterations,block,min_block[k],max_block[k],launches[k],threads[k],layout.cells,workers);
+        bench_emit_iter(names[k],0,&laps[k],params);total+=laps[k].gpu_ms;
     }
-    HIP_CHECK(hipFree(d_partial));
-
-    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
+    bench_emit_summary(total);bench_timer_destroy(&timer);
+    // Download the entire measured hierarchy, including every periodic ghost.
+    HIP_CHECK(hipMemcpy(actual.u.data(),d_u,hierarchy_bytes,hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(actual.r.data(),d_r,hierarchy_bytes,hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(actual.v.data(),d_v,v_bytes,hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(d_u));HIP_CHECK(hipFree(d_r));HIP_CHECK(hipFree(d_v));
+    HIP_CHECK(hipFree(d_a));HIP_CHECK(hipFree(d_c));HIP_CHECK(hipFree(d_norm));
+    const nas_mg::Result expected=nas_mg::reference(c,layout,workers);
+    const size_t errors=nas_mg::compare(actual,expected);
+    const bool nas_ok=nas_mg::published_l2(actual.norms[2],c);
+    fprintf(stderr,"NAS class %c L2: GPU=%.17g expected=%.17g relative_error=%.9g (%s)\n",c.name,actual.norms[2],c.l2,std::fabs(actual.norms[2]-c.l2)/c.l2,nas_ok?"PASS":"FAIL");
+    const bool ok=errors==0 && nas_ok;
+    fprintf(stderr,"%s (verified %zu hierarchy/input values and 4 norms, %zu mismatches, %u CPU workers)\n",ok?"PASS":"FAIL",2*layout.cells+actual.v.size(),errors,workers);
+    return ok?EXIT_SUCCESS:EXIT_FAILURE;
+} catch(const std::exception& error) {
+    fprintf(stderr,"FAIL: MG setup/reference/arithmetic unavailable: %s\n",error.what());return EXIT_FAILURE;
 }

@@ -27,7 +27,9 @@ SITES = {
     "heteromark_fir": [("float diff = fabsf(h_output[i]", [("output", "h_output[i]", "h_ref[i]")])],
     "heteromark_pagerank": [("float diff = fabsf(h_pr[v]", [("rank", "h_pr[v]", "refPr[v]")])],
     "lonestar_bh": [("float ref_mag = sqrtf(ref_ax[i]", [("x", "gpu_ax[i]", "ref_ax[i]"), ("y", "gpu_ay[i]", "ref_ay[i]")])],
-    "npb_cg": [("float rel_res = res_norm /", [("residual", "res_norm", "b_norm")])],
+    "npb_cg": [("const size_t errors=nas_cg::compare(actual,expected);",
+                [(name, f"actual.{name}.back()", f"expected.{name}.back()")
+                 for name in ("x", "z", "p", "q", "r", "zeta", "residual")])],
     "npb_mg": [("float rel_res = res_norm /", [("residual", "res_norm", "rhs_norm")])],
     "parboil_cutcp": [("float tol = 1e-3f * (fabsf(ref)", [("potential", "got", "ref")])],
     "parboil_sgemm": [("float diff = fabsf(h_C[i]", [("C", "h_C[i]", "h_ref[i]")])],
@@ -95,6 +97,12 @@ template<class G, class R> static void r04_inject(const char* site, G& got, R& r
 
 
 def instrument(source, sites):
+    # The production CG reference is immutable. Permit poisoning its heap
+    # elements in this isolated test copy to exercise nonfinite references too.
+    if any(anchor == "const size_t errors=nas_cg::compare(actual,expected);" for anchor, _ in sites):
+        declaration = "const nas_cg::Result expected=nas_cg::reference(matrix,c,workers);"
+        assert source.count(declaration) == 1
+        source = source.replace(declaration, declaration.replace("const ", "", 1))
     for anchor, pairs in sites:
         assert source.count(anchor) == 1, (anchor, source.count(anchor))
         pos = source.index(anchor)

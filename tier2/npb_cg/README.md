@@ -1,84 +1,125 @@
-# tier2/npb_cg — NPB Conjugate Gradient
+# NAS Conjugate Gradient (CG)
 
-Benchmarks a sparse iterative Conjugate Gradient (CG) solver from the NAS Parallel Benchmarks. Solves Ax = b where A is a synthetic sparse matrix in CSR format. Emits per-solve, per-kernel GPU times; SpMV bandwidth and solve throughput are derived downstream.
+Runs the NAS CG inverse-power benchmark in FP64 for standard classes S, W, A,
+B and C. Each process performs one complete benchmark problem and then verifies
+its measured results. The harness supplies repetition across fresh processes.
 
-## Provenance & fidelity
+## Provenance and algorithm
 
-Derived from the [NAS Parallel Benchmarks](https://www.nas.nasa.gov/software/npb.html) — the `CG` (Conjugate Gradient) kernel. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+The implementation follows [GMAP/NPB-GPU, commit
+`3f12d84920ee315ab00ef283717c1e74b68f4d00`, CUDA/CG/cg.cu](https://github.com/GMAP/NPB-GPU/blob/3f12d84920ee315ab00ef283717c1e74b68f4d00/CUDA/CG/cg.cu)
+and its `CUDA/common/c_randdp.cpp` generator. `nas_cg.h` retains the upstream
+MIT license and NAS attribution.
 
-- The matrix is a **synthetic symmetric, strictly diagonally-dominant** sparse matrix (mirrored random off-diagonals with value −1, diagonal = #off-diagonals + 1), rather than NPB's specific `makea` construction. It is genuinely SPD, so CG is well-posed. `nonzeros_per_row` sets the target **average** nonzeros per row (1 diagonal + ~`nonzeros_per_row`−1 mirrored off-diagonals). The right-hand side `b` is random, so the solution is nontrivial. (An earlier version generated non-mirrored random off-diagonals — a non-symmetric, non-SPD matrix on which CG is improper — and used `b ≡ 1`, for which `x ≡ 1` is a trivial exact solution; both have been fixed.)
+The input uses the prescribed NAS sparse outer-product matrix construction,
+46-bit `randlc` stream (seed 314159265, multiplier 1220703125, one discarded
+initial draw), `RCOND=0.1`, and the class-specific diagonal shift. Row incidence
+lists replace insertion moves during host matrix assembly while preserving
+every contribution's addition order and sorted CSR column order. Regression
+checks compare every matrix value and CSR index with the pinned `makea` code.
 
-Read this as "a Conjugate-Gradient benchmark in the spirit of NPB," not NPB's `CG`.
+Starting with `x=1`, each inverse-power iteration performs 25 inner CG iterations,
+an explicit residual SpMV and norm, two normalization dot products, the zeta
+estimate, and vector normalization. There is no convergence early exit or
+clamping of denominators. Non-finite arithmetic fails the process.
 
-## Algorithm
+The portable GPU mapping assigns one thread to each CSR row. The pinned CUDA
+mapping uses a block per row. Independent z/r updates share one launch here;
+their mathematical updates and dependencies remain unchanged. Block reductions
+produce partials that the host finishes in order, as in the selected upstream
+hybrid implementation. Host scalar calculations remain outside GPU event time.
 
-- **N×N** sparse matrix with configurable nonzeros per row (default: 7)
-- Diagonally-dominant matrix ensures convergence
-- CG iteration consists of:
-  1. **SpMV** — sparse matrix-vector multiply `Ap = A * p` (CSR format)
-  2. **Dot product** — `pAp = dot(p, Ap)` with block-level reduction
-  3. **AXPY** — `x = x + alpha * p`, `r = r - alpha * Ap`
-  4. **Dot product** — `rr_new = dot(r, r)` for convergence check
-  5. **Scale + AXPY** — direction update `p = r + beta * p`
-- One full CG solve (default: 25 iterations) is timed per execution;
-  repetition across fresh processes is the harness's job (`gpubench run --reps N`)
+The upstream preliminary CPU solve is omitted under the repository's single
+execution policy. Initialization and input upload occur before one entry warmer.
+The warmer is intended to establish entry clock/cache conditions; it is not
+proof of a particular clock or cache state. The full dependent algorithm then
+runs without additional warmers or verification between stages.
 
-## Parameters
+## Standard problem classes
 
-| Env var | Default | Description |
-|---------|---------|-------------|
-| `BENCH_PARAM_matrix_size` | 50000 | Matrix rows/columns |
-| `BENCH_PARAM_block_size` | 256 | Threads per block |
-| `BENCH_PARAM_max_cg_iterations` | 25 | CG iterations per solve |
-| `BENCH_PARAM_nonzeros_per_row` | 7 | Nonzeros per matrix row |
-| `BENCH_PARAM_vector_add_warmup` | true | Cold-cache calibration: boost the clock and evict the LLC before the timed solve; set `false` to time as-is |
+| Class | `matrix_size` | NONZER | Outer iterations | SHIFT | Published zeta |
+|---|---:|---:|---:|---:|---:|
+| S | 1400 | 7 | 15 | 10 | 8.5971775078648 |
+| W | 7000 | 8 | 15 | 12 | 10.362595087124 |
+| A (default) | 14000 | 11 | 15 | 20 | 17.130235054029 |
+| B | 75000 | 13 | 75 | 60 | 22.712745482631 |
+| C | 150000 | 15 | 75 | 110 | 28.973605592845 |
 
-## Files
+`NONZER` controls the upstream sparse generating vectors; it is not the final
+CSR row length. The emitted `matrix_nonzeros` reports the actual CSR count.
+Five scaling values are an intentional NAS class-domain exception to the usual
+dense size sweep. The former custom sparsity/iteration cross-product does not
+represent NAS CG and has been replaced with these five complete problems.
 
-| File | Description |
-|------|-------------|
-| `npb_cg.hip` | HIP/ROCm implementation |
-| `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
-| `params.json` | Parameter specification |
+| Environment variable | Default | Accepted values |
+|---|---:|---|
+| `BENCH_PARAM_matrix_size` | 14000 | The five class sizes above |
+| `BENCH_PARAM_block_size` | 256 | Power of two from 1 through 1024, within device limits |
+| `BENCH_PARAM_vector_add_warmup` | true | `true` or `false` |
 
-## Build
+The manifest collects all five classes at block size 256. `--size N` is retained
+and takes precedence over `BENCH_PARAM_matrix_size`. Integers must parse fully
+and fit a signed int. Unknown/missing arguments, unsupported classes and obsolete
+`BENCH_PARAM_nonzeros_per_row` or `BENCH_PARAM_max_cg_iterations` variables are
+rejected before device access. Malformed environment integers are rejected even
+when a CLI size was supplied.
 
 ```bash
-make               # auto-detect platform
-make PLATFORM=cuda
-make PLATFORM=rocm
+make PLATFORM=cuda CUDA_ARCH=sm_90  # H100
+# or: make PLATFORM=rocm
+./npb_cg                          # Class A
+./npb_cg --size 150000            # Class C
+BENCH_PARAM_matrix_size=1400 ./npb_cg
 ```
 
-## Run
+## Timing and work records
 
-```bash
-./npb_cg                                        # defaults: N=50000
-BENCH_PARAM_matrix_size=100000 ./npb_cg         # override via env
-./npb_cg --size 100000                           # override via CLI
-```
+Stdout contains six JSON kernel records and one summary. Each kernel record
+accumulates all launches of that kernel in the complete inverse-power problem.
+Per outer iteration, the counts are:
 
-## Output
+| Kernel | Launches |
+|---|---:|
+| `cg_init_kernel` | 1 |
+| `spmv_kernel` | 26 |
+| `dot_product_kernel` | 54 |
+| `axpy_kernel` | 25 |
+| `direction_kernel` | 25 |
+| `normalize_kernel` | 1 |
 
-**stdout** — JSON-lines. The single timed CG solve emits one record per kernel
-carrying that kernel's accumulated GPU event time (`time_ms`) and host
-wall-clock time (`host_time_ms`) within the solve; the summary's
-`total_time_ms` is the sum of all recorded GPU event times. Derived metrics
-(SpMV bandwidth, avg iteration time) are computed downstream:
-```json
-{"type":"kernel","name":"spmv_kernel","iter":0,"time_ms":1.234000,"host_time_ms":1.301000,"params":{"matrix_size":50000,...}}
-{"type":"kernel","name":"dot_product_kernel","iter":0,"time_ms":1.234000,"host_time_ms":1.310000,"params":{...}}
-{"type":"kernel","name":"axpy_kernel","iter":0,"time_ms":1.234000,"host_time_ms":1.298000,"params":{...}}
-{"type":"kernel","name":"scale_kernel","iter":0,"time_ms":0.412000,"host_time_ms":0.450000,"params":{...}}
-{"type":"summary","total_time_ms":29.081000}
-```
+`kernel_launches` reports the actual accumulated count, and
+`spmv_nonzero_products` is actual CSR nonzeros times SpMV launches (zero on other
+records). Descriptors include the full NAS problem, input recipe, FP64 precision,
+actual grid, reference worker count, `algorithm=npb_cg_inverse_power_v1`, and
+`verification=full_cpu_nas_zeta_v1`. These version fields distinguish this restored
+NAS workload from historical synthetic-CG records.
 
-**stderr** — human-readable timing and verification
+`time_ms` sums GPU event times. `host_time_ms` sums the corresponding timed launch
+intervals. `total_time_ms` sums the six GPU records; it excludes host reduction
+finishing, scalar calculations, transfers, setup and verification. It is not an
+end-to-end solution time. There are 1980 GPU launches for S/W/A and 9900 for B/C.
 
-## Verification
+## Verification and resources
 
-- Computes residual `||b - Ax|| / ||b||` after CG solve
-- Reports PASS if relative residual < 1.0 (coarse check — CG with few iterations may not fully converge); on FAIL the binary exits with a non-zero status
+After timing, the process downloads all five actual final vectors (`x,z,p,q,r`)
+and compares every entry, plus every retained outer zeta and residual norm, with
+a complete independent CPU recurrence. No second GPU execution supplies the
+checked result. Both values must be finite and satisfy
+`abs(actual-reference) <= 1e-10 * (1 + abs(reference))`. The final zeta must also
+meet the upstream published value within relative `1e-10`. Failure returns
+nonzero; diagnostics show up to ten numeric mismatches and count all errors.
 
-## Platform Notes
+The CPU reference preserves serial row accumulation and scalar reduction order.
+Classes S/W/A use one CPU worker. B/C use up to eight persistent row workers,
+bounded by hardware concurrency. Worker creation or allocation failure fails
+verification and cannot yield an accepted result. The benchmark requires host
+memory for complete matrix generation and the reference as well as device
+storage for CSR, five vectors and reduction partials. Matrix generation reserves
+up to `12*N*(NONZER+1)^2` bytes for CSR values/columns plus temporary input and row
+assembly storage; the Class C CSR reservation alone is 460.8 MB. The optional
+entry warmer adds its own device working set.
 
-- **CUDA/ROCm**: Uses `cudaEvent` / `hipEvent` for GPU timing; shared memory reduction for dot products
+H100 qualification covers all five declared configurations with the full
+reference under the existing 60-second per-process limit. Host core availability
+and memory contention can affect this limit. AMD hardware qualification and
+trace/capture/replay work remain deferred.

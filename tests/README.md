@@ -488,3 +488,23 @@ Each process has a 60-second budget. Use a fresh output directory; logs and the
 incremental report remain there. `--platform rocm` selects AMD;
 `--compile-only` checks the hooks without claiming GPU execution. CI runs the host
 oracles and compiles the GPU regression.
+
+## NAS CG
+
+`python3 tests/cg_host.py --compiler clang++` compares the production RNG with
+pinned floating randlc, the complete Class S matrix and trajectory with pinned
+NAS code, and serial/2-worker/8-worker references under fatal ASan/UBSan. It also
+checks every result array's finite/nonfinite failure paths, complete diagnostic
+counts, actual class/input admission and CLI precedence, and cleanup after
+partial worker creation failures. `--all-matrices` extends the exact matrix
+comparison to all five complete classes (allow substantial memory and time).
+`--thread-sanitizer` selects TSan for the reference and worker cleanup checks.
+
+`python3 tests/cg_measured_result.py --platform cuda --work-dir /tmp/cg-check`
+executes all five standard classes, extra launch sizes, 86 faults in actual
+measured vectors/history (including the last Class C vector entry and a
+12-error diagnostic-cap case), and two allocation-failure cases. It checks
+problem/work descriptors, timing sums, complete verification counts and exit
+status. Each process has a 60-second budget. Use a fresh output directory.
+`--platform rocm` selects AMD; `--compile-only` compiles the instrumentation
+without claiming GPU execution. CI runs the host tests and compiles these hooks.

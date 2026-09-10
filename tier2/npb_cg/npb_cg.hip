@@ -1,389 +1,193 @@
-// npb_cg.hip — NPB Conjugate Gradient benchmark (HIP/ROCm)
-//
-// Sparse iterative CG solver: SpMV (CSR format) + dot products + AXPY
-//
-// Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer.
-//
-// Environment variables:
-//   BENCH_PARAM_matrix_size, BENCH_PARAM_block_size,
-//   BENCH_PARAM_max_cg_iterations, BENCH_PARAM_nonzeros_per_row
-//
-// Output (stdout): per timed CG solve, one {"type":"kernel",...} JSON line per
-// kernel (spmv_kernel, dot_product_kernel, axpy_kernel, scale_kernel) carrying
-// that kernel's accumulated GPU event time and host time within the solve,
-// then a summary whose total_time_ms is the SUM of all recorded GPU event
-// times. Bandwidth metrics are derived downstream from time_ms and params.
-// Output (stderr): human-readable
-
+// NAS CG inverse-power benchmark, standard classes S/W/A/B/C.
+// Algorithm pin: GMAP/NPB-GPU 3f12d84920ee315ab00ef283717c1e74b68f4d00,
+// CUDA/CG/cg.cu. The NAS problem and CPU reference are in nas_cg.h.
 #include "../../common/bench_timing.h"
-
-#include <cstdio>
-#include <cstdlib>
+#include "nas_cg.h"
+#include <cerrno>
+#include <climits>
 #include <cstring>
-#include <cmath>
-#include <vector>
-#include <set>
+#include <cstdlib>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
-// ---------------------------------------------------------------------------
-// Kernel: Sparse Matrix-Vector Multiply (CSR format)
-// ---------------------------------------------------------------------------
-
-__global__ void spmv_kernel(
-    const int*   __restrict__ row_ptr,
-    const int*   __restrict__ col_idx,
-    const float* __restrict__ values,
-    const float* __restrict__ x,
-    float*       __restrict__ y,
-    int N)
-{
-    int row = blockIdx.x * blockDim.x + threadIdx.x;
-    if (row >= N) return;
-
-    float sum = 0.0f;
-    int start = row_ptr[row];
-    int end   = row_ptr[row + 1];
-    for (int j = start; j < end; ++j) {
-        sum += values[j] * x[col_idx[j]];
-    }
-    y[row] = sum;
+__global__ void cg_init_kernel(const double* x, double* z, double* p, double* q, double* r, int n) {
+    const int i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(i<n) { z[i]=0.0; q[i]=0.0; r[i]=x[i]; p[i]=x[i]; }
 }
-
-// ---------------------------------------------------------------------------
-// Kernel: Dot product using block-level reduction
-// ---------------------------------------------------------------------------
-
-__global__ void dot_product_kernel(
-    const float* __restrict__ a,
-    const float* __restrict__ b,
-    float*       __restrict__ partial,
-    int N)
-{
-    extern __shared__ float sdata[];
-    int tid = threadIdx.x;
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    float val = 0.0f;
-    if (idx < N) val = a[idx] * b[idx];
-    sdata[tid] = val;
+__global__ void spmv_kernel(const int* offsets, const int* columns, const double* values,
+                            const double* x, double* y, int n) {
+    const int row=blockIdx.x*blockDim.x+threadIdx.x;
+    if(row<n) {
+        double sum=0.0;
+        for(int k=offsets[row];k<offsets[row+1];++k) sum+=values[k]*x[columns[k]];
+        y[row]=sum;
+    }
+}
+__global__ void dot_product_kernel(const double* a, const double* b, double* partial, int n, bool difference) {
+    extern __shared__ double scratch[];
+    const int lane=threadIdx.x, i=blockIdx.x*blockDim.x+lane;
+    double value=0.0;
+    if(i<n) {
+        if(difference) { const double d=a[i]-b[i]; value=d*d; }
+        else value=a[i]*b[i];
+    }
+    scratch[lane]=value;
     __syncthreads();
-
-    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
-        if (tid < s) sdata[tid] += sdata[tid + s];
+    for(int stride=blockDim.x/2;stride>0;stride/=2) {
+        if(lane<stride) scratch[lane]+=scratch[lane+stride];
         __syncthreads();
     }
-
-    if (tid == 0) partial[blockIdx.x] = sdata[0];
+    if(lane==0) partial[blockIdx.x]=scratch[0];
+}
+__global__ void axpy_kernel(double alpha, const double* p, const double* q, double* z, double* r, int n) {
+    const int i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(i<n) { z[i]+=alpha*p[i]; r[i]-=alpha*q[i]; }
+}
+__global__ void direction_kernel(double beta, const double* r, double* p, int n) {
+    const int i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(i<n) p[i]=r[i]+beta*p[i];
+}
+__global__ void normalize_kernel(double inverse_norm, const double* z, double* x, int n) {
+    const int i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(i<n) x[i]=inverse_norm*z[i];
 }
 
-// ---------------------------------------------------------------------------
-// Kernel: AXPY  y = alpha * x + y
-// ---------------------------------------------------------------------------
-
-__global__ void axpy_kernel(
-    float        alpha,
-    const float* __restrict__ x,
-    float*       __restrict__ y,
-    int N)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N) {
-        y[idx] = alpha * x[idx] + y[idx];
+// Host parameter admission. The legacy --size option retains its precedence
+// over BENCH_PARAM_matrix_size; both now select a complete standard NAS class.
+static int integer(const char* value) {
+    if(!value || !*value) throw std::invalid_argument("empty CG integer parameter");
+    char* end=nullptr; errno=0;
+    const long parsed=std::strtol(value,&end,10);
+    if(errno || *end || parsed<INT_MIN || parsed>INT_MAX)
+        throw std::invalid_argument("invalid CG integer parameter");
+    return static_cast<int>(parsed);
+}
+static const nas_cg::Class* parameters(int argc, char** argv, int* block) {
+    int n=14000;
+    *block=256;
+    if(const char* value=std::getenv("BENCH_PARAM_matrix_size")) n=integer(value);
+    if(const char* value=std::getenv("BENCH_PARAM_block_size")) *block=integer(value);
+    for(int i=1;i<argc;++i) {
+        if(std::strcmp(argv[i],"--size")!=0 || i+1==argc)
+            throw std::invalid_argument("expected --size followed by a NAS class size");
+        n=integer(argv[++i]);
     }
+    if(std::getenv("BENCH_PARAM_max_cg_iterations") || std::getenv("BENCH_PARAM_nonzeros_per_row"))
+        throw std::invalid_argument("obsolete CG controls: the selected NAS class fixes sparsity and iterations");
+    const auto* c=nas_cg::problem(n);
+    if(!c) throw std::invalid_argument("CG matrix_size must select NAS S/W/A/B/C: 1400,7000,14000,75000,150000");
+    if(*block<=0 || *block>1024 || (*block&(*block-1))!=0)
+        throw std::invalid_argument("CG block_size must be a power of two in 1..1024");
+    return c;
+}
+static double ratio(double numerator, double denominator) {
+    const double value=numerator/denominator;
+    if(!std::isfinite(value)) throw std::runtime_error("non-finite CG scalar or zero denominator");
+    return value;
 }
 
-// ---------------------------------------------------------------------------
-// Kernel: Scale  y = alpha * x
-// ---------------------------------------------------------------------------
+int main(int argc, char** argv) try {
+    setvbuf(stdout,nullptr,_IONBF,0);
+    int block;
+    const nas_cg::Class c=*parameters(argc,argv,&block);
+    const int n=c.n, blocks=(n+block-1)/block;
+    const size_t vector_bytes=static_cast<size_t>(n)*sizeof(double);
+    const unsigned workers=nas_cg::reference_workers(n);
+    int device=0; HIP_CHECK(hipGetDevice(&device));
+    hipDeviceProp_t prop; HIP_CHECK(hipGetDeviceProperties(&prop,device));
+    if(block>prop.maxThreadsPerBlock || block>prop.maxThreadsDim[0] || blocks>prop.maxGridSize[0] ||
+       static_cast<size_t>(block)*sizeof(double)>prop.sharedMemPerBlock)
+        throw std::invalid_argument("CG launch geometry exceeds device limits");
+    fprintf(stderr,"Device: %s (id=%d)\nNAS CG class %c: N=%d NONZER=%d NITER=%d SHIFT=%.0f, 25 inner iterations\n",
+            prop.name,device,c.name,n,c.nonzer,c.iterations,c.shift);
+    const nas_cg::Matrix matrix=nas_cg::make_matrix(c);
+    nas_cg::Result actual(c);
+    std::vector<double> partial(blocks);
+    int *d_offsets,*d_columns;
+    double *d_values,*d_x,*d_z,*d_p,*d_q,*d_r,*d_partial;
+    HIP_CHECK(hipMalloc(&d_offsets,matrix.offsets.size()*sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_columns,matrix.columns.size()*sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_values,matrix.values.size()*sizeof(double)));
+    HIP_CHECK(hipMalloc(&d_x,vector_bytes)); HIP_CHECK(hipMalloc(&d_z,vector_bytes));
+    HIP_CHECK(hipMalloc(&d_p,vector_bytes)); HIP_CHECK(hipMalloc(&d_q,vector_bytes));
+    HIP_CHECK(hipMalloc(&d_r,vector_bytes)); HIP_CHECK(hipMalloc(&d_partial,partial.size()*sizeof(double)));
+    HIP_CHECK(hipMemcpy(d_offsets,matrix.offsets.data(),matrix.offsets.size()*sizeof(int),hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_columns,matrix.columns.data(),matrix.columns.size()*sizeof(int),hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_values,matrix.values.data(),matrix.values.size()*sizeof(double),hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_x,actual.x.data(),vector_bytes,hipMemcpyHostToDevice));
 
-__global__ void scale_kernel(
-    float        alpha,
-    const float* __restrict__ x,
-    float*       __restrict__ y,
-    int N)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N) {
-        y[idx] = alpha * x[idx];
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Host helper: finish dot product
-// ---------------------------------------------------------------------------
-
-static float finish_dot(float* d_partial, int numBlocks) {
-    std::vector<float> h_partial(numBlocks);
-    HIP_CHECK(hipMemcpy(h_partial.data(), d_partial,
-                          numBlocks * sizeof(float), hipMemcpyDeviceToHost));
-    float sum = 0.0f;
-    for (int i = 0; i < numBlocks; ++i) sum += h_partial[i];
-    return sum;
-}
-
-// ---------------------------------------------------------------------------
-// Simple PRNG
-// ---------------------------------------------------------------------------
-
-static inline unsigned int lcg_rand(unsigned int* state) {
-    *state = *state * 1664525u + 1013904223u;
-    return *state;
-}
-
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
-int main(int argc, char** argv) {
-    setvbuf(stdout, NULL, _IONBF, 0);
-
-    int N              = 50000;
-    int block_size     = 256;
-    int max_cg_iters   = 25;
-    int nonzeros_per_row = 7;
-
-    const char* env_val;
-    env_val = getenv("BENCH_PARAM_matrix_size");
-    if (env_val) N = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_max_cg_iterations");
-    if (env_val) max_cg_iters = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_nonzeros_per_row");
-    if (env_val) nonzeros_per_row = atoi(env_val);
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], "--size") == 0) N = atoi(argv[i+1]);
-    }
-
-    int device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    hipDeviceProp_t prop;
-    HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
-    fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "NPB CG  |  Matrix: %d x %d  |  NNZ/row: %d  |  "
-            "CG iters: %d\n\n",
-            N, N, nonzeros_per_row, max_cg_iters);
-
-    // Generate a synthetic SYMMETRIC positive-definite sparse matrix in CSR
-    // format targeting ~nonzeros_per_row nonzeros per row (1 diagonal plus
-    // ~nonzeros_per_row-1 off-diagonals on average). CG is only valid for SPD
-    // systems, so we build a symmetric sparsity pattern — every off-diagonal
-    // (i,j) has its mirror (j,i), both = -1 — and make each row strictly
-    // diagonally dominant with a positive diagonal (diag = #off-diagonals + 1).
-    // Symmetric + strictly diagonally dominant + positive diagonal ⇒ SPD.
-    //
-    // Each undirected edge is inserted once but lands in TWO rows, so to hit an
-    // average off-degree of nonzeros_per_row-1 we generate (nonzeros_per_row-1)/2
-    // forward neighbors per row (× the mirror ≈ nonzeros_per_row-1 per row).
-    // (The previous generator placed random off-diagonals with no mirror — a
-    // non-symmetric, non-SPD matrix on which CG is improper — and inserted
-    // nnz_per_row-1 per row, which after mirroring was ~2× the declared count.)
-    int nnz_per_row  = nonzeros_per_row;
-    int fwd_per_row  = (nnz_per_row - 1) / 2;   // mirrored → ~nnz_per_row-1 off-diag/row
-    unsigned int seed = 42;
-
-    std::vector<std::set<int>> adj(N);
-    for (int i = 0; i < N; ++i) {
-        for (int k = 0; k < fwd_per_row; ++k) {
-            int col;
-            do { col = (int)(lcg_rand(&seed) % (unsigned)N); } while (col == i);
-            adj[i].insert(col);
-            adj[col].insert(i);   // mirror keeps A symmetric
-        }
-    }
-
-    std::vector<int>   h_row_ptr(N + 1);
-    std::vector<int>   h_col_idx;
-    std::vector<float> h_values;
-    std::vector<float> h_x(N);
-    std::vector<float> h_b(N);
-    h_col_idx.reserve((size_t)N * 2 * nnz_per_row);
-    h_values.reserve((size_t)N * 2 * nnz_per_row);
-
-    h_row_ptr[0] = 0;
-    for (int i = 0; i < N; ++i) {
-        int off_count = (int)adj[i].size();
-        // Diagonal first (strict diagonal dominance: > sum of |off-diagonals|).
-        h_col_idx.push_back(i);
-        h_values.push_back((float)(off_count + 1));
-        for (int col : adj[i]) {
-            h_col_idx.push_back(col);
-            h_values.push_back(-1.0f);
-        }
-        h_row_ptr[i + 1] = h_row_ptr[i] + 1 + off_count;
-    }
-    long long total_nnz = h_row_ptr[N];
-
-    // Right-hand side: random in [-1, 1] so the solution x = A^{-1} b is
-    // nontrivial. (With b ≡ 1 and this diagonal every row sums to 1, so x ≡ 1
-    // solves the system exactly — a degenerate case CG reaches immediately.)
-    for (int i = 0; i < N; ++i) {
-        h_x[i] = 0.0f;
-        h_b[i] = (float)(lcg_rand(&seed) & 0xFFFF) / 32767.5f - 1.0f;
-    }
-
-    // Device allocations
-    int *d_row_ptr, *d_col_idx;
-    float *d_values, *d_x, *d_b;
-    float *d_r, *d_p, *d_Ap;
-    float *d_partial;
-
-    size_t ptr_bytes = (N + 1) * sizeof(int);
-    size_t idx_bytes = total_nnz * sizeof(int);
-    size_t val_bytes = total_nnz * sizeof(float);
-    size_t vec_bytes = N * sizeof(float);
-
-    int gridSize  = (N + block_size - 1) / block_size;
-    int numBlocks = gridSize;
-
-    HIP_CHECK(hipMalloc(&d_row_ptr, ptr_bytes));
-    HIP_CHECK(hipMalloc(&d_col_idx, idx_bytes));
-    HIP_CHECK(hipMalloc(&d_values,  val_bytes));
-    HIP_CHECK(hipMalloc(&d_x,       vec_bytes));
-    HIP_CHECK(hipMalloc(&d_b,       vec_bytes));
-    HIP_CHECK(hipMalloc(&d_r,       vec_bytes));
-    HIP_CHECK(hipMalloc(&d_p,       vec_bytes));
-    HIP_CHECK(hipMalloc(&d_Ap,      vec_bytes));
-    HIP_CHECK(hipMalloc(&d_partial, numBlocks * sizeof(float)));
-
-    HIP_CHECK(hipMemcpy(d_row_ptr, h_row_ptr.data(), ptr_bytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_col_idx, h_col_idx.data(), idx_bytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_values,  h_values.data(),  val_bytes, hipMemcpyHostToDevice));
-
-    int smem = block_size * sizeof(float);
-
-    char params[192];
-    snprintf(params, sizeof(params),
-             "\"matrix_size\":%d,\"block_size\":%d,"
-             "\"max_cg_iterations\":%d,\"nonzeros_per_row\":%d",
-             N, block_size, max_cg_iters, nonzeros_per_row);
-
-    // Per-kernel accumulators: one CG solve launches each kernel many times;
-    // the accumulated GPU/host time within one solve becomes that solve's
-    // record for the kernel.
-    bench_timer_t timer;
-    bench_timer_create(&timer);
-    bench_lap_t acc_spmv, acc_dot, acc_axpy, acc_scale;
-
-    // One full CG solve. x, b, r, p are re-initialized at the start of every
-    // solve (untimed), so each solve runs exactly max_cg_iters identical
-    // iterations regardless of state left by earlier solves.
-    auto run_cg = [&]() {
-        bench_lap_reset(&acc_spmv);
-        bench_lap_reset(&acc_dot);
-        bench_lap_reset(&acc_axpy);
-        bench_lap_reset(&acc_scale);
-
-        HIP_CHECK(hipMemcpy(d_x, h_x.data(), vec_bytes, hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(d_b, h_b.data(), vec_bytes, hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(d_r, d_b, vec_bytes, hipMemcpyDeviceToDevice));
-        HIP_CHECK(hipMemcpy(d_p, d_r, vec_bytes, hipMemcpyDeviceToDevice));
-
-        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
-         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
-         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
-        bench_pass_warm();
-
-        bench_lap_add(&acc_dot, bench_time_op(&timer, [&]() {
-            dot_product_kernel<<<numBlocks, block_size, smem>>>(d_r, d_r, d_partial, N);
-        }));
-        float rr = finish_dot(d_partial, numBlocks);
-
-        for (int iter = 0; iter < max_cg_iters; ++iter) {
-            bench_lap_add(&acc_spmv, bench_time_op(&timer, [&]() {
-                spmv_kernel<<<gridSize, block_size>>>(d_row_ptr, d_col_idx, d_values, d_p, d_Ap, N);
-            }));
-
-            bench_lap_add(&acc_dot, bench_time_op(&timer, [&]() {
-                dot_product_kernel<<<numBlocks, block_size, smem>>>(d_p, d_Ap, d_partial, N);
-            }));
-            float pAp = finish_dot(d_partial, numBlocks);
-            float alpha = rr / fmaxf(pAp, 1e-20f);
-
-            bench_lap_add(&acc_axpy, bench_time_op(&timer, [&]() {
-                axpy_kernel<<<gridSize, block_size>>>(alpha, d_p, d_x, N);
-            }));
-            bench_lap_add(&acc_axpy, bench_time_op(&timer, [&]() {
-                axpy_kernel<<<gridSize, block_size>>>(-alpha, d_Ap, d_r, N);
-            }));
-
-            bench_lap_add(&acc_dot, bench_time_op(&timer, [&]() {
-                dot_product_kernel<<<numBlocks, block_size, smem>>>(d_r, d_r, d_partial, N);
-            }));
-            float rr_new = finish_dot(d_partial, numBlocks);
-
-            float beta = rr_new / fmaxf(rr, 1e-20f);
-            bench_lap_add(&acc_scale, bench_time_op(&timer, [&]() {
-                scale_kernel<<<gridSize, block_size>>>(beta, d_p, d_p, N);
-            }));
-
-            bench_lap_add(&acc_axpy, bench_time_op(&timer, [&]() {
-                axpy_kernel<<<gridSize, block_size>>>(1.0f, d_r, d_p, N);
-            }));
-
-            rr = rr_new;
-        }
+    enum { INIT, SPMV, DOT, AXPY, DIRECTION, NORMALIZE, KERNELS };
+    const char* names[KERNELS]={"cg_init_kernel","spmv_kernel","dot_product_kernel","axpy_kernel","direction_kernel","normalize_kernel"};
+    bench_lap_t laps[KERNELS];
+    int launches[KERNELS]={};
+    for(auto& lap:laps) bench_lap_reset(&lap);
+    bench_timer_t timer; bench_timer_create(&timer);
+    auto timed=[&](int kind, auto operation) {
+        bench_lap_add(&laps[kind],bench_time_op(&timer,operation)); ++launches[kind];
     };
-
-    // Timed solve — one record per kernel
-    run_cg();
-    double total_gpu_ms = 0.0;
-    bench_emit_iter("spmv_kernel",        0, &acc_spmv,  params);
-    bench_emit_iter("dot_product_kernel", 0, &acc_dot,   params);
-    bench_emit_iter("axpy_kernel",        0, &acc_axpy,  params);
-    bench_emit_iter("scale_kernel",       0, &acc_scale, params);
-    total_gpu_ms += acc_spmv.gpu_ms + acc_dot.gpu_ms +
-                    acc_axpy.gpu_ms + acc_scale.gpu_ms;
-    fprintf(stderr, "solve: spmv gpu = %.3f ms, dot gpu = %.3f ms, "
-            "axpy gpu = %.3f ms, scale gpu = %.3f ms\n",
-            acc_spmv.gpu_ms, acc_dot.gpu_ms,
-            acc_axpy.gpu_ms, acc_scale.gpu_ms);
-
-    bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
-
-    // Verification. The timed solve already left the solution in d_x, so we
-    // check its residual directly — no second run_cg() (which would also fire a
-    // second untimed warmer and re-solve). Repetition across processes is the
-    // harness's job.
-    bool verify_ok = true;
-    {
-        HIP_CHECK(hipDeviceSynchronize());
-
-        spmv_kernel<<<gridSize, block_size>>>(d_row_ptr, d_col_idx, d_values, d_x, d_Ap, N);
-        HIP_CHECK(hipMemcpy(d_r, d_b, vec_bytes, hipMemcpyDeviceToDevice));
-        axpy_kernel<<<gridSize, block_size>>>(-1.0f, d_Ap, d_r, N);
-
-        dot_product_kernel<<<numBlocks, block_size, smem>>>(d_r, d_r, d_partial, N);
-        float res_norm = sqrtf(finish_dot(d_partial, numBlocks));
-
-        dot_product_kernel<<<numBlocks, block_size, smem>>>(d_b, d_b, d_partial, N);
-        float b_norm = sqrtf(finish_dot(d_partial, numBlocks));
-
-        float rel_res = res_norm / fmaxf(b_norm, 1e-20f);
-        fprintf(stderr, "Residual ||b-Ax||/||b|| = %.6e\n", rel_res);
-
-        if (std::isfinite(res_norm) && std::isfinite(b_norm) &&
-            std::isfinite(rel_res) && rel_res < 1.0f) {
-            fprintf(stderr, "PASS\n");
-        } else {
-            fprintf(stderr, "FAIL: relative residual too large\n");
-            verify_ok = false;
+    auto dot=[&](const double* a,const double* b,bool difference=false) {
+        timed(DOT,[&]() { dot_product_kernel<<<blocks,block,block*sizeof(double)>>>(a,b,d_partial,n,difference); });
+        HIP_CHECK(hipMemcpy(partial.data(),d_partial,partial.size()*sizeof(double),hipMemcpyDeviceToHost));
+        double sum=0.0; for(double value:partial) sum+=value;
+        return sum;
+    };
+    auto spmv=[&](const double* x,double* y) {
+        timed(SPMV,[&]() { spmv_kernel<<<blocks,block>>>(d_offsets,d_columns,d_values,x,y,n); });
+    };
+    bench_pass_warm();
+    for(int outer=0;outer<c.iterations;++outer) {
+        timed(INIT,[&]() { cg_init_kernel<<<blocks,block>>>(d_x,d_z,d_p,d_q,d_r,n); });
+        double rho=dot(d_r,d_r);
+        for(int inner=0;inner<nas_cg::inner_iterations;++inner) {
+            spmv(d_p,d_q);
+            const double alpha=ratio(rho,dot(d_p,d_q)), previous=rho;
+            timed(AXPY,[&]() { axpy_kernel<<<blocks,block>>>(alpha,d_p,d_q,d_z,d_r,n); });
+            rho=dot(d_r,d_r);
+            const double beta=ratio(rho,previous);
+            timed(DIRECTION,[&]() { direction_kernel<<<blocks,block>>>(beta,d_r,d_p,n); });
         }
+        spmv(d_z,d_r);
+        actual.residual[outer]=std::sqrt(dot(d_x,d_r,true));
+        actual.zeta[outer]=c.shift+ratio(1.0,dot(d_x,d_z));
+        const double inverse_norm=ratio(1.0,std::sqrt(dot(d_z,d_z)));
+        timed(NORMALIZE,[&]() { normalize_kernel<<<blocks,block>>>(inverse_norm,d_z,d_x,n); });
     }
+    double total=0.0;
+    for(int kind=0;kind<KERNELS;++kind) {
+        char params[768];
+        snprintf(params,sizeof(params),
+            "\"matrix_size\":%d,\"block_size\":%d,\"num_blocks\":%d,\"actual_threads\":%d,"
+            "\"npb_class\":\"%c\",\"npb_nonzer\":%d,\"outer_iterations\":%d,\"inner_iterations\":25,"
+            "\"shift\":%.0f,\"rcond\":0.1,\"matrix_nonzeros\":%zu,\"kernel_launches\":%d,"
+            "\"spmv_nonzero_products\":%llu,\"input_seed\":314159265,\"input_multiplier\":1220703125,"
+            "\"reference_workers\":%u,\"precision\":\"fp64\",\"algorithm\":\"npb_cg_inverse_power_v1\","
+            "\"verification\":\"full_cpu_nas_zeta_v1\"",
+            n,block,blocks,blocks*block,c.name,c.nonzer,c.iterations,c.shift,matrix.values.size(),launches[kind],
+            kind==SPMV ? static_cast<unsigned long long>(matrix.values.size())*launches[kind] : 0ULL,workers);
+        bench_emit_iter(names[kind],0,&laps[kind],params); total+=laps[kind].gpu_ms;
+    }
+    bench_emit_summary(total); bench_timer_destroy(&timer);
+    fprintf(stderr,"Total GPU time: %.3f ms\n",total);
 
-    bench_timer_destroy(&timer);
-
-    HIP_CHECK(hipFree(d_row_ptr));
-    HIP_CHECK(hipFree(d_col_idx));
-    HIP_CHECK(hipFree(d_values));
-    HIP_CHECK(hipFree(d_x));
-    HIP_CHECK(hipFree(d_b));
-    HIP_CHECK(hipFree(d_r));
-    HIP_CHECK(hipFree(d_p));
-    HIP_CHECK(hipFree(d_Ap));
-    HIP_CHECK(hipFree(d_partial));
-
-    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
+    // Download every actual final vector after the complete measured algorithm.
+    HIP_CHECK(hipMemcpy(actual.x.data(),d_x,vector_bytes,hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(actual.z.data(),d_z,vector_bytes,hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(actual.p.data(),d_p,vector_bytes,hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(actual.q.data(),d_q,vector_bytes,hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(actual.r.data(),d_r,vector_bytes,hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(d_offsets)); HIP_CHECK(hipFree(d_columns)); HIP_CHECK(hipFree(d_values));
+    HIP_CHECK(hipFree(d_x)); HIP_CHECK(hipFree(d_z)); HIP_CHECK(hipFree(d_p));
+    HIP_CHECK(hipFree(d_q)); HIP_CHECK(hipFree(d_r)); HIP_CHECK(hipFree(d_partial));
+    const nas_cg::Result expected=nas_cg::reference(matrix,c,workers);
+    const size_t errors=nas_cg::compare(actual,expected);
+    const bool nas_ok=nas_cg::published_zeta(actual.zeta.back(),c);
+    fprintf(stderr,"NAS class %c zeta: GPU=%.17g expected=%.17g relative_error=%.9g (%s)\n",
+        c.name,actual.zeta.back(),c.zeta,std::fabs(actual.zeta.back()-c.zeta)/c.zeta,nas_ok?"PASS":"FAIL");
+    const bool ok=errors==0 && nas_ok;
+    fprintf(stderr,"%s (verified %zu vector values and %d outer scalars, %zu mismatches, %u CPU workers)\n",
+        ok?"PASS":"FAIL",static_cast<size_t>(5)*n,2*c.iterations,errors,workers);
+    return ok?EXIT_SUCCESS:EXIT_FAILURE;
+} catch(const std::exception& error) {
+    fprintf(stderr,"FAIL: CG setup/reference/arithmetic unavailable: %s\n",error.what());
+    return EXIT_FAILURE;
 }

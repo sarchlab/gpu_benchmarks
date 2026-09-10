@@ -30,7 +30,9 @@ SITES = {
     "npb_cg": [("const size_t errors=nas_cg::compare(actual,expected);",
                 [(name, f"actual.{name}.back()", f"expected.{name}.back()")
                  for name in ("x", "z", "p", "q", "r", "zeta", "residual")])],
-    "npb_mg": [("float rel_res = res_norm /", [("residual", "res_norm", "rhs_norm")])],
+    "npb_mg": [("const size_t errors=nas_mg::compare(actual,expected);",
+                [(name, "actual."+name+"[0]", "expected."+name+"[0]")
+                 for name in ("u", "r", "v", "norms")])],
     "parboil_cutcp": [("float tol = 1e-3f * (fabsf(ref)", [("potential", "got", "ref")])],
     "parboil_sgemm": [("float diff = fabsf(h_C[i]", [("C", "h_C[i]", "h_ref[i]")])],
     "parboil_spmv": [("float thresh = 1e-4f *", [("selftest", "got[r]", "ref[r]")]), ("float thresh = 1e-3f *", [("y", "h_y[r]", "ref[r]")])],
@@ -101,6 +103,10 @@ def instrument(source, sites):
     # elements in this isolated test copy to exercise nonfinite references too.
     if any(anchor == "const size_t errors=nas_cg::compare(actual,expected);" for anchor, _ in sites):
         declaration = "const nas_cg::Result expected=nas_cg::reference(matrix,c,workers);"
+        assert source.count(declaration) == 1
+        source = source.replace(declaration, declaration.replace("const ", "", 1))
+    if any(anchor == "const size_t errors=nas_mg::compare(actual,expected);" for anchor, _ in sites):
+        declaration = "const nas_mg::Result expected=nas_mg::reference(c,layout,workers);"
         assert source.count(declaration) == 1
         source = source.replace(declaration, declaration.replace("const ", "", 1))
     for anchor, pairs in sites:

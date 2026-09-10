@@ -23,12 +23,16 @@ def expected_kernels(kind, params):
             if k + 1 < params['n']:
                 sequence.append('gram_project')
     else:
-        levels = params['grid_size'].bit_length() - 2  # N, N/2, ..., 4
-        smooth = ['smooth_kernel'] * params['num_smooth_steps']
-        cycle = (smooth + ['residual_kernel', 'restrict_kernel', 'coarse_zero']) * (levels - 1)
-        cycle += smooth * 2
-        cycle += (['prolong_kernel'] + smooth) * (levels - 1)
-        sequence = cycle * params['num_vcycles']
+        levels = params['grid_size'].bit_length() - 1  # interior N,...,2
+        boundary = ['comm3_gpu_kernel_1','comm3_gpu_kernel_2','comm3_gpu_kernel_3']
+        residual = ['resid_gpu_kernel'] + boundary
+        smooth = ['psinv_gpu_kernel'] + boundary
+        cycle = (['rprj3_gpu_kernel'] + boundary) * (levels - 1)
+        cycle += ['coarse_zero'] + smooth
+        cycle += (['coarse_zero','interp_gpu_kernel'] + residual + smooth) * (levels - 2)
+        cycle += ['interp_gpu_kernel'] + residual + smooth + residual
+        sequence = residual + ['norm2u3_gpu_kernel'] + cycle * params['num_vcycles'] + ['norm2u3_gpu_kernel']
+
     return sequence
 
 
@@ -45,7 +49,7 @@ def check_capture(database, stdout, kind, params, warmer):
     first = names.index(expected[0])
     assert all(n == 'bench_warmer_kernel' for n in names[:first]), names
     assert bool(first) == warmer, names
-    verification = [] if kind == 'gram' else ['residual_kernel', 'norm_sq_kernel', 'norm_sq_kernel']
+    verification = []
     assert names[first:] == expected + verification, names
     timed = kernels[first:first + len(expected)]
     launches = {r[3]: r for r in runtime}
@@ -62,20 +66,29 @@ def check_capture(database, stdout, kind, params, warmer):
     # Initial setup memsets remain outside the pass; no runtime reset/copy may
     # replace or supplement the explicit algorithm kernels between event pairs.
     transfers = [r for r in runtime if 'cudaMemset' in r[0] or 'cudaMemcpy' in r[0]]
-    assert not any(events[0][1] <= r[1] <= syncs[-1][2] for r in transfers), transfers
+    between = [r for r in transfers if events[0][1] <= r[1] <= syncs[-1][2]]
+    if kind == 'gram':
+        assert not between, between
+    else:
+        # Pinned MG finishes its initial norm on the host between GPU stages.
+        assert len(between) == 1 and 'cudaMemcpy' in between[0][0], between
+        norm_index = expected.index('norm2u3_gpu_kernel')
+        assert syncs[norm_index][2] <= between[0][1] < events[2*(norm_index+1)][1]
     output = [json.loads(line) for line in stdout.splitlines() if line.startswith('{"type":')]
     records = output[:-1]
     assert output[-1]['type'] == 'summary', output
     # gram_project has a zero accumulator record even for the manual N=1 case.
     record_names = (['gram_norm_zero', 'gram_norm', 'gram_norm_finish', 'gram_normalize', 'gram_project']
                     if kind == 'gram' else
-                    ['smooth_kernel', 'restrict_kernel', 'prolong_kernel', 'residual_kernel', 'coarse_zero'])
+                    ['comm3_gpu_kernel_1','comm3_gpu_kernel_2','comm3_gpu_kernel_3','interp_gpu_kernel','norm2u3_gpu_kernel','psinv_gpu_kernel','resid_gpu_kernel','rprj3_gpu_kernel','coarse_zero'])
     assert [r['name'] for r in records] == record_names, records
     for r in records:
-        assert r['type'] == 'kernel' and r['iter'] == 0 and r['params'] == params, r
+        assert r['type'] == 'kernel' and r['iter'] == 0, r
+        assert (r['params'] == params if kind == 'gram' else
+                all(r['params'][k] == v for k,v in params.items())), r
         assert all(math.isfinite(r[k]) and r[k] >= 0 for k in ('time_ms', 'host_time_ms')), r
     total = output[-1]['total_time_ms']
-    assert math.isfinite(total) and abs(total - sum(r['time_ms'] for r in records)) <= 3.1e-6, output
+    assert math.isfinite(total) and abs(total - sum(r['time_ms'] for r in records)) <= (3.1e-6 if kind == 'gram' else 5.1e-6), output
     return dict(counts=dict(Counter(expected)), event_records=len(events),
                 verification_launches=len(verification), timed_launches=len(timed))
 
@@ -94,14 +107,14 @@ def main():
     args.work_dir.mkdir(parents=True, exist_ok=False)
     clean_env = {k: v for k, v in os.environ.items() if not k.startswith('BENCH_PARAM_')}
     cases = [('gram', dict(m=17, n=1)), ('gram', dict(m=512, n=64)),
-             ('mg', dict(grid_size=8, block_size=256, num_vcycles=2, num_smooth_steps=1)),
-             ('mg', dict(grid_size=64, block_size=256, num_vcycles=5, num_smooth_steps=3))]
+             ('mg', dict(npb_class='S', grid_size=32, block_size=256, num_vcycles=4)),
+             ('mg', dict(npb_class='W', grid_size=128, block_size=256, num_vcycles=4))]
     results = []
     for kind, params in cases:
         for warmer in (False, True):
             label = f'{kind}-{next(iter(params.values()))}-warmer-{str(warmer).lower()}'
             prefix = args.work_dir.resolve() / label
-            env = {**clean_env, **{'BENCH_PARAM_' + k: str(v) for k, v in params.items()},
+            env = {**clean_env, **{'BENCH_PARAM_' + k: str(v) for k, v in params.items() if kind != 'mg' or k in ('npb_class','block_size')},
                    'BENCH_PARAM_vector_add_warmup': str(warmer).lower()}
             try:
                 run = subprocess.run(['nsys', 'profile', '--trace=cuda', '--sample=none', '--cpuctxsw=none',

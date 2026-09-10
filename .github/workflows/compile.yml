@@ -71,6 +71,11 @@ jobs:
           python3 tests/cg_host.py --compiler g++
           python3 tests/cg_measured_result.py --platform cuda --work-dir /tmp/cg-measured --compile-only
 
+      - name: Check pinned NAS MG inputs, full hierarchy, worker cleanup and measured-result hooks
+        run: |
+          python3 tests/mg_host.py --compiler g++
+          python3 tests/mg_measured_result.py --platform cuda --work-dir /tmp/mg-measured --compile-only
+
       - name: Check GUPS stream, complete table verification and controls
         run: |
           python3 tests/gups_reference.py --compiler g++

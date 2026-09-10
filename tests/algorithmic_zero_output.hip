@@ -14,12 +14,17 @@
 #include <cstdio>
 #include <vector>
 
-static bool check_zero(int count, uint32_t poison) {
-    std::vector<uint32_t> words(count + 2, poison);
+#if defined(TEST_GRAM_ZERO)
+using Word=uint32_t; using Value=float;
+#else
+using Word=uint64_t; using Value=double;
+#endif
+static bool check_zero(int count, Word poison) {
+    std::vector<Word> words(count + 2, poison);
     words.front() = 0x5a123456u;
     words.back() = 0xdeadbeefu;
-    float* device;
-    const size_t bytes = words.size() * sizeof(uint32_t);
+    Value* device;
+    const size_t bytes = words.size() * sizeof(Word);
     HIP_CHECK(hipMalloc(&device, bytes));
     HIP_CHECK(hipMemcpy(device, words.data(), bytes, hipMemcpyHostToDevice));
 #if defined(TEST_GRAM_ZERO)
@@ -37,8 +42,8 @@ static bool check_zero(int count, uint32_t poison) {
     }
     for (int i = 1; i <= count; ++i) {
         if (words[i] != 0u) {
-            fprintf(stderr, "count=%d index=%d: expected +0, got 0x%08x\n",
-                    count, i - 1, words[i]);
+            fprintf(stderr, "count=%d index=%d: expected +0, got 0x%llx\n",
+                    count, i - 1, static_cast<unsigned long long>(words[i]));
             return false;
         }
     }
@@ -51,12 +56,17 @@ int main() {
 #else
     // Includes the largest coarse grid in the declared N=512 sweep.
     const int counts[] = {1, 2, 17, 64, 255, 256, 257, 511, 512, 513,
-                          32768, 16777216};
+                          32768, 17173512};
 #endif
-    const uint32_t poisons[] = {0x7fc12345u, 0x80000000u, 0x3f800000u, 0xff800000u};
+#if defined(TEST_GRAM_ZERO)
+    const Word poisons[] = {0x7fc12345u, 0x80000000u, 0x3f800000u, 0xff800000u};
+#else
+    const Word poisons[] = {UINT64_C(0x7ff8123456789abc), UINT64_C(0x8000000000000000),
+                            UINT64_C(0x3ff0000000000000), UINT64_C(0xfff0000000000000)};
+#endif
     int passed = 0;
     for (int count : counts) {
-        for (uint32_t poison : poisons) {
+        for (Word poison : poisons) {
             if (!check_zero(count, poison)) return 1;
             ++passed;
         }

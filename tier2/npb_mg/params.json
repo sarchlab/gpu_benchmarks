@@ -2,25 +2,23 @@
   "benchmark": "npb_mg",
   "tier": 2,
   "suite": "npb",
-  "description": "Multi-Grid solver from the NAS Parallel Benchmarks. Performs V-cycle multigrid with Jacobi smoothing, restriction, and prolongation on a synthetic 3D grid. Grid size is rounded up to the nearest power of 2. Emits per-pass kernel times; throughput is derived downstream.",
+  "description": "NAS MG standard S/W/A/B/C: FP64 periodic multigrid, pinned NAS input and V-cycle, full measured hierarchy verification and published final L2 check.",
   "scaling_param": {
-    "name": "grid_size",
-    "description": "Grid dimension N for the NxNxN 3D mesh; must be a power of 2 (8-512). Values are the distinct problems the solver actually runs (the code rounds any N up to the next power of 2, so intermediate values would be silent duplicates).",
-    "type": "int",
+    "name": "npb_class",
+    "description": "Standard NAS class; A and B share grid256 but have different iterations and smoother coefficients. Default A.",
+    "type": "enum",
     "values": [
-      8,
-      16,
-      32,
-      64,
-      128,
-      256,
-      512
+      "S",
+      "W",
+      "A",
+      "B",
+      "C"
     ]
   },
   "non_scaling_params": [
     {
       "name": "block_size",
-      "description": "Number of threads per block",
+      "description": "Power-of-two cap for row stencils and threads for norm/boundary/zero kernels, 1..1024. Restriction and interpolation retain upstream class/level-specific row widths.",
       "type": "int",
       "default": 256,
       "values": [
@@ -28,32 +26,8 @@
       ]
     },
     {
-      "name": "num_vcycles",
-      "description": "Number of V-cycles per solve",
-      "type": "int",
-      "default": 5,
-      "values": [
-        2,
-        5,
-        10,
-        20
-      ]
-    },
-    {
-      "name": "num_smooth_steps",
-      "description": "Number of Jacobi smoothing steps per level per direction",
-      "type": "int",
-      "default": 3,
-      "values": [
-        1,
-        2,
-        3,
-        5
-      ]
-    },
-    {
       "name": "vector_add_warmup",
-      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "description": "Run one vector-add warmer after setup and before the complete measured NAS algorithm. Intended entry cache/clock preparation; no guarantee of residency or clock rate.",
       "type": "enum",
       "default": "true",
       "values": [
@@ -63,10 +37,14 @@
     }
   ],
   "kernels": [
-    "smooth_kernel",
-    "restrict_kernel",
-    "prolong_kernel",
-    "residual_kernel",
+    "comm3_gpu_kernel_1",
+    "comm3_gpu_kernel_2",
+    "comm3_gpu_kernel_3",
+    "interp_gpu_kernel",
+    "norm2u3_gpu_kernel",
+    "psinv_gpu_kernel",
+    "resid_gpu_kernel",
+    "rprj3_gpu_kernel",
     "coarse_zero"
   ]
 }

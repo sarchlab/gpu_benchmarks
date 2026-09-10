@@ -25,8 +25,9 @@ and negative infinity, independently. An incorrect finite output control affects
 all compared samples so it exceeds Barnes–Hut's existing approximation allowance.
 A normal finite run must still pass. FFT checks both float and double precision;
 Parboil SpMV checks its host self-test and actual GPU result. Complex/vector
-comparisons cover each compared component independently. CG/MG injection targets
-the reduced residual and reference norms that their verifiers actually compare.
+comparisons cover each compared component independently. CG injection covers all
+five actual/reference vectors and both outer histories; MG covers the full
+hierarchy solution/residual, input and initial/final norm arrays.
 
 `python3 tests/nbody_reference.py --compiler clang++` checks the production
 N-body comparator and CPU recurrence with 59 analytic/boundary checks, plus
@@ -154,8 +155,9 @@ python3 tests/algorithmic_zero_order.py \
 ```
 
 It checks the full timed kernel sequence (including resets), individual event
-brackets, absence of algorithmic runtime memsets/copies, verification extras
-and all records/summary totals. Eight captures cover small/default cases and
+brackets, absence of algorithmic runtime memsets/copies (except the pinned MG
+host-finished initial norm transfer), and all records/summary totals. Eight
+captures cover small/reference cases and
 warmer on/off. Run with assertions enabled; optimized Python is rejected.
 Ordinary capture/export failures are recorded; timeouts or missing tools abort
 and may leave partial reports. Captures are retained. CI does not execute this
@@ -508,3 +510,21 @@ problem/work descriptors, timing sums, complete verification counts and exit
 status. Each process has a 60-second budget. Use a fresh output directory.
 `--platform rocm` selects AMD; `--compile-only` compiles the instrumentation
 without claiming GPU execution. CI runs the host tests and compiles these hooks.
+
+## NAS MG
+
+`python3 tests/mg_host.py --compiler clang++` checks the exact RNG, pinned Class S
+full hierarchy/input/norm trajectory with serial/2/8 workers, 192 corruption
+cases across every level and periodic ghost region, 54 actual admission cases,
+and partial worker creation cleanup under fatal host sanitizers. `--all-inputs`
+compares all five complete S--C inputs with original zran3; `--thread-sanitizer`
+checks the parallel reference on a supported host.
+
+`python3 tests/mg_measured_result.py --platform cuda --work-dir /tmp/mg-check`
+runs 205 cases: five standard classes, four extra launch controls, 194 faults in
+actual measured hierarchy/input/norm values (including the largest-class tail
+and a 12-error diagnostic cap), and two allocation failures. Each process has
+a 60-second limit. All records, actual launch geometry/work, full verification
+counts and exit status are checked. `--compile-only` builds the hooks without
+claiming GPU execution; CI uses it alongside the host tests. `--platform rocm`
+selects AMD, whose hardware qualification remains separate.

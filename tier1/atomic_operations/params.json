@@ -2,10 +2,10 @@
   "benchmark": "atomic_operations",
   "tier": 1,
   "suite": "microbench",
-  "description": "Measures atomic operation throughput on global memory under maximum contention (all threads targeting a single memory location). Tests atomicAdd, atomicCAS, and atomicMin. Emits per-iteration GPU event time and host time records (total = sum of kernel times); Giga-Operations/s is derived downstream.",
+  "description": "Single shared uint32 counter with fixed atomicAdd, atomicCAS or atomicMin attempts. CAS includes a value-preserving atomic read per attempt and one success-count store per thread; min retains zero. Raw times and attempted-work counts are emitted; actual results are verified.",
   "scaling_param": {
     "name": "ops_per_thread",
-    "description": "Number of atomic operations each thread performs per kernel invocation",
+    "description": "Number of selected atomic attempts per thread; CAS additionally performs one atomic read per attempt.",
     "type": "int",
     "values": [
       4,

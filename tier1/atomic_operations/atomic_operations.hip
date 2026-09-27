@@ -1,218 +1,71 @@
-/**
- * atomic_operations.hip
- *
- * HIP port of the atomic_operations microbenchmark.
- * Compiles for both AMD (ROCm hipcc) and NVIDIA (nvcc -x cu) targets.
- *
- * Microbenchmark for atomic operation throughput on global memory:
- *   - atomicAdd
- *   - atomicCAS (compare-and-swap)
- *   - atomicMin
- *
- * Strategy:
- *   All threads perform N atomic operations on a single global memory
- *   location.  This creates maximum contention and measures the hardware
- *   atomic unit throughput.  The achieved Giga-Operations/s is:
- *
- *       Gops = (num_threads * ops_per_thread) / elapsed_seconds / 1e9
- *
- * Usage:
- *   ./atomic_operations [ops_per_thread]
- *
- *   ops_per_thread  – optional number of atomic ops per thread
- *                     (default 1024).
- *
- * Environment variables (override argv):
- *   BENCH_PARAM_ops_per_thread
- *   BENCH_PARAM_num_blocks
- *   BENCH_PARAM_threads_per_block
- *   BENCH_PARAM_atomic_op   ("atomicAdd", "atomicCAS", "atomicMin")
- *   BENCH_PARAM_vector_add_warmup  (default true; clock-boost + LLC-evict
- *                                   warmer before the timed run)
- *
- * Measurement: the selected kernel is launched and timed EXACTLY ONCE per
- * process (repetition = fresh re-executions via `gpubench run --reps N`).
- * Output: one {"type":"kernel",...} JSON line carrying the GPU event time
- * and host wall-clock time for that single launch, then a summary whose
- * total_time_ms equals it. Derived metrics (Gops/s) are intentionally not
- * computed here — derive them downstream from time and the work-descriptor
- * params.
- */
-
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-
+// Single-counter, fixed-attempt atomic microbenchmark. See README.md.
 #include "../../common/bench_timing.h"
-
-// ---------------------------------------------------------------------------
-// Error-checking helper
-// ---------------------------------------------------------------------------
-
+#include "atomic_reference.h"
 #define HIP_CHECK(call) BENCH_TIMING_CHECK(call)
+static_assert(sizeof(unsigned int)==sizeof(uint32_t),"32-bit unsigned atomic counter required");
 
-// ---------------------------------------------------------------------------
-// Tuning constants (defaults)
-// ---------------------------------------------------------------------------
-
-static const int DEFAULT_OPS_PER_THREAD  = 1024;
-static const int DEFAULT_THREADS_PER_BLK = 256;
-static const int DEFAULT_NUM_BLOCKS      = 2048;
-
-// ---------------------------------------------------------------------------
-// Atomic kernels
-// ---------------------------------------------------------------------------
-
-__global__ void atomicAdd_kernel(unsigned int *counter, int ops_per_thread)
-{
-    for (int i = 0; i < ops_per_thread; ++i) {
-        atomicAdd(counter, 1u);
+__global__ void atomicAdd_kernel(unsigned int* counter,int ops) {
+    for(int i=0;i<ops;++i)atomicAdd(counter,1u);
+}
+__global__ void atomicCAS_kernel(unsigned int* counter,int ops,unsigned int* successes) {
+    unsigned int count=0;
+    for(int i=0;i<ops;++i) {
+        // A value-preserving atomic read; never mix ordinary loads with writers.
+        const unsigned int old=atomicAdd(counter,0u);
+        count+=atomicCAS(counter,old,old+1u)==old;
     }
+    successes[static_cast<size_t>(blockIdx.x)*blockDim.x+threadIdx.x]=count;
+}
+__global__ void atomicMin_kernel(unsigned int* counter,int ops) {
+    const unsigned int tid=blockIdx.x*blockDim.x+threadIdx.x;
+    for(int i=0;i<ops;++i)atomicMin(counter,tid+static_cast<unsigned int>(i));
 }
 
-__global__ void atomicCAS_kernel(unsigned int *counter, int ops_per_thread)
-{
-    for (int i = 0; i < ops_per_thread; ++i) {
-        unsigned int old = *counter;
-        atomicCAS(counter, old, old + 1);
-    }
-}
-
-__global__ void atomicMin_kernel(unsigned int *counter, int ops_per_thread)
-{
-    unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    for (int i = 0; i < ops_per_thread; ++i) {
-        atomicMin(counter, tid + (unsigned int)i);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Benchmark helper
-// ---------------------------------------------------------------------------
-
-typedef void (*KernelFunc)(unsigned int *, int);
-
-/**
- * Run a single atomic benchmark: one timed launch (preceded by the vector-add
- * warmer unless disabled). Emits one kernel JSON line and returns that
- * launch's GPU event time in ms.
- */
-static double run_benchmark(const char *kernel_name,
-                            KernelFunc kernel, unsigned int *d_counter,
-                            int ops_per_thread, int num_blocks,
-                            int threads_per_block, const char *atomic_op)
-{
-    /* Reset counter once, outside the timed region. The counter's value does
-     * not affect timing, so no further reset is needed. */
-    unsigned int zero = 0;
-    HIP_CHECK(hipMemcpy(d_counter, &zero, sizeof(unsigned int),
-                        hipMemcpyHostToDevice));
-
-    char params[192];
-    snprintf(params, sizeof(params),
-             "\"ops_per_thread\":%d,\"num_blocks\":%d,"
-             "\"threads_per_block\":%d,\"atomic_op\":\"%s\"",
-             ops_per_thread, num_blocks, threads_per_block, atomic_op);
-
-    return bench_run_once(kernel_name, params, [&]() {
-        kernel<<<dim3(num_blocks), dim3(threads_per_block)>>>(d_counter,
-                                                              ops_per_thread);
+int main(int argc,char** argv)try {
+    setvbuf(stdout,nullptr,_IOLBF,0);
+    const atomic_bench::Problem p=atomic_bench::parameters(argc,argv);
+    const bool is_cas=atomic_bench::cas(p);
+    const uint64_t num_threads=atomic_bench::threads(p),attempts=atomic_bench::attempts(p);
+    int device=0;HIP_CHECK(hipGetDevice(&device));hipDeviceProp_t prop;
+    HIP_CHECK(hipGetDeviceProperties(&prop,device));
+    if(p.block>prop.maxThreadsPerBlock || p.block>prop.maxThreadsDim[0] || p.blocks>prop.maxGridSize[0])
+        throw std::invalid_argument("atomic launch geometry exceeds device limits");
+    fprintf(stderr,"Device: %s; %s; %llu threads; %llu fixed attempts\n",prop.name,p.operation,
+            static_cast<unsigned long long>(num_threads),static_cast<unsigned long long>(attempts));
+    std::vector<uint32_t> successes(is_cas?num_threads:0);
+    unsigned int* d_counter=nullptr;unsigned int* d_successes=nullptr;
+    HIP_CHECK(hipMalloc(&d_counter,sizeof(unsigned int)));
+    if(is_cas)HIP_CHECK(hipMalloc(&d_successes,num_threads*sizeof(unsigned int)));
+    if(is_cas)HIP_CHECK(hipMemset(d_successes,0xff,num_threads*sizeof(unsigned int)));
+    unsigned int counter=0;
+    HIP_CHECK(hipMemcpy(d_counter,&counter,sizeof(counter),hipMemcpyHostToDevice));
+    // No copy or verification lies between the entry warmer and measured launch.
+    char params[1000];
+    const int written=snprintf(params,sizeof(params),
+        "\"ops_per_thread\":%d,\"num_blocks\":%d,\"threads_per_block\":%d,\"atomic_op\":\"%s\","
+        "\"num_threads\":%llu,\"attempted_operations\":%llu,\"atomic_read_operations\":%llu,"
+        "\"total_atomic_operations\":%llu,\"success_count_stores\":%llu,\"counter_bits\":32,"
+        "\"initial_counter\":0,\"workload\":\"fixed_attempts_v1\",\"verification\":\"full_counter_and_cas_counts_v1\"",
+        p.ops,p.blocks,p.block,p.operation,static_cast<unsigned long long>(num_threads),
+        static_cast<unsigned long long>(attempts),static_cast<unsigned long long>(is_cas?attempts:0),
+        static_cast<unsigned long long>(attempts*(is_cas?2:1)),static_cast<unsigned long long>(is_cas?num_threads:0));
+    if(written<0 || static_cast<size_t>(written)>=sizeof(params))throw std::runtime_error("atomic metadata overflow");
+    const char* name=is_cas?"atomicCAS_kernel":std::strcmp(p.operation,"atomicAdd")==0?"atomicAdd_kernel":"atomicMin_kernel";
+    const double elapsed=bench_run_once(name,params,[&]() {
+        if(is_cas)atomicCAS_kernel<<<p.blocks,p.block>>>(d_counter,p.ops,d_successes);
+        else if(std::strcmp(p.operation,"atomicAdd")==0)atomicAdd_kernel<<<p.blocks,p.block>>>(d_counter,p.ops);
+        else atomicMin_kernel<<<p.blocks,p.block>>>(d_counter,p.ops);
     });
-}
-
-// ---------------------------------------------------------------------------
-// main
-// ---------------------------------------------------------------------------
-
-int main(int argc, char *argv[])
-{
-    /* Line-buffer stdout so JSON lines are flushed promptly. */
-    setvbuf(stdout, NULL, _IOLBF, 0);
-
-    const char* env_val;
-
-    /* Read parameters: env vars take priority, then argv, then defaults. */
-    int ops_per_thread = DEFAULT_OPS_PER_THREAD;
-    env_val = getenv("BENCH_PARAM_ops_per_thread");
-    if (env_val) {
-        ops_per_thread = atoi(env_val);
-    } else if (argc >= 2) {
-        ops_per_thread = atoi(argv[1]);
-    }
-    if (ops_per_thread <= 0) {
-        fprintf(stderr, "Invalid ops_per_thread\n");
-        return EXIT_FAILURE;
-    }
-
-    int num_blocks = DEFAULT_NUM_BLOCKS;
-    env_val = getenv("BENCH_PARAM_num_blocks");
-    if (env_val) num_blocks = atoi(env_val);
-
-    int threads_per_block = DEFAULT_THREADS_PER_BLK;
-    env_val = getenv("BENCH_PARAM_threads_per_block");
-    if (env_val) threads_per_block = atoi(env_val);
-
-    const char* atomic_op = "atomicAdd";
-    env_val = getenv("BENCH_PARAM_atomic_op");
-    if (env_val) atomic_op = env_val;
-    if (strcmp(atomic_op, "atomicAdd") != 0 &&
-        strcmp(atomic_op, "atomicCAS") != 0 &&
-        strcmp(atomic_op, "atomicMin") != 0) {
-        fprintf(stderr, "Error: unsupported atomic_op '%s'\n", atomic_op);
-        return EXIT_FAILURE;
-    }
-
-    /* Print device information to stderr. */
-    int device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    hipDeviceProp_t prop;
-    HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
-
-    fprintf(stderr, "Device          : %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "CUs             : %d\n", prop.multiProcessorCount);
-    fprintf(stderr, "Grid            : %d blocks × %d threads = %d total threads\n",
-            num_blocks, threads_per_block,
-            num_blocks * threads_per_block);
-    fprintf(stderr, "Ops / thread    : %d\n", ops_per_thread);
-    fprintf(stderr, "Atomic op       : %s\n\n", atomic_op);
-
-    /* Allocate a single unsigned int on the device as the shared counter. */
-    unsigned int *d_counter = nullptr;
-    HIP_CHECK(hipMalloc(&d_counter, sizeof(unsigned int)));
-
-    double total_gpu_ms = 0.0;
-
-    bool run_add = (strcmp(atomic_op, "atomicAdd") == 0);
-    bool run_cas = (strcmp(atomic_op, "atomicCAS") == 0);
-    bool run_min = (strcmp(atomic_op, "atomicMin") == 0);
-
-    if (run_add) {
-        total_gpu_ms += run_benchmark("atomicAdd_kernel",
-                                      (KernelFunc)atomicAdd_kernel, d_counter,
-                                      ops_per_thread, num_blocks,
-                                      threads_per_block, atomic_op);
-    }
-
-    if (run_cas) {
-        total_gpu_ms += run_benchmark("atomicCAS_kernel",
-                                      (KernelFunc)atomicCAS_kernel, d_counter,
-                                      ops_per_thread, num_blocks,
-                                      threads_per_block, atomic_op);
-    }
-
-    if (run_min) {
-        total_gpu_ms += run_benchmark("atomicMin_kernel",
-                                      (KernelFunc)atomicMin_kernel, d_counter,
-                                      ops_per_thread, num_blocks,
-                                      threads_per_block, atomic_op);
-    }
-
-    bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time  : %.3f ms\n", total_gpu_ms);
-
-    /* Clean up. */
-    HIP_CHECK(hipFree(d_counter));
-
-    fprintf(stderr, "\nDone.\n");
-    return EXIT_SUCCESS;
+    bench_emit_summary(elapsed);
+    // Verify the actual measured counter and every thread's CAS success count.
+    HIP_CHECK(hipMemcpy(&counter,d_counter,sizeof(counter),hipMemcpyDeviceToHost));
+    if(is_cas)HIP_CHECK(hipMemcpy(successes.data(),d_successes,num_threads*sizeof(unsigned int),hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(d_counter));if(is_cas)HIP_CHECK(hipFree(d_successes));
+    const atomic_bench::Verification result=atomic_bench::verify(p,counter,successes);
+    fprintf(stderr,"%s (counter=%u; verified %zu CAS counts; successful CAS=%llu; %zu mismatches)\n",
+            result.errors?"FAIL":"PASS",counter,successes.size(),
+            static_cast<unsigned long long>(result.successes),result.errors);
+    return result.errors?1:0;
+} catch(const std::exception& e) {
+    fprintf(stderr,"FAIL: atomic setup/verification unavailable: %s\n",e.what());return 1;
 }

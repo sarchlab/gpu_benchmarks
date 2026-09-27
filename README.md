@@ -272,7 +272,7 @@ The metric column names downstream quantities. See [measurement interpretation](
 | `pcie_bandwidth` | GB/s | PCIe/Thunderbolt host-device transfer bandwidth |
 | `mixbench` | GFLOPS/GB/s | Nominal compute/logical-byte intensity sweep |
 | `shared_mem_bandwidth` | GB/s | Shared/threadgroup memory bandwidth (single SM/CU) |
-| `atomic_operations` | Gops/s | Atomic operation throughput (Add/CAS/Min) |
+| `atomic_operations` | Gattempts/s | [Fixed-attempt contended Add/CAS/Min](tier1/atomic_operations/README.md); CAS includes an atomic read and success bookkeeping |
 | `warp_shuffle` | Gops/s | Warp/SIMD shuffle issue rate (single SM/CU, dependent chain) |
 | `cache_bandwidth` | GB/s | Cache-hierarchy bandwidth vs working-set size (shared/private modes) |
 | `empty_kernel` | µs | Empty-dispatch GPU event interval and host bracket time |

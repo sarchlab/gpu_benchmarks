@@ -34,10 +34,11 @@ make PLATFORM=cuda         # nvcc; use PLATFORM=rocm for hipcc
 BENCH_PARAM_atomic_op=atomicCAS ./atomic_operations 4096
 ```
 
-`BENCH_PARAM_ops_per_thread` overrides the optional positional argument.
+`BENCH_PARAM_ops_per_thread` overrides the optional positional argument; when set,
+the positional value is ignored and is not validated.
 `BENCH_PARAM_num_blocks`, `BENCH_PARAM_threads_per_block`, and
 `BENCH_PARAM_atomic_op` override their defaults. Unknown modes, malformed/nonpositive
-integers, more than one positional argument, unsafe thread-index products, and
+effective integers, more than one positional argument, unsafe thread-index products, and
 unsupported device geometry fail before measurement. Integer parsing does not
 silently truncate or fall back. AMD hardware qualification is separate.
 

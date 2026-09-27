@@ -551,3 +551,21 @@ accepts the same `--n` and `--tsteps` controls for full-domain qualification.
 The shared `finite_verification.py --benchmark polybench_jacobi2d` additionally
 poisons the actual/reference tails of both grids. All injection is confined to
 isolated test copies. AMD and trace qualification remain separate work.
+
+## Fixed-attempt atomic operations
+
+`python3 tests/atomic_host.py --compiler clang++` exercises actual parameter
+admission and environment precedence, exact add/min counters, every CAS count's
+bounds, complete success sums and unsigned 32-bit wrap under fatal ASan/UBSan.
+The success-count oracle does not predict a concurrent GPU schedule.
+
+`python3 tests/atomic_measured_result.py --platform cuda --work-dir /tmp/atomic-check`
+builds production and isolated instrumented binaries, executes all 87 declared
+configurations and additional launch controls, and corrupts the actual counter
+and first/middle/last CAS count slots. It also injects setup/reference failures.
+All 109 cases check the effective source-level work descriptors, timing records,
+result diagnostics and failure status within a 60-second per-process limit.
+Use a fresh output directory; raw logs and an incremental report remain there.
+`--compile-only` builds the hooks without claiming GPU execution, as used by CI
+alongside the host tests. `--platform rocm` selects AMD; AMD hardware and trace
+qualification remain separate.

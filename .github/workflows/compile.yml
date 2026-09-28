@@ -90,6 +90,11 @@ jobs:
           python3 tests/fir_verification.py --host-only --compiler g++ --work-dir /tmp/fir-host
           python3 tests/fir_verification.py --platform cuda --compile-only --work-dir /tmp/fir-measured
 
+      - name: Check complete PageRank reference and compile measured-output regression
+        run: |
+          python3 tests/graph_pr_verification.py --host-only --compiler g++ --work-dir /tmp/graph-pr-host
+          python3 tests/graph_pr_verification.py --platform cuda --compile-only --work-dir /tmp/graph-pr-measured
+
       - name: Check complete CC labels and compile measured-output regression
         run: |
           python3 tests/graph_cc_verification.py --host-only --compiler g++ --work-dir /tmp/graph-cc-host

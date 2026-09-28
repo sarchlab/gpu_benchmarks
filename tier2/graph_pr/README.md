@@ -36,8 +36,10 @@ Environment variables (`BENCH_PARAM_vertices`, `BENCH_PARAM_degree`,
 
 **Generator note:** the graph is generated deterministically (fixed seed 42).
 Each vertex draws about `degree` outgoing endpoints uniformly at random —
-**self-loops and duplicate edges are permitted** and kept, so `degree` is the
-real per-vertex out-degree used for rank division. Minimum out-degree is 1,
+**self-loops and duplicate edges are permitted** and kept. Each vertex's stored
+out-degree counts every outgoing edge and is used for rank division; the
+`degree` parameter controls the random draw, rather than fixing every vertex
+to that exact degree. Minimum out-degree is 1,
 so there are no dangling nodes and the ranks form a probability distribution
 (mass-consistent). The PageRank run executes exactly once per execution;
 repetition across fresh processes is the harness's job
@@ -65,7 +67,7 @@ carrying the accumulated GPU event time (`time_ms`) and host wall-clock time
 (`host_time_ms`) of all PageRank iterations, then a `summary` whose
 `total_time_ms` equals the recorded GPU event time:
 ```
-{"type":"kernel","name":"pagerank_kernel","iter":0,"time_ms":45.123400,"host_time_ms":46.010000,"params":{"vertices":131072,"degree":16,"pr_iterations":5}}
+{"type":"kernel","name":"pagerank_kernel","iter":0,"time_ms":45.123400,"host_time_ms":46.010000,"params":{"vertices":131072,"degree":16,"pr_iterations":5,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":45.123400}
 ```
 
@@ -76,23 +78,57 @@ PageRank (pull-based)  |  Vertices: 131072  |  Edges: 2097152  |  PR iterations:
 
 pagerank_kernel gpu = 45.123 ms, host = 46.010 ms
 Total GPU time: 45.123 ms
-PASS
+Max error (131072 vertices): 1.000000e-11
+PageRank verification: PASS (131072 vertices, 0 mismatches)
 ```
 
 ## Metric
 
-**GTEPS** (Giga Traversed Edges Per Second) = `N_edges × PR_iterations / time_seconds / 1e9`
+**GTEPS** (Giga Traversed Edges Per Second) = `num_edges × pr_iterations / time_seconds / 1e9`
 
-Derived downstream from the emitted `time_ms` and params; the benchmark itself
-reports raw times only.
+Use the actual edge count printed on stderr, the `pr_iterations` parameter and
+the emitted kernel time. The benchmark itself reports raw times only.
 
 ## Verification
 
-Compares GPU PageRank values against a sequential CPU reference implementation
-for the first 1024 vertices using a scale-aware tolerance: a vertex fails if
-`|gpu - cpu| > 1e-7 + 1e-2 * max(|cpu|, 1/N)` (ranks have magnitude ~1/N, so
-an absolute tolerance would be vacuous at large N). Additionally checks mass
-conservation: the total GPU rank must satisfy `|sum - 1.0| <= 1e-3` (the
-generator guarantees min out-degree 1, so ranks form a probability
-distribution). Reports PASS if both checks hold; a FAIL makes the benchmark
-exit non-zero (after all JSON output is emitted).
+Every actual final GPU rank is compared with the complete sequential CPU
+trajectory for the same requested iteration count. There is no second GPU solve.
+Both values must be finite, and the existing local per-vertex criterion remains
+`|gpu - cpu| <= 1e-7 + 1e-2 * max(|cpu|, 1/N)`. The kernel record identifies this
+check with `verification: "full_cpu_v1"`.
+
+The independent mass check requires `|sum(gpu) - 1.0| <= 1e-3`; the generator
+has no dangling vertices. Conserving mass does not establish individual ranks:
+opposite errors in two vertices can cancel. Both checks must pass for a zero
+exit code. The diagnostic counts every vertex and mismatch, printing at most ten
+individual examples. Download, CPU computation and comparison are all untimed.
+
+The fixed `1e-7` term can dominate ranks near `1/N` for large graphs and admit
+large relative per-vertex errors. This coverage repair retains that numerical
+policy; tightening it is a separate follow-up. Complete coverage alone does not
+remove this limitation.
+
+From the repository root, using new output directories:
+
+```bash
+python3 tests/graph_pr_verification.py --host-only --work-dir /tmp/pr-host
+python3 tests/graph_pr_verification.py --platform cuda --work-dir /tmp/pr-gpu --sweep
+```
+
+Host cases use exact analytical trajectories, duplicate edges, a one-vertex
+graph with a self-loop, and total mass. GPU cases check startup and
+partial blocks, odd/even final-buffer selection, balanced errors after the former
+1024-vertex cutoff, nonfinite ranks, both warmer settings and bounded diagnostics.
+`--sweep` additionally runs all 81 declared configurations with the unmodified
+production binary and warmer enabled, requiring complete verification within
+60 seconds per process.
+
+On the NVIDIA H100 PCIe with CUDA on 2026-09-28, all 116 production/fault
+cases passed, including all 81 declared configurations. The largest case
+(8,388,608 vertices, degree 64, five iterations) completed in 46.638 seconds
+including graph generation and complete verification. Four Compute Sanitizer
+tools, eight nonfinite-reference/output checks and six native CLI/SQLite
+success/failure checks passed. The compiled PageRank kernel's complete SASS
+section is identical to the previous implementation. These shared-GPU checks
+establish correctness coverage and observed runtime budget, not publication
+performance or AMD qualification; the tolerance limitation above remains.

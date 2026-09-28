@@ -225,7 +225,8 @@ int main(int argc, char** argv) {
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"vertices\":%d,\"degree\":%d,\"pr_iterations\":%d",
+             "\"vertices\":%d,\"degree\":%d,\"pr_iterations\":%d,"
+             "\"verification\":\"full_cpu_v1\"",
              vertices, degree, pr_iterations);
 
     float base_rank = (1.0f - damping) / (float)N;
@@ -291,7 +292,6 @@ int main(int argc, char** argv) {
         std::vector<float> h_cpu_rank;
         pagerank_cpu(N, pr_iters, damping, col_offsets, row_indices, out_degree, h_cpu_rank);
 
-        int verify_n = (N < 1024) ? N : 1024;
         int errors = 0;
         float max_err = 0.0f;
         // Ranks have magnitude ~1/N, so an absolute tolerance would be
@@ -299,7 +299,7 @@ int main(int argc, char** argv) {
         // 1e-2 relative term (covers float accumulation-order differences
         // between the CPU and GPU gathers over high-degree vertices).
         const float rank_floor = 1.0f / (float)N;
-        for (int i = 0; i < verify_n; ++i) {
+        for (int i = 0; i < N; ++i) {
             float err = fabsf(h_gpu_rank[i] - h_cpu_rank[i]);
             if (err > max_err) max_err = err;
             float scale = fabsf(h_cpu_rank[i]);
@@ -313,7 +313,7 @@ int main(int argc, char** argv) {
                 errors++;
             }
         }
-        fprintf(stderr, "Max error (first %d vertices): %.6e\n", verify_n, max_err);
+        fprintf(stderr, "Max error (%d vertices): %.6e\n", N, max_err);
 
         // Mass conservation: the generator guarantees min out-degree 1 (no
         // dangling nodes), so the ranks form a probability distribution and
@@ -325,13 +325,10 @@ int main(int argc, char** argv) {
             fprintf(stderr, "Mass conservation violated: sum(rank) = %.6f\n",
                     rank_sum);
 
-        if (errors > 0 || !mass_ok) {
-            fprintf(stderr, "FAIL: %d mismatches in first %d vertices%s\n",
-                    errors, verify_n,
-                    mass_ok ? "" : ", rank mass not conserved");
-            verify_ok = false;
-        } else
-            fprintf(stderr, "PASS\n");
+        verify_ok = errors == 0 && mass_ok;
+        fprintf(stderr, "PageRank verification: %s (%d vertices, %d mismatches%s)\n",
+                verify_ok ? "PASS" : "FAIL", N, errors,
+                mass_ok ? "" : ", rank mass not conserved");
     }
 
     HIP_CHECK(hipFree(d_col_offsets));

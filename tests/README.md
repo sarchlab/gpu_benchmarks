@@ -601,3 +601,29 @@ require exact equality via `HS3D_TEST_REQUIRE_EXACT=1`. Normal production
 compilation retains FMA. This fixture requires N>=2, ambient=80 and unchanged upstream dt;
 its only kernel adaptation is an x/y guard. CI compiles it. `--platform rocm`
 and `PLATFORM=rocm` select AMD, whose hardware qualification remains deferred.
+
+## Rodinia HotSpot
+
+`python3 tests/hotspot_host.py --compiler clang++` checks all 46340 physical
+parameter sets against the frozen CUDA source, 224 independently enumerated
+padded/partial-pyramid work counts, 100 complete long-double/mixed/serial/2/8-worker
+trajectories, steady and impulse cases, finite comparisons and legacy input
+identity. It also checks 96 actual control/precedence/overflow cases and three
+partial worker-creation failures under fatal ASan/UBSan. `--all-inputs` compares
+complete inputs at all 20 declared sizes. `--thread-sanitizer` selects TSan on
+hosts that support it.
+
+`python3 tests/hotspot_measured_result.py --platform cuda --work-dir /tmp/hotspot-check`
+builds production and isolated instrumented binaries, then runs 264 cases:
+60 declared profiles, 103 small/partial/limited-timestep controls, 28 finite or
+nonfinite output faults, a diagnostic-cap and largest-tail case, four stale-buffer
+checks, four storage/reference/worker failures, and 63 actual GPU work-count
+checks. Every process has a 60-second limit; all records, work, timesteps,
+verification counts and exit statuses are checked. Use a fresh output directory.
+`--compile-only` builds the hooks without claiming GPU execution; CI uses it.
+
+`make -C tier2/rodinia_hotspot PLATFORM=cuda test` compares the entire production
+result with the frozen original CUDA kernel. `bench_output_test --grid_size N
+--total_iterations T --pyramid_height P` supports full-profile and partial-tail
+comparison. Both use the approved dt for N; the fixture kernel body is unchanged.
+AMD hardware and trace/replay qualification remain separate.

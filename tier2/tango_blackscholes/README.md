@@ -4,7 +4,20 @@ Benchmarks the Black-Scholes closed-form pricing of European call and put option
 
 ## Provenance & fidelity
 
-Faithful reproduction of the [Tango benchmark suite](https://gitlab.com/Tango-DNNbench/Tango) Black-Scholes workload: the closed-form European pricing with the Abramowitz & Stegun cumulative-normal constants is verified against the reference.
+The upstream source and revision for this implementation have not been
+established. The previously cited [Tango repository at revision
+59db699](https://gitlab.com/Tango-DNNbench/Tango/-/blob/59db69914bf5391b8f39b8b8463482794afe3956/README.md)
+describes neural-network inference workloads; it does not establish the origin
+of this Black-Scholes implementation. The former claim of a faithful Tango
+reproduction was unsupported.
+
+The `tango_blackscholes` benchmark name and `suite: "tango"` manifest value are
+retained as existing identifiers, not evidence of upstream provenance. The
+complete CPU check below verifies this repository's European call/put formula
+with its cumulative-normal approximation. Passing it does not demonstrate
+equivalence to a pinned upstream implementation. Source attribution and any
+resulting restoration remain open under [R-09 in the readiness
+tracker](https://github.com/sarchlab/gpu_benchmarks/issues/71).
 
 ## Algorithm
 

@@ -627,3 +627,31 @@ result with the frozen original CUDA kernel. `bench_output_test --grid_size N
 --total_iterations T --pyramid_height P` supports full-profile and partial-tail
 comparison. Both use the approved dt for N; the fixture kernel body is unchanged.
 AMD hardware and trace/replay qualification remain separate.
+
+## Altis CFD solver and complete results
+
+`python3 tests/cfd_host.py --compiler clang++` (or `g++`) runs independent
+geometric reconstruction for 342 tetrahedral meshes, 36 complete frozen-FP32
+versus independent-FP64 trajectories, all final auxiliary arrays, and 68 actual
+control/padding/index/precedence cases under fatal ASan/UBSan.
+Host far-field constants are compared bitwise against frozen upstream initialization
+statements; the GPU qualification below checks the actual uploaded constants too. Two mutations reject the former double-literal
+gamma rounding in boundary and initial-state energy. Separate isolated
+header copies exercise both system-error and allocation-failure paths during
+zero-worker and partial-worker creation, retaining complete reference output.
+
+`python3 tests/cfd_measured_result.py --platform cuda --work-dir /tmp/cfd-check`
+builds clean production and isolated instrumented binaries. It checks every
+declared size, nonstandard and partial blocks, actual finite/NaN/Inf faults in
+all final and auxiliary buffers, padding and largest tails, capped diagnostics,
+omitted solver stages, and setup/reference failure. Each process has a 60-second
+limit and preserves its output. Use a fresh directory. CI uses `--compile-only`.
+
+`make -C tier2/altis_cfd PLATFORM=cuda test` compares every stage with frozen
+Altis revision `042e2926d1fe9a5ea5b3e2d659b75bf925b152cc` kernels. The
+`bench_output_test --size N --block_size B` binary also supports full-size
+comparisons; all 10 copies, 10 step-factor buffers, 30 flux buffers and 30 state
+updates are compared exactly, including padded cells. The owner-approved
+synthetic tetrahedral input is shared with the original solver for this test;
+no upstream random-dataset equivalence is claimed. Qualification downloads do
+not occur in the measured production run. AMD and trace work remain separate.

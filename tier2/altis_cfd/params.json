@@ -2,7 +2,7 @@
   "benchmark": "altis_cfd",
   "tier": 2,
   "suite": "altis",
-  "description": "Compressible Euler equations solver on synthetic unstructured mesh. Finite-volume method with 2-stage Runge-Kutta time integration. Each thread processes one mesh cell.",
+  "description": "Pinned Altis Euler solver: 10 timesteps, per-cell step factors, 3 flux/update Runge-Kutta stages and old-state copies. Uses a documented synthetic tetrahedral mesh with perturbed flow; full final and auxiliary results verified.",
   "scaling_param": {
     "name": "size",
     "description": "Number of mesh cells",
@@ -59,6 +59,8 @@
     }
   ],
   "kernels": [
+    "copy_variables_kernel",
+    "compute_step_factor_kernel",
     "compute_flux_kernel",
     "rk_update_kernel"
   ]

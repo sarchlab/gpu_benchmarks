@@ -166,6 +166,11 @@ profile and the raw results together. The collection workspaces are for running
 the copied binary; regenerate qualification when changing the binary, source,
 compiler, GPU or workload. The general harness still has no built-in profile
 filter. Whole-suite profile selection and provenance remain separate work.
+CI checks this committed profile's current source hashes and candidate coverage.
+Changes to benchmark inputs or any of the three shared headers require fresh
+H100 qualification; updating hashes alone is not requalification. Run
+`python3 tests/h100_profile_identity.py --benchmark cuda_nbody` from the repository
+to check the source/configuration identity without a GPU.
 
 Regression commands:
 

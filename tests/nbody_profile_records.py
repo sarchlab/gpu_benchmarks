@@ -3,10 +3,13 @@
 import copy
 import json
 import math
+from pathlib import Path
+from h100_profile_identity import check_profile
 from nbody_h100_profile import classify_completed
 
 
 def main():
+    check_profile(Path(__file__).resolve().parents[1], 'cuda_nbody')
     kernel=dict(type='kernel',name='nbody_kernel',iter=0,time_ms=1.5,host_time_ms=2.0,
                 params=dict(bodies=256,timesteps=10,verification='full_cpu_v1'))
     summary=dict(type='summary',total_time_ms=1.5)

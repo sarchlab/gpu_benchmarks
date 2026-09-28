@@ -73,7 +73,7 @@ Application benchmarks use realistic kernels drawn from scientific computing, im
 |---|-------------------|--------|-------------|------------|----------|
 | **SHOC (Scalable HeterOgeneous Computing)** | | | | | |
 | 1 | SHOC — BusSpeedDownload/Upload | github.com/vetter/shoc | PCIe transfer bandwidth | Low | **High** |
-| 2 | SHOC — DeviceMemory | SHOC | Global memory bandwidth (read, write, read-write) | Low | **High** |
+| 2 | SHOC — DeviceMemory (not selected) | SHOC | Memory microbenchmark; excluded from this repository's application workloads | Low | Excluded |
 | 3 | SHOC — MaxFlops | SHOC | Peak FLOPS (SP/DP) | Low | **High** |
 | 4 | SHOC — FFT | SHOC | Fast Fourier Transform | Medium | **High** |
 | 5 | SHOC — GEMM | SHOC | Dense matrix multiplication | Medium | **High** |

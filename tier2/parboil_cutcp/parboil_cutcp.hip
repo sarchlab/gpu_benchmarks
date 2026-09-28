@@ -1,11 +1,12 @@
 // parboil_cutcp.hip — faithful port of Parboil cutcp:
-// the device kernel (cuda_cutoff_potential_lattice6overlap) is the original
+// the device kernel (cuda_cutoff_potential_lattice6overlap) follows the original
 // CUTOFF-BINNING kernel, and the host driver reproduces the original bin
 // construction, neighbor-list stencil, and per-z-slab region launch from
-// gpu_compute_cutoff_potential_lattice6overlap. Only the host driver is
-// restructured for the per-iteration timing harness and JSON output.
+// gpu_compute_cutoff_potential_lattice6overlap. Region metadata is thread-local
+// to remove shared write/read races; the host driver uses the timing harness
+// and JSON output.
 //
-// Provenance (verbatim kernel + host binning):
+// Provenance (kernel algorithm + host binning):
 //   parboil/benchmarks/cutcp/src/cuda/cutoff6overlap.cu
 //
 // Cutoff binning (the faithful part): atoms are geometrically hashed into a
@@ -94,7 +95,7 @@ typedef int ener_t;
 #define REGION_SIZE     512  /* number of floats in lattice region */
 
 // ---------------------------------------------------------------------------
-// Kernel — verbatim from cutoff6overlap.cu
+// Kernel — cutoff6overlap.cu with thread-local region metadata
 // ---------------------------------------------------------------------------
 __global__ static void cuda_cutoff_potential_lattice6overlap(
     int binDim_x,
@@ -108,8 +109,9 @@ __global__ static void cuda_cutoff_potential_lattice6overlap(
     )
 {
   __shared__ float AtomBinCache[BIN_CACHE_MAXLEN * BIN_DEPTH * 4];
-  __shared__ ener_t *myRegionAddr;
-  __shared__ int3 myBinIndex;
+  // Every thread computes these values; they require no shared ownership.
+  ener_t *myRegionAddr;
+  int3 myBinIndex;
 
   const int xRegionIndex = blockIdx.x;
   const int yRegionIndex = blockIdx.y;

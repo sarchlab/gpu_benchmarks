@@ -78,6 +78,16 @@ host check and compiles both GPU variants; execution requires hardware. Every
 GPU process has a 60-second budget, with raw output and source/binary hashes
 retained in the new work directory.
 
+`python3 tests/cutcp_concurrency.py --platform cuda --work-dir /tmp/cutcp-race
+--sweep` runs Compute Sanitizer against actual CUTCP kernels, evaluates the
+existing CPU potential at every lattice point in small test copies, and runs
+all 120 declared production configurations. An optional `--baseline-source`
+pre-repair `.hip` file also reproduces its two racecheck failures and compares
+seven complete baseline/current lattices. These test-only full comparisons do
+not expand the production verifier's 64-point coverage. CI compiles the variants;
+runtime checks require a CUDA GPU, retain hashes/logs and enforce 60 seconds per
+process. Temporary full-array dumps are removed after comparison.
+
 `python3 tests/aes_verification.py --host-only --work-dir /tmp/aes-host` checks
 the unchanged CPU cipher and key expansion against all four NIST SP 800-38A
 F.1.5 AES-256 vectors, with fatal sanitizers and buffer/key guards. Use

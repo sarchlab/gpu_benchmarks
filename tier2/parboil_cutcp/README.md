@@ -1,9 +1,10 @@
 # tier2/parboil_cutcp — Coulombic Potential with Cutoff (Parboil, cutoff binning)
 
 Faithful port of the Parboil **CUTCP** benchmark: the device kernel
-`cuda_cutoff_potential_lattice6overlap` and the host bin-construction driver are
-the original (`parboil/benchmarks/cutcp/src/cuda/cutoff6overlap.cu`). Only the
-host driver is restructured for the single-run timing harness and JSON output.
+`cuda_cutoff_potential_lattice6overlap` and the host bin-construction driver
+follow `parboil/benchmarks/cutcp/src/cuda/cutoff6overlap.cu`. The local kernel
+uses thread-local region metadata to remove shared write/read races; the host
+driver is restructured for the single-run timing harness and JSON output.
 
 ## Provenance & fidelity
 
@@ -33,6 +34,14 @@ Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parbo
   before measurement** rather than silently dropping atoms (issue #63, C-02).
   See the bin-capacity section below.
 - Synthetic atoms are generated in-process (no `.pdb`/dataset file).
+- `myRegionAddr` and `myBinIndex` are thread-local. The
+  [pinned Parboil source](https://github.com/abduld/Parboil/blob/a4c63da28f45699e9a274cbc49af3e067162aa2b/benchmarks/cutcp/src/cuda/cutoff6overlap.cu)
+  declares them shared and has every thread write them; bin-index reads can
+  occur before a barrier. Identical intended values do not make these accesses
+  race-free. Each thread now computes its own metadata. `AtomBinCache`, its
+  cooperative loads/barriers, neighbor order, potential arithmetic and launch
+  geometry are unchanged. Recollect timings because generated GPU instructions
+  can change after this correctness repair.
 
 ### Bin-capacity constraint on `num_atoms` × `lattice_dim`
 
@@ -69,9 +78,10 @@ cold-cache at a boosted clock. Repetition = `gpubench run --reps N`.
 | `BENCH_PARAM_cutoff_radius` | Interaction cutoff (Å) | 12.0 |
 | `BENCH_PARAM_vector_add_warmup` | Cold-cache clock warmer on/off | true |
 
-`grid_spacing` is fixed at 0.5 by the neighbor-list branch condition
-(`BIN_LENGTH/(8h)` must be integral). `block_size` is not tunable — the region
-scheme fixes it at `8×2×8` (compile-time).
+The declared sweep fixes `grid_spacing` at 0.5, selecting the integral
+`BIN_LENGTH/(8h)` neighbor-list branch. Other manually supplied spacings follow
+the driver's existing branch/limit checks. `block_size` is not tunable — the
+region scheme fixes it at `8×2×8` (compile-time).
 
 ## Build / Run
 
@@ -106,3 +116,30 @@ bin-overflow rejection, the process exits non-zero.
 
 Derived metrics (e.g. Ginteractions/sec) are computed downstream from `time_ms`
 and params.
+
+## Ownership regression
+
+From the repository root, using a new output directory:
+
+```bash
+python3 tests/cutcp_concurrency.py --platform cuda --work-dir /tmp/cutcp-race --sweep
+```
+
+This runs the actual kernel under Compute Sanitizer, compares every small-case
+lattice point with the existing CPU potential in an isolated test copy, and
+checks all 120 declared production configurations. Supply `--baseline-source`
+with a pre-repair `parboil_cutcp.hip` to additionally reproduce the old shared
+access races and compare seven complete baseline/current output lattices.
+
+The production verifier still checks only 64 lattice points. Complete ordinary
+run verification remains a separate repair; passing this ownership regression
+does not close that coverage gap.
+
+On the NVIDIA H100 PCIe with CUDA on 2026-09-28, all 157 checks passed with a
+pre-repair baseline supplied. Two old racecheck cases return error91; the
+repaired kernel has three clean racecheck runs and clean memcheck, initcheck
+and synccheck runs. Eight small cases check every lattice point, and seven
+complete output lattices are bit-identical to baseline. All 120 declared
+production configurations pass; the maximum process time is 0.4991 seconds
+with the existing sampled verifier. These are shared-GPU correctness/budget
+checks, not publication performance or AMD qualification.

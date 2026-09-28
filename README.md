@@ -327,7 +327,7 @@ The metric column names downstream quantities. See [measurement interpretation](
 | CUDA SDK Extended | `cuda_nbody` | N-body gravitational simulation |
 | CUDA SDK Extended | `cuda_convolution_separable` | Separable 2D convolution |
 | CUDA SDK Extended | `cuda_scan_large` | Work-efficient parallel prefix sum |
-| Tango | `tango_blackscholes` | Black-Scholes option pricing |
+| [Unresolved attribution](tier2/tango_blackscholes/README.md#provenance--fidelity) | `tango_blackscholes` | Black-Scholes option pricing (legacy Tango identifier) |
 | Tango | `tango_binomial_options` | Binomial option pricing |
 | NPB-GPU | `npb_ep` | Embarrassingly Parallel (EP) |
 | NPB-GPU | `npb_is` | Integer Sort (IS) |

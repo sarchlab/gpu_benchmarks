@@ -3,7 +3,7 @@
 // Computes connected components on a random undirected sparse graph using
 // iterative label propagation. The graph is stored in CSR format. Each vertex
 // starts with its own ID as label and iteratively updates to the minimum label
-// among itself and its neighbors until convergence.
+// among itself and its neighbors until convergence or the iteration cap.
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
@@ -14,7 +14,7 @@
 // Output (stdout): for the single timed run, one {"type":"kernel",...} JSON
 // line for cc_propagate_kernel carrying the accumulated GPU event time
 // (time_ms) and host time (host_time_ms) of all label-propagation iterations
-// until convergence, then a summary whose total_time_ms is the SUM of all
+// until convergence or the cap, then a summary whose total_time_ms is the SUM of all
 // recorded GPU event times. MTEPS is derived downstream from time_ms and params.
 // Output (stderr): human-readable results
 
@@ -163,7 +163,12 @@ static void cc_cpu(int N, int max_iters,
 // the accumulated GPU/host time of all iterations lands in *acc.
 // ---------------------------------------------------------------------------
 
-static int run_cc_gpu(int N, int max_iters, int block_size,
+struct cc_run_result {
+    int iterations_performed;
+    bool converged;
+};
+
+static cc_run_result run_cc_gpu(int N, int max_iters, int block_size,
                       int* d_row_offsets, int* d_col_indices,
                       int* d_labels, int* d_labels_scratch, int* d_changed,
                       bench_timer_t* timer, bench_lap_t* acc) {
@@ -208,7 +213,9 @@ static int run_cc_gpu(int N, int max_iters, int block_size,
         HIP_CHECK(hipMemcpy(d_labels, cur, N * sizeof(int), hipMemcpyDeviceToDevice));
     }
 
-    return iters_done;
+    // Convergence is observed only by an executed no-change iteration. Merely
+    // reaching the cap (even at a fixed point) does not establish that result.
+    return {iters_done, iters_done > 0 && h_changed == 0};
 }
 
 // ---------------------------------------------------------------------------
@@ -264,12 +271,6 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(d_row_offsets, row_offsets.data(), (N + 1) * sizeof(int), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_col_indices, col_indices.data(), num_edges * sizeof(int), hipMemcpyHostToDevice));
 
-    char params[192];
-    snprintf(params, sizeof(params),
-             "\"num_vertices\":%d,\"avg_degree\":%d,\"max_iterations\":%d,"
-             "\"block_size\":%d,\"verification\":\"full_cpu_v1\"",
-             num_vertices, avg_degree, max_iterations, block_size);
-
     bench_timer_t timer;
     bench_timer_create(&timer);
     bench_lap_t acc;
@@ -278,13 +279,21 @@ int main(int argc, char** argv) {
     // Timed pass — one record with the accumulated kernel time
     // -------------------------------------------------------------------
     double total_gpu_ms = 0.0;
-    int cc_iters = run_cc_gpu(N, max_iterations, block_size,
+    cc_run_result result = run_cc_gpu(N, max_iterations, block_size,
                               d_row_offsets, d_col_indices, d_labels, d_labels2,
                               d_changed, &timer, &acc);
+    char params[256];
+    snprintf(params, sizeof(params),
+             "\"num_vertices\":%d,\"avg_degree\":%d,\"max_iterations\":%d,"
+             "\"block_size\":%d,\"verification\":\"full_cpu_v1\","
+             "\"iterations_performed\":%d,\"converged\":%s",
+             num_vertices, avg_degree, max_iterations, block_size,
+             result.iterations_performed, result.converged ? "true" : "false");
     bench_emit_iter("cc_propagate_kernel", 0, &acc, params);
     total_gpu_ms += acc.gpu_ms;
-    fprintf(stderr, "gpu = %.3f ms, host = %.3f ms (%d CC iterations)\n",
-            acc.gpu_ms, acc.host_ms, cc_iters);
+    fprintf(stderr, "gpu = %.3f ms, host = %.3f ms (%d CC iterations) %s\n",
+            acc.gpu_ms, acc.host_ms, result.iterations_performed,
+            result.converged ? "converged" : "iteration cap reached");
 
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);

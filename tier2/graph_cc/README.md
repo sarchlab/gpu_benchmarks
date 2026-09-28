@@ -74,7 +74,7 @@ Connected Components (label propagation)  |  Vertices: 100000  |  Edges: 3186470
 
 gpu = 15.234 ms, host = 16.001 ms (12 CC iterations)
 Total GPU time: 15.234 ms
-PASS
+CC verification: PASS (100000 vertices, 0 mismatches)
 ```
 
 ## Metrics (derived downstream)
@@ -85,5 +85,36 @@ Derived downstream from `time_ms` and params — not reported by the binary:
 
 ## Verification
 
-Compares GPU labels against a sequential CPU reference implementation for
-the first 1024 vertices. Reports PASS if all labels match exactly; on FAIL the binary exits with a non-zero status.
+After timing, every actual GPU label is compared exactly with the complete CPU
+Jacobi reference. Both paths stop at convergence or `max_iterations`, so this
+also verifies the defined partial trajectory when the cap is reached. A capped
+trajectory is not a claim of converged connected components. There is no second
+GPU solve. The kernel record includes `verification: "full_cpu_v1"`.
+
+The diagnostic reports all vertices and the complete mismatch count, with at
+most ten individual examples. Any mismatch returns a nonzero exit code. The
+reference, comparison and final download remain outside the timed kernels.
+
+From the repository root, using new output directories:
+
+```bash
+python3 tests/graph_cc_verification.py --host-only --work-dir /tmp/cc-host
+python3 tests/graph_cc_verification.py --platform cuda --work-dir /tmp/cc-gpu --sweep
+```
+
+The host test checks the production CPU routine against exact trajectories on a
+path, a disconnected pair and an isolated vertex. GPU cases cover odd/even caps,
+early convergence, wrong final-buffer selection, corruption past the old 1024
+label cutoff and bounded diagnostics. `--sweep` additionally executes all 69
+declared configurations with the unmodified production binary and warmer enabled,
+requiring complete verification within 60 seconds per process. These checks
+provide correctness and observed process-budget evidence, not publication
+performance or AMD qualification. The separately tracked concurrent plain writes
+to the GPU convergence flag remain a correctness follow-up.
+
+H100 PCIe / CUDA 12.9 validation on 2026-09-28 passed all 69 configurations and
+95 production/fault cases. The largest case verified all 1,000,000 labels; the
+slowest whole process took 9.831 seconds. Clang/GCC fatal host sanitizers, four
+GPU tools and six native CLI/SQLite outcomes passed. These tool results do not
+establish race freedom for the separately tracked global flag. The shared GPU's
+timings are correctness-budget evidence, not publication performance results.

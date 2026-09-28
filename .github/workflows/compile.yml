@@ -85,6 +85,11 @@ jobs:
           python3 tests/shoc_spmv_verification.py --host-only --compiler g++ --work-dir /tmp/shoc-spmv-host
           python3 tests/shoc_spmv_verification.py --platform cuda --compile-only --work-dir /tmp/shoc-spmv-measured
 
+      - name: Check complete CC labels and compile measured-output regression
+        run: |
+          python3 tests/graph_cc_verification.py --host-only --compiler g++ --work-dir /tmp/graph-cc-host
+          python3 tests/graph_cc_verification.py --platform cuda --compile-only --work-dir /tmp/graph-cc-measured
+
       - name: Check pinned CFD solver, mesh geometry and measured-result hooks
         run: |
           python3 tests/cfd_host.py --compiler g++

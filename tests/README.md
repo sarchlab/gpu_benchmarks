@@ -68,6 +68,16 @@ manifest combinations. Every GPU process must finish within 60 seconds. CI
 compiles these GPU tests; their execution requires a GPU. Raw output, source and
 binary hashes and per-case outcomes remain in the new work directory.
 
+`python3 tests/graph_cc_verification.py --host-only --work-dir /tmp/cc-host`
+checks the production CPU label propagation against exact capped and converged
+trajectories, including disconnected and isolated vertices. Use `--platform cuda
+--work-dir /tmp/cc-gpu --sweep` for actual device-label faults, odd-step final-buffer
+faults and all 69 production configurations. CPU and GPU use the same existing
+Jacobi termination rule; the regression does not silently replace capped runs
+with converged answers. CI runs the fatal-sanitizer host check and compiles the
+GPU tests. GPU execution requires hardware; each test process has a 60-second
+budget and retained raw output and source/binary hashes.
+
 `python3 tests/parboil_spmv_controls.py --compiler clang++` checks SpMV’s
 resolved seed, requested/effective launch geometry and JSON identity without a
 GPU. Its 72 cases cover CLI/environment precedence and simulated device

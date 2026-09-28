@@ -17,7 +17,14 @@ update denominators 4, 3 and 2. The timestep count is the upstream constant 10.
 The old-state device copy is an explicit timed kernel, as required by this
 repository's measurement protocol. Copy and step-factor calculation run in one
 stream; the upstream driver can overlap these independent operations on two
-streams. No defining computation has been removed or moved to the CPU.
+streams. All defining solver steps remain on the GPU.
+
+For setup, upstream uses a GPU kernel to fill uniform far-field state and
+preinitializes its auxiliary buffers. Under the approved input exception below,
+this port instead generates perturbed initial state on the host and uploads it
+before the entry warmer. Auxiliary buffers are completely written by the first
+copy, step-factor or flux launch before any read; their overwritten setup fills
+are omitted. These setup differences are outside the measured trajectory.
 
 **The dataset is intentionally different from upstream.** The owner approved
 this exception on 2026-09-28: use a valid, reproducible synthetic mesh and

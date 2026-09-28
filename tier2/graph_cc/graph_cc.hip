@@ -116,7 +116,9 @@ __global__ void cc_propagate_kernel(const int* __restrict__ row_offsets,
 
     labels_out[v] = new_label;      // always write — Jacobi update
     if (new_label < my_label) {
-        *changed = 1;
+        // Writers in different blocks share this flag. The host reads it
+        // only after the kernel completes; device-scope atomicity suffices.
+        atomicExch(changed, 1);
     }
 }
 

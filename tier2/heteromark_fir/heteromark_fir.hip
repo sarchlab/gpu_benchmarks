@@ -1,7 +1,8 @@
 // heteromark_fir.hip — HeteroMark FIR filter benchmark (HIP)
 //
 // 1D FIR (Finite Impulse Response) convolution:
-//   output[i] = sum(coeff[k] * input[i - k]) for k = 0..NUM_TAPS-1
+//   output[i] = sum(coeff[k] * input[i - k]) for k = 0..num_taps-1,
+//   with zero input history for i-k < 0.
 //
 // Each thread computes one output sample. Filter coefficients are loaded
 // into shared memory for performance.
@@ -198,7 +199,8 @@ int main(int argc, char** argv) {
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"num_taps\":%d,\"block_size\":%d",
+             "\"size\":%d,\"num_taps\":%d,\"block_size\":%d,"
+             "\"verification\":\"full_cpu_v1\"",
              size, num_taps, block_size);
 
     // Single timed launch (bench_run_once). The kernel reads immutable
@@ -213,18 +215,17 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
-    // Verification (compare first 1024 samples with CPU reference)
+    // Verification of every actual output from the measured launch
     // -------------------------------------------------------------------
     bool verify_ok = true;
     {
-        int verify_n = (N < 1024) ? N : 1024;
         HIP_CHECK(hipMemcpy(h_output, d_output, output_bytes, hipMemcpyDeviceToHost));
 
         float* h_ref = (float*)malloc(output_bytes);
-        fir_cpu(h_input, h_ref, h_coeff, verify_n, taps);
+        fir_cpu(h_input, h_ref, h_coeff, N, taps);
 
         int errors = 0;
-        for (int i = 0; i < verify_n; ++i) {
+        for (int i = 0; i < N; ++i) {
             float diff = fabsf(h_output[i] - h_ref[i]);
             float tol = 1e-4f * fabsf(h_ref[i]) + 1e-6f;
             if (!std::isfinite(h_output[i]) || !std::isfinite(h_ref[i]) ||
@@ -236,13 +237,9 @@ int main(int argc, char** argv) {
                 errors++;
             }
         }
-        if (errors > 0) {
-            fprintf(stderr, "FAIL: %d errors in first %d samples\n",
-                    errors, verify_n);
-            verify_ok = false;
-        } else {
-            fprintf(stderr, "PASS\n");
-        }
+        verify_ok = errors == 0;
+        fprintf(stderr, "FIR verification: %s (%d samples, %d mismatches)\n",
+                verify_ok ? "PASS" : "FAIL", N, errors);
 
         free(h_ref);
     }

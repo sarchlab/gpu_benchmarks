@@ -68,6 +68,16 @@ manifest combinations. Every GPU process must finish within 60 seconds. CI
 compiles these GPU tests; their execution requires a GPU. Raw output, source and
 binary hashes and per-case outcomes remain in the new work directory.
 
+`python3 tests/fir_verification.py --host-only --work-dir /tmp/fir-host`
+checks the production CPU FIR against exact startup and signed-coefficient cases,
+complete impulse responses beyond the former 1024-sample cutoff, and output
+guards with fatal host sanitizers. Use `--platform cuda --work-dir /tmp/fir-gpu
+--sweep` for actual device-output finite/nonfinite faults, partial blocks, all tap
+counts, bounded diagnostics and all 108 production configurations. CI runs the
+host check and compiles both GPU variants; execution requires hardware. Every
+GPU process has a 60-second budget, with raw output and source/binary hashes
+retained in the new work directory.
+
 `python3 tests/graph_cc_verification.py --host-only --work-dir /tmp/cc-host`
 checks the production CPU label propagation against exact capped and converged
 trajectories, including disconnected and isolated vertices. Use `--platform cuda

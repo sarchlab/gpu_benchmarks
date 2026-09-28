@@ -4,7 +4,19 @@ Benchmarks a 1D FIR (Finite Impulse Response) filter on the GPU. Each thread com
 
 ## Provenance & fidelity
 
-Faithful reproduction of the [HeteroMark benchmark suite](https://github.com/NUCAR-DEV/Hetero-Mark) FIR workload.
+An independent HIP implementation of HeteroMark's causal FIR recurrence with
+zero initial history. The reference sources are the
+[upstream CPU implementation](https://github.com/NUCAR-DEV/Hetero-Mark/blob/aa685e02705f4be380cba215c6df10b42262a9cd/src/fir/fir_benchmark.cc)
+and [CUDA implementation](https://github.com/NUCAR-DEV/Hetero-Mark/blob/aa685e02705f4be380cba215c6df10b42262a9cd/src/fir/cuda/fir_cuda_benchmark.cu),
+pinned at `aa685e02705f4be380cba215c6df10b42262a9cd`.
+
+Upstream streams chunks and carries their input history between launches. This
+version filters one contiguous input in a single launch, reading earlier samples
+directly and staging coefficients in shared memory. The causal convolution and
+its scaling with samples and taps are preserved; the launch and transfer layout
+differ. The local input is `sin(0.01*i)+0.5`, with normalized `1/(k+1)`
+coefficients, rather than upstream's time-seeded random input and coefficients.
+These existing synthetic inputs remain unchanged by the verification repair.
 
 ## Algorithm
 
@@ -60,7 +72,7 @@ make PLATFORM=rocm
 
 **stdout** — JSON lines: one `{"type":"kernel",...}` record (`iter:0`) carrying the GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`), then a summary whose `total_time_ms` is the sum of all recorded GPU event times:
 ```json
-{"type":"kernel","name":"fir_filter_kernel","iter":0,"time_ms":3.210000,"host_time_ms":3.300000,"params":{"size":1048576,"num_taps":64,"block_size":256}}
+{"type":"kernel","name":"fir_filter_kernel","iter":0,"time_ms":3.210000,"host_time_ms":3.300000,"params":{"size":1048576,"num_taps":64,"block_size":256,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":3.210000}
 ```
 
@@ -73,14 +85,43 @@ FIR filter  |  Samples: 1048576  |  Taps: 64
 
 fir_filter_kernel: gpu = 3.215 ms, host = 3.301 ms
 Total GPU time: 3.215 ms
-PASS
+FIR verification: PASS (1048576 samples, 0 mismatches)
 ```
 
 ## Verification
 
-- First 1024 output samples are compared against a CPU reference FIR implementation
-- Tolerance: relative 1e-4 + absolute 1e-6
-- Reports PASS/FAIL with mismatch details; on FAIL the process exits non-zero
+After timing, the CPU computes the complete causal FIR from the pristine input
+and coefficients. Every actual GPU output sample is compared, including startup
+history and the final partial block; no GPU rerun supplies the checked result.
+The kernel record identifies this check as `verification: "full_cpu_v1"`.
+
+The existing local acceptance criterion is retained: both values must be finite,
+and `abs(gpu-reference) <= 1e-4*abs(reference)+1e-6`. This differs from upstream's
+absolute `1e-5` check. Any mismatch returns nonzero. The diagnostic reports the
+complete sample and mismatch counts, with at most ten individual examples.
+Reference calculation, download and comparison remain outside kernel timing.
+
+From the repository root, using new output directories:
+
+```bash
+python3 tests/fir_verification.py --host-only --work-dir /tmp/fir-host
+python3 tests/fir_verification.py --platform cuda --work-dir /tmp/fir-gpu --sweep
+```
+
+The host check uses exact signed-coefficient and impulse-response examples with
+fatal sanitizers. GPU cases cover startup and partial-block boundaries, all tap
+counts, corruption before and after the former 1024-sample cutoff, nonfinite
+outputs, both warmer settings and bounded diagnostics. `--sweep` additionally
+runs all 108 declared configurations with the unmodified production binary and
+warmer enabled, requiring complete verification within 60 seconds per process.
+
+H100 PCIe / CUDA 12.9 validation on 2026-09-28 passed all 108 configurations and
+148 production/fault cases, with a maximum whole-process duration of 1.293 seconds
+while checking all 8,388,608 samples at 128 taps. Clang/GCC fatal host sanitizers,
+four GPU tools, eight existing finite-comparison cases and six native CLI/SQLite
+outcomes passed. The compiled FIR kernel instructions are unchanged. These are
+correctness and observed process-budget results on a shared GPU, not publication
+performance measurements or AMD qualification.
 
 ## Platform Notes
 

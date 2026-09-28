@@ -67,10 +67,10 @@ BENCH_PARAM_num_vertices=500000 BENCH_PARAM_avg_degree=8 ./graph_cc
 
 **JSON-lines to stdout:** the single timed run emits one `kernel` record with
 the accumulated GPU event time (`time_ms`) and host time (`host_time_ms`) of
-all label-propagation iterations until convergence, then a summary whose
+all label-propagation iterations until convergence or the cap, then a summary whose
 `total_time_ms` equals the recorded GPU event time:
 ```json
-{"type":"kernel","name":"cc_propagate_kernel","iter":0,"time_ms":15.234,"host_time_ms":16.001,"params":{"num_vertices":100000,...}}
+{"type":"kernel","name":"cc_propagate_kernel","iter":0,"time_ms":15.234,"host_time_ms":16.001,"params":{"num_vertices":100000,"avg_degree":16,"max_iterations":100,"block_size":256,"verification":"full_cpu_v1","iterations_performed":12,"converged":true}}
 {"type":"summary","total_time_ms":15.234}
 ```
 
@@ -79,7 +79,7 @@ all label-propagation iterations until convergence, then a summary whose
 Device: AMD Radeon RX 7900 XTX (id=0)
 Connected Components (label propagation)  |  Vertices: 100000  |  Edges: 3186470  |  ...
 
-gpu = 15.234 ms, host = 16.001 ms (12 CC iterations)
+gpu = 15.234 ms, host = 16.001 ms (12 CC iterations) converged
 Total GPU time: 15.234 ms
 CC verification: PASS (100000 vertices, 0 mismatches)
 ```
@@ -98,6 +98,15 @@ also verifies the defined partial trajectory when the cap is reached. A capped
 trajectory is not a claim of converged connected components. There is no second
 GPU solve. The kernel record includes `verification: "full_cpu_v1"`.
 
+`iterations_performed` records the number of timed propagation launches, while
+`converged` is true only if the last executed iteration observed no label
+changes. A no-change iteration at exactly `max_iterations` is converged. If the
+last allowed iteration still changed labels, `converged` is false, even if those
+new labels happen to be a fixed point. The binary does not run another iteration
+to decide. Both fields are preserved in the CLI's `kernel_results.params_json`;
+they describe the measured solve and do not by themselves prove verification
+passed. A capped trajectory can still pass the complete CPU comparison.
+
 The diagnostic reports all vertices and the complete mismatch count, with at
 most ten individual examples. Any mismatch returns a nonzero exit code. The
 reference, comparison and final download remain outside the timed kernels.
@@ -111,7 +120,8 @@ python3 tests/graph_cc_verification.py --platform cuda --work-dir /tmp/cc-gpu --
 
 The host test checks the production CPU routine against exact trajectories on a
 path, a disconnected pair and an isolated vertex. GPU cases cover odd/even caps,
-early convergence, wrong final-buffer selection, corruption past the old 1024
+early convergence, convergence detection exactly at the cap, result descriptors,
+wrong final-buffer selection, corruption past the old 1024
 label cutoff and bounded diagnostics. `--sweep` additionally executes all 69
 declared configurations with the unmodified production binary and warmer enabled,
 requiring complete verification within 60 seconds per process. These checks
@@ -119,9 +129,10 @@ provide correctness and observed process-budget evidence, not publication
 performance or AMD qualification.
 
 H100 PCIe / CUDA 12.9 validation on 2026-09-28 passed all 69 configurations and
-95 production/fault cases. The largest case verified all 1,000,000 labels; the
-slowest whole process took under 10 seconds. Clang/GCC fatal host sanitizers, four
-GPU tools and six native CLI/SQLite outcomes passed. The shared GPU's
+97 production/fault cases. The largest case verified all 1,000,000 labels; the
+slowest whole process took under 11 seconds. Clang/GCC fatal host sanitizers and
+eight native CLI/SQLite outcomes passed, including capped, converged-at-cap and
+failed-verification records under both warmer settings. The shared GPU's
 timings are correctness-budget evidence, not publication performance results.
-After the atomic-flag repair, all 95 cases passed again with identical iteration
-counts, and the production H100 instructions contain the global atomic exchange.
+The descriptor addition preserves the atomic-flag repair's compiled GPU kernel
+instructions and all 95 common cases' iteration counts.

@@ -122,7 +122,9 @@ def main():
     cases += [("faults",2049,16,100,"false",False,"one",i,1,None) for i in (0,1023,1024,1536,2048)]
     cases += [("faults",2049,16,100,"false",False,"many",1024,12,None)]
     cases += [("faults",9,4,t,"false",True,"old",0,errors,t) for t,errors in ((1,6),(3,3),(5,1))]
-    cases += [("faults",9,4,100,"true",True,None,0,0,6),
+    cases += [("faults",9,4,5,"true",True,None,0,0,5),
+              ("faults",9,4,6,"true",True,None,0,0,6),
+              ("faults",9,4,100,"true",True,None,0,0,6),
               ("faults",2049,16,100,"true",False,"one",2048,1,None)]
     if args.sweep:
         manifest=json.loads((src/"params.json").read_text())
@@ -163,7 +165,14 @@ def main():
         try:
             k,s=[json.loads(line) for line in stdout.splitlines()]
             passed &= k['type']=='kernel' and k['name']=='cc_propagate_kernel' and k['iter']==0
-            passed &= k['params']==dict(num_vertices=n,avg_degree=degree,max_iterations=cap,block_size=256,verification='full_cpu_v1')
+            performed=k['params']['iterations_performed']
+            converged=k['params']['converged']
+            passed &= type(performed) is int and 1<=performed<=cap
+            passed &= type(converged) is bool and converged==(not fixture or cap>=6)
+            if iters is not None: passed &= performed==iters
+            passed &= f'({performed} CC iterations) '+('converged' if converged else 'iteration cap reached') in stderr
+            passed &= k['params']==dict(num_vertices=n,avg_degree=degree,max_iterations=cap,block_size=256,
+                                       verification='full_cpu_v1',iterations_performed=performed,converged=converged)
             passed &= all(math.isfinite(k[f]) and k[f]>=0 for f in ('time_ms','host_time_ms'))
             passed &= s['type']=='summary' and math.isfinite(s['total_time_ms']) and abs(s['total_time_ms']-k['time_ms'])<0.000002
         except (ValueError,KeyError,TypeError): passed=False

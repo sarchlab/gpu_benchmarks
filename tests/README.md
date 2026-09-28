@@ -627,3 +627,30 @@ result with the frozen original CUDA kernel. `bench_output_test --grid_size N
 --total_iterations T --pyramid_height P` supports full-profile and partial-tail
 comparison. Both use the approved dt for N; the fixture kernel body is unchanged.
 AMD hardware and trace/replay qualification remain separate.
+
+## Local device-memory microbenchmarks
+
+`python3 tests/devicememory_host.py --compiler clang++` checks 233 complete
+read-reference cases against independently enumerated grid-stride loops and
+materialized inputs, full write/readwrite formulas, large-index FP32 rounding,
+finite/exact comparisons, chunk offsets and 99 control/admission cases under
+fatal ASan/UBSan with `-ffp-contract=fast` to exercise FMA-capable host targets.
+GCC is also supported. On an x86 host that supports FMA, compile
+`tests/devicememory_reference.cpp` with `-O2 -std=c++14 -mfma -ffp-contract=fast`
+to exercise the same complete reference comparisons with FMA enabled explicitly.
+
+`python3 tests/devicememory_measured_result.py --platform cuda --work-dir /tmp/dm-check`
+builds clean production and isolated instrumented binaries. Its 125 cases cover
+all 63 declared configurations, ten extra block controls, actual one-ULP and
+nonfinite corruptions in each kernel, largest-output tails, chunk boundaries,
+diagnostic limits, omitted launches, and four setup/reference/reset failures.
+Each process has a 60-second limit. Metadata, complete verification counts,
+summary timing and failure statuses are asserted; raw outputs are preserved.
+Use a fresh directory. CI uses `--compile-only` without claiming GPU execution.
+
+`make -C tier2/shoc_devicememory PLATFORM=cuda test` compares every produced
+value with the frozen **local** kernels at commit
+`d589cb261621ceeb00c77c48062349e23fc2bf9c`, not SHOC upstream. The
+`bench_output_test` executable also accepts the production size/block controls
+for larger comparisons. These fixtures only rename the original functions.
+AMD hardware and trace qualification remain separate.

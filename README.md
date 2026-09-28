@@ -283,7 +283,7 @@ The metric column names downstream quantities. See [measurement interpretation](
 
 | Suite | Benchmark | Description |
 |-------|-----------|-------------|
-| SHOC | `shoc_devicememory` | Device memory read/write bandwidth |
+| SHOC (historical ID) | `shoc_devicememory` | Local global-memory read/write microbenchmarks; not the upstream SHOC DeviceMemory suite |
 | SHOC | `shoc_fft` | Fast Fourier Transform |
 | SHOC | `shoc_gemm` | Dense matrix multiplication |
 | SHOC | `shoc_reduction` | Parallel reduction |

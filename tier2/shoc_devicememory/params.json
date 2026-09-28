@@ -2,10 +2,10 @@
   "benchmark": "shoc_devicememory",
   "tier": 2,
   "suite": "shoc",
-  "description": "Device global memory bandwidth benchmark with read-only, write-only, and read-write access patterns. Emits per-iteration kernel times; bandwidth in GB/s is derived downstream.",
+  "description": "Owner-selected local global-memory read/write/readwrite microbenchmarks with ordinary device malloc and complete exact CPU verification. Historical SHOC identifier; not the full upstream SHOC DeviceMemory suite.",
   "scaling_param": {
     "name": "array_size_mb",
-    "description": "Array size in megabytes",
+    "description": "Array size in binary MiB (2^20 bytes); historical parameter name retained.",
     "type": "int",
     "values": [
       1,

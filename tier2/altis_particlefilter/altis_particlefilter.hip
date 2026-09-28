@@ -1,668 +1,86 @@
-// altis_particlefilter.hip — Altis Particle Filter benchmark (HIP)
-//
-// Sequential Importance Resampling (SIR) particle filter for Monte Carlo
-// localization on a 2D grid. Tracks an object over multiple time steps.
-//
-// Kernel 1: update particle positions (random walk)
-// Kernel 2: compute weights (Gaussian likelihood)
-// Kernel 3: resample (prefix sum + scatter)
-//
-// Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
-//
-// Usage:
-//   ./altis_particlefilter [--size N]
-//
-//   --size N         Number of particles (default: 100000)
-//
-// Environment variables (override argv):
-//   BENCH_PARAM_size
-//
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line per
-// kernel (update_particles_kernel, compute_weights_kernel, prefix_sum_kernel,
-// add_block_sums_kernel, resample_kernel) carrying that kernel's accumulated
-// GPU event time (time_ms) and host time (host_time_ms) across the TIME_STEPS
-// loop within the pass, then a summary whose total_time_ms is the SUM of all
-// recorded GPU event times. Throughput (particles/sec) is derived downstream
-// from time_ms and params.
-// Output (stderr): human-readable results
-
+// Pinned Altis/Rodinia GPU particle filter; see README.md and UPSTREAM_LICENSE.
 #include "../../common/bench_timing.h"
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <cmath>
-#include <vector>
-
+#include "particlefilter_reference.h"
+#include "particlefilter_kernels.h"
+#include <type_traits>
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
-// ---------------------------------------------------------------------------
-// Argument parsing
-// ---------------------------------------------------------------------------
-
-static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
-    for (int i = 1; i < argc - 1; ++i) {
-        if (strcmp(argv[i], name) == 0) {
-            int v = atoi(argv[i + 1]);
-            if (v > 0) return v;
-            break;
-        }
-    }
-    return defaultVal;
-}
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-#define GRID_SIZE    128
-#define TIME_STEPS   10
-#define SIGMA_OBS    10.0f    // Observation noise std dev
-#define SIGMA_MOVE   2.0f     // Movement noise std dev
-
-// ---------------------------------------------------------------------------
-// Simple GPU-side PRNG (xorshift32)
-// ---------------------------------------------------------------------------
-
-__device__ static unsigned int gpu_xorshift(unsigned int s) {
-    s ^= s << 13;
-    s ^= s >> 17;
-    s ^= s << 5;
-    return s;
-}
-
-__device__ static float gpu_rand_uniform(unsigned int* state) {
-    *state = gpu_xorshift(*state);
-    return (float)(*state & 0xFFFFFF) / 16777216.0f;
-}
-
-__device__ static float gpu_rand_normal(unsigned int* state) {
-    // Box-Muller transform
-    float u1 = gpu_rand_uniform(state);
-    float u2 = gpu_rand_uniform(state);
-    u1 = fmaxf(u1, 1e-10f);
-    return sqrtf(-2.0f * logf(u1)) * cosf(2.0f * 3.14159265f * u2);
-}
-
-// ---------------------------------------------------------------------------
-// Kernel 1: Update particle positions (random walk)
-// ---------------------------------------------------------------------------
-
-__global__ void update_particles_kernel(
-    float* __restrict__ x_pos,
-    float* __restrict__ y_pos,
-    unsigned int* __restrict__ rng_states,
-    int N)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= N) return;
-
-    unsigned int rng = rng_states[idx];
-
-    // Random walk
-    float dx = SIGMA_MOVE * gpu_rand_normal(&rng);
-    float dy = SIGMA_MOVE * gpu_rand_normal(&rng);
-
-    float nx = x_pos[idx] + dx;
-    float ny = y_pos[idx] + dy;
-
-    // Clamp to grid boundaries
-    nx = fminf(fmaxf(nx, 0.0f), (float)(GRID_SIZE - 1));
-    ny = fminf(fmaxf(ny, 0.0f), (float)(GRID_SIZE - 1));
-
-    x_pos[idx] = nx;
-    y_pos[idx] = ny;
-    rng_states[idx] = rng;
-}
-
-// ---------------------------------------------------------------------------
-// Kernel 2: Compute weights (Gaussian likelihood)
-// ---------------------------------------------------------------------------
-
-__global__ void compute_weights_kernel(
-    const float* __restrict__ x_pos,
-    const float* __restrict__ y_pos,
-    float* __restrict__ weights,
-    float obs_x, float obs_y,
-    int N)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= N) return;
-
-    float dx = x_pos[idx] - obs_x;
-    float dy = y_pos[idx] - obs_y;
-    float dist2 = dx * dx + dy * dy;
-
-    // Gaussian likelihood: exp(-dist^2 / (2 * sigma^2))
-    float w = expf(-dist2 / (2.0f * SIGMA_OBS * SIGMA_OBS));
-    weights[idx] = w;
-}
-
-// ---------------------------------------------------------------------------
-// Kernel 3a: Parallel prefix sum (Blelloch scan) for weight normalization
-// Simple work-efficient scan within blocks.
-// ---------------------------------------------------------------------------
-
-__global__ void prefix_sum_kernel(
-    float* __restrict__ data,
-    float* __restrict__ block_sums,
-    int N)
-{
-    extern __shared__ float sdata[];
-
-    int tid = threadIdx.x;
-    int gid = blockIdx.x * blockDim.x * 2 + threadIdx.x;
-
-    // Load data into shared memory
-    sdata[tid]              = (gid < N)              ? data[gid]              : 0.0f;
-    sdata[tid + blockDim.x] = (gid + blockDim.x < N) ? data[gid + blockDim.x] : 0.0f;
-
-    int n = blockDim.x * 2;
-
-    // Barrier before the up-sweep: thread `index` reads sdata[index - stride],
-    // written by another (possibly cross-warp) thread's load above. Without this
-    // the first add races. (Present in the Metal port; dropped here.)
-    __syncthreads();
-
-    // Up-sweep (reduce)
-    for (int stride = 1; stride < n; stride *= 2) {
-        int index = (tid + 1) * stride * 2 - 1;
-        if (index < n)
-            sdata[index] += sdata[index - stride];
-        __syncthreads();
-    }
-
-    // Save block total and clear last element
-    if (tid == 0) {
-        if (block_sums) block_sums[blockIdx.x] = sdata[n - 1];
-        sdata[n - 1] = 0.0f;
-    }
-    __syncthreads();
-
-    // Down-sweep
-    for (int stride = n / 2; stride >= 1; stride /= 2) {
-        int index = (tid + 1) * stride * 2 - 1;
-        if (index < n) {
-            float t = sdata[index - stride];
-            sdata[index - stride] = sdata[index];
-            sdata[index] += t;
-        }
-        __syncthreads();
-    }
-
-    // Write results (exclusive prefix sum)
-    if (gid < N)              data[gid]              = sdata[tid];
-    if (gid + blockDim.x < N) data[gid + blockDim.x] = sdata[tid + blockDim.x];
-}
-
-__global__ void add_block_sums_kernel(
-    float* __restrict__ data,
-    const float* __restrict__ block_sums,
-    int N)
-{
-    int gid = blockIdx.x * blockDim.x * 2 + threadIdx.x;
-    float val = block_sums[blockIdx.x];
-
-    if (gid < N)              data[gid]              += val;
-    if (gid + blockDim.x < N) data[gid + blockDim.x] += val;
-}
-
-// ---------------------------------------------------------------------------
-// Kernel 3b: Systematic resampling
-// ---------------------------------------------------------------------------
-
-__global__ void resample_kernel(
-    const float* __restrict__ cdf,         // prefix sum of normalized weights
-    const float* __restrict__ x_pos_in,
-    const float* __restrict__ y_pos_in,
-    float* __restrict__ x_pos_out,
-    float* __restrict__ y_pos_out,
-    unsigned int* __restrict__ rng_states,
-    float total_weight,
-    int N)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= N) return;
-
-    // Systematic resampling: evenly spaced points with random offset
-    unsigned int rng = rng_states[idx];
-    float u0 = gpu_rand_uniform(&rng);
-    rng_states[idx] = rng;
-
-    float target = (((float)idx + u0) / (float)N) * total_weight;
-
-    // Binary search in CDF
-    int lo = 0, hi = N - 1;
-    while (lo < hi) {
-        int mid = (lo + hi) / 2;
-        if (cdf[mid] < target)
-            lo = mid + 1;
-        else
-            hi = mid;
-    }
-
-    // Clamp to valid range
-    lo = min(lo, N - 1);
-    lo = max(lo, 0);
-
-    x_pos_out[idx] = x_pos_in[lo];
-    y_pos_out[idx] = y_pos_in[lo];
-}
-
-// ---------------------------------------------------------------------------
-// Host prefix sum (for small arrays / block sums)
-// ---------------------------------------------------------------------------
-
-static void host_prefix_sum(float* data, int n) {
-    float acc = 0.0f;
-    for (int i = 0; i < n; ++i) {
-        float tmp = data[i];
-        data[i] = acc;
-        acc += tmp;
-    }
-}
-
-// ---------------------------------------------------------------------------
-// CPU reference particle filter (for verification)
-// ---------------------------------------------------------------------------
-
-static inline unsigned int cpu_xorshift(unsigned int s) {
-    s ^= s << 13;
-    s ^= s >> 17;
-    s ^= s << 5;
-    return s;
-}
-
-static inline float cpu_rand_uniform(unsigned int* state) {
-    *state = cpu_xorshift(*state);
-    return (float)(*state & 0xFFFFFF) / 16777216.0f;
-}
-
-static inline float cpu_rand_normal(unsigned int* state) {
-    float u1 = cpu_rand_uniform(state);
-    float u2 = cpu_rand_uniform(state);
-    u1 = fmaxf(u1, 1e-10f);
-    return sqrtf(-2.0f * logf(u1)) * cosf(2.0f * 3.14159265f * u2);
-}
-
-static void cpu_particle_filter_step(
-    float* x_pos, float* y_pos, unsigned int* rng,
-    float obs_x, float obs_y, float* weights, float* cdf,
-    float* x_tmp, float* y_tmp, int N)
-{
-    // Update positions
-    for (int i = 0; i < N; ++i) {
-        float dx = SIGMA_MOVE * cpu_rand_normal(&rng[i]);
-        float dy = SIGMA_MOVE * cpu_rand_normal(&rng[i]);
-        x_pos[i] = fminf(fmaxf(x_pos[i] + dx, 0.0f), (float)(GRID_SIZE - 1));
-        y_pos[i] = fminf(fmaxf(y_pos[i] + dy, 0.0f), (float)(GRID_SIZE - 1));
-    }
-
-    // Compute weights
-    for (int i = 0; i < N; ++i) {
-        float dx = x_pos[i] - obs_x;
-        float dy = y_pos[i] - obs_y;
-        float dist2 = dx * dx + dy * dy;
-        weights[i] = expf(-dist2 / (2.0f * SIGMA_OBS * SIGMA_OBS));
-    }
-
-    // Exclusive prefix sum for CDF
-    float total = 0.0f;
-    for (int i = 0; i < N; ++i) {
-        cdf[i] = total;
-        total += weights[i];
-    }
-
-    // Resample
-    for (int i = 0; i < N; ++i) {
-        float u0 = cpu_rand_uniform(&rng[i]);
-        float target = ((float)i + u0) / (float)N * total;
-
-        int lo = 0, hi = N - 1;
-        while (lo < hi) {
-            int mid = (lo + hi) / 2;
-            if (cdf[mid] < target) lo = mid + 1;
-            else hi = mid;
-        }
-        if (lo >= N) lo = N - 1;
-        if (lo < 0) lo = 0;
-
-        x_tmp[i] = x_pos[lo];
-        y_tmp[i] = y_pos[lo];
-    }
-
-    memcpy(x_pos, x_tmp, N * sizeof(float));
-    memcpy(y_pos, y_tmp, N * sizeof(float));
-}
-
-// ---------------------------------------------------------------------------
-// Simple PRNG for initialization
-// ---------------------------------------------------------------------------
-
-static inline unsigned int lcg_rand(unsigned int* state) {
-    *state = *state * 1664525u + 1013904223u;
-    return *state;
-}
-
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
-int main(int argc, char** argv) {
-    setvbuf(stdout, NULL, _IONBF, 0);
-
-    // Defaults from params.json
-    int N          = 100000;
-
-    // Command-line fallback
-    N          = parseIntParam(argc, argv, "--size", N);
-
-    // Environment variable overrides
-    const char* env_val;
-    env_val = getenv("BENCH_PARAM_size");
-    if (env_val) N = atoi(env_val);
-
-    // Print device info
-    int device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    hipDeviceProp_t prop;
-    HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
-    fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "Particle Filter  |  Particles: %d  |  Grid: %dx%d  |  "
-            "Steps/pass: %d\n\n",
-            N, GRID_SIZE, GRID_SIZE, TIME_STEPS);
-
-    size_t float_bytes = (size_t)N * sizeof(float);
-    size_t uint_bytes  = (size_t)N * sizeof(unsigned int);
-
-    // -----------------------------------------------------------------------
-    // Host data initialization
-    // -----------------------------------------------------------------------
-    std::vector<float> h_x(N), h_y(N);
-    std::vector<unsigned int> h_rng(N);
-
-    unsigned int init_seed = 12345;
-    for (int i = 0; i < N; ++i) {
-        h_x[i] = (float)(GRID_SIZE / 2) + ((float)(lcg_rand(&init_seed) & 0xFFFF) / 65535.0f - 0.5f) * 10.0f;
-        h_y[i] = (float)(GRID_SIZE / 2) + ((float)(lcg_rand(&init_seed) & 0xFFFF) / 65535.0f - 0.5f) * 10.0f;
-        h_rng[i] = lcg_rand(&init_seed) | 1u;  // ensure non-zero
-    }
-
-    // Generate synthetic observations (target moving in a circle)
-    float obs_x[TIME_STEPS], obs_y[TIME_STEPS];
-    for (int t = 0; t < TIME_STEPS; ++t) {
-        float angle = 2.0f * 3.14159265f * t / TIME_STEPS;
-        obs_x[t] = GRID_SIZE / 2.0f + 20.0f * cosf(angle);
-        obs_y[t] = GRID_SIZE / 2.0f + 20.0f * sinf(angle);
-    }
-
-    // -----------------------------------------------------------------------
-    // Device allocations
-    // -----------------------------------------------------------------------
-    float *d_x, *d_y, *d_x2, *d_y2;
-    float *d_weights, *d_cdf;
-    unsigned int *d_rng;
-
-    HIP_CHECK(hipMalloc(&d_x,       float_bytes));
-    HIP_CHECK(hipMalloc(&d_y,       float_bytes));
-    HIP_CHECK(hipMalloc(&d_x2,      float_bytes));
-    HIP_CHECK(hipMalloc(&d_y2,      float_bytes));
-    HIP_CHECK(hipMalloc(&d_weights, float_bytes));
-    HIP_CHECK(hipMalloc(&d_cdf,     float_bytes));
-    HIP_CHECK(hipMalloc(&d_rng,     uint_bytes));
-
-    // Prefix sum block sums
-    int scanBlock = 256;
-    int scanElements = scanBlock * 2;
-    int numScanBlocks = (N + scanElements - 1) / scanElements;
-    size_t blockSumBytes = numScanBlocks * sizeof(float);
-    float *d_block_sums;
-    HIP_CHECK(hipMalloc(&d_block_sums, blockSumBytes));
-
-    int blockSize = 256;
-    int gridSize  = (N + blockSize - 1) / blockSize;
-
-    // Lambda: upload initial state
-    auto upload_initial = [&]() {
-        HIP_CHECK(hipMemcpy(d_x,   h_x.data(),   float_bytes, hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(d_y,   h_y.data(),   float_bytes, hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(d_rng, h_rng.data(), uint_bytes,  hipMemcpyHostToDevice));
-    };
-
-    // The seed recorded here is the fixed initialization seed used above; it
-    // is a constant of the benchmark, not a tunable parameter.
-    char params[160];
-    snprintf(params, sizeof(params),
-             "\"size\":%d,\"seed\":12345",
-             N);
-
-    // Per-kernel accumulators: each pass launches every kernel once per time
-    // step; the accumulated GPU/host time of all TIME_STEPS within one pass
-    // becomes that pass's record for the kernel.
-    bench_timer_t timer;
-    bench_timer_create(&timer);
-    bench_lap_t acc_update, acc_weights, acc_prefix, acc_addblock, acc_resample;
-
-    // One full particle-filter pass. Particle positions and RNG states are
-    // re-uploaded at the start of every pass (untimed), so each pass measures
-    // the same filtering work regardless of the drift left by earlier passes.
-    auto run_pass = [&]() {
-        bench_lap_reset(&acc_update);
-        bench_lap_reset(&acc_weights);
-        bench_lap_reset(&acc_prefix);
-        bench_lap_reset(&acc_addblock);
-        bench_lap_reset(&acc_resample);
-
-        upload_initial();
-
-        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
-         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
-         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
-        bench_pass_warm();
-
-        for (int t = 0; t < TIME_STEPS; ++t) {
-            // Kernel 1: update positions
-            bench_lap_add(&acc_update, bench_time_op(&timer, [&]() {
-                update_particles_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_x, d_y, d_rng, N);
-            }));
-
-            // Kernel 2: compute weights
-            bench_lap_add(&acc_weights, bench_time_op(&timer, [&]() {
-                compute_weights_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
-                    d_x, d_y, d_weights, obs_x[t], obs_y[t], N);
-            }));
-
-            // Copy weights to CDF for prefix sum (untimed)
-            HIP_CHECK(hipMemcpy(d_cdf, d_weights, float_bytes, hipMemcpyDeviceToDevice));
-
-            // Prefix sum (in-place on d_cdf)
-            bench_lap_add(&acc_prefix, bench_time_op(&timer, [&]() {
-                prefix_sum_kernel<<<dim3(numScanBlocks), dim3(scanBlock), scanElements * sizeof(float), 0>>>(
-                    d_cdf, d_block_sums, N);
-            }));
-
-            // Fix up block sums on host (small array, untimed)
-            if (numScanBlocks > 1) {
-                std::vector<float> h_bsums(numScanBlocks);
-                HIP_CHECK(hipMemcpy(h_bsums.data(), d_block_sums, blockSumBytes,
-                                     hipMemcpyDeviceToHost));
-                host_prefix_sum(h_bsums.data(), numScanBlocks);
-                HIP_CHECK(hipMemcpy(d_block_sums, h_bsums.data(), blockSumBytes,
-                                     hipMemcpyHostToDevice));
-
-                bench_lap_add(&acc_addblock, bench_time_op(&timer, [&]() {
-                    add_block_sums_kernel<<<dim3(numScanBlocks), dim3(scanBlock)>>>(
-                        d_cdf, d_block_sums, N);
-                }));
+template<class T> struct Device {
+    T* data=nullptr;size_t count;
+    explicit Device(size_t n):count(n) {HIP_CHECK(hipMalloc(&data,n*sizeof(T)));}
+    ~Device() {if(data)hipFree(data);}
+    Device(const Device&)=delete;Device& operator=(const Device&)=delete;
+    void upload(const T* host) {HIP_CHECK(hipMemcpy(data,host,count*sizeof(T),hipMemcpyHostToDevice));}
+};
+struct Verification {
+    size_t checked=0,errors=0;
+    template<class T,class Expected> void buffer(const char* name,const Device<T>& device,const Expected& expected,bool relative_only=false) {
+        const size_t chunk=std::min<size_t>(device.count,131072);std::vector<T> actual(chunk);
+        for(size_t start=0;start<device.count;start+=chunk) {
+            const size_t count=std::min(chunk,device.count-start);
+            HIP_CHECK(hipMemcpy(actual.data(),device.data+start,count*sizeof(T),hipMemcpyDeviceToHost));
+            for(size_t j=0;j<count;++j) {
+                const auto want=expected(start+j);const double a=double(actual[j]),b=double(want);
+                const bool good=std::is_integral<T>::value?actual[j]==want:
+                    relative_only?(std::isfinite(a)&&std::isfinite(b)&&std::fabs(a-b)<=4e-300+1e-10*std::fabs(b)):pf::matches(a,b);
+                ++checked;if(!good) {if(errors++<10)std::fprintf(stderr,"Mismatch %s[%zu]: GPU=%.17g CPU=%.17g\n",name,start+j,a,b);}
             }
-
-            // Get total weight (sum of all weights)
-            float total_weight = 0.0f;
-            {
-                // total = cdf[N-1] + weights[N-1]
-                float last_cdf, last_w;
-                HIP_CHECK(hipMemcpy(&last_cdf, d_cdf + N - 1, sizeof(float),
-                                     hipMemcpyDeviceToHost));
-                HIP_CHECK(hipMemcpy(&last_w, d_weights + N - 1, sizeof(float),
-                                     hipMemcpyDeviceToHost));
-                total_weight = last_cdf + last_w;
-            }
-
-            if (total_weight < 1e-30f) total_weight = 1.0f;
-
-            // Kernel 3: resample
-            bench_lap_add(&acc_resample, bench_time_op(&timer, [&]() {
-                resample_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
-                    d_cdf, d_x, d_y, d_x2, d_y2, d_rng, total_weight, N);
-            }));
-
-            // Swap buffers
-            float* tmp;
-            tmp = d_x; d_x = d_x2; d_x2 = tmp;
-            tmp = d_y; d_y = d_y2; d_y2 = tmp;
         }
-    };
-
-    // Timed pass — one record per kernel
-    double total_gpu_ms = 0.0;
-    run_pass();
-    bench_emit_iter("update_particles_kernel", 0, &acc_update,   params);
-    bench_emit_iter("compute_weights_kernel",  0, &acc_weights,  params);
-    bench_emit_iter("prefix_sum_kernel",       0, &acc_prefix,   params);
-    bench_emit_iter("add_block_sums_kernel",   0, &acc_addblock, params);
-    bench_emit_iter("resample_kernel",         0, &acc_resample, params);
-    total_gpu_ms += acc_update.gpu_ms + acc_weights.gpu_ms +
-                    acc_prefix.gpu_ms + acc_addblock.gpu_ms +
-                    acc_resample.gpu_ms;
-    fprintf(stderr,
-            "update=%.3f weights=%.3f prefix=%.3f addblock=%.3f "
-            "resample=%.3f ms (gpu)\n",
-            acc_update.gpu_ms, acc_weights.gpu_ms, acc_prefix.gpu_ms,
-            acc_addblock.gpu_ms, acc_resample.gpu_ms);
-
+    }
+};
+int main(int argc,char** argv)try {
+    setvbuf(stdout,nullptr,_IONBF,0);
+    const int n=pf::parameters(argc,argv),blocks=(n+pf::block-1)/pf::block;
+    int device=0;HIP_CHECK(hipGetDevice(&device));hipDeviceProp_t prop;
+    HIP_CHECK(hipGetDeviceProperties(&prop,device));
+    if(prop.maxThreadsPerBlock<pf::block||prop.maxThreadsDim[0]<pf::block||blocks>prop.maxGridSize[0])
+        throw std::runtime_error("Particle Filter launch exceeds selected device limits");
+    size_t free_bytes=0,total_bytes=0;HIP_CHECK(hipMemGetInfo(&free_bytes,&total_bytes));
+    const size_t bytes=pf::device_bytes(n),warmer=bench_vector_add_warmup()?BENCH_WARMER_BYTES:0;
+    if(bytes+warmer>free_bytes)throw std::runtime_error("Particle Filter buffers plus warmer exceed available device memory");
+    const pf::Input in=pf::input(n);
+    Device<double> x(n),y(n),xj(n),yj(n),likelihood(n),weights(n),cdf(n),u(n),partial(blocks),u0(1);
+    Device<int32_t> seeds(n);Device<int> indices(size_t(n)*pf::neighbors),offsets(2*pf::neighbors);
+    Device<unsigned char> video(pf::video_size);
+    std::vector<double> initial(n,pf::width/2);xj.upload(initial.data());yj.upload(initial.data());
+    std::vector<double>().swap(initial);
+    static_assert(sizeof(pf::Offset)==2*sizeof(int),"Offset upload layout");
+    seeds.upload(in.seeds.data());offsets.upload(in.disk[0].data());video.upload(in.video.data());
+    std::fprintf(stderr,"Device: %s (id=%d); Particle Filter particles=%d, video=128x128x11, updates=10, double precision\n",prop.name,device,n);
+    bench_timer_t timer;bench_timer_create(&timer);bench_lap_t times[6];for(auto& t:times)bench_lap_reset(&t);
+    bench_pass_warm();
+    for(int frame=1;frame<pf::frames;++frame) {
+        bench_lap_add(&times[0],bench_time_op(&timer,[&]() {pf_gpu::likelihood_kernel<<<blocks,pf::block>>>(n,frame,video.data,offsets.data,x.data,y.data,xj.data,yj.data,indices.data,likelihood.data,weights.data,seeds.data,partial.data);}));
+        bench_lap_add(&times[1],bench_time_op(&timer,[&]() {pf_gpu::sum_kernel<<<blocks,pf::block>>>(partial.data,blocks);}));
+        bench_lap_add(&times[2],bench_time_op(&timer,[&]() {pf_gpu::normalize_weights_kernel<<<blocks,pf::block>>>(weights.data,partial.data,n);}));
+        bench_lap_add(&times[3],bench_time_op(&timer,[&]() {pf_gpu::cdf_kernel<<<1,pf::block>>>(weights.data,cdf.data,u0.data,seeds.data,n);}));
+        bench_lap_add(&times[4],bench_time_op(&timer,[&]() {pf_gpu::thresholds_kernel<<<blocks,pf::block>>>(u0.data,u.data,n);}));
+        bench_lap_add(&times[5],bench_time_op(&timer,[&]() {pf_gpu::find_index_kernel<<<blocks,pf::block>>>(x.data,y.data,cdf.data,u.data,xj.data,yj.data,n);}));
+    }
     bench_timer_destroy(&timer);
-    bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
-
-    bool verify_ok = true;
-    // -----------------------------------------------------------------------
-    // Verification: run CPU reference and compare mean positions
-    // -----------------------------------------------------------------------
-    {
-        int verify_n = (N < 10000) ? N : 10000;
-
-        // CPU reference
-        std::vector<float> cpu_x(verify_n), cpu_y(verify_n);
-        std::vector<unsigned int> cpu_rng(verify_n);
-        std::vector<float> cpu_w(verify_n), cpu_cdf(verify_n);
-        std::vector<float> cpu_xt(verify_n), cpu_yt(verify_n);
-
-        for (int i = 0; i < verify_n; ++i) {
-            cpu_x[i]   = h_x[i];
-            cpu_y[i]   = h_y[i];
-            cpu_rng[i] = h_rng[i];
-        }
-
-        for (int t = 0; t < TIME_STEPS; ++t) {
-            cpu_particle_filter_step(cpu_x.data(), cpu_y.data(), cpu_rng.data(),
-                                      obs_x[t], obs_y[t], cpu_w.data(), cpu_cdf.data(),
-                                      cpu_xt.data(), cpu_yt.data(), verify_n);
-        }
-
-        // GPU reference (same subset)
-        HIP_CHECK(hipMemcpy(d_x, h_x.data(), verify_n * sizeof(float), hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(d_y, h_y.data(), verify_n * sizeof(float), hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(d_rng, h_rng.data(), verify_n * sizeof(unsigned int), hipMemcpyHostToDevice));
-
-        // Run GPU on verify_n particles
-        int vGridSize = (verify_n + blockSize - 1) / blockSize;
-        int vScanBlocks = (verify_n + scanElements - 1) / scanElements;
-        size_t vBlockSumBytes = vScanBlocks * sizeof(float);
-        float* d_vblock_sums;
-        HIP_CHECK(hipMalloc(&d_vblock_sums, vBlockSumBytes));
-
-        for (int t = 0; t < TIME_STEPS; ++t) {
-            update_particles_kernel<<<dim3(vGridSize), dim3(blockSize)>>>(d_x, d_y, d_rng, verify_n);
-            compute_weights_kernel<<<dim3(vGridSize), dim3(blockSize)>>>(
-                d_x, d_y, d_weights, obs_x[t], obs_y[t], verify_n);
-            HIP_CHECK(hipMemcpy(d_cdf, d_weights, verify_n * sizeof(float), hipMemcpyDeviceToDevice));
-
-            prefix_sum_kernel<<<dim3(vScanBlocks), dim3(scanBlock), scanElements * sizeof(float), 0>>>(
-                d_cdf, d_vblock_sums, verify_n);
-
-            if (vScanBlocks > 1) {
-                std::vector<float> h_bsums(vScanBlocks);
-                HIP_CHECK(hipMemcpy(h_bsums.data(), d_vblock_sums, vBlockSumBytes,
-                                     hipMemcpyDeviceToHost));
-                host_prefix_sum(h_bsums.data(), vScanBlocks);
-                HIP_CHECK(hipMemcpy(d_vblock_sums, h_bsums.data(), vBlockSumBytes,
-                                     hipMemcpyHostToDevice));
-                add_block_sums_kernel<<<dim3(vScanBlocks), dim3(scanBlock)>>>(
-                    d_cdf, d_vblock_sums, verify_n);
-            }
-
-            float total_weight = 0.0f;
-            {
-                float last_cdf, last_w;
-                HIP_CHECK(hipMemcpy(&last_cdf, d_cdf + verify_n - 1, sizeof(float),
-                                     hipMemcpyDeviceToHost));
-                HIP_CHECK(hipMemcpy(&last_w, d_weights + verify_n - 1, sizeof(float),
-                                     hipMemcpyDeviceToHost));
-                total_weight = last_cdf + last_w;
-            }
-            if (total_weight < 1e-30f) total_weight = 1.0f;
-
-            resample_kernel<<<dim3(vGridSize), dim3(blockSize)>>>(
-                d_cdf, d_x, d_y, d_x2, d_y2, d_rng, total_weight, verify_n);
-
-            float* tmp;
-            tmp = d_x; d_x = d_x2; d_x2 = tmp;
-            tmp = d_y; d_y = d_y2; d_y2 = tmp;
-        }
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Compare mean x/y positions
-        std::vector<float> gpu_x(verify_n), gpu_y(verify_n);
-        HIP_CHECK(hipMemcpy(gpu_x.data(), d_x, verify_n * sizeof(float), hipMemcpyDeviceToHost));
-        HIP_CHECK(hipMemcpy(gpu_y.data(), d_y, verify_n * sizeof(float), hipMemcpyDeviceToHost));
-
-        double gpu_mean_x = 0, gpu_mean_y = 0;
-        double cpu_mean_x = 0, cpu_mean_y = 0;
-        for (int i = 0; i < verify_n; ++i) {
-            gpu_mean_x += gpu_x[i];
-            gpu_mean_y += gpu_y[i];
-            cpu_mean_x += cpu_x[i];
-            cpu_mean_y += cpu_y[i];
-        }
-        gpu_mean_x /= verify_n; gpu_mean_y /= verify_n;
-        cpu_mean_x /= verify_n; cpu_mean_y /= verify_n;
-
-        fprintf(stderr, "GPU mean: (%.4f, %.4f)  CPU mean: (%.4f, %.4f)\n",
-                gpu_mean_x, gpu_mean_y, cpu_mean_x, cpu_mean_y);
-
-        // Both should converge to similar region (near observations)
-        // Allow generous tolerance since particle filters are stochastic
-        double diff = sqrt((gpu_mean_x - cpu_mean_x) * (gpu_mean_x - cpu_mean_x) +
-                           (gpu_mean_y - cpu_mean_y) * (gpu_mean_y - cpu_mean_y));
-
-        if (diff < 20.0) {
-            fprintf(stderr, "PASS\n");
-        } else {
-            fprintf(stderr, "FAIL: mean position difference %.4f exceeds tolerance\n", diff);
-            verify_ok = false;
-        }
-
-        HIP_CHECK(hipFree(d_vblock_sums));
-    }
-
-    // Cleanup
-    HIP_CHECK(hipFree(d_x));
-    HIP_CHECK(hipFree(d_y));
-    HIP_CHECK(hipFree(d_x2));
-    HIP_CHECK(hipFree(d_y2));
-    HIP_CHECK(hipFree(d_weights));
-    HIP_CHECK(hipFree(d_cdf));
-    HIP_CHECK(hipFree(d_rng));
-    HIP_CHECK(hipFree(d_block_sums));
-
-    return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;
-}
+    const char* names[]={"likelihood_kernel","sum_kernel","normalize_weights_kernel","cdf_kernel","thresholds_kernel","find_index_kernel"};
+    char params[1200];int written=std::snprintf(params,sizeof(params),
+        "\"size\":%d,\"seed\":12345,\"width\":128,\"height\":128,\"frames\":11,\"timesteps\":10,\"neighbors\":69,"
+        "\"block_size\":512,\"kernel_launches\":10,\"particle_updates\":%llu,\"device_buffer_bytes\":%zu,"
+        "\"algorithm\":\"altis_particlefilter_float_library_v1\",\"input\":\"fixed_video_safe_lcg_v1\","
+        "\"precision\":\"fp64\",\"verification\":\"full_final_aux_cpu_fp64_v1\"",n,10ULL*n,bytes);
+    if(written<0||size_t(written)>=sizeof(params))throw std::runtime_error("Particle Filter metadata overflow");
+    double total=0;for(int k=0;k<6;++k) {bench_emit_iter(names[k],0,&times[k],params);total+=times[k].gpu_ms;}bench_emit_summary(total);
+    // No GPU rerun, mid-trajectory readbacks, host scans or sampled validation.
+    const pf::Reference expected=pf::reference(n,in);
+    Verification result;
+    result.buffer("x",x,[&](size_t i){return expected.x[i];});
+    result.buffer("y",y,[&](size_t i){return expected.y[i];});
+    result.buffer("xj",xj,[&](size_t i){return expected.xj[i];});
+    result.buffer("yj",yj,[&](size_t i){return expected.yj[i];});
+    result.buffer("likelihood",likelihood,[&](size_t i){return expected.likelihood[i];});
+    result.buffer("weights",weights,[&](size_t i){return expected.weights[i];},true);
+    result.buffer("cdf",cdf,[&](size_t i){return expected.cdf[i];});
+    result.buffer("u",u,[&](size_t i){return expected.u[i];});
+    result.buffer("partial",partial,[&](size_t i){return expected.partial[i];},true);
+    result.buffer("u0",u0,[&](size_t){return expected.u0;});
+    result.buffer("seeds",seeds,[&](size_t i){return expected.seeds[i];});
+    result.buffer("indices",indices,[&](size_t i){return pf::gather_index(expected.x[i/pf::neighbors],expected.y[i/pf::neighbors],in.disk[i%pf::neighbors],pf::steps);});
+    std::fprintf(stderr,"Particle Filter verification: %s (verified %d particles, 10 timesteps, %zu final and auxiliary values; %zu mismatches)\n",result.errors?"FAIL":"PASS",n,result.checked,result.errors);
+    return result.errors?1:0;
+} catch(const std::exception& e) {std::fprintf(stderr,"FAIL: Particle Filter setup/reference unavailable: %s\n",e.what());return 1;}

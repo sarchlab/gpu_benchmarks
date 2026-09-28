@@ -71,6 +71,12 @@ jobs:
           python3 tests/atomic_host.py --compiler g++
           python3 tests/atomic_measured_result.py --platform cuda --work-dir /tmp/atomic-measured --compile-only
 
+      - name: Check Particle Filter inputs, complete references and measured-result hooks
+        run: |
+          python3 tests/particlefilter_host.py --compiler g++
+          python3 tests/particlefilter_profile_records.py
+          python3 tests/particlefilter_measured_result.py --platform cuda --work-dir /tmp/particlefilter-measured --compile-only
+
       - name: Check pinned CFD solver, mesh geometry and measured-result hooks
         run: |
           python3 tests/cfd_host.py --compiler g++

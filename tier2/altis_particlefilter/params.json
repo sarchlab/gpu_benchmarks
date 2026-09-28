@@ -2,7 +2,7 @@
   "benchmark": "altis_particlefilter",
   "tier": 2,
   "suite": "altis",
-  "description": "Sequential Importance Resampling (SIR) particle filter for Monte Carlo localization on a 2D grid. Three kernel phases: update particles, compute weights, resample.",
+  "description": "Pinned Altis double-precision video particle filter: GPU likelihood, reduction, normalization, sequential CDF, thresholds and linear resampling; ten updates and full measured-result verification.",
   "scaling_param": {
     "name": "size",
     "description": "Number of particles",
@@ -50,10 +50,11 @@
     }
   ],
   "kernels": [
-    "update_particles_kernel",
-    "compute_weights_kernel",
-    "prefix_sum_kernel",
-    "add_block_sums_kernel",
-    "resample_kernel"
+    "likelihood_kernel",
+    "sum_kernel",
+    "normalize_weights_kernel",
+    "cdf_kernel",
+    "thresholds_kernel",
+    "find_index_kernel"
   ]
 }

@@ -90,6 +90,11 @@ jobs:
           python3 tests/fir_verification.py --host-only --compiler g++ --work-dir /tmp/fir-host
           python3 tests/fir_verification.py --platform cuda --compile-only --work-dir /tmp/fir-measured
 
+      - name: Check AES known answers and compile measured-output regression
+        run: |
+          python3 tests/aes_verification.py --host-only --compiler g++ --work-dir /tmp/aes-host
+          python3 tests/aes_verification.py --platform cuda --compile-only --work-dir /tmp/aes-measured
+
       - name: Check complete PageRank reference and compile measured-output regression
         run: |
           python3 tests/graph_pr_verification.py --host-only --compiler g++ --work-dir /tmp/graph-pr-host

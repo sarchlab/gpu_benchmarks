@@ -325,7 +325,7 @@ int main(int argc, char** argv) {
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"block_size\":%d",
+             "\"size\":%d,\"block_size\":%d,\"verification\":\"full_cpu_v1\"",
              size, block_size);
 
     bench_timer_t timer;
@@ -364,42 +364,32 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
-    // Verification (compare first 256 blocks with CPU reference)
+    // Verification (compare every measured ciphertext byte with CPU AES)
     // -------------------------------------------------------------------
     bool verify_ok = true;
     {
-        int verify_n = (N < 256) ? N : 256;
         HIP_CHECK(hipMemcpy(h_data, d_data, data_bytes, hipMemcpyDeviceToHost));
 
-        unsigned char* h_ref = (unsigned char*)malloc((size_t)verify_n * 16);
-        memcpy(h_ref, h_orig, (size_t)verify_n * 16);
-
-        for (int b = 0; b < verify_n; ++b) {
-            aes256_encrypt_cpu(h_ref + b * 16, expanded_key);
-        }
-
-        int errors = 0;
-        for (int b = 0; b < verify_n; ++b) {
+        size_t errors = 0;
+        for (int b = 0; b < N; ++b) {
+            const size_t offset = (size_t)b * 16;
+            unsigned char reference[16];
+            memcpy(reference, h_orig + offset, sizeof(reference));
+            aes256_encrypt_cpu(reference, expanded_key);
             for (int j = 0; j < 16; ++j) {
-                if (h_data[b * 16 + j] != h_ref[b * 16 + j]) {
+                if (h_data[offset + j] != reference[j]) {
                     if (errors < 10) {
                         fprintf(stderr, "Mismatch at block %d byte %d: "
                                 "GPU=0x%02x CPU=0x%02x\n",
-                                b, j, h_data[b * 16 + j], h_ref[b * 16 + j]);
+                                b, j, h_data[offset + j], reference[j]);
                     }
-                    errors++;
+                    ++errors;
                 }
             }
         }
-        if (errors > 0) {
-            fprintf(stderr, "FAIL: %d byte errors in first %d blocks\n",
-                    errors, verify_n);
-            verify_ok = false;
-        } else {
-            fprintf(stderr, "PASS\n");
-        }
-
-        free(h_ref);
+        verify_ok = errors == 0;
+        fprintf(stderr, "AES verification: %s (%d blocks, %zu bytes, %zu byte mismatches)\n",
+                verify_ok ? "PASS" : "FAIL", N, data_bytes, errors);
     }
 
     HIP_CHECK(hipFree(d_data));

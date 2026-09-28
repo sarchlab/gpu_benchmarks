@@ -2,7 +2,7 @@
   "benchmark": "rodinia_hotspot",
   "tier": 2,
   "suite": "rodinia",
-  "description": "Rodinia Hotspot: transient thermal simulation via the original pyramidal shared-memory stencil (calculate_temp), advancing pyramid_height time steps per launch with ghost-zone halos. Records the accumulated per-pass GPU time of a full total_iterations simulation.",
+  "description": "Pinned Rodinia 3.1 HotSpot pyramidal stencil with FP32 state and upstream mixed arithmetic, stability-limited timestep when required, fixed iteration counts and complete FP64 CPU verification.",
   "scaling_param": {
     "name": "grid_size",
     "description": "Grid dimension (NxN temperature grid)",
@@ -33,7 +33,7 @@
   "non_scaling_params": [
     {
       "name": "total_iterations",
-      "description": "Total thermal time steps simulated per pass",
+      "description": "Fixed number of thermal time steps per process. Actual timestep and simulated duration are reported; limiting dt does not add steps.",
       "type": "int",
       "default": 360,
       "values": [
@@ -53,7 +53,7 @@
     },
     {
       "name": "vector_add_warmup",
-      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "description": "Run the vector-add warmer once before the timed trajectory. Subsequent dependent launches retain natural cache state; false disables the entry warmer.",
       "type": "enum",
       "default": "true",
       "values": [

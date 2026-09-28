@@ -31,12 +31,12 @@ ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := rodinia_hotspot.hip
   CUDA_ARCH ?= native
-  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH) -x cu
+  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH) -Xcompiler -pthread -x cu
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc
   SRC    := rodinia_hotspot.hip
-  CFLAGS := -O3 -std=c++14
+  CFLAGS := -O3 -std=c++14 -pthread
 
 else
   $(error Unknown PLATFORM=$(PLATFORM). Use cuda or rocm.)
@@ -45,12 +45,18 @@ endif
 # ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
-.PHONY: all clean
+.PHONY: all clean test
 
 all: $(TARGET)
 
-$(TARGET): $(SRC) ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
+$(TARGET): $(SRC) hotspot_reference.h ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
 	$(CC) $(CFLAGS) $< -o $@
 
+bench_output_test: ../../tests/hotspot_original_gpu.hip $(SRC) hotspot_reference.h ../../tests/upstream/hotspot_physics.h ../../tests/upstream/hotspot_gpu.hip ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
+	$(CC) $(CFLAGS) $< -o $@
+
+test: bench_output_test
+	./bench_output_test --grid_size 17 --total_iterations 3 --pyramid_height 7
+
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) bench_output_test

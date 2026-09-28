@@ -98,7 +98,7 @@ Each benchmark declares its parameters in `params.json`; the sweep is structured
 | Tier | Name | Description |
 |------|------|-------------|
 | **Tier 1** | Microbenchmarks | Low-level hardware characterization: memory bandwidth, compute throughput (FP32/FP64/FP16/INT32), cache latency, PCIe transfer rates, atomic ops, warp shuffles |
-| **Tier 2** | Application Benchmarks | Classic GPU benchmark suites: SHOC, PolyBench-GPU, Rodinia, Parboil, HeteroMark, CUDA SDK Extended, Tango, NPB-GPU, Altis, Lonestar GPU, Graph Analytics, Chai |
+| **Tier 2** | Application Benchmarks | Classic GPU benchmark suites: SHOC, PolyBench-GPU, Rodinia, Parboil, HeteroMark, CUDA SDK Extended, NPB-GPU, Altis, Lonestar GPU, Graph Analytics, Chai; financial workloads with unresolved upstream attribution |
 | **Tier 3** | Library Benchmarks | Vendor and third-party library kernels: cuBLAS, CUTLASS, cuFFT, cuSPARSE, cuDNN |
 | **Tier 4** | Alternative Languages | Non-CUDA implementations: Triton, BabelStream |
 | **Tier 5** | ML Workloads | End-to-end machine learning training/inference and LLM benchmarks: ResNet-50, BERT, GPT-2, ViT, NanoGPT, SDPA, torch.compile, vLLM, llama.cpp, Ollama, LLaMA, DeepSeek, Qwen, GLM, Phi, Mistral, BERT fine-tune, Whisper, Stable Diffusion, MoE, RAG, CoT, Multi-Agent, SDXL, GPT-NeoX, DLRM, GNN, GPT-J, RetinaNet, UNet3D |
@@ -328,7 +328,7 @@ The metric column names downstream quantities. See [measurement interpretation](
 | CUDA SDK Extended | `cuda_convolution_separable` | Separable 2D convolution |
 | CUDA SDK Extended | `cuda_scan_large` | Work-efficient parallel prefix sum |
 | [Unresolved attribution](tier2/tango_blackscholes/README.md#provenance--fidelity) | `tango_blackscholes` | Black-Scholes option pricing (legacy Tango identifier) |
-| Tango | `tango_binomial_options` | Binomial option pricing |
+| [Unresolved attribution](tier2/tango_binomial_options/README.md#provenance--fidelity) | `tango_binomial_options` | American put option pricing (legacy Tango identifier) |
 | NPB-GPU | `npb_ep` | Embarrassingly Parallel (EP) |
 | NPB-GPU | `npb_is` | Integer Sort (IS) |
 | NPB-GPU | `npb_cg` | Conjugate Gradient (CG) |

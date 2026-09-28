@@ -79,7 +79,7 @@ __global__ void binomial_kernel(
 
     int numNodes = numSteps + 1;
 
-    // Double-buffer the tree level (upstream does the same). A single in-place
+    // Double-buffer the tree level. A single in-place
     // buffer races: computing node j reads shared_values[j+1] while the thread
     // owning node j+1 overwrites it in the same sweep — only one barrier per
     // level, so on sm_70+ this corrupts even within a warp. `cur` is read-only

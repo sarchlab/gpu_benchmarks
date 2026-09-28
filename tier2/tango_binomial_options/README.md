@@ -4,11 +4,20 @@ Benchmarks the Cox-Ross-Rubinstein (CRR) binomial tree model for **American put 
 
 ## Provenance & fidelity
 
-Derived from the [Tango benchmark suite](https://gitlab.com/Tango-DNNbench/Tango) — the binomial options workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+The upstream source and revision for this implementation have not been
+established. The previously cited [Tango repository at revision
+59db699](https://gitlab.com/Tango-DNNbench/Tango/-/blob/59db69914bf5391b8f39b8b8463482794afe3956/README.md)
+describes neural-network inference workloads. It supports neither the former
+Tango derivation claim nor the comparison to a purported upstream European
+option-pricing implementation using FMA induction.
 
-- Prices American puts with a per-node `powf` vs the upstream European FMA induction — a transcendental-heavy, different workload class. (A shared-memory race in the backward induction has been fixed.)
-
-Read this as "a binomial-options benchmark in the spirit of Tango," not Tango's binomial options.
+This repository computes American put prices with early exercise and a
+per-node `powf` payoff calculation. The complete CPU check below verifies that
+local recurrence; it does not establish equivalence to a pinned upstream
+implementation. The `tango_binomial_options` name and `suite: "tango"` manifest
+value remain existing identifiers, not evidence of provenance. Exact source
+attribution and any resulting restoration remain open under [R-09 in the
+readiness tracker](https://github.com/sarchlab/gpu_benchmarks/issues/71).
 
 ## Algorithm
 

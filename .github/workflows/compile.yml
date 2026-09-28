@@ -71,6 +71,12 @@ jobs:
           python3 tests/atomic_host.py --compiler g++
           python3 tests/atomic_measured_result.py --platform cuda --work-dir /tmp/atomic-measured --compile-only
 
+      - name: Check pinned HotSpot3D physics, full references and measured-result hooks
+        run: |
+          python3 tests/hotspot3d_host.py --compiler g++
+          python3 tests/hotspot3d_measured_result.py --platform cuda --work-dir /tmp/hotspot3d-measured --compile-only
+          make -C tier2/rodinia_hotspot3d PLATFORM=cuda bench_output_test
+
       - name: Check pinned NAS CG inputs, reference, worker cleanup and measured-result hooks
         run: |
           python3 tests/cg_host.py --compiler g++

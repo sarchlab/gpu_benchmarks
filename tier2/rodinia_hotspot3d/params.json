@@ -2,7 +2,7 @@
   "benchmark": "rodinia_hotspot3d",
   "tier": 2,
   "suite": "rodinia",
-  "description": "3D stencil thermal simulation extending the 2D HotSpot benchmark. Each cell temperature is updated based on 6 neighbors (\u00b1x,\u00b1y,\u00b1z), local power density, and thermal resistances in an NxNxN grid.",
+  "description": "Rodinia 3.1 HotSpot3D FP32 recurrence with one-cell mapping, fixed iteration counts, stability-limited timestep when required, and complete FP64 CPU verification.",
   "scaling_param": {
     "name": "grid_size",
     "description": "Grid dimension per axis (NxNxN temperature grid)",
@@ -35,7 +35,7 @@
   "non_scaling_params": [
     {
       "name": "block_size",
-      "description": "Thread-block dimension (BxBxB or 1D block)",
+      "description": "Thread-block dimension (BxBxB); each thread updates one cell.",
       "type": "int",
       "default": 8,
       "values": [
@@ -44,7 +44,7 @@
     },
     {
       "name": "num_iterations",
-      "description": "Stencil time-steps per timed launch",
+      "description": "Fixed number of time steps per process; one kernel launch per step. The timestep and resulting simulated duration are reported.",
       "type": "int",
       "default": 10,
       "values": [
@@ -64,7 +64,7 @@
     },
     {
       "name": "vector_add_warmup",
-      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "description": "Run the vector-add warmer once before the timed trajectory. Subsequent dependent steps retain their natural cache state. False disables this entry warmer.",
       "type": "enum",
       "default": "true",
       "values": [

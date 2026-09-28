@@ -569,3 +569,35 @@ Use a fresh output directory; raw logs and an incremental report remain there.
 `--compile-only` builds the hooks without claiming GPU execution, as used by CI
 alongside the host tests. `--platform rocm` selects AMD; AMD hardware and trace
 qualification remain separate.
+
+## Rodinia HotSpot3D
+
+`python3 tests/hotspot3d_host.py --compiler clang++` checks all 1290 integer-safe
+sizes against pinned physical parameters, including the 56 sizes requiring a
+smaller timestep, plus 24 small-grid trajectories using limited coefficients
+from the first and last limited sizes. These exercise the numerical branch
+without claiming hardware qualification of the corresponding large grids.
+It compares complete small CPU trajectories with both a frozen
+upstream CPU body and a separately indexed long-double oracle, and checks all
+91 parameter/precedence cases under fatal ASan/UBSan. `--all-inputs` checks the
+complete legacy input recipe at all 22 declared sizes.
+
+`python3 tests/hotspot3d_measured_result.py --platform cuda --work-dir /tmp/hs3d-check`
+builds clean production and isolated instrumented binaries, then runs 118 cases:
+all 66 declared size/step pairs, nine extra controls, 36 finite/nonfinite faults
+at faces/interior/tail, a diagnostic-cap case, a largest-grid tail fault, three
+stale-buffer checks and two storage/reference failures. Each process must finish
+within 60 seconds. All cases check metadata, timing sums, complete verification
+counts and exit status. Use a fresh work directory. `--compile-only` compiles the
+fault hooks without claiming GPU execution; CI uses it plus host tests.
+
+`make -C tier2/rodinia_hotspot3d PLATFORM=cuda test` compares the entire actual
+production result with the frozen z-marching GPU body on a partial grid.
+`bench_output_test --grid_size N --num_iterations T` supports full-profile
+comparisons. Both complete GPU grids must satisfy the derived bound against the
+independent FP64 trajectory, and their mutual difference must not exceed twice
+that bound. A test-only build with FMA contraction disabled can additionally
+require exact equality via `HS3D_TEST_REQUIRE_EXACT=1`. Normal production
+compilation retains FMA. This fixture requires N>=2, ambient=80 and unchanged upstream dt;
+its only kernel adaptation is an x/y guard. CI compiles it. `--platform rocm`
+and `PLATFORM=rocm` select AMD, whose hardware qualification remains deferred.

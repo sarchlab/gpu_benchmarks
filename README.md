@@ -126,9 +126,8 @@ gpu_benchmarks/
 │   ├── atomic_operations/
 │   ├── warp_shuffle/
 │   └── empty_kernel/
-├── tier2/                          # Application benchmarks (63)
+├── tier2/                          # Application benchmarks (62)
 │   ├── Makefile
-│   ├── shoc_devicememory/
 │   ├── shoc_fft/
 │   ├── shoc_gemm/
 │   ├── shoc_reduction/
@@ -283,7 +282,6 @@ The metric column names downstream quantities. See [measurement interpretation](
 
 | Suite | Benchmark | Description |
 |-------|-----------|-------------|
-| SHOC (historical ID) | `shoc_devicememory` | Local global-memory read/write microbenchmarks; not the upstream SHOC DeviceMemory suite |
 | SHOC | `shoc_fft` | Fast Fourier Transform |
 | SHOC | `shoc_gemm` | Dense matrix multiplication |
 | SHOC | `shoc_reduction` | Parallel reduction |

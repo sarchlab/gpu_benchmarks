@@ -78,6 +78,15 @@ host check and compiles both GPU variants; execution requires hardware. Every
 GPU process has a 60-second budget, with raw output and source/binary hashes
 retained in the new work directory.
 
+`python3 tests/graph_pr_verification.py --host-only --work-dir /tmp/pr-host`
+checks the production PageRank reference against exact trajectories, duplicated
+edges, a single vertex and total mass with fatal host sanitizers. Use `--platform
+cuda --work-dir /tmp/pr-gpu --sweep` for balanced measured-rank faults (which
+preserve total mass), nonfinite ranks, odd/even final-buffer selection and all 81
+production configurations. The existing numerical criterion is unchanged by
+this coverage check. CI runs the host check and compiles the GPU variants; actual
+GPU runs retain raw output and source/binary hashes with a 60-second process limit.
+
 `python3 tests/graph_cc_verification.py --host-only --work-dir /tmp/cc-host`
 checks the production CPU label propagation against exact capped and converged
 trajectories, including disconnected and isolated vertices. Use `--platform cuda

@@ -45,12 +45,18 @@ endif
 # ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
-.PHONY: all clean
+.PHONY: all clean test
 
 all: $(TARGET)
 
-$(TARGET): $(SRC) ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
+$(TARGET): $(SRC) hotspot3d_reference.h ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
 	$(CC) $(CFLAGS) $< -o $@
 
+bench_output_test: ../../tests/hotspot3d_original_gpu.hip $(SRC) hotspot3d_reference.h ../../tests/upstream/hotspot3d_cpu.h ../../tests/upstream/hotspot3d_gpu.hip ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
+	$(CC) $(CFLAGS) $< -o $@
+
+test: bench_output_test
+	./bench_output_test --grid_size 17 --num_iterations 3
+
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) bench_output_test

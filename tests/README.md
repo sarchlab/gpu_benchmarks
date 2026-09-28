@@ -634,7 +634,10 @@ AMD hardware and trace/replay qualification remain separate.
 read-reference cases against independently enumerated grid-stride loops and
 materialized inputs, full write/readwrite formulas, large-index FP32 rounding,
 finite/exact comparisons, chunk offsets and 99 control/admission cases under
-fatal ASan/UBSan. GCC is also supported.
+fatal ASan/UBSan with `-ffp-contract=fast` to exercise FMA-capable host targets.
+GCC is also supported. On an x86 host that supports FMA, compile
+`tests/devicememory_reference.cpp` with `-O2 -std=c++14 -mfma -ffp-contract=fast`
+to exercise the same complete reference comparisons with FMA enabled explicitly.
 
 `python3 tests/devicememory_measured_result.py --platform cuda --work-dir /tmp/dm-check`
 builds clean production and isolated instrumented binaries. Its 125 cases cover

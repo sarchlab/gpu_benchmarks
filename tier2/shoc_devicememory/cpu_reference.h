@@ -74,14 +74,18 @@ public:
     ReadReference(int n,int stride):remainder(0) {
         if(n<1 || stride<1) throw std::invalid_argument("invalid read reference geometry");
         const int q=n/stride, step=stride%1000; remainder=n%stride;
+        // Match the separately stored GPU input, including its FP32 rounding.
+        // A multiply inside the sum could otherwise contract into a host FMA.
+        std::array<float,1000> pattern;
+        for(int i=0;i<1000;++i) pattern[i]=input_value(i);
         for(int residue=0;residue<1000;++residue) {
             float sum=0; int position=residue;
             for(int j=0;j<q;++j) {
-                sum+=input_value(position);
+                sum+=pattern[position];
                 position=(position+step)%1000;
             }
             shorter[residue]=sum;
-            longer[residue]=sum+input_value(position);
+            longer[residue]=sum+pattern[position];
         }
     }
     float operator()(size_t gid) const {

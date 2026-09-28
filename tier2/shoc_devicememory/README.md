@@ -80,6 +80,8 @@ The read input is periodic with period 1000. For stride `S`, each thread makes
 `floor(N/S)` or one additional FP32 addition, with the same input-residue
 sequence for each `gid % 1000`. The CPU caches both ordered sums for every
 residue (2000 floats), then compares **every actual produced output**. This
+reference first materializes the 1000 FP32 input values so a host compiler
+cannot fuse their generation with the accumulation and change rounding. This
 exploits an exact property of the existing input; it does not sample outputs or
 run a smaller GPU problem. Host tests independently enumerate all original loop
 indices against materialized inputs to validate this reference.
@@ -95,7 +97,8 @@ records with an error status.
 GPU problem storage remains two `4*N` arrays. Peak explicit host storage is the
 existing `4*N` input/reset buffer, a verification chunk up to 4 MiB and a read
 reference of about 8 KiB, excluding runtime overhead. CPU reference storage
-therefore does not grow by another full array.
+therefore does not grow by another full array. Reference construction also uses
+a temporary 4 KiB input-period table before the full input/reset buffer exists.
 
 Records include requested controls, actual element/grid/thread/output counts,
 logical read/write bytes, `algorithm="local_grid_stride_v1"`,

@@ -11,7 +11,9 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--compiler',default='c++');a=ap.parse_args()
     root=Path(__file__).resolve().parents[1]
     with tempfile.TemporaryDirectory(prefix='devicememory-host-') as folder:
-        exe=Path(folder)/'test';subprocess.run([a.compiler,'-O2','-std=c++14','-fsanitize=address,undefined','-fno-sanitize-recover=all',str(root/'tests/devicememory_reference.cpp'),'-o',str(exe)],check=True)
+        # Exercise contraction on host targets that support FMA. The reference
+        # must still sum already-rounded inputs, just like the GPU kernel.
+        exe=Path(folder)/'test';subprocess.run([a.compiler,'-O2','-std=c++14','-ffp-contract=fast','-fsanitize=address,undefined','-fno-sanitize-recover=all',str(root/'tests/devicememory_reference.cpp'),'-o',str(exe)],check=True)
         subprocess.run([str(exe)],check=True,timeout=120)
         clean={k:v for k,v in os.environ.items() if not k.startswith(('BENCH_PARAM_','DM_TEST_'))}
         cases=[]

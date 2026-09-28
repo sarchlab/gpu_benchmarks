@@ -574,7 +574,10 @@ qualification remain separate.
 
 `python3 tests/hotspot3d_host.py --compiler clang++` checks all 1290 integer-safe
 sizes against pinned physical parameters, including the 56 sizes requiring a
-smaller timestep. It compares complete small CPU trajectories with both a frozen
+smaller timestep, plus 24 small-grid trajectories using limited coefficients
+from the first and last limited sizes. These exercise the numerical branch
+without claiming hardware qualification of the corresponding large grids.
+It compares complete small CPU trajectories with both a frozen
 upstream CPU body and a separately indexed long-double oracle, and checks all
 91 parameter/precedence cases under fatal ASan/UBSan. `--all-inputs` checks the
 complete legacy input recipe at all 22 declared sizes.

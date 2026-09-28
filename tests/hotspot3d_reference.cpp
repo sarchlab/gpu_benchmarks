@@ -56,6 +56,19 @@ int main(int argc,char** argv) {
         std::vector<float> actual(pin,pin+pin_a.size());assert(compare(actual,expected,bound)==0);
         for(size_t i=0;i<exact.size();++i)assert(std::fabs(static_cast<long double>(expected[i])-exact[i])<1e-11L);
     }
+    // Exercise limiting without allocating a 1235^3 or 1290^3 hardware problem.
+    // Spatial shape and physical coefficients are independent helper inputs.
+    for(int physical_n:{1235,1290})for(int n:{1,3,8})for(int steps:{1,2,3,50}) {
+        Problem p;p.n=n;p.steps=steps;auto in=input(p);const auto c=coefficients(physical_n);
+        assert(c.dt<c.upstream_dt);admissible(c);
+        const auto expected=reference(p,c,in);const auto exact=oracle(p,c,in);
+        const double bound=error_bound(p,c,in);
+        std::vector<float> pin_a=in.temperature,pin_b(pin_a.size());
+        const float* pin=pinned_hotspot3d::computeTempCPU(in.power.data(),pin_a.data(),pin_b.data(),n,n,n,c.cap,c.rx,c.ry,c.rz,c.dt,steps);
+        assert(compare(std::vector<float>(pin,pin+pin_a.size()),expected,bound)==0);
+        for(size_t i=0;i<exact.size();++i)assert(std::fabs(static_cast<long double>(expected[i])-exact[i])<1e-11L);
+    }
+    puts("PASS: 24 small-grid trajectories with actual limited-timestep coefficients");
     // Nondefault ambient values and an asymmetric input exercise all six faces.
     for(float ambient:{-20.5f,0.0f,80.125f}) {
         Problem p;p.n=3;p.steps=3;p.ambient=ambient;auto in=input(p);const auto c=coefficients(p.n);

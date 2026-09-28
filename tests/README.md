@@ -78,6 +78,15 @@ host check and compiles both GPU variants; execution requires hardware. Every
 GPU process has a 60-second budget, with raw output and source/binary hashes
 retained in the new work directory.
 
+`python3 tests/aes_verification.py --host-only --work-dir /tmp/aes-host` checks
+the unchanged CPU cipher and key expansion against all four NIST SP 800-38A
+F.1.5 AES-256 vectors, with fatal sanitizers and buffer/key guards. Use
+`--platform cuda --work-dir /tmp/aes-gpu --sweep` for actual GPU known answers,
+partial blocks, measured ciphertext faults beyond the former 256-block cutoff,
+all 16 byte positions, bounded diagnostics, both warmers and all 27 declared
+configurations. CI runs the host checks and compiles both GPU variants. Runtime
+checks retain raw output and source/binary hashes with a 60-second process limit.
+
 `python3 tests/graph_pr_verification.py --host-only --work-dir /tmp/pr-host`
 checks the production PageRank reference against exact trajectories, duplicated
 edges, a single vertex and total mass with fatal host sanitizers. Use `--platform

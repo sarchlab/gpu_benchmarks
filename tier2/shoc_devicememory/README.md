@@ -1,94 +1,107 @@
-# tier2/shoc_devicememory — Device Memory Bandwidth (SHOC)
+# Local global-memory microbenchmarks (`shoc_devicememory`)
 
-Benchmarks GPU global memory bandwidth for three access patterns: read-only, write-only, and read-write. Emits one raw per-kernel GPU time per execution; GB/s for each pattern is derived downstream.
+Three ordinary device-memory kernels measure read, write and in-place read/write
+access. Each enabled kernel runs once, and every produced result is checked
+against an exact FP32 CPU reference outside its timed interval.
 
-## Provenance & fidelity
+## Scope and identity
 
-Derived from the SHOC benchmark suite (https://github.com/vetter/shoc) — the `DeviceMemory` workload. This is an independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction of the upstream kernel. It differs from SHOC's version as follows:
+The owner selected these existing three local kernels on 2026-09-28 instead of
+restoring the full SHOC DeviceMemory suite. The directory, executable, suite tag
+and benchmark ID remain `shoc_devicememory` for compatibility; they are historical
+identifiers, not a claim of SHOC algorithm or performance equivalence. This is
+an independent local global-memory microbenchmark.
 
-- Three simple grid-stride kernels vs SHOC's unrolled/local-memory/texture set.
+SHOC DeviceMemory is a collection of access experiments, including shared memory
+and textures. Those experiments are outside this selected scope. Ordinary
+`hipMalloc` allocations are used here; on NVIDIA, the compatibility layer maps
+that API to `cudaMalloc`. There is no managed-memory, shared-memory or texture
+allocation in these three kernels. Kernel bodies, input values and launch
+mapping are unchanged by the verification repair.
 
-Read this as "a device-memory-bandwidth benchmark in the spirit of SHOC," not as SHOC's `DeviceMemory`.
+## Workloads
 
-## Kernels
+Let `N = array_size_mb * 2^20 / sizeof(float)`, `B = block_size`,
+`G = min(ceil(N/B), 65535)` and `S = G*B`. Input element `i` is
+`float(i % 1000) * 0.001f`.
 
-| Kernel | Access Pattern | Bandwidth Formula (derived downstream) |
-|--------|---------------|-------------------|
-| `readOnly_kernel` | Read-only (all threads read; one write/thread) | bytes / time |
-| `writeOnly_kernel` | Write-only (strided writes) | bytes / time |
-| `readWrite_kernel` | Read + scale + write (in-place) | 2 × bytes / time |
+| Kernel | Work and output | Logical data bytes |
+|---|---|---|
+| `readOnly_kernel` | Each active thread sums `input[gid + k*S]` in FP32 and writes one result | Reads `4*N`; writes `4*min(N,S)` |
+| `writeOnly_kernel` | Writes `float(i) * 0.001f` to every element | Writes `4*N` |
+| `readWrite_kernel` | Multiplies each pristine input by `1.0001f` in place | Reads `4*N`; writes `4*N` |
 
-`BENCH_PARAM_transfer_mode` selects which kernels run: `read`, `write`, or
-`readwrite` (all three; default).
+These are logical accesses, not a claim about physical DRAM traffic. Cache
+behavior and transaction sizes can differ. Derive bandwidth from the chosen
+logical byte count and emitted kernel time; account for the read kernel's
+output stores when reporting total logical traffic.
 
-## Measurement protocol
+`transfer_mode=read` runs the read kernel, `write` runs the write kernel, and
+`readwrite` runs all three in the order above. The third kernel's input is reset
+with the existing recipe before its launch. The unused tail of the read-output
+allocation is not a produced result and is never read by verification.
 
-Each enabled kernel is launched and timed **exactly once** per execution —
-there is no in-program warmup or iteration loop. When
-`BENCH_PARAM_vector_add_warmup` is `true` (default), the vector-add warmer runs
-immediately before each timed launch: ~100 ms of sustained load ramps the GPU
-clock while its final pass evicts the last-level cache, so every kernel is
-measured cold-cache at a boosted clock. Repetition is the harness's job:
-`gpubench run --reps N` re-executes the binary in fresh processes.
+## Controls and build
 
-## Parameters
-
-| Env var | Default | Description |
-|---------|---------|-------------|
-| `BENCH_PARAM_array_size_mb` | 64 | Array size in MB |
-| `BENCH_PARAM_block_size` | 256 | Threads per block |
-| `BENCH_PARAM_transfer_mode` | readwrite | Access pattern(s): read, write, readwrite |
-| `BENCH_PARAM_vector_add_warmup` | true | Clock-boost + LLC-evict warmer before each timed launch |
-
-## Files
-
-| File | Description |
-|------|-------------|
-| `shoc_devicememory.hip` | HIP source — 3 kernels + self-contained utilities |
-| `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
-
-## Build
-
-```bash
-make               # auto-detect platform
-make PLATFORM=cuda
-make PLATFORM=rocm
+```
+make PLATFORM=cuda                    # or PLATFORM=rocm
+./shoc_devicememory                   # 64 MiB, block 256, all three kernels
+./shoc_devicememory --array_size_mb 96 --transfer_mode read
 ```
 
-## Run
+The flags `--array_size_mb`, `--block_size` and `--transfer_mode` have matching
+`BENCH_PARAM_` variables, which take precedence. The first matching CLI flag is
+used; all supplied values must be valid even when overridden. Numeric controls
+must be positive 32-bit integers. Admission also checks the actual capped grid,
+array byte size and final signed-index increment of the unchanged grid-stride
+loops. The selected device's block and grid limits apply before allocation.
+An integer-admissible manual input is not a resource-qualified configuration.
 
-```bash
-./shoc_devicememory                        # defaults: 64 MB, readwrite
-./shoc_devicememory --array_size_mb 256
-./shoc_devicememory --transfer_mode read
-```
+The declared profile remains 21 array sizes from 1 to 4096 MiB, block 256, and
+three transfer modes: 63 configurations. `array_size_mb` retains its historical
+name but means binary MiB. The warmer is a measurement control, not another
+workload sweep dimension.
 
-## Output
+## Measurement and verification
 
-**stdout** — JSON lines: one `kernel` record per enabled kernel carrying the
-GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`), then a
-`summary` whose `total_time_ms` is the sum of the recorded GPU event times
-(with `transfer_mode=readwrite`, all three kernels):
-```
-{"type":"kernel","name":"readOnly_kernel","iter":0,"time_ms":2.345600,"host_time_ms":2.400000,"params":{"array_size_mb":64,"block_size":256,"transfer_mode":"readwrite"}}
-{"type":"kernel","name":"writeOnly_kernel","iter":0,"time_ms":1.987600,"host_time_ms":2.020000,"params":{...}}
-{"type":"kernel","name":"readWrite_kernel","iter":0,"time_ms":4.123400,"host_time_ms":4.180000,"params":{...}}
-{"type":"summary","total_time_ms":8.456600}
-```
+The shared vector-add warmer runs immediately before each enabled timed kernel
+unless `BENCH_PARAM_vector_add_warmup=false`. Setup, transfers, allocation and
+verification are outside kernel timing. Each kernel emits one timing record;
+the summary sums those recorded kernel times. Repetition remains the harness's
+job (`gpubench run --reps N`).
 
-Bandwidth in GB/s is derived downstream from `time_ms` and params.
+Verification downloads each result in chunks of at most 1,048,576 floats (4 MiB).
+Read results are checked before the write kernel overwrites them. Write and
+read/write results are checked in full before their buffers are freed. With
+the warmer disabled, these added downloads and CPU checks also affect the
+inter-kernel delay/cache state; this mode has no controlled cache-entry claim.
 
-**stderr** — human-readable per-kernel times:
-```
-Device: NVIDIA GeForce RTX 4090 (id=0)
-Array size: 64 MB (16777216 floats)  |  Block size: 256
+The read input is periodic with period 1000. For stride `S`, each thread makes
+`floor(N/S)` or one additional FP32 addition, with the same input-residue
+sequence for each `gid % 1000`. The CPU caches both ordered sums for every
+residue (2000 floats), then compares **every actual produced output**. This
+exploits an exact property of the existing input; it does not sample outputs or
+run a smaller GPU problem. Host tests independently enumerate all original loop
+indices against materialized inputs to validate this reference.
 
-readOnly_kernel: gpu = 2.346 ms, host = 2.400 ms
-writeOnly_kernel: gpu = 1.988 ms, host = 2.020 ms
-readWrite_kernel: gpu = 4.123 ms, host = 4.180 ms
-Total GPU time: 8.457 ms
-```
+The other references directly evaluate the existing write and multiply
+expressions. Every actual and expected value must be finite and exactly equal
+as an FP32 value. There is no tolerance or verification bypass. The first ten
+mismatches per kernel are printed, all mismatches are counted, and any mismatch
+returns nonzero after the enabled measurements finish. Missing setup or
+verification resources also fail explicitly; the runner retains emitted timing
+records with an error status.
 
-## Platform Notes
+GPU problem storage remains two `4*N` arrays. Peak explicit host storage is the
+existing `4*N` input/reset buffer, a verification chunk up to 4 MiB and a read
+reference of about 8 KiB, excluding runtime overhead. CPU reference storage
+therefore does not grow by another full array.
 
-- **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `shoc_devicememory.hip`
+Records include requested controls, actual element/grid/thread/output counts,
+logical read/write bytes, `algorithm="local_grid_stride_v1"`,
+`input="periodic_1000_fp32_v1"`, `allocation="device_malloc"`,
+`precision="fp32"` and `verification="full_cpu_exact_v1"`.
+
+See `../../tests/README.md` for host references, full-profile GPU/fault checks
+and frozen-local-kernel comparisons. H100 qualification does not imply AMD,
+trace/replay or other-host resource qualification.

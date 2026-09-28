@@ -45,12 +45,18 @@ endif
 # ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
-.PHONY: all clean
+.PHONY: all clean test
 
 all: $(TARGET)
 
-$(TARGET): $(SRC) ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
+$(TARGET): $(SRC) cpu_reference.h ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
 	$(CC) $(CFLAGS) $< -o $@
 
+bench_output_test: ../../tests/devicememory_baseline_gpu.hip ../../tests/fixtures/devicememory_baseline.hip $(SRC) cpu_reference.h ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
+	$(CC) $(CFLAGS) $< -o $@
+
+test: bench_output_test
+	./bench_output_test --array_size_mb 1
+
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) bench_output_test

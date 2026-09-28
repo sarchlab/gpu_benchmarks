@@ -71,6 +71,12 @@ jobs:
           python3 tests/atomic_host.py --compiler g++
           python3 tests/atomic_measured_result.py --platform cuda --work-dir /tmp/atomic-measured --compile-only
 
+      - name: Check complete local device-memory references and measured-result hooks
+        run: |
+          python3 tests/devicememory_host.py --compiler g++
+          python3 tests/devicememory_measured_result.py --platform cuda --work-dir /tmp/devicememory-measured --compile-only
+          make -C tier2/shoc_devicememory PLATFORM=cuda bench_output_test
+
       - name: Check pinned HotSpot physics, complete references and measured-result hooks
         run: |
           python3 tests/hotspot_host.py --compiler g++

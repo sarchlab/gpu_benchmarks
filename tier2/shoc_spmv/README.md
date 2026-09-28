@@ -93,7 +93,7 @@ Device: <device_name>
 Rows: 16384  |  NNZ_per_row: 32  |  Total NNZ: 524288
 
 spmv_csr_kernel: gpu = X.XXX ms, host = X.XXX ms
-Correctness check (first 32 elements): PASS
+SpMV verification: PASS (16384 rows, 0 mismatches)
 
 Total GPU time: X.XXX ms
 ```
@@ -101,7 +101,7 @@ Total GPU time: X.XXX ms
 **stdout** — JSON lines: one `kernel` record for the single timed launch, then
 a `summary` whose `total_time_ms` equals that record's GPU event time:
 ```
-{"type":"kernel","name":"spmv_csr_kernel","iter":0,"time_ms":0.234500,"host_time_ms":0.289000,"params":{"num_rows":16384,"nnz_per_row":32}}
+{"type":"kernel","name":"spmv_csr_kernel","iter":0,"time_ms":0.234500,"host_time_ms":0.289000,"params":{"num_rows":16384,"nnz_per_row":32,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":0.234500}
 ```
 
@@ -134,11 +134,42 @@ GFLOPS = 2 * NNZ / time_s / 1e9
 
 ## Correctness Verification
 
-After the timed run (measurements already emitted), the GPU output `y` is compared against a CPU reference SpMV for the first 32 elements. A relative error threshold of `1e-4` is applied:
+After the timed run (measurements already emitted), **every row** of the actual
+GPU output `y` is compared against the complete CPU reference SpMV. Verification
+does not run another GPU SpMV. The existing relative error threshold is retained:
 ```
-rel_err = |gpu - cpu| / (|cpu| + 1e-6)  < 1e-4
+rel_err = |gpu - cpu| / (|cpu| + 1e-6) <= 1e-4
 ```
 
 The benchmark exits with code `0` on PASS and non-zero on FAIL, so the harness
 marks the run as failed without losing the measurements. There is no
 verification on/off parameter.
+Nonfinite outputs, references or relative errors fail. The diagnostic reports
+the total rows and mismatches; at most ten individual errors are printed, while
+all rows are checked. The kernel record identifies this verification as
+`full_cpu_v1`. CPU reference computation, comparison and diagnostics are outside
+GPU timing; the GPU algorithm, input generation and launch are unchanged.
+
+Regression commands (use new output directories):
+
+```bash
+python3 tests/shoc_spmv_verification.py --host-only --work-dir /tmp/spmv-host
+python3 tests/shoc_spmv_verification.py --platform cuda --work-dir /tmp/spmv-check --sweep
+```
+
+The host check exercises the production CPU routine against exact CSR examples.
+The GPU check builds an unmodified production executable and a separate test
+copy that can corrupt actual device results after timing. It checks rows around
+the old 32-row cutoff, interior and final rows, finite/NaN/infinity errors, skipped
+GPU work, bounded diagnostics, timing records, and both warmer settings.
+`--sweep` also checks all 81 declared workload combinations with the production
+binary and the warmer enabled, requiring each process to finish within 60 seconds.
+These tests establish correctness and process-budget evidence on the tested
+device; they do not qualify performance reproducibility or untested AMD hardware.
+
+H100 PCIe / CUDA 12.9 validation on 2026-09-28 passed all 81 configurations and
+123 production/fault cases. The largest case checked all 8,388,608 rows with 64
+entries per row; the slowest complete process took 11.377 seconds. Four GPU
+sanitizers, eight existing output/reference finite-value cases and six native
+CLI/SQLite outcomes also passed. The GPU was shared with other jobs, so these
+are correctness and observed process-budget results, not publication timings.

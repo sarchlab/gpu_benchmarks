@@ -59,6 +59,15 @@ input. This check does not rerun the GPU, authenticate a claimed qualification,
 or establish that a locally rebuilt binary or different toolchain/GPU is covered;
 the documented requirement to use the exact qualified collection binary remains.
 
+`python3 tests/shoc_spmv_verification.py --host-only --work-dir /tmp/spmv-host`
+checks the actual CPU SpMV reference against analytical CSR examples with fatal
+host sanitizers. Use `--platform cuda --work-dir /tmp/spmv-gpu --sweep` for
+production controls, actual post-timing device faults (including the former
+32-row cutoff and final row), skipped-work rejection and all 81 production
+manifest combinations. Every GPU process must finish within 60 seconds. CI
+compiles these GPU tests; their execution requires a GPU. Raw output, source and
+binary hashes and per-case outcomes remain in the new work directory.
+
 `python3 tests/parboil_spmv_controls.py --compiler clang++` checks SpMV’s
 resolved seed, requested/effective launch geometry and JSON identity without a
 GPU. Its 72 cases cover CLI/environment precedence and simulated device

@@ -153,7 +153,7 @@ int main(int argc, char** argv)
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"num_rows\":%d,\"nnz_per_row\":%d",
+             "\"num_rows\":%d,\"nnz_per_row\":%d,\"verification\":\"full_cpu_v1\"",
              num_rows, nnz_per_row);
 
     // Single timed launch (bench_run_once: optional cold-cache warmer, then
@@ -172,20 +172,21 @@ int main(int argc, char** argv)
     // CPU reference
     cpu_spmv(h_row_ptr, h_col_idx, h_values, h_x, h_y_ref, num_rows);
 
-    bool pass = true;
-    int check_n = 32;
-    for (int i = 0; i < check_n && i < num_rows; ++i) {
+    int errors = 0;
+    for (int i = 0; i < num_rows; ++i) {
         float ref = h_y_ref[i];
         float rel = fabsf(h_y[i] - ref) / (fabsf(ref) + 1e-6f);
         if (!std::isfinite(h_y[i]) || !std::isfinite(ref) || !std::isfinite(rel) ||
             rel > 1e-4f) {
-            fprintf(stderr, "MISMATCH y[%d]: gpu=%.6f cpu=%.6f rel=%.4e\n",
-                    i, h_y[i], ref, rel);
-            pass = false;
+            if (errors < 10)
+                fprintf(stderr, "MISMATCH y[%d]: gpu=%.6f cpu=%.6f rel=%.4e\n",
+                        i, h_y[i], ref, rel);
+            ++errors;
         }
     }
-    fprintf(stderr, "Correctness check (first %d elements): %s\n\n",
-            check_n, pass ? "PASS" : "FAIL");
+    const bool pass = errors == 0;
+    fprintf(stderr, "SpMV verification: %s (%d rows, %d mismatches)\n\n",
+            pass ? "PASS" : "FAIL", num_rows, errors);
 
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);

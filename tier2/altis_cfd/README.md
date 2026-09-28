@@ -107,7 +107,8 @@ measurements require fresh processes through the harness.
 
 A separate matrix-form CPU reference advances the same input through all ten
 three-stage steps using FP64 arithmetic and the pinned rounded physical
-constants. It does not invoke or reuse the production GPU flux functions.
+constants (including FP32 `gamma=1.4f` and its FP32 subtraction in the
+initial/boundary energy expression). It does not invoke or reuse the production GPU flux functions.
 After the measured run, it compares every element of:
 
 - final density, three momenta and energy: `5*padded_cells` values;
@@ -140,6 +141,9 @@ python3 tests/cfd_measured_result.py --platform cuda --work-dir /tmp/cfd-check
 make -C tier2/altis_cfd PLATFORM=cuda test
 ```
 
+Host tests compare all far-field state/flux constants against the frozen upstream
+host initialization and reject gamma-precision mutations. GPU qualification also
+reads all 17 actual uploaded constant values and compares them bitwise.
 Host tests reconstruct tetrahedral faces independently, verify reciprocal
 geometry and all padding, compare complete trajectories against frozen upstream
 FP32 scalar bodies, and check actual parameter admission under fatal ASan/UBSan.

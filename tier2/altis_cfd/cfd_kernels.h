@@ -2,7 +2,7 @@
 // See UPSTREAM_LICENSE. Padded cell count is divisible by the block size.
 #pragma once
 namespace cfd_device {
-#define GAMMA 1.4
+#define GAMMA 1.4f
 #define NNB 4
 #define NVAR 5
 #define VAR_DENSITY 0

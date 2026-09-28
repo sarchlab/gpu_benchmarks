@@ -83,12 +83,12 @@ struct Topology {
 };
 inline const Topology& topology() { static const Topology value;return value; }
 inline std::array<float,5> farfield() {
-    // Preserve the pinned host expressions, including its mixed literal precision.
+    // Preserve the pinned host expressions, including FP32 gamma and the FP32 gamma-minus-one denominator.
     std::array<float,5> u;u[0]=float(1.4);
-    float speed_of_sound=std::sqrt(1.4*float(1.0f)/u[0]);
+    float speed_of_sound=std::sqrt(1.4f*float(1.0f)/u[0]);
     float speed=float(1.2f)*speed_of_sound;
     u[1]=u[0]*speed;u[2]=0.0f;u[3]=0.0f;
-    u[4]=u[0]*(float(0.5f)*(speed*speed))+(float(1.0f)/float(1.4-1.0f));return u;
+    u[4]=u[0]*(float(0.5f)*(speed*speed))+(float(1.0f)/float(1.4f-1.0f));return u;
 }
 struct Input {
     int side;
@@ -118,7 +118,7 @@ inline Input input(const Problem& p) {
         const float density=1.4f+perturb,pressure=1.0f+0.5f*perturb,speed=1.2f;
         in.initial[i]=density;in.initial[i+n]=density*speed;
         in.initial[i+2*n]=in.initial[i+3*n]=0.0f;
-        in.initial[i+4*n]=density*(0.5f*(speed*speed))+pressure/float(1.4-1.0f);
+        in.initial[i+4*n]=density*(0.5f*(speed*speed))+pressure/float(1.4f-1.0f);
     }
     // Upstream padding duplicates the last real cell; all normal planes are initialized.
     for(int i=p.cells;i<p.padded;++i) {

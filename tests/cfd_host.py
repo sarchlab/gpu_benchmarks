@@ -28,6 +28,18 @@ def main():
                 subprocess.run([args.compiler,*flags,'-I'+str(repo/'tests'),str(fallback),'-o',str(binary)],check=True)
                 subprocess.run([str(binary)],check=True,timeout=120)
         print('PASS: complete references survive system_error/bad_alloc at zero-worker and partial-worker creation')
+        # Reject the former double-literal rounding independently in the boundary
+        # constants and the approved perturbed initial-state energy expression.
+        for line in ['u[4]=u[0]*', 'in.initial[i+4*n]=']:
+            original=next(x for x in header.splitlines() if line in x)
+            assert 'float(1.4f-1.0f)' in original
+            altered=header.replace(original,original.replace('float(1.4f-1.0f)','float(1.4-1.0f)'))
+            (work/'cfd_reference.h').write_text(altered)
+            subprocess.run([args.compiler,*flags,'-I'+str(repo/'tests'),str(fallback),'-o',str(binary)],check=True)
+            rejected=subprocess.run([str(binary)],capture_output=True,text=True,timeout=120)
+            expected_function='check_farfield' if line.startswith('u[4]') else 'check_mesh'
+            assert rejected.returncode!=0 and 'assert' in rejected.stderr.lower() and expected_function in rejected.stderr,rejected
+        print('PASS: independent upstream setup rejects both former gamma-rounding mutations')
         source=work/'parameters.cpp';source.write_text('#include "'+str(repo/'tier2/altis_cfd/cfd_reference.h')+'"\n'+r'''
 int main(int argc,char**argv)try{auto p=cfd::parameters(argc,argv);printf("%d,%d,%d\n",p.cells,p.block,p.padded);}
 catch(const std::exception&e){fprintf(stderr,"FAIL: %s\n",e.what());return 1;}

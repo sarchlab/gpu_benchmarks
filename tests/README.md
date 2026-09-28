@@ -633,7 +633,10 @@ AMD hardware and trace/replay qualification remain separate.
 `python3 tests/cfd_host.py --compiler clang++` (or `g++`) runs independent
 geometric reconstruction for 342 tetrahedral meshes, 36 complete frozen-FP32
 versus independent-FP64 trajectories, all final auxiliary arrays, and 68 actual
-control/padding/index/precedence cases under fatal ASan/UBSan. Separate isolated
+control/padding/index/precedence cases under fatal ASan/UBSan.
+Host far-field constants are compared bitwise against frozen upstream initialization
+statements; the GPU qualification below checks the actual uploaded constants too. Two mutations reject the former double-literal
+gamma rounding in boundary and initial-state energy. Separate isolated
 header copies exercise both system-error and allocation-failure paths during
 zero-worker and partial-worker creation, retaining complete reference output.
 

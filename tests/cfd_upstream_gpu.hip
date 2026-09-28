@@ -5,15 +5,28 @@
 #include "fixtures/cfd_upstream.h"
 #include <cstdint>
 
+// Read the actual production constant memory, not a shared setup helper.
+__global__ void read_farfield_constants(float* out) {
+    for(int k=0;k<5;++k)out[k]=cfd_device::ff_variable[k];
+    const float3 flux[]={cfd_device::ff_flux_contribution_momentum_x[0],
+        cfd_device::ff_flux_contribution_momentum_y[0],cfd_device::ff_flux_contribution_momentum_z[0],
+        cfd_device::ff_flux_contribution_density_energy[0]};
+    for(int k=0;k<4;++k){out[5+3*k]=flux[k].x;out[6+3*k]=flux[k].y;out[7+3*k]=flux[k].z;}
+}
 static void upstream_farfield() {
-    auto ff=cfd::farfield();float pressure=1;float3 momentum=make_float3(ff[1],ff[2],ff[3]);
-    float3 velocity=make_float3(1.2f,0,0),fx,fy,fz,fe;
-    cfd_upstream::compute_flux_contribution(ff[0],momentum,ff[4],pressure,velocity,fx,fy,fz,fe);
-    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(cfd_upstream::ff_variable),ff.data(),5*sizeof(float)));
-    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(cfd_upstream::ff_flux_contribution_momentum_x),&fx,sizeof(fx)));
-    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(cfd_upstream::ff_flux_contribution_momentum_y),&fy,sizeof(fy)));
-    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(cfd_upstream::ff_flux_contribution_momentum_z),&fz,sizeof(fz)));
-    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(cfd_upstream::ff_flux_contribution_density_energy),&fe,sizeof(fe)));
+    const auto ff=cfd_upstream::farfield();
+    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(cfd_upstream::ff_variable),ff.variables,5*sizeof(float)));
+    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(cfd_upstream::ff_flux_contribution_momentum_x),&ff.momentum_x,sizeof(float3)));
+    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(cfd_upstream::ff_flux_contribution_momentum_y),&ff.momentum_y,sizeof(float3)));
+    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(cfd_upstream::ff_flux_contribution_momentum_z),&ff.momentum_z,sizeof(float3)));
+    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(cfd_upstream::ff_flux_contribution_density_energy),&ff.energy,sizeof(float3)));
+    float expected[17],actual[17];for(int k=0;k<5;++k)expected[k]=ff.variables[k];
+    const float3 flux[]={ff.momentum_x,ff.momentum_y,ff.momentum_z,ff.energy};
+    for(int k=0;k<4;++k){expected[5+3*k]=flux[k].x;expected[6+3*k]=flux[k].y;expected[7+3*k]=flux[k].z;}
+    float* device;HIP_CHECK(hipMalloc(&device,sizeof(actual)));read_farfield_constants<<<1,1>>>(device);
+    HIP_CHECK(hipGetLastError());HIP_CHECK(hipMemcpy(actual,device,sizeof(actual),hipMemcpyDeviceToHost));HIP_CHECK(hipFree(device));
+    if(std::memcmp(actual,expected,sizeof(actual))!=0)throw std::runtime_error("CFD uploaded farfield differs from pinned upstream initialization");
+    std::fprintf(stderr,"PASS: all 17 uploaded farfield values match independent upstream host initialization exactly\n");
 }
 static uint64_t compare(const char* label,float* a,float* b,size_t count) {
     const size_t chunk=std::min<size_t>(count,1048576);std::vector<float> x(chunk),y(chunk);

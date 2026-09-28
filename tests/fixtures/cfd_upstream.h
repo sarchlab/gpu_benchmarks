@@ -1,8 +1,9 @@
 // Frozen pinned Altis 042e2926d1fe9a5ea5b3e2d659b75bf925b152cc euler3d.cu solver bodies.
-// License: ../../tier2/altis_cfd/UPSTREAM_LICENSE. Only the enclosing namespace is new.
+// License: ../../tier2/altis_cfd/UPSTREAM_LICENSE. Original solver bodies and host setup;
+// the namespace and result wrapper expose independent upstream constants to tests.
 #pragma once
 namespace cfd_upstream {
-#define GAMMA 1.4
+#define GAMMA 1.4f
 #define NNB 4
 #define NVAR 5
 #define VAR_DENSITY 0
@@ -220,6 +221,47 @@ __global__ void cuda_time_step(int j, int nelr, float* old_variables, float* var
 	variables[i + (VAR_MOMENTUM+0)*nelr] = old_variables[i + (VAR_MOMENTUM+0)*nelr] + factor*fluxes[i + (VAR_MOMENTUM+0)*nelr];
 	variables[i + (VAR_MOMENTUM+1)*nelr] = old_variables[i + (VAR_MOMENTUM+1)*nelr] + factor*fluxes[i + (VAR_MOMENTUM+1)*nelr];
 	variables[i + (VAR_MOMENTUM+2)*nelr] = old_variables[i + (VAR_MOMENTUM+2)*nelr] + factor*fluxes[i + (VAR_MOMENTUM+2)*nelr];
+}
+// Original host initialization statements, exposed without symbol uploads.
+struct Farfield { float variables[5];float3 momentum_x,momentum_y,momentum_z,energy; };
+inline Farfield farfield() {
+    constexpr float ff_mach=1.2f,deg_angle_of_attack=0.0f;
+		float h_ff_variable[NVAR];
+		const float angle_of_attack = float(3.1415926535897931 / 180.0f) * float(deg_angle_of_attack);
+
+		h_ff_variable[VAR_DENSITY] = float(1.4);
+
+		float ff_pressure = float(1.0f);
+		float ff_speed_of_sound = sqrt(GAMMA*ff_pressure / h_ff_variable[VAR_DENSITY]);
+		float ff_speed = float(ff_mach)*ff_speed_of_sound;
+
+		float3 ff_velocity;
+		ff_velocity.x = ff_speed*float(cos((float)angle_of_attack));
+		ff_velocity.y = ff_speed*float(sin((float)angle_of_attack));
+		ff_velocity.z = 0.0f;
+
+		h_ff_variable[VAR_MOMENTUM+0] = h_ff_variable[VAR_DENSITY] * ff_velocity.x;
+		h_ff_variable[VAR_MOMENTUM+1] = h_ff_variable[VAR_DENSITY] * ff_velocity.y;
+		h_ff_variable[VAR_MOMENTUM+2] = h_ff_variable[VAR_DENSITY] * ff_velocity.z;
+
+		h_ff_variable[VAR_DENSITY_ENERGY] = h_ff_variable[VAR_DENSITY]*(float(0.5f)*(ff_speed*ff_speed)) + (ff_pressure / float(GAMMA-1.0f));
+
+		float3 h_ff_momentum;
+		h_ff_momentum.x = *(h_ff_variable+VAR_MOMENTUM+0);
+		h_ff_momentum.y = *(h_ff_variable+VAR_MOMENTUM+1);
+		h_ff_momentum.z = *(h_ff_variable+VAR_MOMENTUM+2);
+		float3 h_ff_flux_contribution_momentum_x;
+		float3 h_ff_flux_contribution_momentum_y;
+		float3 h_ff_flux_contribution_momentum_z;
+		float3 h_ff_flux_contribution_density_energy;
+		compute_flux_contribution(h_ff_variable[VAR_DENSITY], h_ff_momentum, h_ff_variable[VAR_DENSITY_ENERGY], ff_pressure, ff_velocity, h_ff_flux_contribution_momentum_x, h_ff_flux_contribution_momentum_y, h_ff_flux_contribution_momentum_z, h_ff_flux_contribution_density_energy);
+    Farfield result;
+    for(int k=0;k<NVAR;++k)result.variables[k]=h_ff_variable[k];
+    result.momentum_x=h_ff_flux_contribution_momentum_x;
+    result.momentum_y=h_ff_flux_contribution_momentum_y;
+    result.momentum_z=h_ff_flux_contribution_momentum_z;
+    result.energy=h_ff_flux_contribution_density_energy;
+    return result;
 }
 #undef GAMMA
 #undef NNB

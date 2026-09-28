@@ -13,11 +13,22 @@ static Index blockDim{1},blockIdx{0},threadIdx{0};
 #define __global__
 #define __constant__
 #include "fixtures/cfd_upstream.h"
+#include "../tier2/altis_cfd/cfd_kernels.h"
 #undef __device__
 #undef __host__
 #undef __global__
 #undef __constant__
 
+static void check_farfield() {
+    const auto expected=cfd_upstream::farfield();auto actual=cfd::farfield();
+    assert(std::memcmp(actual.data(),expected.variables,5*sizeof(float))==0);
+    float pressure=1;float3 momentum{actual[1],actual[2],actual[3]},velocity{1.2f,0,0},x,y,z,e;
+    cfd_device::compute_flux_contribution(actual[0],momentum,actual[4],pressure,velocity,x,y,z,e);
+    assert(std::memcmp(&x,&expected.momentum_x,sizeof(x))==0);
+    assert(std::memcmp(&y,&expected.momentum_y,sizeof(y))==0);
+    assert(std::memcmp(&z,&expected.momentum_z,sizeof(z))==0);
+    assert(std::memcmp(&e,&expected.energy,sizeof(e))==0);
+}
 static void check_mesh(int cells,int block) {
     const cfd::Problem p{cells,block,(cells+block-1)/block*block};const auto in=cfd::input(p);const int n=p.padded;
     using FaceKey=std::array<cfd::Point,3>;std::map<FaceKey,std::vector<std::pair<int,int>>> faces;
@@ -25,6 +36,11 @@ static void check_mesh(int cells,int block) {
     for(int i=0;i<cells;++i) {
         const int cube=i/6;const cfd::Point origin{{cube%in.side,(cube/in.side)%in.side,cube/(in.side*in.side)}};
         const auto& tet=topology.tetra[i%6];
+        const float q=float((11*origin[0]+7*origin[1]+3*origin[2]+i%6)%33-16)/256.0f;
+        const float density=1.4f+q,pressure=1.0f+0.5f*q,speed=1.2f;
+        const float energy=density*(0.5f*(speed*speed))+pressure/float(1.4f-1.0f);
+        assert(in.initial[i]==density&&in.initial[i+n]==density*speed);
+        assert(in.initial[i+2*n]==0&&in.initial[i+3*n]==0&&in.initial[i+4*n]==energy);
         int det=cfd::dot(cfd::subtract(tet[1],tet[0]),cfd::cross(cfd::subtract(tet[2],tet[0]),cfd::subtract(tet[3],tet[0])));
         assert(std::abs(det)==1 && in.areas[i]==1.0f/6.0f);
         for(int d=0;d<3;++d){float sum=0;for(int f=0;f<4;++f)sum+=in.normals[i+(f+4*d)*n];assert(sum==0);}
@@ -49,11 +65,11 @@ static void check_mesh(int cells,int block) {
 }
 static void check_solver(int cells,int block) {
     cfd::Problem p{cells,block,(cells+block-1)/block*block};auto in=cfd::input(p);const size_t n=p.padded;
-    auto ff=cfd::farfield();for(int k=0;k<5;++k)cfd_upstream::ff_variable[k]=ff[k];
-    float pressure=1;float3 momentum{ff[1],ff[2],ff[3]},velocity{1.2f,0,0};
-    cfd_upstream::compute_flux_contribution(ff[0],momentum,ff[4],pressure,velocity,
-        cfd_upstream::ff_flux_contribution_momentum_x[0],cfd_upstream::ff_flux_contribution_momentum_y[0],
-        cfd_upstream::ff_flux_contribution_momentum_z[0],cfd_upstream::ff_flux_contribution_density_energy[0]);
+    const auto ff=cfd_upstream::farfield();for(int k=0;k<5;++k)cfd_upstream::ff_variable[k]=ff.variables[k];
+    cfd_upstream::ff_flux_contribution_momentum_x[0]=ff.momentum_x;
+    cfd_upstream::ff_flux_contribution_momentum_y[0]=ff.momentum_y;
+    cfd_upstream::ff_flux_contribution_momentum_z[0]=ff.momentum_z;
+    cfd_upstream::ff_flux_contribution_density_energy[0]=ff.energy;
     auto state=in.initial;std::vector<float> old(5*n),flux(5*n),factor(n);
     for(int t=0;t<10;++t) {
         old=state;
@@ -70,6 +86,7 @@ static void check_solver(int cells,int block) {
     assert(!cfd::matches(1.01f,1));
 }
 int main() {
+    check_farfield();
     int meshes=0,solves=0;
     for(int n=1;n<=83;++n)for(int b:{1,7,32,256}){check_mesh(n,b);++meshes;}
     for(int n:{125,127,128,129,500,503,1023,1024,1025,4096}){check_mesh(n,256);++meshes;}

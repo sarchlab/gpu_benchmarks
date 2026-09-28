@@ -88,7 +88,7 @@ CC verification: PASS (100000 vertices, 0 mismatches)
 
 Derived downstream from `time_ms` and params — not reported by the binary:
 
-- **MTEPS** (Mega Traversed Edges Per Second) = `num_edges × cc_iterations / time_seconds / 1e6`
+- **MTEPS** (Mega Traversed Edges Per Second) = `num_edges × iterations_performed / time_seconds / 1e6`
 
 ## Verification
 

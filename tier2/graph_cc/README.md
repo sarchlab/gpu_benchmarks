@@ -21,6 +21,13 @@ for each vertex v in parallel:
 Iterations continue until no labels change (convergence) or the maximum
 number of iterations is reached.
 
+Threads whose labels change set the shared global convergence flag with a
+device-scope `atomicExch`. The host resets the flag before launching each
+iteration and reads it after that kernel completes. This preserves the Jacobi
+updates and stopping rule while avoiding concurrent non-atomic writes. The
+atomic operation is part of the timed propagation kernel; recollect kernel
+performance after this synchronization repair.
+
 ## Parameters
 
 | Parameter         | Default  | Description                              |
@@ -109,12 +116,12 @@ label cutoff and bounded diagnostics. `--sweep` additionally executes all 69
 declared configurations with the unmodified production binary and warmer enabled,
 requiring complete verification within 60 seconds per process. These checks
 provide correctness and observed process-budget evidence, not publication
-performance or AMD qualification. The separately tracked concurrent plain writes
-to the GPU convergence flag remain a correctness follow-up.
+performance or AMD qualification.
 
 H100 PCIe / CUDA 12.9 validation on 2026-09-28 passed all 69 configurations and
 95 production/fault cases. The largest case verified all 1,000,000 labels; the
-slowest whole process took 9.831 seconds. Clang/GCC fatal host sanitizers, four
-GPU tools and six native CLI/SQLite outcomes passed. These tool results do not
-establish race freedom for the separately tracked global flag. The shared GPU's
+slowest whole process took under 10 seconds. Clang/GCC fatal host sanitizers, four
+GPU tools and six native CLI/SQLite outcomes passed. The shared GPU's
 timings are correctness-budget evidence, not publication performance results.
+After the atomic-flag repair, all 95 cases passed again with identical iteration
+counts, and the production H100 instructions contain the global atomic exchange.

@@ -1,4 +1,4 @@
-# Makefile for tier2/shoc_devicememory — SHOC DeviceMemory benchmark
+# Local global-memory microbenchmarks (historical shoc_devicememory ID)
 #
 # Supported platforms:
 #   PLATFORM=cuda   — NVIDIA CUDA  (default on Linux without ROCm)

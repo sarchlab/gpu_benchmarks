@@ -77,6 +77,9 @@ jobs:
           python3 tests/particlefilter_profile_records.py
           python3 tests/particlefilter_measured_result.py --platform cuda --work-dir /tmp/particlefilter-measured --compile-only
 
+      - name: Reject stale H100 qualification profiles
+        run: python3 tests/h100_profile_identity_test.py
+
       - name: Check pinned CFD solver, mesh geometry and measured-result hooks
         run: |
           python3 tests/cfd_host.py --compiler g++

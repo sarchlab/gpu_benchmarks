@@ -130,6 +130,11 @@ collection workspace: it intentionally contains the already-qualified binary.
 The general repository manifest still enumerates all 27 candidate counts and
 does not enforce the restricted profile. Requalify after changing relevant
 sources, compiler, hardware or collection input.
+CI checks that this committed profile's source hashes and candidate coverage
+remain current. A change to a benchmark input or any of the three shared headers
+requires fresh H100 qualification; updating hashes alone is not requalification.
+Run `python3 tests/h100_profile_identity.py --benchmark altis_particlefilter`
+from the repository to check the source/configuration identity without a GPU.
 
 ## Build and run
 

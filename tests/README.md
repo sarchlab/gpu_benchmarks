@@ -44,6 +44,21 @@ for the existing harness. `python3 tests/nbody_profile_records.py` checks 28
 qualification classifications, including malformed timing/verification evidence,
 explicit completed-process overruns and unexpected failures. See the [N-body README](../tier2/cuda_nbody/README.md).
 
+`python3 tests/h100_profile_identity.py` checks that the committed N-body and
+Particle Filter H100 profiles still match the current benchmark sources,
+headers, Makefiles, manifests and preserved licenses. Both existing profile
+record tests also run this check in CI. Each current candidate must have exactly
+one classification, with consistent qualified/unsupported counts.
+`python3 tests/h100_profile_identity_test.py` exercises isolated source/hash
+corruption, missing or new helpers, shared-header changes and changed candidate
+coverage, including attempts to hide a changed manifest by refreshing its hash.
+Changes to any of the three common headers invalidate both profiles: run each
+benchmark's existing H100 qualification procedure and commit its fresh evidence.
+Never update only a hash to make this check pass. Documentation is not a runtime
+input. This check does not rerun the GPU, authenticate a claimed qualification,
+or establish that a locally rebuilt binary or different toolchain/GPU is covered;
+the documented requirement to use the exact qualified collection binary remains.
+
 `python3 tests/parboil_spmv_controls.py --compiler clang++` checks SpMV’s
 resolved seed, requested/effective launch geometry and JSON identity without a
 GPU. Its 72 cases cover CLI/environment precedence and simulated device

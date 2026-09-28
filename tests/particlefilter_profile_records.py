@@ -3,9 +3,12 @@
 import copy
 import json
 import math
+from pathlib import Path
+from h100_profile_identity import check_profile
 from particlefilter_h100_profile import NAMES, expected_params, classify_completed
 
 def main():
+    check_profile(Path(__file__).resolve().parents[1], 'altis_particlefilter')
     n=503;rows=[dict(type='kernel',name=name,iter=0,time_ms=1.0,host_time_ms=1.5,params=expected_params(n)) for name in NAMES]+[dict(type='summary',total_time_ms=6.0)]
     passed='Particle Filter verification: PASS (verified 503 particles, 10 timesteps, 39236 final and auxiliary values; 0 mismatches)'
     failed=passed.replace('PASS','FAIL').replace('0 mismatches','1 mismatches');encode=lambda x:'\n'.join(json.dumps(v) for v in x)

@@ -19,7 +19,8 @@ import sys
 # closed when verification code moves; these are injection sites, not copies of
 # the verifier or its tolerance logic.
 SITES = {
-    "altis_cfd": [("float diff_rho =", [("rho", "gpu_flux_rho[i]", "cpu_f_rho[i]"), ("mx", "gpu_flux_mx[i]", "cpu_f_mx[i]")])],
+    "altis_cfd": [("for(size_t i=0;i<count;++i)if(!cfd::matches(actual[i],expected[start+i])) {",
+                   [("value", "actual[0]", "expected[start]")])],
     "cuda_convolution_separable": [("float diff = fabsf(h_output[idx]", [("output", "h_output[idx]", "ref[idx]")])],
     "cuda_nbody": [("const bool position_ok =", [("pos_" + c, f"h_pos[i].{c}", f"h_pos_orig[i].{c}") for c in "xyzw"] + [("vel_" + c, f"h_vel[i].{c}", f"h_vel_orig[i].{c}") for c in "xyzw"])],
     "cuda_transpose": [("int naive_errors = 0;", [("naive", "h_odata[0]", "h_ref[0]")]), ("int opt_errors = 0;", [("optimized", "h_odata[0]", "h_ref[0]")])],
@@ -115,6 +116,13 @@ def instrument(source, sites):
         declaration = "const jacobi::Grids expected=jacobi::reference(problem);"
         assert source.count(declaration) == 1
         source = source.replace(declaration, declaration.replace("const ", "", 1))
+    if any(anchor.startswith("for(size_t i=0;i<count;++i)if(!cfd::matches") for anchor, _ in sites):
+        # Test-only mutability for poisoning a CPU-reference element after the
+        # actual chunk download and before its production finite comparison.
+        for declaration in ("const cfd::Reference expected=cfd::reference(p,in);",
+                            "const std::vector<double>& expected"):
+            assert source.count(declaration) == 1
+            source = source.replace(declaration, declaration.replace("const ", "", 1))
     for anchor, pairs in sites:
         assert source.count(anchor) == 1, (anchor, source.count(anchor))
         pos = source.index(anchor)

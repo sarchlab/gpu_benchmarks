@@ -265,7 +265,7 @@ int main(int argc, char** argv) {
     char params[192];
     snprintf(params, sizeof(params),
              "\"num_vertices\":%d,\"avg_degree\":%d,\"max_iterations\":%d,"
-             "\"block_size\":%d",
+             "\"block_size\":%d,\"verification\":\"full_cpu_v1\"",
              num_vertices, avg_degree, max_iterations, block_size);
 
     bench_timer_t timer;
@@ -291,7 +291,7 @@ int main(int argc, char** argv) {
     // -------------------------------------------------------------------
     // Verification
     // -------------------------------------------------------------------
-    // The timed pass already left the converged labels in d_labels, so we read
+    // The timed pass already left the final labels in d_labels, so we read
     // them directly — no second run_cc_gpu() (which would also fire a second
     // untimed warmer and re-solve). Repetition across processes is the
     // harness's job.
@@ -302,10 +302,9 @@ int main(int argc, char** argv) {
         std::vector<int> h_cpu_labels;
         cc_cpu(N, max_iterations, row_offsets, col_indices, h_cpu_labels);
 
-        int verify_n = (N < 1024) ? N : 1024;
         int errors = 0;
 
-        for (int i = 0; i < verify_n; ++i) {
+        for (int i = 0; i < N; ++i) {
             if (h_gpu_labels[i] != h_cpu_labels[i]) {
                 if (errors < 10) {
                     fprintf(stderr, "Mismatch at vertex %d: GPU=%d CPU=%d\n",
@@ -315,12 +314,9 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (errors > 0) {
-            fprintf(stderr, "FAIL: %d mismatches in first %d vertices\n",
-                    errors, verify_n);
-            verify_ok = false;
-        } else
-            fprintf(stderr, "PASS\n");
+        verify_ok = errors == 0;
+        fprintf(stderr, "CC verification: %s (%d vertices, %d mismatches)\n",
+                verify_ok ? "PASS" : "FAIL", N, errors);
     }
 
     bench_timer_destroy(&timer);

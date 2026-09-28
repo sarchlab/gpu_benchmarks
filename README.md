@@ -18,7 +18,7 @@ The suite is designed to cover the widest possible diversity of GPU compute and 
 
 ## Overview
 
-This suite contains **125 benchmarks across five tiers** of increasing complexity and scope, allowing researchers and engineers to evaluate GPU hardware and software stacks at every level — from raw memory bandwidth to end-to-end ML training throughput.
+This suite contains **124 benchmarks across five tiers** of increasing complexity and scope, allowing researchers and engineers to evaluate GPU hardware and software stacks at every level — from raw memory bandwidth to end-to-end ML training throughput.
 
 ---
 

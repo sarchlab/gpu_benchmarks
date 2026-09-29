@@ -145,6 +145,11 @@ jobs:
           make -C tier2/lonestar_bh PLATFORM=cuda
           python3 tests/bh_positive_steps.py --compiler g++ --binary tier2/lonestar_bh/lonestar_bh --work-dir /tmp/bh-positive-steps
 
+      - name: Check FDTD-2D input admission
+        run: |
+          make -C tier2/polybench_fdtd2d PLATFORM=cuda
+          python3 tests/fdtd_input_ranges.py --compiler g++ --binary tier2/polybench_fdtd2d/polybench_fdtd2d --work-dir /tmp/fdtd-input-ranges
+
       - name: Check pinned CFD solver, mesh geometry and measured-result hooks
         run: |
           python3 tests/cfd_host.py --compiler g++

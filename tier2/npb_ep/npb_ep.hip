@@ -21,7 +21,7 @@
 // Uses double precision (NAS spec). Double atomicAdd needs sm_60+ / any GCN.
 //
 // Class is set by M: M=24 -> S, 25 -> W, 28 -> A, 30 -> B, 32 -> C.
-// Default M=28 (Class A): NN = 2^12 threads, each doing NK = 2^16 numbers,
+// Default M=28 (Class A): NN = 2^12 threads, each doing NK = 2^16 pairs,
 // i.e. 2^28 pairs / 2^29 numbers per launch — runs in well under a second on a
 // modern GPU yet gives a substantial (>~ms) per-pass kernel time.
 //
@@ -50,7 +50,7 @@
 // NAS EP constants — verbatim from NPB-GPU EP/ep.cpp and common/npb.hpp
 // ---------------------------------------------------------------------------
 #define MK            (16)
-#define NK            (1 << MK)            // numbers per batch group = 2^16 (fixed)
+#define NK            (1 << MK)            // pairs per batch group = 2^16 (fixed)
 #define NQ            (10)                 // number of annular bins
 #define EPSILON       (1.0e-8)
 #define A             (1220703125.0)
@@ -215,6 +215,55 @@ __global__ void gpu_kernel(double* q_global,
 }
 
 // ---------------------------------------------------------------------------
+// Untimed sanity checks and the original ordered host reduction. These bounds
+// are necessary properties of the outputs, not an exact histogram reference.
+// Each active thread generates NK pairs; admitted M <= 46 keeps every valid
+// integer count exactly representable in double.
+// ---------------------------------------------------------------------------
+static size_t reduce_and_check_partials(const double* q_host,
+        const double* sx_host, const double* sy_host, long long nn,
+        int threads_per_block, int blocks_per_grid, double* q,
+        double& sx, double& sy) {
+    size_t errors = 0;
+    auto invalid = [&](const char* field, int block, int bin, double value) {
+        if (errors < 10)
+            fprintf(stderr, "Invalid %s at block %d, bin %d: %.17g\n",
+                    field, block, bin, value);
+        ++errors;
+    };
+    for (int i = 0; i < NQ; ++i) q[i] = 0.0;
+    sx = sy = 0.0;
+    for (int block = 0; block < blocks_per_grid; ++block) {
+        long long active = nn - (long long)block * threads_per_block;
+        if (active > threads_per_block) active = threads_per_block;
+        const double pair_budget = (double)active * NK;
+        double block_count = 0.0;
+        bool valid_counts = true;
+        for (int i = 0; i < NQ; ++i) {
+            const double count = q_host[(size_t)block * NQ + i];
+            if (!std::isfinite(count) || count < 0.0 ||
+                    std::floor(count) != count || count > pair_budget) {
+                invalid("count", block, i, count);
+                valid_counts = false;
+            }
+            block_count += count;
+            q[i] += count;
+        }
+        if (valid_counts && block_count > pair_budget)
+            invalid("block count total", block, -1, block_count);
+        if (!std::isfinite(sx_host[block])) invalid("Sx", block, -1, sx_host[block]);
+        if (!std::isfinite(sy_host[block])) invalid("Sy", block, -1, sy_host[block]);
+        sx += sx_host[block];
+        sy += sy_host[block];
+    }
+    if (!std::isfinite(sx)) invalid("reduced Sx", -1, -1, sx);
+    if (!std::isfinite(sy)) invalid("reduced Sy", -1, -1, sy);
+    fprintf(stderr, "Output sanity: %s: %zu errors across %d blocks\n",
+            errors ? "FAIL" : "PASS", errors, blocks_per_grid);
+    return errors;
+}
+
+// ---------------------------------------------------------------------------
 // Argument parsing
 // ---------------------------------------------------------------------------
 static int parseIntParam(int argc, char** argv, const char* name, int defaultVal) {
@@ -307,7 +356,8 @@ int main(int argc, char** argv) {
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"class\":\"%s\",\"m\":%d,\"block_size\":%d",
+             "\"class\":\"%s\",\"m\":%d,\"block_size\":%d,"
+             "\"output_sanity\":\"finite_count_bounds_v1\"",
              class_of(m), m, block_size);
 
     // One recorded pass = one gpu_kernel launch (EP is embarrassingly parallel;
@@ -353,18 +403,22 @@ int main(int argc, char** argv) {
     double* q_host  = (double*)malloc(size_q);
     double* sx_host = (double*)malloc(size_sx);
     double* sy_host = (double*)malloc(size_sy);
+    if (!q_host || !sx_host || !sy_host) {
+        fprintf(stderr, "Verification: FAIL (host output allocation failed)\n");
+        free(q_host); free(sx_host); free(sy_host);
+        HIP_CHECK(hipFree(q_device));
+        HIP_CHECK(hipFree(sx_device));
+        HIP_CHECK(hipFree(sy_device));
+        return EXIT_FAILURE;
+    }
     HIP_CHECK(hipMemcpy(q_host,  q_device,  size_q,  hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(sx_host, sx_device, size_sx, hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(sy_host, sy_device, size_sy, hipMemcpyDeviceToHost));
 
     double q[NQ];
-    for (int i = 0; i < NQ; ++i) q[i] = 0.0;
     double sx = 0.0, sy = 0.0;
-    for (int block = 0; block < blocks_per_grid; ++block) {
-        for (int i = 0; i < NQ; ++i) q[i] += q_host[block*NQ + i];
-        sx += sx_host[block];
-        sy += sy_host[block];
-    }
+    const size_t sanity_errors = reduce_and_check_partials(q_host, sx_host,
+            sy_host, nn, threads_per_block, blocks_per_grid, q, sx, sy);
     double gc = 0.0;
     for (int i = 0; i < NQ; ++i) gc += q[i];
 
@@ -393,7 +447,8 @@ int main(int argc, char** argv) {
     fprintf(stderr, "  Sums = %25.15e %25.15e\n", sx, sy);
     fprintf(stderr, "  Counts:\n");
     for (int i = 0; i < NQ; ++i) fprintf(stderr, "    %3d %15.0f\n", i, q[i]);
-    if (!have_ref)      fprintf(stderr, "  No reference sums for M=%d (verification skipped)\n", m);
+    if (sanity_errors) fprintf(stderr, "  Verification: FAIL (invalid output)\n");
+    else if (!have_ref) fprintf(stderr, "  No reference sums for M=%d (verification skipped)\n", m);
     else if (verified)  fprintf(stderr, "  Verification: PASS\n");
     else                fprintf(stderr, "  Verification: FAIL (sx=%.15e vs %.15e, sy=%.15e vs %.15e)\n",
                                  sx, sx_verify, sy, sy_verify);
@@ -405,7 +460,6 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipFree(sx_device));
     HIP_CHECK(hipFree(sy_device));
 
-    // Unknown M has no reference sums (verification skipped): exit 0.
-    // A known class whose sums mismatch is a wrong computation: exit non-zero.
-    return (!have_ref || verified) ? EXIT_SUCCESS : EXIT_FAILURE;
+    // Unknown M keeps NAS verification skipped, but invalid outputs still fail.
+    return (sanity_errors == 0 && (!have_ref || verified)) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

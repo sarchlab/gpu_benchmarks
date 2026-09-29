@@ -11,7 +11,7 @@ Faithful port of the [NAS Parallel Benchmarks](https://www.nas.nasa.gov/software
 ## Algorithm (original NAS EP)
 
 - Generate 2^(M+1) uniform numbers with the NAS 46-bit linear congruential generator `randlc`/`vranlc` (R23/R46 split, `A = 5^13 = 1,220,703,125`, seed `S = 271828183`).
-- Each of the 2^(M-16) threads derives its own starting seed via the `randlc` skip-ahead loop, then draws `NK = 2^16` numbers in batches of `RECOMPUTATION = 128`.
+- Each of the 2^(M-16) threads derives its own starting seed via the `randlc` skip-ahead loop, then draws `NK = 2^16` pairs of numbers in batches of `RECOMPUTATION = 128` pairs.
 - **Marsaglia polar (acceptance-rejection)** method: for a pair `(x1, x2)` in [-1,1]², accept iff `t1 = x1²+x2² <= 1`, then `t = sqrt(-2 ln t1 / t1)`, `t3 = x1·t`, `t4 = x2·t`.
 - Annulus bin `l = max(|t3|, |t4|)` (integer truncation); increment `q[l]` and accumulate `Sx += t3`, `Sy += t4`.
 - Each block reduces its threads' partials via `atomicAdd` into per-block slots; the host sums the per-block partials after the timed loop.
@@ -79,7 +79,7 @@ EP is embarrassingly parallel: the benchmark times **one `gpu_kernel` launch per
 
 **stdout** — JSON lines: one `{"type":"kernel",...}` record with `time_ms` (GPU event time of the single `gpu_kernel` launch) and `host_time_ms`, then a summary whose `total_time_ms` equals that launch's GPU event time:
 ```
-{"type":"kernel","name":"gpu_kernel","iter":0,"time_ms":...,"host_time_ms":...,"params":{"class":"A","m":28,"block_size":256}}
+{"type":"kernel","name":"gpu_kernel","iter":0,"time_ms":...,"host_time_ms":...,"params":{"class":"A","m":28,"block_size":256,"output_sanity":"finite_count_bounds_v1"}}
 {"type":"summary","total_time_ms":...}
 ```
 
@@ -88,6 +88,36 @@ EP is embarrassingly parallel: the benchmark times **one `gpu_kernel` launch per
 ## Verification
 
 After the timed launch the host sums the per-block partials into `q[10]`, `Sx`, `Sy` and compares `Sx`/`Sy` against the NAS reference sums for the class (relative error ≤ 1e-8), exactly as in upstream NPB-GPU. If a reference exists for the class and verification fails, the binary exits with a non-zero status.
+
+Before reporting success, every downloaded block's `Sx` and `Sy`, and both
+final sums, must be finite. Every histogram bin must be finite, nonnegative and
+integral; the sum of a block's bins cannot exceed `NK` times its active thread
+count. A partial final block uses its actual active count. All valid counts are
+exactly representable in double for the admitted M range. Invalid output or a
+failed host output allocation exits nonzero, including for non-reference M.
+At most ten invalid-value diagnostics are printed, followed by the total error
+count. Host checks and downloads occur after timing; the GPU kernel is unchanged.
+
+`output_sanity=finite_count_bounds_v1` identifies these necessary bounds. They
+are **not an independent exact histogram reference**: an incorrect histogram
+with legal counts may still pass. The official NAS Sx/Sy criterion is unchanged.
+Healthy M values without NAS references still report verification skipped and
+are not qualified for performance collection by passing sanity checks.
+
+Regression commands (use a new work directory each time):
+
+```bash
+python3 tests/npb_ep_output_sanity.py --host-only --compiler clang++ --work-dir /tmp/ep-host
+python3 tests/npb_ep_output_sanity.py --platform cuda --sweep --work-dir /tmp/ep-device
+```
+
+The host test exercises the production reduction with fatal ASan/UBSan,
+partial blocks, exact limits, invalid counts, nonfinite partials and sum overflow.
+The device test corrupts actual output buffers after the timed launch, checks
+first/final blocks, bounded diagnostics, both warmer modes, unknown-class skip
+behavior and allocation failure. `--sweep` adds all 15 declared M/block-size
+combinations with a 60-second per-process limit. CI runs host fixtures and
+compiles both production and fault variants; execution requires GPU hardware.
 
 ## Platform Notes
 

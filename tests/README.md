@@ -375,12 +375,19 @@ expression and does not claim that ordinary timing runs perform verification
 (R-13).
 
 `python3 tests/lbm_input_ranges.py --compiler clang++ --work-dir /tmp/lbm-inputs`
-checks LBM's actual resolved guards, distribution-array bounds, launch arithmetic
-and parameter records under fatal host sanitizers. It covers all 78 declared
-configurations, the 483/484 dimension boundary, positive-work requirements and
-existing environment/ignored-command-line behavior. Add `--binary <parboil_lbm>`
-for exact GPU-hidden rejection with no timing records. Numerical verification,
-upstream fidelity, capacity and hardware block support remain separate.
+compiles the production LBM admission/layout header under fatal host sanitizers.
+It covers all 78 candidates, padded signed-index bounds, positive work, removed
+block/tau controls and the owner-excluded 256³/500 point. Add `--binary` for
+actual GPU-hidden rejection with no timing records. `tests/lbm_host.cpp` checks
+an analytical first step, serial/parallel CPU trajectories and corruption of
+every tail population, both reference and output, plus flags.
+
+`python3 tests/lbm_measured_result.py --platform cuda --work-dir /tmp/lbm-measured`
+checks full measured-output fault rejection with both warmers and compares all
+GPU storage/initialization against frozen Parboil CUDA sources. Use
+`--compile-only` on a GPU-less builder. CI runs host checks and compiles the GPU
+regressions; H100 execution is recorded separately. See the benchmark README for
+upstream fidelity, strict error limits and collection exclusions.
 
 `python3 tests/fdtd_input_ranges.py --compiler clang++ --work-dir /tmp/fdtd-inputs`
 checks actual FDTD-2D input guards, initialization bounds and allocation byte

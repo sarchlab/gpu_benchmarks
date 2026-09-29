@@ -31,12 +31,12 @@ ifeq ($(PLATFORM),cuda)
   CC     := nvcc
   SRC    := parboil_lbm.hip
   CUDA_ARCH ?= native
-  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH) -x cu
+  CFLAGS := -O3 -std=c++14 -arch=$(CUDA_ARCH) -Xcompiler -pthread -x cu
 
 else ifeq ($(PLATFORM),rocm)
   CC     := hipcc
   SRC    := parboil_lbm.hip
-  CFLAGS := -O3 -std=c++14
+  CFLAGS := -O3 -std=c++14 -pthread
 
 else
   $(error Unknown PLATFORM=$(PLATFORM). Use cuda or rocm.)
@@ -49,7 +49,7 @@ endif
 
 all: $(TARGET)
 
-$(TARGET): $(SRC) ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
+$(TARGET): $(SRC) lbm_common.h lbm_kernel.h lbm_reference.h ../../common/bench_timing.h ../../common/bench_warmup.h ../../common/hip_cuda_compat.h
 	$(CC) $(CFLAGS) $< -o $@
 
 clean:

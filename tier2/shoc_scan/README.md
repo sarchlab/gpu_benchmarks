@@ -117,7 +117,9 @@ PASS
 ## Verification
 
 After the measured run (all JSON records and the summary already emitted), the
-scan is re-run and its output compared element-wise against a CPU reference.
+output left by that run is downloaded and compared element-wise against a CPU
+exclusive-scan reference. Verification does not launch another GPU scan or
+another clock warmer.
 On FAIL the process exits non-zero, so the harness marks the run as failed
 without losing the measurements. There is no verification on/off parameter.
 

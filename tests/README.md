@@ -68,6 +68,17 @@ manifest combinations. Every GPU process must finish within 60 seconds. CI
 compiles these GPU tests; their execution requires a GPU. Raw output, source and
 binary hashes and per-case outcomes remain in the new work directory.
 
+`python3 tests/shoc_sort_verification.py --host-only --compiler clang++ --work-dir /tmp/sort-host`
+checks the production sort verifier against an independent complete pair-multiset
+and key-order oracle, including all small permutations with ties/extreme keys,
+invalid indices, wrong associations, bounded diagnostics, unavailable allocation
+and immutable input/output guards under fatal host sanitizers. Use `--platform
+cuda --sweep --work-dir /tmp/sort-gpu` for actual measured-device faults, skipped
+sorting and both new allocation failures, plus all 13 declared sizes and both
+warmer modes. Each GPU process has a 60-second budget. Use a new directory for
+raw logs, source/binary hashes and outcomes. CI executes host fixtures and
+compiles GPU variants; execution requires hardware.
+
 `python3 tests/transpose_verification.py --host-only --compiler clang++ --work-dir /tmp/transpose-host`
 checks the production CPU transpose against a known answer and independent
 rectangular mappings, bit preservation, inverse transposes and memory guards

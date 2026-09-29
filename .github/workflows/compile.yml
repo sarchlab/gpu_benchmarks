@@ -297,6 +297,11 @@ jobs:
           python3 tests/npb_ep_output_sanity.py --host-only --compiler g++ --work-dir /tmp/ep-output-host
           python3 tests/npb_ep_output_sanity.py --platform cuda --work-dir /tmp/ep-output-device --compile-only
 
+      - name: Check full sort-pair verifier and compile measured-output regression
+        run: |
+          python3 tests/shoc_sort_verification.py --host-only --compiler g++ --work-dir /tmp/sort-pairs-host
+          python3 tests/shoc_sort_verification.py --platform cuda --work-dir /tmp/sort-pairs-measured --compile-only
+
       - name: Check full transpose reference and compile measured-output regression
         run: |
           python3 tests/transpose_verification.py --host-only --compiler g++ --work-dir /tmp/transpose-host

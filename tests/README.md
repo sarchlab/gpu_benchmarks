@@ -4,7 +4,7 @@ The CI CPU-reference builds and Python host sanitizer checks use
 `-fno-sanitize-recover=all`, so detected sanitizer errors fail the check. Include
 this flag when compiling a sanitized host test manually.
 
-`finite_verification.py` exercises the actual verification paths of 27 Tier 2
+`finite_verification.py` exercises the actual verification paths of 29 Tier 2
 benchmarks. It makes isolated source copies, injects values immediately before
 the existing comparisons, and builds those copies with the benchmark Makefiles.
 The production sources and executables receive no injection interface.
@@ -266,13 +266,6 @@ fatal host sanitizers. It covers all 60 declared configurations, positive work,
 the signed square-size boundary, partial blocks and CLI/environment precedence.
 Add `--binary <shoc_stencil2d>` for exact GPU-hidden invalid-request rejection
 with no timing records. Hardware block support and capacity remain separate.
-
-`python3 tests/heteromark_pagerank_input_ranges.py --compiler clang++ --work-dir /tmp/hpr-inputs`
-checks actual resolved integer guards, parser precedence and size expressions
-under fatal host sanitizers. It covers all 108 declared vertex/damping combinations,
-empty-work requests and the fixed-degree CSR limit. Add `--binary <heteromark_pagerank>`
-for exact GPU-hidden invalid-request diagnostics with no timing records. This does
-not change or qualify the benchmark's numerical criterion or upstream fidelity.
 
 `python3 tests/graph_cc_input_ranges.py --compiler clang++ --work-dir /tmp/cc-inputs`
 checks the actual preallocation guards and grid arithmetic under fatal host

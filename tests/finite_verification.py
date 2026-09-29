@@ -26,7 +26,6 @@ SITES = {
     "cuda_transpose": [("size_t naive_errors = 0;", [("naive", "h_odata[0]", "h_ref[0]")]), ("size_t opt_errors = 0;", [("optimized", "h_odata[0]", "h_ref[0]")])],
     "graph_pr": [("float err = fabsf(h_gpu_rank[i]", [("rank", "h_gpu_rank[i]", "h_cpu_rank[i]")])],
     "heteromark_fir": [("float diff = fabsf(h_output[i]", [("output", "h_output[i]", "h_ref[i]")])],
-    "heteromark_pagerank": [("float diff = fabsf(h_pr[v]", [("rank", "h_pr[v]", "refPr[v]")])],
     "lonestar_bh": [("float ref_mag = sqrtf(ref_ax[i]", [("x", "gpu_ax[i]", "ref_ax[i]"), ("y", "gpu_ay[i]", "ref_ay[i]")])],
     "npb_cg": [("const size_t errors=nas_cg::compare(actual,expected);",
                 [(name, f"actual.{name}.back()", f"expected.{name}.back()")

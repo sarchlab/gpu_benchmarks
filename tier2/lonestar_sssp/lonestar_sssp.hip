@@ -153,7 +153,7 @@ static int run_sssp_gpu(int N,
     HIP_CHECK(hipMemcpy(d_dist, h_dist.data(), N * sizeof(int), hipMemcpyHostToDevice));
 
     int blockSize = blkSize;
-    int gridSize  = (N + blockSize - 1) / blockSize;
+    int gridSize  = (int)(((long long)N + blockSize - 1) / blockSize);
     int max_iters = N; // upper bound
     int total_iters = 0;
 
@@ -210,6 +210,24 @@ int main(int argc, char** argv) {
     int N       = vertices;
     int avg_deg = degree;
     int source  = 0;
+
+    if (N <= 0 || avg_deg < 0 || block_size <= 0) {
+        fprintf(stderr, "SSSP vertices and block_size must be positive; degree must be nonnegative\n");
+        return EXIT_FAILURE;
+    }
+    // Bound every generated CSR prefix, including the degree expression itself.
+    long long max_degree = (long long)avg_deg / 2 + avg_deg;
+    if (max_degree < 1) max_degree = 1;
+    if ((long long)N * max_degree > INT_MAX) {
+        fprintf(stderr, "SSSP maximum generated edge count exceeds INT_MAX\n");
+        return EXIT_FAILURE;
+    }
+    // At most N rounds, with weights 1..100. Keep every candidate below the
+    // unreachable sentinel, including the final no-change round's attempts.
+    if ((long long)N * 100 >= INT_MAX) {
+        fprintf(stderr, "SSSP maximum distance candidate reaches INT_MAX\n");
+        return EXIT_FAILURE;
+    }
 
     // Generate CSR graph
     std::vector<int> row_offsets, col_indices, weights;

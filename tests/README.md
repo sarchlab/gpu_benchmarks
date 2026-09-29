@@ -162,6 +162,14 @@ complete measured-distance corruption,
 skipped-work rejection and bounded diagnostics. Every process has a 60-second
 limit. CI runs host checks and compiles production and instrumented binaries.
 
+`python3 tests/sssp_input_ranges.py --compiler clang++ --work-dir /tmp/sssp-ranges`
+extracts the actual parser, pre-allocation guards and grid rounding for fatal
+ASan/UBSan checks without allocating graphs. It covers every declared configuration,
+degree/CSR and distance bounds, zero-degree compatibility, grid arithmetic and
+CLI/environment precedence. Add `--binary <lonestar_sssp>` to require exact
+invalid-input diagnostics and empty timing output from the GPU-hidden production
+binary. These are integer-safety checks, not capacity or runtime qualification.
+
 `python3 tests/sssp_rounds.py --binary /tmp/sssp-gpu/faults/tier2/lonestar_sssp/lonestar_sssp --work-dir /tmp/sssp-rounds`
 checks every GPU round against an independent Python snapshot model, and counts
 actual atomic relaxation attempts in a test-only kernel copy. It covers small

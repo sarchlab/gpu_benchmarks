@@ -68,6 +68,17 @@ manifest combinations. Every GPU process must finish within 60 seconds. CI
 compiles these GPU tests; their execution requires a GPU. Raw output, source and
 binary hashes and per-case outcomes remain in the new work directory.
 
+`python3 tests/shoc_gemm_verification.py --host-only --work-dir /tmp/shoc-gemm-host`
+checks complete bitwise agreement with the original FP32 reference, independent
+rectangular known answers, zero/identity cases, guards and input preservation.
+Fatal host sanitizers also exercise zero and partial worker-creation failure.
+Use `--platform cuda --work-dir /tmp/shoc-gemm-gpu --sweep` for actual measured
+device-tail finite/NaN faults, partial tiles, bounded diagnostics, unavailable
+references, both warmers and all 22 declared sizes. CI runs host checks and
+compiles GPU variants; execution requires hardware. Use a new nonexistent work
+directory. Logs and source/binary hashes are retained; each GPU process has a
+60-second budget.
+
 `python3 tests/fir_verification.py --host-only --work-dir /tmp/fir-host`
 checks the production CPU FIR against exact startup and signed-coefficient cases,
 complete impulse responses beyond the former 1024-sample cutoff, and output

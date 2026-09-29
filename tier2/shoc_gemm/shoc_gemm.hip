@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include "cpu_reference.h"
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -73,22 +74,6 @@ __global__ void gemm_kernel(const float* __restrict__ A,
 }
 
 // ---------------------------------------------------------------------------
-// CPU reference
-// ---------------------------------------------------------------------------
-static void gemm_cpu(const float* A, const float* B, float* C,
-                     int M, int N, int K, float alpha, float beta) {
-    for (int i = 0; i < M; ++i) {
-        for (int j = 0; j < N; ++j) {
-            float s = 0.0f;
-            for (int k = 0; k < K; ++k) {
-                s += A[i * K + k] * B[k * N + j];
-            }
-            C[i * N + j] = alpha * s + beta * C[i * N + j];
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 int main(int argc, char** argv) {
@@ -125,6 +110,11 @@ int main(int argc, char** argv) {
     float* h_B   = (float*)malloc(bytesB);
     float* h_C   = (float*)malloc(bytesC);
     float* h_ref = (float*)malloc(bytesC);
+    if (!h_A || !h_B || !h_C || !h_ref) {
+        fprintf(stderr, "FAIL: complete host matrices unavailable\n");
+        free(h_A); free(h_B); free(h_C); free(h_ref);
+        return EXIT_FAILURE;
+    }
 
     for (int i = 0; i < M * K; ++i)
         h_A[i] = (float)(i % 1000) * 0.001f;
@@ -149,7 +139,7 @@ int main(int argc, char** argv) {
     dim3 grid((N + TILE_SIZE - 1) / TILE_SIZE, (M + TILE_SIZE - 1) / TILE_SIZE);
 
     char params[160];
-    snprintf(params, sizeof(params), "\"size\":%d", size);
+    snprintf(params, sizeof(params), "\"size\":%d,\"verification\":\"full_cpu_v1\"", size);
 
     // Single timed launch (bench_run_once: optional cold-cache warmer, then
     // one bracketed launch). With beta = 0 the kernel fully overwrites C
@@ -163,32 +153,30 @@ int main(int argc, char** argv) {
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
-    // Verify correctness (only for small sizes)
-    bool verify_ok = true;
-    if (size <= 512) {
+    // Verify every measured output after timing; no skipped sizes or GPU rerun.
+    bool verify_ok = false;
+    try {
         HIP_CHECK(hipMemcpy(h_C, d_C, bytesC, hipMemcpyDeviceToHost));
         gemm_cpu(h_A, h_B, h_ref, M, N, K, alpha, beta);
 
-        int errors = 0;
-        for (int i = 0; i < M * N; ++i) {
+        const size_t count = (size_t)M * N;
+        size_t errors = 0;
+        for (size_t i = 0; i < count; ++i) {
             float diff = fabsf(h_C[i] - h_ref[i]);
             if (!std::isfinite(h_C[i]) || !std::isfinite(h_ref[i]) ||
                 diff > 1e-3f * fabsf(h_ref[i]) + 1e-5f) {
                 if (errors < 10) {
-                    fprintf(stderr, "Mismatch at %d: got %f, expected %f\n",
+                    fprintf(stderr, "Mismatch at %zu: got %f, expected %f\n",
                             i, h_C[i], h_ref[i]);
                 }
                 errors++;
             }
         }
-        if (errors > 0) {
-            fprintf(stderr, "FAIL: %d errors\n", errors);
-            verify_ok = false;
-        } else {
-            fprintf(stderr, "PASS\n");
-        }
-    } else {
-        fprintf(stderr, "Skipping verification for large size\n");
+        verify_ok = errors == 0;
+        fprintf(stderr, "%s: %zu mismatches in %zu values\n",
+                verify_ok ? "PASS" : "FAIL", errors, count);
+    } catch (const std::exception& error) {
+        fprintf(stderr, "FAIL: complete CPU reference unavailable: %s\n", error.what());
     }
 
     HIP_CHECK(hipFree(d_A));

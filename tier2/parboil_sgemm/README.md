@@ -36,7 +36,8 @@ last-level cache immediately before the timed launch. Repetition =
 
 | File | Description |
 |------|-------------|
-| `parboil_sgemm.hip` | HIP/CUDA source — tiled SGEMM kernel + self-contained utilities |
+| `parboil_sgemm.hip` | HIP/CUDA source — timed tiled SGEMM kernel and driver |
+| `cpu_reference.h` | Tiled, threaded full CPU reference used by verification and host tests |
 | `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
 | `README.md` | This file |
 
@@ -62,7 +63,7 @@ BENCH_PARAM_size=512 ./parboil_sgemm
 time (`time_ms`) and host wall-clock time (`host_time_ms`), then a summary
 whose `total_time_ms` is the sum of all recorded GPU event times:
 ```
-{"type":"kernel","name":"sgemm_kernel","iter":0,"time_ms":0.495000,"host_time_ms":0.520000,"params":{"size":1024}}
+{"type":"kernel","name":"sgemm_kernel","iter":0,"time_ms":0.495000,"host_time_ms":0.520000,"params":{"size":1024,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":0.495000}
 ```
 GFLOPS is derived downstream from `time_ms` and params.
@@ -74,11 +75,45 @@ Matrix size: 1024×1024  |  alpha=1.5  beta=1.2
 
 sgemm_kernel: gpu = 0.495 ms, host = 0.520 ms
 Total GPU time: 0.495 ms
-Skipping verification for large size
+PASS: 0 mismatches in 1048576 values
 ```
+
+## Verification
+
+After the single timed launch, every element of the actual measured GPU matrix
+is downloaded and compared with a full CPU reference at every declared size.
+Both values must be finite and satisfy the existing criterion
+`abs(GPU - CPU) <= 1e-3 * abs(CPU) + 1e-4`. The CPU reference starts from
+pristine C, including the nonzero `beta*C` term
+with the fixed `alpha=1.5`, `beta=1.2`. The original FP32 increasing-k
+accumulation and `alpha*sum + beta*initial_C` expression are preserved. There is
+no GPU rerun, sampling, skipped large size or verification toggle. Records
+include `verification: "full_cpu_v1"`.
+
+The CPU reference uses 4×32 output tiles and at most eight workers owning
+disjoint row tiles. It uses one worker below 512² output elements, otherwise
+caps the host's reported concurrency at eight. If some worker threads cannot
+start, the caller completes their partitions and joins those already running.
+A reference or host-allocation failure exits nonzero. All mismatches are
+counted, with at most ten detailed diagnostics. The four host matrices retain
+the previous memory footprint (about 1 GiB at 8192²); reference work, downloads and
+comparison are outside kernel timing but count toward the whole-process timeout.
+CPU capacity on other hosts must be qualified separately.
+
+From the repository root, use a new work directory:
+
+```bash
+python3 tests/parboil_sgemm_verification.py --host-only --work-dir /tmp/parboil-sgemm-host
+python3 tests/parboil_sgemm_verification.py --platform cuda --sweep --work-dir /tmp/parboil-sgemm-gpu
+```
+
+The tests cover complete equivalence to the original CPU recipe, independent
+known answers, failed thread creation, automatic worker selection, actual
+device-tail corruption and all 22
+declared sizes with a 60-second process budget. This verification repair retains
+the local GEMM workload and the provenance limitations stated above.
 
 ## Platform Notes
 
 - **CUDA**: compiled with `nvcc` from `parboil_sgemm.hip` (uses `-x cu` flag)
 - **ROCm**: compiled with `hipcc` from `parboil_sgemm.hip`
-- Correctness verification runs only for N≤256 (CPU reference is O(N³)); on FAIL the process exits non-zero

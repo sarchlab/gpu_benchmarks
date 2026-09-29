@@ -70,7 +70,11 @@ Examples:
 
 1. Discover benchmarks matching filters
 2. For each C++ benchmark (language != "python"):
-   - Run `make -C <dir> PLATFORM=<platform>`
+   - Tier 1–2: run `make -B -C <dir> PLATFORM=<platform>` to rebuild the selected
+     binaries even when source timestamps are unchanged. This applies the requested
+     platform and inherited build settings such as `CUDA_ARCH` on every explicit
+     compile invocation; it can take longer than an incremental build.
+   - Other C++ tiers: run `make -C <dir> PLATFORM=<platform>` (incremental).
 3. Report pass/fail summary
 4. Exit 0 if all pass, exit 1 if any fail
 

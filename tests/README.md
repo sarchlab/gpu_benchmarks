@@ -381,6 +381,13 @@ the test; GPU runtime qualification is separate. This checks the restored R-09
 expression and does not claim that ordinary timing runs perform verification
 (R-13).
 
+`python3 tests/fdtd_input_ranges.py --compiler clang++ --work-dir /tmp/fdtd-inputs`
+checks actual FDTD-2D input guards, initialization bounds and allocation byte
+arithmetic under fatal host sanitizers. It covers all 60 declared configurations,
+positive work including size 1, the signed square-size boundary and CLI/environment
+precedence. Add `--binary <polybench_fdtd2d>` for precise GPU-hidden rejection
+with no timing records. Memory capacity and runtime admission remain separate.
+
 `python3 tests/bh_positive_steps.py --compiler clang++ --work-dir /tmp/bh-positive-steps`
 checks the actual Barnes–Hut timestep guard, parser precedence and record fields
 under fatal host sanitizers. All 400 declared body/timestep/theta combinations,

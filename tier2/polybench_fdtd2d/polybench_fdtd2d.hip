@@ -37,6 +37,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <climits>
 #include "cpu_reference.h"
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
@@ -119,6 +120,15 @@ int main(int argc, char** argv) {
     if (env_val) N = atoi(env_val);
     env_val = getenv("BENCH_PARAM_tmax");
     if (env_val) TMAX = atoi(env_val);
+
+    if (N <= 0 || TMAX <= 0) {
+        fprintf(stderr, "FDTD-2D requires positive size and tmax\n");
+        return EXIT_FAILURE;
+    }
+    if (N > INT_MAX / N) {
+        fprintf(stderr, "FDTD-2D size*size exceeds INT_MAX\n");
+        return EXIT_FAILURE;
+    }
 
     int NX = N, NY = N;
     size_t grid_bytes = (size_t)NX * NY * sizeof(float);

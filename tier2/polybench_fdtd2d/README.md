@@ -89,6 +89,14 @@ make clean
 
 The TMAX-step simulation runs exactly once per execution; repetition is the harness's job (`gpubench run --reps N`).
 
+Resolved size and time-step count must be positive, with `size*size <= INT_MAX`
+for the signed initialization bounds and GPU field indices. Invalid requests fail
+before allocation or GPU access and emit no timing records. Size 1 remains valid:
+the time-varying `ey` source row is still updated. These guards preserve all 60
+declared configurations, existing positive-only CLI fallback and environment
+`atoi` overrides. GPU work, input generation and full numerical verification
+are unchanged; memory capacity and runtime admission remain separate.
+
 ## Output
 
 **stdout** — JSON lines: one `{"type":"kernel",...}` record per kernel (`fdtd_update_ex`, `fdtd_update_ey`, `fdtd_update_hz`) with that kernel's GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`) accumulated over the TMAX steps, then a summary whose `total_time_ms` is the sum of all recorded GPU event times:

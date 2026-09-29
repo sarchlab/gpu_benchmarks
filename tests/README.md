@@ -68,6 +68,13 @@ manifest combinations. Every GPU process must finish within 60 seconds. CI
 compiles these GPU tests; their execution requires a GPU. Raw output, source and
 binary hashes and per-case outcomes remain in the new work directory.
 
+`python3 tests/shoc_sort_input_ranges.py --compiler clang++ --work-dir /tmp/sort-input`
+checks the actual production parser, nonpositive-input rejection, existing size
+rounding and wide buffer-byte arithmetic with fatal host sanitizers. Cases cross
+the former 4 GiB wrap boundary without allocating large arrays. Add `--binary
+/path/to/shoc_sort` to require exact invalid-input errors with GPUs hidden; CI
+runs this path too. Memory/time qualification of large manual sizes is separate.
+
 `python3 tests/shoc_sort_verification.py --host-only --compiler clang++ --work-dir /tmp/sort-host`
 checks the production sort verifier against an independent complete pair-multiset
 and key-order oracle, including all small permutations with ties/extreme keys,

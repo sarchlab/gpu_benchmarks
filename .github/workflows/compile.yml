@@ -122,6 +122,7 @@ jobs:
         run: |
           python3 tests/graph_pr_verification.py --host-only --compiler g++ --work-dir /tmp/graph-pr-host
           python3 tests/graph_pr_verification.py --platform cuda --compile-only --work-dir /tmp/graph-pr-measured
+          python3 tests/graph_pr_input_ranges.py --compiler g++ --binary /tmp/graph-pr-measured/production/tier2/graph_pr/graph_pr --work-dir /tmp/graph-pr-input-ranges
 
       - name: Check complete CC labels and compile measured-output regression
         run: |

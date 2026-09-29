@@ -29,6 +29,7 @@
 #include <cstring>
 #include <cmath>
 #include <vector>
+#include <climits>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -85,7 +86,7 @@ static void generate_csc_graph(int N, int avg_degree, uint32_t seed,
     }
 
     // Build CSC from incoming lists
-    col_offsets.resize(N + 1);
+    col_offsets.resize((size_t)N + 1);
     col_offsets[0] = 0;
     for (int v = 0; v < N; ++v)
         col_offsets[v + 1] = col_offsets[v] + (int)incoming[v].size();
@@ -194,6 +195,18 @@ int main(int argc, char** argv) {
     int pr_iters  = pr_iterations;
     float damping = 0.85f;
 
+    if (N <= 0 || avg_deg < 0 || pr_iters <= 0) {
+        fprintf(stderr, "PageRank vertices and pr_iterations must be positive; degree must be nonnegative\n");
+        return EXIT_FAILURE;
+    }
+    // Bound generated degrees and every CSC prefix before allocating the graph.
+    long long max_degree = (long long)avg_deg / 2 + avg_deg;
+    if (max_degree < 1) max_degree = 1;
+    if ((long long)N * max_degree > INT_MAX) {
+        fprintf(stderr, "PageRank maximum generated edge count exceeds INT_MAX\n");
+        return EXIT_FAILURE;
+    }
+
     // Generate CSC graph
     std::vector<int> col_offsets, row_indices, out_degree;
     generate_csc_graph(N, avg_deg, 42, col_offsets, row_indices, out_degree);
@@ -212,14 +225,14 @@ int main(int argc, char** argv) {
     // Allocate device memory
     int *d_col_offsets, *d_row_indices, *d_out_degree;
     float *d_rank_a, *d_rank_b;
-    HIP_CHECK(hipMalloc(&d_col_offsets, (N + 1) * sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_col_offsets, ((size_t)N + 1) * sizeof(int)));
     HIP_CHECK(hipMalloc(&d_row_indices, num_edges * sizeof(int)));
     HIP_CHECK(hipMalloc(&d_out_degree, N * sizeof(int)));
     HIP_CHECK(hipMalloc(&d_rank_a, N * sizeof(float)));
     HIP_CHECK(hipMalloc(&d_rank_b, N * sizeof(float)));
 
     // Copy graph structure to device
-    HIP_CHECK(hipMemcpy(d_col_offsets, col_offsets.data(), (N + 1) * sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_col_offsets, col_offsets.data(), ((size_t)N + 1) * sizeof(int), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_row_indices, row_indices.data(), num_edges * sizeof(int), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_out_degree, out_degree.data(), N * sizeof(int), hipMemcpyHostToDevice));
 
@@ -231,7 +244,7 @@ int main(int argc, char** argv) {
 
     float base_rank = (1.0f - damping) / (float)N;
     int blockSize = 256;
-    int gridSize  = (N + blockSize - 1) / blockSize;
+    int gridSize  = (int)(((long long)N + blockSize - 1) / blockSize);
     std::vector<float> h_init(N, 1.0f / (float)N);
 
     bench_timer_t timer;

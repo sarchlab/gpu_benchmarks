@@ -11,8 +11,10 @@ import subprocess
 import time
 
 
-def instrument(source, full):
-    anchor = "    // ---- verification: CPU reference over the binned atoms. With the"
+def instrument(source):
+    anchor = "    // ---- verification: complete actual measured lattice, untimed ----"
+    if anchor not in source:  # Historical pre-race baseline.
+        anchor = "    // ---- verification: CPU reference over the binned atoms. With the"
     if source.count(anchor) != 1:
         raise ValueError("expected one measured-lattice anchor")
     source = source.replace(anchor, r'''
@@ -23,18 +25,6 @@ def instrument(source, full):
         std::fprintf(stderr,"CUTCP_TEST_DUMP %zu values\n",lattice.size());
     }
 ''' + anchor)
-    if full:
-        replacements = {
-            "int verify_n = 64, errors = 0;": "int verify_n = nx * ny * nz, errors = 0;",
-            "    unsigned int vseed = 12345;\n": "",
-            "int i = lcg_rand(&vseed) % nx;": "int i = v % nx;",
-            "int j = lcg_rand(&vseed) % ny;": "int j = (v / nx) % ny;",
-            "int k = lcg_rand(&vseed) % nz;": "int k = v / (nx * ny);",
-        }
-        for old,new in replacements.items():
-            if source.count(old) != 1:
-                raise ValueError("expected one small-reference anchor: " + old)
-            source = source.replace(old,new)
     return source
 
 
@@ -54,19 +44,19 @@ def main():
     relative = Path("tier2/parboil_cutcp")
     src = args.source / relative
     source = (src / "parboil_cutcp.hip").read_text()
-    inputs = [relative / n for n in ("parboil_cutcp.hip","Makefile","params.json")]
+    inputs = [relative / n for n in ("parboil_cutcp.hip","cpu_reference.h","Makefile","params.json")]
     inputs += [Path("common") / n for n in ("bench_timing.h","bench_warmup.h","hip_cuda_compat.h")]
     hashes = {str(p):hashlib.sha256((args.source/p).read_bytes()).hexdigest() for p in inputs}
-    variants = dict(production=source,small=instrument(source,True),dump=instrument(source,False))
+    variants = dict(production=source,dump=instrument(source))
     if args.baseline_source:
-        variants["baseline"] = instrument(args.baseline_source.read_text(),False)
+        variants["baseline"] = instrument(args.baseline_source.read_text())
     binaries = {}
     for name,text in variants.items():
         root = args.work_dir / name
         dst = root / relative
         dst.mkdir(parents=True)
         shutil.copytree(args.source/"common",root/"common")
-        for f in ("Makefile","params.json"):
+        for f in ("Makefile","params.json","cpu_reference.h"):
             shutil.copy2(src/f,dst/f)
         (dst/"parboil_cutcp.hip").write_text(text)
         with (root/"build.log").open("w") as log:
@@ -102,7 +92,7 @@ def main():
         seconds = time.monotonic()-start
         (args.work_dir/(label+".stdout")).write_text(stdout)
         (args.work_dir/(label+".stderr")).write_text(stderr)
-        count = dim**3 if variant=="small" else 64
+        count = 64 if variant=="baseline" else dim**3
         passed = code==expected_exit and seconds<60 and f"PASS ({count} points verified)" in stderr
         if tool and expected_exit==0:
             passed &= "ERROR SUMMARY: 0 errors" in stdout+stderr or "RACECHECK SUMMARY: 0 hazards" in stdout+stderr
@@ -135,11 +125,11 @@ def main():
              (16,8,.5,8.,"false"),(64,32,.5,16.,"false"),(8,16,1.,12.,"false"),
              (128,32,.5,12.,"true"),(1,8,.5,8.,"true")]
     for i,c in enumerate(small):
-        run(f"full-small-{i}","small",*c)
+        run(f"full-small-{i}","production",*c)
     for i in (0,2,4):
-        run(f"racecheck-{i}","small",*small[i],tool="racecheck")
+        run(f"racecheck-{i}","production",*small[i],tool="racecheck")
     for tool in ("memcheck","initcheck","synccheck"):
-        run(tool,"small",*small[4],tool=tool)
+        run(tool,"production",*small[4],tool=tool)
     if args.baseline_source:
         for i in (0,2):
             run(f"baseline-racecheck-{i}","baseline",*small[i],tool="racecheck",expected_exit=91)

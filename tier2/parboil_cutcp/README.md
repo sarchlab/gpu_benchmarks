@@ -104,15 +104,26 @@ non-zero.
 over all z-slab launches of the single run, then a `summary` whose
 `total_time_ms` is the sum of all recorded GPU event times:
 ```json
-{"type":"kernel","name":"cuda_cutoff_potential_lattice6overlap","iter":0,"time_ms":12.345678,"host_time_ms":12.501000,"params":{"num_atoms":40000,"lattice_dim":144,"grid_spacing":0.50,"cutoff_radius":12.0,"bin_depth":16,"nbrlist_len":335}}
+{"type":"kernel","name":"cuda_cutoff_potential_lattice6overlap","iter":0,"time_ms":12.345678,"host_time_ms":12.501000,"params":{"num_atoms":40000,"lattice_dim":144,"grid_spacing":0.50,"cutoff_radius":12.0,"bin_depth":16,"nbrlist_len":335,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":12.345678}
 ```
 
-**stderr** — device info, geometry (including bin dims and the overflow /
-excluded atom counts), timing, and PASS/FAIL (64 sampled lattice points vs. a
-CPU reference over the binned atoms — with overflow rejection this is the full
-requested atom set, not a truncated subset; rel. tol. 0.1%). On FAIL, or on a
-bin-overflow rejection, the process exits non-zero.
+**stderr** — device info, geometry, timing, and PASS/FAIL for every actual
+measured lattice value. The CPU reference uses the actual nonempty input bins
+in their original bin/insertion order. It evaluates the original float
+potential expression with `1/sqrtf(r2)` and compares each point using the
+unchanged `1e-3 * (abs(reference) + 1e-4)` criterion; both values must be finite.
+All mismatches are counted and at most ten examples printed. Corruption,
+unavailable reference storage, or bin overflow causes a nonzero exit.
+
+Verification is untimed and never replays the GPU workload. Conservative
+atom-centered cutoff boxes avoid irrelevant point/atom pairs; up to sixteen
+CPU workers own disjoint z slabs. Each point retains its original summation
+order. If thread creation fails, the calling thread finishes the remaining
+slabs and joins all started workers. Reference storage adds one float per
+lattice point (64 MiB at 256 cubed), plus the binned atom list. The kernel record
+identifies this complete check as `full_cpu_v1`. This preserves the existing
+numerical criterion, which intentionally admits errors below its threshold.
 
 Derived metrics (e.g. Ginteractions/sec) are computed downstream from `time_ms`
 and params.
@@ -126,20 +137,41 @@ python3 tests/cutcp_concurrency.py --platform cuda --work-dir /tmp/cutcp-race --
 ```
 
 This runs the actual kernel under Compute Sanitizer, compares every small-case
-lattice point with the existing CPU potential in an isolated test copy, and
+lattice point with the production CPU potential, and
 checks all 120 declared production configurations. Supply `--baseline-source`
 with a pre-repair `parboil_cutcp.hip` to additionally reproduce the old shared
 access races and compare seven complete baseline/current output lattices.
-
-The production verifier still checks only 64 lattice points. Complete ordinary
-run verification remains a separate repair; passing this ownership regression
-does not close that coverage gap.
 
 On the NVIDIA H100 PCIe with CUDA on 2026-09-28, all 157 checks passed with a
 pre-repair baseline supplied. Two old racecheck cases return error91; the
 repaired kernel has three clean racecheck runs and clean memcheck, initcheck
 and synccheck runs. Eight small cases check every lattice point, and seven
 complete output lattices are bit-identical to baseline. All 120 declared
-production configurations pass; the maximum process time is 0.4991 seconds
-with the existing sampled verifier. These are shared-GPU correctness/budget
+production configurations pass; the maximum process time was under 0.5 seconds
+with the former sampled verifier. These are shared-GPU correctness/budget
 checks, not publication performance or AMD qualification.
+
+## Complete verification regression
+
+```bash
+python3 tests/cutcp_verification.py --host-only --compiler c++ --work-dir /tmp/cutcp-host
+python3 tests/cutcp_verification.py --platform cuda --work-dir /tmp/cutcp-full --sweep
+```
+
+Host checks compare complete small lattices bit for bit with the original
+pointwise CPU expression, including uneven worker slabs, signed charges,
+cutoff boundaries, invalid references and simulated thread-creation failures.
+GPU checks corrupt the actual measured device output before download, including
+the last logical point, NaN, multiple errors and partial-region boundaries.
+Both warmer settings and unavailable-reference failure are checked. The sweep
+runs all 120 declared atom/grid/cutoff combinations with the default warmer;
+every process, including complete verification, must finish within 60 seconds.
+Other hosts and AMD still require separate qualification.
+
+On the tested H100 PCIe host (2026-09-28), all 158 measured-result cases passed,
+including all 120 declared configurations. The slowest complete process took
+3.242 seconds at 45,000 atoms, a 256-cubed lattice and cutoff 16. Both finite
+and NaN last-point faults were rejected; 12 errors produce 12 counted mismatches
+and ten examples. The former 64-point checker accepted those tail faults.
+These shared-host checks establish correctness and the process budget, not
+publication performance or AMD qualification.

@@ -80,11 +80,11 @@ retained in the new work directory.
 
 `python3 tests/cutcp_concurrency.py --platform cuda --work-dir /tmp/cutcp-race
 --sweep` runs Compute Sanitizer against actual CUTCP kernels, evaluates the
-existing CPU potential at every lattice point in small test copies, and runs
+production CPU potential at every lattice point in small cases, and runs
 all 120 declared production configurations. An optional `--baseline-source`
 pre-repair `.hip` file also reproduces its two racecheck failures and compares
-seven complete baseline/current lattices. These test-only full comparisons do
-not expand the production verifier's 64-point coverage. CI compiles the variants;
+seven complete baseline/current lattices. The current production verifier
+checks every point; the historical baseline checks 64. CI compiles the variants;
 runtime checks require a CUDA GPU, retain hashes/logs and enforce 60 seconds per
 process. Temporary full-array dumps are removed after comparison.
 
@@ -727,3 +727,18 @@ updates are compared exactly, including padded cells. The owner-approved
 synthetic tetrahedral input is shared with the original solver for this test;
 no upstream random-dataset equivalence is claimed. Qualification downloads do
 not occur in the measured production run. AMD and trace work remain separate.
+
+### CUTCP complete measured potentials
+
+`cutcp_verification.py --host-only --compiler c++ --work-dir /tmp/cutcp-host`
+runs analytical and complete pointwise CPU comparisons under fatal ASan/UBSan,
+including no-thread and partial-thread creation fallback. Run
+`cutcp_verification.py --platform cuda --work-dir /tmp/cutcp-full --sweep`
+on hardware to check actual device-tail/NaN/multiple-output faults, partial
+region boundaries, reference allocation failure and all 120 manifest
+atom/grid/cutoff configurations within a 60-second process budget.
+`--compile-only` builds the isolated production/fault variants without claiming
+hardware execution. Output directories must not already exist. Production
+contains no test fault controls. `cutcp_concurrency.py` now uses the complete
+production reference; its optional historical pre-race baseline remains a
+64-point checker.

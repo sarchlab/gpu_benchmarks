@@ -51,6 +51,18 @@ the algorithm. No extra GPU computation is run for verification.
 flags. `BENCH_PARAM_vector_add_warmup` defaults to `true`; `false` disables the
 entry warmer without promising a particular cache/clock state.
 
+Resolved vertices and block size must be positive; degree must be nonnegative.
+An environment degree of zero retains the generator's one-edge-per-vertex case.
+The existing positive-only CLI fallback and environment precedence are unchanged.
+Before allocation or GPU access, a sufficient integer-safety bound requires
+`N * max(1, floor(D/2) + D) <= INT_MAX` for every possible generated CSR prefix,
+and `100 * N < INT_MAX` for every distance candidate, including the terminating
+round. This limits N to 21,474,836 and preserves all 81 declared configurations.
+Grid rounding uses wide arithmetic. With this N bound, even padded thread
+indices fit signed int for any positive int block size. These checks do not
+guarantee memory capacity, runtime budget or hardware support for arbitrary
+manual block sizes.
+
 ```bash
 make PLATFORM=cuda  # or PLATFORM=rocm
 ./lonestar_sssp --vertices 131072 --degree 16

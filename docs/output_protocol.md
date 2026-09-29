@@ -38,7 +38,7 @@ Emit one record per timed kernel name in the complete run. Accumulate GPU event 
 | `type` | string | **yes** | Always `"kernel"` |
 | `name` | string | **yes** | Kernel name (must match the manifest’s `kernels` list when nonempty) |
 | `time_ms` | number | **yes** | Accumulated GPU event time in milliseconds for Tier 1/Tier 2; finite and ≥ 0 |
-| `params` | object | **yes** | Actual workload parameters for this run (scaling + non-scaling, excluding harness measurement controls) |
+| `params` | object | **yes** | Actual workload parameters (excluding harness measurement controls), plus optional measured-result descriptors |
 | `host_time_ms` | number | no | Optional compatibility field, stored if supplied; finite and ≥ 0. It is not included in the GPU time total |
 | `iter` | integer | no | Optional legacy annotation stored as `kernel_results.iteration`; it does not permit duplicate kernel records |
 
@@ -47,6 +47,38 @@ Emit one record per timed kernel name in the complete run. Accumulate GPU event 
 - `params` must include the scaling parameter and all non-scaling workload parameters with their actual values. The harness control `vector_add_warmup` is excluded from this required echo and is recorded in the run configuration.
 - Tier 1/Tier 2 producers do not need host timing or `iter`. Compatibility fields do not change the one-record-per-name contract.
 - Higher-tier producers may use their documented timing instrumentation, but all tiers must satisfy the validator’s finite-time and summary-sum rules.
+
+#### Measured-result descriptors in `params`
+
+The required workload echo can be accompanied by descriptors of the measured
+run, such as `iterations_performed` and `converged`. These describe an outcome
+rather than a swept input. Keep the requested workload entries intact: a
+descriptor neither replaces a required input nor permits its value to differ
+from the requested configuration. Additional descriptors do not have to appear
+in the manifest's parameter lists.
+
+For example, `graph_cc` reports the requested `max_iterations` cap alongside
+its actual work and termination state. An illustrative `params` object is:
+
+```json
+{"num_vertices":100000,"avg_degree":16,"max_iterations":100,"block_size":256,"verification":"full_cpu_v1","iterations_performed":12,"converged":true}
+```
+
+Here, `iterations_performed` counts timed propagation launches. `converged` is
+true only when the last executed iteration observed no label changes, including
+when that iteration reaches the cap exactly. If the last allowed iteration
+still changed labels, it is false; the benchmark does not perform an extra
+iteration to test the resulting labels. A capped run can pass its complete CPU
+comparison while remaining unconverged. Use performed work, rather than the
+iteration cap, when deriving work-normalized rates.
+
+The CLI preserves additional descriptors in `kernel_results.params_json`,
+and the exporter includes that object as kernel `params`. The protocol
+validator checks the required workload echo; it does not validate the meaning
+of arbitrary extra descriptors. Consumers must use the benchmark's documented
+semantics and qualified checks. Successful execution, convergence and numerical
+verification are separate properties; missing descriptors leave the respective
+property unknown.
 
 #### Verification descriptors in `params`
 
@@ -179,7 +211,7 @@ A run with exit code 0 is accepted only when all of the following hold:
 2. At least one `kernel` event with exactly one record per kernel name, and **exactly one** `summary` event with a numeric `total_time_ms`
 3. All `time_ms`, `host_time_ms`, and `total_time_ms` values are finite and non-negative
 4. When the manifest declares a nonempty `kernels` list, every emitted name must appear in it. An empty list disables name checking for compatibility; it does not waive the requirement to emit a timed record
-5. Every `kernel` event carries a `params` object whose values match the requested configuration (the scaling param and all non-scaling params, excluding harness measurement controls such as `vector_add_warmup`)
+5. Every `kernel` event carries a `params` object whose required workload entries match the requested configuration (the scaling param and all non-scaling params, excluding harness measurement controls such as `vector_add_warmup`); additional measured-result descriptors are allowed
 6. `total_time_ms` equals the sum of all `kernel` event `time_ms` values, within a small floating-point tolerance
 7. No fatal `error` event was emitted (a fatal error with exit 0 is a contradiction)
 
@@ -201,7 +233,9 @@ The CLI sets parameters via environment variables (`BENCH_PARAM_{name}={value}`)
 2. Falls back to its own default if a variable is not set
 3. Reports the **actual values used** in every `kernel` event's `params` field
 
-This ensures the CLI can verify what parameters were actually used.
+This ensures the CLI can verify what workload parameters were actually used.
+Additional measured-result descriptors describe the run without changing this
+required echo contract.
 
 ## Error Handling Matrix
 

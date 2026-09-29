@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <climits>
 #include <cmath>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
@@ -128,7 +129,7 @@ static void scan_recursive(float* d_output, const float* d_input, int N,
                             bench_lap_t* acc_scan,
                             bench_lap_t* acc_add) {
     int elements_per_block = block_size * 2;
-    int num_blocks         = (N + elements_per_block - 1) / elements_per_block;
+    int num_blocks         = (int)(((long long)N + elements_per_block - 1) / elements_per_block);
     size_t shared_mem      = (size_t)elements_per_block * sizeof(float);
 
     float* d_block_sums = nullptr;
@@ -195,13 +196,25 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
     int N     = array_size;
 
-    // Clamp block_size
+    if (N <= 0 || block_size <= 0) {
+        fprintf(stderr, "SHOC scan array_size and block_size must be positive\n");
+        return EXIT_FAILURE;
+    }
+    // Preserve the existing clamp, then enforce the Blelloch tree geometry.
     if (block_size > MAX_BLOCK_SIZE) block_size = MAX_BLOCK_SIZE;
+    if (block_size & (block_size - 1)) {
+        fprintf(stderr, "SHOC scan block_size must be a power of two after clamping\n");
+        return EXIT_FAILURE;
+    }
 
-    // Pad N to next multiple of elements_per_block
     int elements_per_block = block_size * 2;
-    int N_padded = ((N + elements_per_block - 1) / elements_per_block)
-                   * elements_per_block;
+    long long padded = (((long long)N + elements_per_block - 1) / elements_per_block)
+                         * elements_per_block;
+    if (padded > INT_MAX) {
+        fprintf(stderr, "SHOC scan padded array size exceeds INT_MAX\n");
+        return EXIT_FAILURE;
+    }
+    int N_padded = (int)padded;
 
     size_t bytes         = (size_t)N_padded * sizeof(float);
     size_t bytes_orig    = (size_t)N        * sizeof(float);

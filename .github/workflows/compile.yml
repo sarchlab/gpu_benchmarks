@@ -322,6 +322,7 @@ jobs:
         run: |
           python3 tests/shoc_scan_reference.py --host-only --compiler g++ --work-dir /tmp/shoc-scan-reference-host
           python3 tests/shoc_scan_reference.py --platform cuda --work-dir /tmp/shoc-scan-reference-device --compile-only
+          python3 tests/shoc_scan_input_ranges.py --compiler g++ --binary /tmp/shoc-scan-reference-device/production/tier2/shoc_scan/shoc_scan --work-dir /tmp/shoc-scan-input-ranges
 
       - name: Check SSSP distances, deterministic rounds and compile GPU regressions
         run: |

@@ -28,6 +28,7 @@
 #include <cstring>
 #include <cmath>
 #include <vector>
+#include <exception>
 
 // ---------------------------------------------------------------------------
 // Error-checking macro
@@ -194,12 +195,9 @@ __global__ void convolution_col_kernel(
 // CPU reference: separable 2D convolution
 // ---------------------------------------------------------------------------
 
-static void conv_separable_cpu(const float* input, float* output,
+static void conv_separable_cpu(const float* input, float* temp, float* output,
                                int width, int height,
                                const float* kernel_weights, int radius) {
-    // Temporary buffer for row pass
-    std::vector<float> temp((size_t)width * height, 0.0f);
-
     // Row pass
     for (int r = 0; r < height; ++r) {
         for (int c = 0; c < width; ++c) {
@@ -290,6 +288,12 @@ int main(int argc, char** argv) {
     // Host allocation + initialization
     float* h_input  = (float*)malloc(imageBytes);
     float* h_output = (float*)malloc(imageBytes);
+    if (!h_input || !h_output) {
+        fprintf(stderr, "FAIL: host image buffers unavailable\n");
+        free(h_input);
+        free(h_output);
+        return EXIT_FAILURE;
+    }
     for (int i = 0; i < width * height; ++i) {
         h_input[i] = (float)(i % 256) / 255.0f;
     }
@@ -316,7 +320,7 @@ int main(int argc, char** argv) {
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"width\":%d,\"height\":%d,\"radius\":%d",
+             "\"width\":%d,\"height\":%d,\"radius\":%d,\"verification\":\"full_cpu_v1\"",
              width, height, radius);
 
     // Per-kernel accumulators: each pass runs the row kernel then the
@@ -362,44 +366,41 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
     // -------------------------------------------------------------------
-    // Verification (for smaller images)
+    // Verify both measured stages after all timing, using the original
+    // full-image CPU arithmetic and tolerance. No GPU rerun or sampled fallback.
     // -------------------------------------------------------------------
-    int verify_w = (width  <= 512) ? width  : 512;
-    int verify_h = (height <= 512) ? height : 512;
-    bool verify_ok = true;
-
-    {
-        HIP_CHECK(hipMemcpy(h_output, d_output, imageBytes, hipMemcpyDeviceToHost));
-
-        // CPU reference on the full image
-        std::vector<float> ref((size_t)width * height);
-        conv_separable_cpu(h_input, ref.data(), width, height,
+    bool verify_ok = false;
+    try {
+        const size_t count = (size_t)width * height;
+        std::vector<float> row_ref(count), ref(count);
+        conv_separable_cpu(h_input, row_ref.data(), ref.data(), width, height,
                            h_kernel.data(), radius);
 
-        int errors = 0;
-        for (int r = 0; r < verify_h; ++r) {
-            for (int c = 0; c < verify_w; ++c) {
-                int idx = r * width + c;
+        size_t errors = 0;
+        auto compare = [&](const char* stage, const float* device,
+                           std::vector<float>& ref) {
+            HIP_CHECK(hipMemcpy(h_output, device, imageBytes, hipMemcpyDeviceToHost));
+            for (size_t idx = 0; idx < count; ++idx) {
                 float diff = fabsf(h_output[idx] - ref[idx]);
                 float tol = 1e-3f * fabsf(ref[idx]) + 1e-5f;
                 if (!std::isfinite(h_output[idx]) || !std::isfinite(ref[idx]) ||
                     diff > tol) {
                     if (errors < 10) {
-                        fprintf(stderr, "Mismatch at (%d,%d): GPU=%.6f CPU=%.6f diff=%.6f\n",
-                                r, c, h_output[idx], ref[idx], diff);
+                        fprintf(stderr, "Mismatch %s at (%zu,%zu): GPU=%.6f CPU=%.6f diff=%.6f\n",
+                                stage, idx / width, idx % width,
+                                h_output[idx], ref[idx], diff);
                     }
-                    errors++;
+                    ++errors;
                 }
             }
-        }
-
-        if (errors > 0) {
-            fprintf(stderr, "FAIL: %d errors in %dx%d verification region\n",
-                    errors, verify_w, verify_h);
-            verify_ok = false;
-        } else {
-            fprintf(stderr, "PASS\n");
-        }
+        };
+        compare("row", d_temp, row_ref);
+        compare("column", d_output, ref);
+        verify_ok = errors == 0;
+        fprintf(stderr, "%s: %zu mismatches in %zu values (%zu pixels per stage)\n",
+                verify_ok ? "PASS" : "FAIL", errors, 2 * count, count);
+    } catch (const std::exception& error) {
+        fprintf(stderr, "FAIL: complete CPU reference unavailable: %s\n", error.what());
     }
 
     HIP_CHECK(hipFree(d_input));

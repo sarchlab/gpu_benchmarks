@@ -60,8 +60,8 @@ make PLATFORM=rocm
 
 **stdout** — JSON lines: one `{"type":"kernel",...}` record (`iter:0`) per kernel (`convolution_row_kernel`, `convolution_col_kernel`) carrying that kernel's GPU event time (`time_ms`) and host wall-clock time (`host_time_ms`), then a summary whose `total_time_ms` is the sum of all recorded GPU event times:
 ```json
-{"type":"kernel","name":"convolution_row_kernel","iter":0,"time_ms":2.500000,"host_time_ms":2.600000,"params":{"width":4096,"height":4096,"radius":8}}
-{"type":"kernel","name":"convolution_col_kernel","iter":0,"time_ms":2.600000,"host_time_ms":2.700000,"params":{"width":4096,"height":4096,"radius":8}}
+{"type":"kernel","name":"convolution_row_kernel","iter":0,"time_ms":2.500000,"host_time_ms":2.600000,"params":{"width":4096,"height":4096,"radius":8,"verification":"full_cpu_v1"}}
+{"type":"kernel","name":"convolution_col_kernel","iter":0,"time_ms":2.600000,"host_time_ms":2.700000,"params":{"width":4096,"height":4096,"radius":8,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":5.100000}
 ```
 
@@ -74,14 +74,36 @@ Image: 4096x4096  |  Kernel radius: 8 (17-tap)
 
 row gpu = 2.500 ms, col gpu = 2.600 ms
 Total GPU time: 5.100 ms
-PASS
+PASS: 0 mismatches in 33554432 values (16777216 pixels per stage)
 ```
 
 ## Verification
 
-- Compares GPU output against CPU separable convolution reference
-- Checks a 512×512 sub-region (or full image if smaller) with relative tolerance
-- On FAIL the process exits non-zero
+Every pixel of both the actual measured row intermediate and final column output
+is downloaded and checked after timing against the full CPU separable reference.
+The reference uses the original ascending-tap FP32 arithmetic, zero padding and
+Gaussian weights. Both values must be finite and satisfy
+`abs(GPU - CPU) <= 1e-3 * abs(CPU) + 1e-5`. No GPU pass is rerun for verification.
+Both kernel records carry `verification: "full_cpu_v1"`.
+
+A mismatch or unavailable complete reference makes the process fail. All
+mismatches are counted, with at most ten detailed diagnostics. Verification
+retains the CPU row and column images and reuses one GPU-download host buffer;
+peak host image storage remains four images (about 2 GiB at 16384×8192).
+Reference computation, downloads and comparisons are outside the kernel timers,
+but count toward the runner's whole-process timeout.
+
+Regression commands from the repository root:
+
+```bash
+python3 tests/convolution_verification.py --host-only --work-dir /tmp/conv-host
+python3 tests/convolution_verification.py --platform cuda --sweep --work-dir /tmp/conv-gpu
+```
+
+The host fixtures cover asymmetric coefficients, direct 2D known results,
+zero-padding boundaries and immutable inputs. GPU regressions corrupt actual
+post-timing device values in each stage, including points outside the old
+512×512 region and NaNs, and exercise unavailable-reference failures.
 
 ## Platform Notes
 

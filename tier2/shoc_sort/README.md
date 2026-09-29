@@ -63,10 +63,35 @@ Fixed (compile-time) CTA sizes are `SORT_BLOCK_SIZE = 128` and
 
 ## Verification
 
-After the measured run, the sorted keys are checked for non-decreasing order.
-The JSON records and summary are emitted before the check, so on FAIL the
-process exits non-zero without losing the measurements. There is no
-verification on/off parameter.
+After the measured run, both actual output arrays are downloaded and every
+key/value pair is checked. Keys must be non-decreasing; values must be valid
+source indices, with each index appearing exactly once; and each key must equal
+the pristine input key at its source index. This proves exact conservation of
+all input pairs without imposing an ordering on equal keys. The GPU sort is not
+rerun for verification.
+
+All invalid output positions are counted (one error per position even when
+several checks fail), with at most ten detailed messages. A mismatch or an
+unavailable host verification buffer returns nonzero. Kernel JSON records are
+emitted before verification, and the summary follows it, including on these
+failures, so the harness retains timings while marking the run as failed.
+Records include `verification: full_pairs_v1`. There is no verification switch.
+
+Verification takes O(N) host work. It preserves the original keys, reuses the
+existing host values buffer for the measured indices, and adds one output-key
+buffer plus one byte per source index: 20 MiB extra at the largest declared
+4,194,304-pair size. GPU allocations and all eight radix passes are unchanged.
+Manual-size admission and AMD hardware qualification remain separate.
+
+From the repository root, run
+`python3 tests/shoc_sort_verification.py --host-only --compiler clang++ --work-dir /tmp/sort-host`
+for independent pair-multiset/order fixtures, complete error counts, diagnostic
+caps, allocation failure and memory guards under fatal host sanitizers. Use
+`--platform cuda --sweep --work-dir /tmp/sort-gpu` for actual measured-device key,
+value, duplicate-pair and association faults, skipped work, unavailable buffers,
+and all 13 declared sizes with both warmer settings. Each GPU process has a
+60-second limit; use a new work directory to retain logs, hashes and outcomes.
+CI executes host checks and compiles GPU variants; GPU execution needs hardware.
 
 ## Build
 

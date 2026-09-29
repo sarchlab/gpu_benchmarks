@@ -536,15 +536,36 @@ static void radixSortStep(uint nbits, uint startbit, uint4* keys, uint4* values,
     }));
 }
 
-static bool verifySort(const uint* keys, int size) {
-    for (int i = 0; i < size - 1; ++i) {
-        if (keys[i] > keys[i + 1]) {
-            fprintf(stderr, "Failure at idx %d: %u > %u\n",
-                    i, keys[i], keys[i + 1]);
-            return false;
+// Values carry original source indices. Sorted keys plus an exact index
+// permutation and matching input keys prove conservation of every input pair,
+// without imposing an order on equal keys.
+static bool verifySort(const uint* keys, const uint* values,
+                       const uint* original_keys, size_t size) {
+    unsigned char* seen = (unsigned char*)calloc(size, sizeof(unsigned char));
+    if (!seen) {
+        fprintf(stderr, "Sort verification unavailable: host allocation failed\n");
+        return false;
+    }
+    size_t errors = 0;
+    for (size_t i = 0; i < size; ++i) {
+        const uint index = values[i];
+        bool bad = i > 0 && keys[i - 1] > keys[i];
+        if (index >= size) {
+            bad = true;
+        } else {
+            bad |= seen[index] != 0 || keys[i] != original_keys[index];
+            seen[index] = 1;
+        }
+        if (bad) {
+            if (errors < 10)
+                fprintf(stderr, "Sort mismatch at %zu: key=%u source_index=%u\n",
+                        i, keys[i], index);
+            ++errors;
         }
     }
-    return true;
+    free(seen);
+    fprintf(stderr, "Sort verification: %zu invalid pairs in %zu outputs\n", errors, size);
+    return errors == 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -634,7 +655,8 @@ int main(int argc, char** argv) {
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"size\":%d,\"sort_block_size\":%d,\"scan_block_size\":%d",
+             "\"size\":%d,\"sort_block_size\":%d,\"scan_block_size\":%d,"
+             "\"verification\":\"full_pairs_v1\"",
              size, SORT_BLOCK_SIZE, SCAN_BLOCK_SIZE);
 
     bench_timer_t timer;
@@ -689,8 +711,17 @@ int main(int argc, char** argv) {
     bench_timer_destroy(&timer);
 
     // Correctness check on the last pass's result.
-    HIP_CHECK(hipMemcpy(hKeys, dKeys, bytes, hipMemcpyDeviceToHost));
-    bool sorted_ok = verifySort(hKeys, size);
+    // Preserve pristine hKeys; hVals can now hold the measured source indices.
+    uint* hSortedKeys = (uint*)malloc(bytes);
+    bool sorted_ok = false;
+    if (!hSortedKeys) {
+        fprintf(stderr, "Sort verification unavailable: host allocation failed\n");
+    } else {
+        HIP_CHECK(hipMemcpy(hSortedKeys, dKeys, bytes, hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(hVals, dVals, bytes, hipMemcpyDeviceToHost));
+        sorted_ok = verifySort(hSortedKeys, hVals, hKeys, (size_t)size);
+        free(hSortedKeys);
+    }
     fprintf(stderr, "Correctness: %s\n", sorted_ok ? "PASS" : "FAIL");
 
     bench_emit_summary(total_gpu_ms);

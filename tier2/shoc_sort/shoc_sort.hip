@@ -581,6 +581,11 @@ int main(int argc, char** argv) {
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");      if (env_val) size = atoi(env_val);
 
+    if (size <= 0) {
+        fprintf(stderr, "SHOC sort size must be positive\n");
+        return EXIT_FAILURE;
+    }
+
     // The SHOC pipeline requires the element count to be a multiple of 1024
     // (4 * SCAN_BLOCK_SIZE) so every kernel's grid geometry divides evenly.
     if (size % 1024 != 0) {
@@ -591,7 +596,7 @@ int main(int argc, char** argv) {
         size = rounded;
     }
 
-    uint bytes = (uint)size * sizeof(uint);
+    size_t bytes = (size_t)size * sizeof(uint);
 
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));

@@ -47,6 +47,12 @@ The `BENCH_PARAM_size` environment variable overrides the CLI flag, plus:
 |----------|---------|-------------|
 | `BENCH_PARAM_vector_add_warmup` | true | Clock-boost + LLC-evict warmer before the timed run |
 
+The resolved size must be positive; rejection happens before device access.
+Buffer byte counts use `size_t`, avoiding the former 32-bit wrap on supported
+64-bit hosts. This does not guarantee available memory or qualify arbitrary
+manual sizes within the collection time budget. Positive CLI fallback and
+environment precedence are preserved.
+
 Fixed (compile-time) CTA sizes are `SORT_BLOCK_SIZE = 128` and
 `SCAN_BLOCK_SIZE = 256`, echoed into the params as `sort_block_size` /
 `scan_block_size`.
@@ -81,7 +87,8 @@ Verification takes O(N) host work. It preserves the original keys, reuses the
 existing host values buffer for the measured indices, and adds one output-key
 buffer plus one byte per source index: 20 MiB extra at the largest declared
 4,194,304-pair size. GPU allocations and all eight radix passes are unchanged.
-Manual-size admission and AMD hardware qualification remain separate.
+Available-memory/time admission for manual sizes and AMD hardware qualification
+remain separate.
 
 From the repository root, run
 `python3 tests/shoc_sort_verification.py --host-only --compiler clang++ --work-dir /tmp/sort-host`
@@ -92,6 +99,13 @@ value, duplicate-pair and association faults, skipped work, unavailable buffers,
 and all 13 declared sizes with both warmer settings. Each GPU process has a
 60-second limit; use a new work directory to retain logs, hashes and outcomes.
 CI executes host checks and compiles GPU variants; GPU execution needs hardware.
+
+`python3 tests/shoc_sort_input_ranges.py --compiler clang++ --work-dir /tmp/sort-input`
+checks the production parser, positivity guard, rounding and byte arithmetic
+without allocating large arrays. Add `--binary /path/to/shoc_sort` to require
+exact invalid-input errors from the actual binary with GPUs hidden. These host
+checks include the former 4 GiB wrap boundary and `INT_MAX`; they do not execute
+or qualify those large sorts.
 
 ## Build
 
@@ -118,8 +132,9 @@ make PLATFORM=rocm # hipcc
 
 ## Notes
 
-- N must be a multiple of 1024 (`4 * SCAN_BLOCK_SIZE`) so every kernel's grid
-  geometry divides evenly; other values are rounded down with a warning.
+- Positive N is rounded down to a multiple of 1024 (`4 * SCAN_BLOCK_SIZE`),
+  with a minimum of 1024, so every kernel's grid geometry divides evenly.
+  Nonmultiples produce a warning.
 - Input keys are synthetic random `uint32` (SHOC uses `i % 1024`). The radix
   sort's *operation count* is data-independent, but memory locality is not:
   `reorderData`'s scatter pattern depends on the key distribution. Uniform

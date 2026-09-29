@@ -68,6 +68,16 @@ manifest combinations. Every GPU process must finish within 60 seconds. CI
 compiles these GPU tests; their execution requires a GPU. Raw output, source and
 binary hashes and per-case outcomes remain in the new work directory.
 
+`python3 tests/transpose_verification.py --host-only --compiler clang++ --work-dir /tmp/transpose-host`
+checks the production CPU transpose against a known answer and independent
+rectangular mappings, bit preservation, inverse transposes and memory guards
+under fatal host sanitizers. Use `--platform cuda --sweep --work-dir
+/tmp/transpose-gpu` for faults in each actual measured variant beyond the former
+1000-element cutoff, nonfinite results, skipped launches, partial tiles and all
+22 declared sizes with both warmer modes. Every process has a 60-second budget.
+Use a new work directory to retain logs, hashes and outcomes. CI executes host
+fixtures and compiles GPU variants; execution requires hardware.
+
 `python3 tests/gramschmidt_input_ranges.py --compiler clang++ --work-dir /tmp/gram-input-host`
 checks the actual parser, resolved dimension guards, storage sizes and widened
 launch geometry with fatal host sanitizers, including signed-index boundaries

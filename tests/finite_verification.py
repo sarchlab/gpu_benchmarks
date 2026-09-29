@@ -23,7 +23,7 @@ SITES = {
                    [("value", "actual[0]", "expected[start]")])],
     "cuda_convolution_separable": [("float diff = fabsf(h_output[idx]", [("output", "h_output[idx]", "ref[idx]")])],
     "cuda_nbody": [("const bool position_ok =", [("pos_" + c, f"h_pos[i].{c}", f"h_pos_orig[i].{c}") for c in "xyzw"] + [("vel_" + c, f"h_vel[i].{c}", f"h_vel_orig[i].{c}") for c in "xyzw"])],
-    "cuda_transpose": [("int naive_errors = 0;", [("naive", "h_odata[0]", "h_ref[0]")]), ("int opt_errors = 0;", [("optimized", "h_odata[0]", "h_ref[0]")])],
+    "cuda_transpose": [("size_t naive_errors = 0;", [("naive", "h_odata[0]", "h_ref[0]")]), ("size_t opt_errors = 0;", [("optimized", "h_odata[0]", "h_ref[0]")])],
     "graph_pr": [("float err = fabsf(h_gpu_rank[i]", [("rank", "h_gpu_rank[i]", "h_cpu_rank[i]")])],
     "heteromark_fir": [("float diff = fabsf(h_output[i]", [("output", "h_output[i]", "h_ref[i]")])],
     "heteromark_pagerank": [("float diff = fabsf(h_pr[v]", [("rank", "h_pr[v]", "refPr[v]")])],

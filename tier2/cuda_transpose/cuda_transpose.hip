@@ -169,7 +169,8 @@ int main(int argc, char** argv) {
     dim3 grid((N + TILE_DIM - 1) / TILE_DIM, (N + TILE_DIM - 1) / TILE_DIM);
 
     char params[128];
-    snprintf(params, sizeof(params), "\"size\":%d", N);
+    snprintf(params, sizeof(params),
+             "\"size\":%d,\"verification\":\"full_cpu_v1\"", N);
 
     // Both variants read d_idata (never modified) and overwrite d_odata in
     // full; repeating a launch performs identical work regardless of the
@@ -189,19 +190,19 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(h_odata, d_odata, bytes, hipMemcpyDeviceToHost));
     transpose_cpu(h_idata, h_ref, N, N);
 
-    int naive_errors = 0;
-    for (int i = 0; i < 1000 && i < (int)num_elems; ++i) {
+    size_t naive_errors = 0;
+    for (size_t i = 0; i < num_elems; ++i) {
         if (!std::isfinite(h_odata[i]) || !std::isfinite(h_ref[i]) ||
             fabsf(h_odata[i] - h_ref[i]) > 1e-5f) {
             if (naive_errors < 5) {
-                fprintf(stderr, "  Naive mismatch at %d: got %f, expected %f\n",
+                fprintf(stderr, "  Naive mismatch at %zu: got %f, expected %f\n",
                         i, h_odata[i], h_ref[i]);
             }
             naive_errors++;
         }
     }
-    fprintf(stderr, "  Verification: %s\n",
-            (naive_errors == 0) ? "PASS" : "FAIL");
+    fprintf(stderr, "  Naive verification: %s (%zu mismatches in %zu elements)\n",
+            (naive_errors == 0) ? "PASS" : "FAIL", naive_errors, num_elems);
     bool verify_ok = (naive_errors == 0);
 
     // -----------------------------------------------------------------------
@@ -217,19 +218,19 @@ int main(int argc, char** argv) {
     // Verify optimized transpose
     HIP_CHECK(hipMemcpy(h_odata, d_odata, bytes, hipMemcpyDeviceToHost));
 
-    int opt_errors = 0;
-    for (int i = 0; i < 1000 && i < (int)num_elems; ++i) {
+    size_t opt_errors = 0;
+    for (size_t i = 0; i < num_elems; ++i) {
         if (!std::isfinite(h_odata[i]) || !std::isfinite(h_ref[i]) ||
             fabsf(h_odata[i] - h_ref[i]) > 1e-5f) {
             if (opt_errors < 5) {
-                fprintf(stderr, "  Optimized mismatch at %d: got %f, expected %f\n",
+                fprintf(stderr, "  Optimized mismatch at %zu: got %f, expected %f\n",
                         i, h_odata[i], h_ref[i]);
             }
             opt_errors++;
         }
     }
-    fprintf(stderr, "  Verification: %s\n",
-            (opt_errors == 0) ? "PASS" : "FAIL");
+    fprintf(stderr, "  Optimized verification: %s (%zu mismatches in %zu elements)\n",
+            (opt_errors == 0) ? "PASS" : "FAIL", opt_errors, num_elems);
     if (opt_errors != 0) verify_ok = false;
 
     // -----------------------------------------------------------------------

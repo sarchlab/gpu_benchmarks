@@ -92,6 +92,18 @@ Environment variables override the flags:
 | `BENCH_PARAM_block_size` | 16 | Thread-block dimension (block_size × block_size) |
 | `BENCH_PARAM_vector_add_warmup` | true | Clock-boost + LLC-evict warmer before the timed run |
 
+Resolved `n` must be at least 3 so the stencil has an interior cell; iterations
+and block size must be positive. Require `n*n <= INT_MAX` for the signed array
+indices and host allocation size expression. Invalid resolved inputs fail before
+allocation or GPU access and emit no timing records. Grid rounding uses wide
+arithmetic for positive block sizes. These checks preserve all 60 declared
+configurations; arbitrary manual block support, memory capacity and runtime
+budgets remain separate requirements.
+
+Existing command-line fallback for nonpositive integers and environment `atoi`
+overrides are unchanged. Positive iteration counts, the seed-123 input, stencil
+formula, measured work and complete numerical verification are preserved.
+
 ## Output Format
 
 **stderr**: device info, timing, correctness check result

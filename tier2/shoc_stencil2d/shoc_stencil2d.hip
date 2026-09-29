@@ -38,6 +38,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <climits>
 #include <vector>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
@@ -103,6 +104,15 @@ int main(int argc, char** argv)
     env_val = getenv("BENCH_PARAM_block_size");
     if (env_val) block_size = atoi(env_val);
 
+    if (N < 3 || iters <= 0 || block_size <= 0) {
+        fprintf(stderr, "SHOC Stencil2D requires n>=3 and positive iterations/block_size\n");
+        return EXIT_FAILURE;
+    }
+    if (N > INT_MAX / N) {
+        fprintf(stderr, "SHOC Stencil2D n*n exceeds INT_MAX\n");
+        return EXIT_FAILURE;
+    }
+
     // Print device info
     int device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
@@ -130,8 +140,8 @@ int main(int argc, char** argv)
 
     // Kernel launch config
     dim3 block(block_size, block_size);
-    dim3 grid((N - 2 + block_size - 1) / block_size,
-              (N - 2 + block_size - 1) / block_size);
+    int grid_size = (int)(((long long)N - 2 + block_size - 1) / block_size);
+    dim3 grid(grid_size, grid_size);
 
     char params[128];
     snprintf(params, sizeof(params),

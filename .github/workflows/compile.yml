@@ -323,7 +323,7 @@ jobs:
           python3 tests/shoc_scan_reference.py --host-only --compiler g++ --work-dir /tmp/shoc-scan-reference-host
           python3 tests/shoc_scan_reference.py --platform cuda --work-dir /tmp/shoc-scan-reference-device --compile-only
 
-      - name: Check SSSP full reference and compile measured-distance regression
+      - name: Check SSSP distances, deterministic rounds and compile GPU regressions
         run: |
           python3 tests/sssp_verification.py --host-only --compiler g++ --work-dir /tmp/sssp-reference-host
           python3 tests/sssp_verification.py --platform cuda --work-dir /tmp/sssp-measured-device --compile-only

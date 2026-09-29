@@ -70,6 +70,7 @@
     }
   ],
   "kernels": [
+    "sssp_snapshot_kernel",
     "bellman_ford_kernel"
   ]
 }

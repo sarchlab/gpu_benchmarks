@@ -145,16 +145,22 @@ requires hardware. This checks Q orthogonality only; full QR reconstruction
 and final A workspace verification remain separate.
 
 `python3 tests/sssp_verification.py --host-only --compiler clang++ --work-dir /tmp/sssp-host`
-checks the actual CPU Bellman-Ford reference against 32,768 independent
-Floyd-Warshall cases and a weighted parallel/self-edge/unreachable fixture with
-fatal host sanitizers. Use `--platform cuda --sweep --work-dir /tmp/sssp-gpu`
-for actual measured-distance faults beyond the former 1024-vertex cutoff,
-skipped-work rejection, bounded diagnostics, both warmer modes and all 81
-declared vertex/degree configurations. CI runs host fixtures and compiles GPU
-variants; execution requires hardware. Use a new work directory to retain raw
-logs, source/binary hashes and outcomes. Each GPU process has a 60-second limit.
-These checks cover final distances; SSSP concurrency and deterministic work
-remain separate repairs.
+checks the production reference against 32,768 Floyd-Warshall distance cases
+and an independent dense snapshot recurrence for round counts and edge work,
+plus self/parallel/unreachable and forward/reverse chain fixtures under fatal
+ASan/UBSan. Use `--platform cuda --sweep --work-dir /tmp/sssp-gpu` for all 81
+configurations in both warmer modes, complete measured-distance corruption,
+skipped-work rejection and bounded diagnostics. Every process has a 60-second
+limit. CI runs host checks and compiles production and instrumented binaries.
+
+`python3 tests/sssp_rounds.py --binary /tmp/sssp-gpu/faults/tier2/lonestar_sssp/lonestar_sssp --work-dir /tmp/sssp-rounds`
+checks every GPU round against an independent Python snapshot model, and counts
+actual atomic relaxation attempts in a test-only kernel copy. It covers small
+random graphs, weighted competing paths, self/parallel edges, unreachable
+vertices, forward/reverse chains, partial blocks, alternate block sizes,
+repeated runs and both warmer modes. Corrupting only the reported round count
+must fail even with correct final distances. Use fresh work directories to
+preserve reports and raw logs. GPU execution requires hardware.
 
 `python3 tests/convolution_verification.py --host-only --work-dir /tmp/conv-host`
 checks the production separable CPU reference against asymmetric known answers,

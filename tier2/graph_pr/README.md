@@ -45,6 +45,20 @@ so there are no dangling nodes and the ranks form a probability distribution
 repetition across fresh processes is the harness's job
 (`gpubench run --reps N`).
 
+Resolved vertices and iteration count must be positive, and degree must be
+nonnegative. Invalid requests fail before graph allocation or GPU access and
+emit no timing records, so zero-step runs cannot count as successful measurements.
+An environment degree of zero still generates one outgoing edge per vertex.
+The existing positive-only CLI fallback and environment precedence are unchanged.
+
+A sufficient integer-safety bound requires
+`N * max(1, floor(D/2) + D) <= INT_MAX`, covering generated degrees and all CSC
+offsets. Row sizing and grid rounding use wide arithmetic; the fixed 256-thread
+blocks keep even padded vertex indices within signed int. All 81 declared
+configurations are unchanged. These checks do not guarantee memory capacity or
+the process budget for arbitrary manual sizes/iteration counts. The numerical
+tolerance limitation below remains separate.
+
 ## Build & Run
 
 ```bash

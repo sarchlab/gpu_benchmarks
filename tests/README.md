@@ -243,6 +243,14 @@ all 16 byte positions, bounded diagnostics, both warmers and all 27 declared
 configurations. CI runs the host checks and compiles both GPU variants. Runtime
 checks retain raw output and source/binary hashes with a 60-second process limit.
 
+`python3 tests/graph_pr_input_ranges.py --compiler clang++ --work-dir /tmp/pr-ranges`
+extracts the actual parser, guards, three row-size expressions and grid rounding
+for fatal ASan/UBSan boundary checks without allocating graphs. It covers all
+declared configurations, empty/negative work, degree-zero compatibility, integer
+limits and CLI/environment precedence. Add `--binary <graph_pr>` to require exact
+GPU-hidden rejection diagnostics and no timing records from invalid requests.
+Capacity, manual runtime budgets and the separate tolerance decision remain open.
+
 `python3 tests/graph_pr_verification.py --host-only --work-dir /tmp/pr-host`
 checks the production PageRank reference against exact trajectories, duplicated
 edges, a single vertex and total mass with fatal host sanitizers. Use `--platform

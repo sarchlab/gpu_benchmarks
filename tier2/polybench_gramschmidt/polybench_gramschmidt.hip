@@ -39,6 +39,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <climits>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -166,6 +167,19 @@ int main(int argc, char** argv)
     env_val = getenv("BENCH_PARAM_n");
     if (env_val) N = atoi(env_val);
 
+    if (M <= 0 || N <= 0) {
+        fprintf(stderr, "Gram-Schmidt dimensions m and n must be positive\n");
+        return EXIT_FAILURE;
+    }
+    if ((unsigned long long)M * N > INT_MAX) {
+        fprintf(stderr, "Gram-Schmidt M*N exceeds INT_MAX\n");
+        return EXIT_FAILURE;
+    }
+    if ((unsigned long long)N * N > INT_MAX) {
+        fprintf(stderr, "Gram-Schmidt N*N exceeds INT_MAX\n");
+        return EXIT_FAILURE;
+    }
+
     size_t bytes_A = (size_t)M * N * sizeof(float);
     size_t bytes_Q = (size_t)M * N * sizeof(float);
     size_t bytes_R = (size_t)N * N * sizeof(float);
@@ -201,7 +215,7 @@ int main(int argc, char** argv)
     HIP_CHECK(hipMalloc(&d_nrm_buf, bytes_1));
 
     const int block_size = 256;
-    const int grid_M = (M + block_size - 1) / block_size;
+    const int grid_M = (int)(((unsigned long long)M + block_size - 1) / block_size);
 
     char params[160];
     snprintf(params, sizeof(params),

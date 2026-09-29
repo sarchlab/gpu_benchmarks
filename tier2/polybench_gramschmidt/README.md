@@ -86,6 +86,19 @@ The run executes once per process: it performs a single full QR
 factorization and emits one record per kernel accumulating all k-columns.
 Repetition across runs is the harness's job (`gpubench run --reps N`).
 
+Resolved M and N must be positive, and both `M*N` and `N*N` must fit a signed
+32-bit integer for the existing matrix/index expressions. Invalid dimensions
+fail before allocation or device access, without timing records. Launch-grid
+rounding uses widened arithmetic. Positive command-line fallback and
+environment-variable precedence are unchanged; this does not introduce a new
+strict string parser.
+
+These bounds establish arithmetic safety only. They do not guarantee available
+memory, full column rank or a bounded process time for arbitrary overrides.
+Full Q checking costs O(M N²). H100 budget evidence covers the declared N=64
+sizes; accepting an override at the input guard does not qualify it for
+collection. Complete QR verification remains separate below.
+
 ## Output Format
 
 **stderr** — device info, per-kernel timing, orthogonality check result,

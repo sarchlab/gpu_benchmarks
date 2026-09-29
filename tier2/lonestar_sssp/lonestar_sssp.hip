@@ -258,7 +258,8 @@ int main(int argc, char** argv) {
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"vertices\":%d,\"degree\":%d,\"block_size\":%d",
+             "\"vertices\":%d,\"degree\":%d,\"block_size\":%d,"
+             "\"verification\":\"full_cpu_distances_v1\"",
              vertices, degree, block_size);
 
     bench_timer_t timer;
@@ -292,9 +293,8 @@ int main(int argc, char** argv) {
         std::vector<int> h_cpu_dist;
         bellman_ford_cpu(N, row_offsets, col_indices, weights, h_cpu_dist, source);
 
-        int verify_n = (N < 1024) ? N : 1024;
         int errors = 0;
-        for (int i = 0; i < verify_n; ++i) {
+        for (int i = 0; i < N; ++i) {
             if (h_gpu_dist[i] != h_cpu_dist[i]) {
                 if (errors < 10) {
                     fprintf(stderr, "Mismatch at vertex %d: GPU=%d CPU=%d\n",
@@ -304,11 +304,10 @@ int main(int argc, char** argv) {
             }
         }
         if (errors > 0) {
-            fprintf(stderr, "FAIL: %d mismatches in first %d vertices\n",
-                    errors, verify_n);
+            fprintf(stderr, "FAIL: %d mismatches in %d vertices\n", errors, N);
             verify_ok = false;
         } else
-            fprintf(stderr, "PASS\n");
+            fprintf(stderr, "PASS: 0 mismatches in %d vertices\n", N);
     }
 
     HIP_CHECK(hipFree(d_row_offsets));

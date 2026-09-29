@@ -297,6 +297,11 @@ jobs:
           python3 tests/npb_ep_output_sanity.py --host-only --compiler g++ --work-dir /tmp/ep-output-host
           python3 tests/npb_ep_output_sanity.py --platform cuda --work-dir /tmp/ep-output-device --compile-only
 
+      - name: Check SSSP full reference and compile measured-distance regression
+        run: |
+          python3 tests/sssp_verification.py --host-only --compiler g++ --work-dir /tmp/sssp-reference-host
+          python3 tests/sssp_verification.py --platform cuda --work-dir /tmp/sssp-measured-device --compile-only
+
       - name: Check binomial CPU reference (no GPU required)
         run: |
           g++ -std=c++14 -O3 -pthread -fsanitize=address,undefined -fno-sanitize-recover=all tests/binomial_cpu_reference.cpp -o /tmp/binomial-cpu-reference

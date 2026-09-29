@@ -68,6 +68,15 @@ manifest combinations. Every GPU process must finish within 60 seconds. CI
 compiles these GPU tests; their execution requires a GPU. Raw output, source and
 binary hashes and per-case outcomes remain in the new work directory.
 
+`python3 tests/shoc_scan_reference.py --host-only --compiler clang++ --work-dir /tmp/shoc-scan-host`
+checks the actual SHOC scan reference against independent exact integer-prefix
+formulas, known answers and memory guards, including the former float-precision
+failure boundary. Use `--platform cuda --sweep --work-dir /tmp/shoc-scan-gpu`
+for all declared sizes with both warmers, partial/recursive boundaries and
+actual-device finite/nonfinite/zero-output faults. Each process has a 60-second
+budget. CI runs host tests and compiles GPU variants; GPU execution requires
+hardware. Raw output and source/binary hashes remain in the new work directory.
+
 `python3 tests/scan_input_ranges.py --compiler clang++ --work-dir /tmp/scan-input`
 checks the production large-scan parser, positivity guard, buffer arithmetic and
 recursive block count under fatal host sanitizers. It covers all declared sizes

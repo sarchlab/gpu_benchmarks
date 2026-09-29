@@ -163,9 +163,13 @@ static void scan_recursive(float* d_output, const float* d_input, int N,
 // CPU reference: exclusive prefix sum
 // ---------------------------------------------------------------------------
 static void scan_cpu(float* output, const float* input, int N) {
-    output[0] = 0.0f;
-    for (int i = 1; i < N; ++i) {
-        output[i] = output[i - 1] + input[i - 1];
+    // Generated inputs are integers in [1,7]. Their prefixes are exact in
+    // double for every positive int N; serial float accumulation can drift
+    // or saturate long before the parallel GPU scan loses useful precision.
+    double sum = 0.0;
+    for (int i = 0; i < N; ++i) {
+        output[i] = (float)sum;
+        sum += input[i];
     }
 }
 
@@ -230,7 +234,8 @@ int main(int argc, char** argv) {
 
     char params[128];
     snprintf(params, sizeof(params),
-             "\"array_size\":%d,\"block_size\":%d",
+             "\"array_size\":%d,\"block_size\":%d,"
+             "\"verification\":\"full_cpu_fp64accum_v1\"",
              array_size, block_size);
 
     bench_timer_t timer;

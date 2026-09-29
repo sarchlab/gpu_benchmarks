@@ -318,6 +318,11 @@ jobs:
           make -C tier2/cuda_scan_large PLATFORM=cuda CUDA_ARCH=sm_90
           python3 tests/scan_input_ranges.py --compiler g++ --binary tier2/cuda_scan_large/cuda_scan_large --work-dir /tmp/scan-input-ranges
 
+      - name: Check SHOC scan reference precision and compile measured-output regression
+        run: |
+          python3 tests/shoc_scan_reference.py --host-only --compiler g++ --work-dir /tmp/shoc-scan-reference-host
+          python3 tests/shoc_scan_reference.py --platform cuda --work-dir /tmp/shoc-scan-reference-device --compile-only
+
       - name: Check SSSP full reference and compile measured-distance regression
         run: |
           python3 tests/sssp_verification.py --host-only --compiler g++ --work-dir /tmp/sssp-reference-host

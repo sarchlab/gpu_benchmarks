@@ -96,8 +96,8 @@ Environment variables override the flags:
 time accumulated across all recursion levels of the run, then a `summary`
 whose `total_time_ms` is the sum of the recorded GPU event times:
 ```json
-{"type":"kernel","name":"scan_block_kernel","iter":0,"time_ms":0.185000,"host_time_ms":0.210000,"params":{"array_size":1048576,"block_size":256}}
-{"type":"kernel","name":"add_block_sums_kernel","iter":0,"time_ms":0.030000,"host_time_ms":0.045000,"params":{"array_size":1048576,"block_size":256}}
+{"type":"kernel","name":"scan_block_kernel","iter":0,"time_ms":0.185000,"host_time_ms":0.210000,"params":{"array_size":1048576,"block_size":256,"verification":"full_cpu_fp64accum_v1"}}
+{"type":"kernel","name":"add_block_sums_kernel","iter":0,"time_ms":0.030000,"host_time_ms":0.045000,"params":{"array_size":1048576,"block_size":256,"verification":"full_cpu_fp64accum_v1"}}
 {"type":"summary","total_time_ms":0.215000}
 ```
 
@@ -122,6 +122,27 @@ exclusive-scan reference. Verification does not launch another GPU scan or
 another clock warmer.
 On FAIL the process exits non-zero, so the harness marks the run as failed
 without losing the measurements. There is no verification on/off parameter.
+
+The CPU reference accumulates the actual input in `double`, then stores each
+exclusive prefix as `float`. Generated inputs are integers from 1 to 7, so every
+prefix is exact in the double accumulator over the positive `int` size domain.
+The previous serial float accumulator drifted and eventually saturated, falsely
+rejecting large declared arrays. GPU arithmetic and the acceptance rule remain
+unchanged: both compared values must be finite, and the absolute difference
+must not exceed `1e-3 * abs(reference) + 1e-5`. Every output is checked; all errors
+are counted with at most ten details. `verification: full_cpu_fp64accum_v1`
+identifies the corrected reference. No extra arrays or GPU launches are added.
+
+`python3 tests/shoc_scan_reference.py --host-only --compiler clang++ --work-dir /tmp/shoc-scan-host`
+(from the repository root) compares the actual CPU reference against independent
+integer-prefix formulas, known answers, input immutability and buffer guards,
+including sizes where float accumulation loses precision. Use `--platform cuda
+--sweep --work-dir /tmp/shoc-scan-gpu` for every declared size with both warmer
+settings and actual-device first/middle/tail corruption, nonfinite values,
+zeroed outputs and bounded error diagnostics. Each process has a 60-second
+budget; raw logs and source/binary hashes remain in the new work directory.
+CI runs host checks and compiles GPU variants; GPU execution requires hardware.
+Manual input/memory admission and AMD hardware qualification remain separate.
 
 ## Bandwidth Formula
 

@@ -292,6 +292,11 @@ jobs:
       - name: Check NPB EP input ranges (no GPU required)
         run: python3 tests/npb_ep_input_ranges.py --compiler g++
 
+      - name: Check NPB EP output sanity and compile measured-output regression
+        run: |
+          python3 tests/npb_ep_output_sanity.py --host-only --compiler g++ --work-dir /tmp/ep-output-host
+          python3 tests/npb_ep_output_sanity.py --platform cuda --work-dir /tmp/ep-output-device --compile-only
+
       - name: Check binomial CPU reference (no GPU required)
         run: |
           g++ -std=c++14 -O3 -pthread -fsanitize=address,undefined -fno-sanitize-recover=all tests/binomial_cpu_reference.cpp -o /tmp/binomial-cpu-reference

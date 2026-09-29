@@ -410,6 +410,17 @@ configurations, and existing argv/environment precedence without allocating
 large inputs. Host acceptance establishes representable indices, not device
 support, verification coverage or runtime feasibility. CI runs it with g++.
 
+`python3 tests/npb_ep_output_sanity.py --host-only --compiler clang++ --work-dir
+/tmp/ep-host` tests the actual EP reduction with fatal host sanitizers, including
+partial blocks, integral/count bounds, nonfinite partials, reduced-sum overflow
+and bounded diagnostics. `--platform cuda --sweep --work-dir /tmp/ep-device`
+builds production and post-timing device-fault variants, checks all measured
+partial buffers and all 15 declared configurations. Both warmer modes and
+healthy non-reference-M skip behavior are covered. Each work directory must be
+new. CI runs host fixtures and compiles the GPU variants. These sanity bounds
+supplement the unchanged official NAS Sx/Sy criterion; they do not establish
+an independent exact histogram reference.
+
 `python3 tests/bfs_input_ranges.py --compiler clang++` executes the actual
 BFS parameter prefix and row-size expression under host sanitizers. It checks
 positive vertex/block counts, nonnegative out-degree, signed edge/index limits,

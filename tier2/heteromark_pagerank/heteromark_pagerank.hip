@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <climits>
 #include <vector>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
@@ -189,6 +190,18 @@ int main(int argc, char** argv) {
     int N       = vertices;
     int prIters = pr_iterations;
     float damping = (float)damping_factor;
+    const int avgDegree = 16;
+
+    if (N <= 0 || prIters <= 0) {
+        fprintf(stderr, "Hetero-Mark PageRank vertices and pr_iterations must be positive\n");
+        return EXIT_FAILURE;
+    }
+    // Exactly avgDegree outgoing edges per vertex, including duplicate targets.
+    // This also bounds N+1 and the fixed-256-thread grid arithmetic below.
+    if (N > INT_MAX / avgDegree) {
+        fprintf(stderr, "Hetero-Mark PageRank generated edge count exceeds INT_MAX\n");
+        return EXIT_FAILURE;
+    }
 
     // Print device info
     int device_id = 0;
@@ -201,7 +214,7 @@ int main(int argc, char** argv) {
 
     // Generate synthetic graph
     std::vector<int> rowPtr, colIdx, outDegree;
-    generateCSR(N, 16, 42, rowPtr, colIdx, outDegree);
+    generateCSR(N, avgDegree, 42, rowPtr, colIdx, outDegree);
     int numEdges = rowPtr[N];
     fprintf(stderr, "Graph: %d vertices, %d edges (avg in-degree: %.1f)\n",
             N, numEdges, (double)numEdges / N);

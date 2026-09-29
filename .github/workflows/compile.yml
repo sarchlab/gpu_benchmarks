@@ -130,6 +130,11 @@ jobs:
           python3 tests/graph_cc_verification.py --platform cuda --compile-only --work-dir /tmp/graph-cc-measured
           python3 tests/graph_cc_input_ranges.py --compiler g++ --binary /tmp/graph-cc-measured/production/tier2/graph_cc/graph_cc --work-dir /tmp/graph-cc-input-ranges
 
+      - name: Check Hetero-Mark PageRank integer input admission
+        run: |
+          make -C tier2/heteromark_pagerank PLATFORM=cuda
+          python3 tests/heteromark_pagerank_input_ranges.py --compiler g++ --binary tier2/heteromark_pagerank/heteromark_pagerank --work-dir /tmp/heteromark-pagerank-input-ranges
+
       - name: Check pinned CFD solver, mesh geometry and measured-result hooks
         run: |
           python3 tests/cfd_host.py --compiler g++

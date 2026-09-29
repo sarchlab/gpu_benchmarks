@@ -33,6 +33,18 @@ run. Repetition = `gpubench run --reps N`.
 | `BENCH_PARAM_damping_factor` / `--damping_factor` | Damping factor d | 0.85 |
 | `BENCH_PARAM_vector_add_warmup` | Cold-cache clock warmer on/off | true |
 
+Resolved vertex and iteration counts must be positive. The fixed 16 outgoing
+edges per vertex require `16 * vertices <= INT_MAX` for the signed CSR indices.
+Invalid resolved integer requests fail before allocation or GPU access and emit no timing
+records. This bound also keeps row sizes and fixed-block grid rounding safe.
+All 108 declared vertex/damping combinations remain supported by these integer
+checks; memory capacity and process budgets are separate requirements.
+
+Environment values still override command-line values. Existing `atoi` parsing
+and the command line's fallback to defaults for nonpositive integers remain
+unchanged; the guards check the resolved values. This input repair preserves
+positive iteration counts, damping behavior and the existing numerical criterion.
+
 ## Files
 
 | File | Description |

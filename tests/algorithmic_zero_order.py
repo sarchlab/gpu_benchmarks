@@ -84,7 +84,7 @@ def check_capture(database, stdout, kind, params, warmer):
     assert [r['name'] for r in records] == record_names, records
     for r in records:
         assert r['type'] == 'kernel' and r['iter'] == 0, r
-        assert (r['params'] == params if kind == 'gram' else
+        assert (r['params'] == dict(params, q_orthogonality='all_columns_v1') if kind == 'gram' else
                 all(r['params'][k] == v for k,v in params.items())), r
         assert all(math.isfinite(r[k]) and r[k] >= 0 for k in ('time_ms', 'host_time_ms')), r
     total = output[-1]['total_time_ms']

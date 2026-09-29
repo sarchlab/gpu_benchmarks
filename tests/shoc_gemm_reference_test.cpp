@@ -30,6 +30,22 @@ int main() {
                 return 1;
             ++cases;
         }
+    // Omit the worker override on both sides of the automatic 512^2 threshold.
+    for (int m : {511, 512}) {
+        const int n = 512, k = 2;
+        std::vector<float> a((size_t)m * k), b((size_t)k * n), c((size_t)m * n + 2);
+        for (size_t i = 0; i < a.size(); ++i) a[i] = float(i % 7) * .137f;
+        for (size_t i = 0; i < b.size(); ++i) b[i] = float(i % 11) * .139f;
+        for (size_t i = 0; i < c.size(); ++i) c[i] = float(i % 13) * .141f;
+        c.front() = 12345.f; c.back() = -12345.f;
+        const auto aa = a, bb = b;
+        auto expected = c;
+        original(a.data(), b.data(), expected.data() + 1, m, n, k, 1.f, 0.f);
+        gemm_cpu(a.data(), b.data(), c.data() + 1, m, n, k, 1.f, 0.f);
+        if (a != aa || b != bb || std::memcmp(c.data(), expected.data(), c.size() * sizeof(float)))
+            return 6;
+        ++cases;
+    }
     // Independent rectangular known answer includes nonzero initial C and beta.
     const float a[] = {1, 2, 3, 4, 5, 6}, b[] = {7, 8, 9, 10, 11, 12};
     float c[] = {1, 2, 3, 4};

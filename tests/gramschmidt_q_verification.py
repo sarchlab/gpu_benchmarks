@@ -61,6 +61,15 @@ def host_checks(root, work, compiler):
     p = subprocess.run([str(binary)],capture_output=True,text=True,timeout=60)
     (work/'host.stdout').write_text(p.stdout); (work/'host.stderr').write_text(p.stderr)
     assert p.returncode == 0, p.stderr
+    fixtures = re.split(r'GRAM_Q_CASE (\d+) (\d+) (\d+)\n',p.stderr)
+    assert not fixtures[0] and len(fixtures)>1
+    for i in range(1,len(fixtures),4):
+        case,n,errors,diagnostics = fixtures[i:i+4]
+        expected = f'Orthogonality: {errors} failing pairs out of {int(n)**2}\n'
+        assert diagnostics.endswith(expected) and diagnostics.count('Orthogonality:')==1,(case,diagnostics)
+        assert diagnostics.count('ORTH FAIL:')==min(int(errors),10),(case,diagnostics)
+    total = int(re.search(r'PASS: (\d+)',p.stdout)[1])
+    assert total==(len(fixtures)-1)//4
     print(p.stdout,end='')
 
 

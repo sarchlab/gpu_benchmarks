@@ -100,7 +100,10 @@ memory-capacity or arbitrary-override performance qualification.
 `python3 tests/gramschmidt_q_verification.py --host-only --compiler clang++ --work-dir /tmp/gram-q-host`
 exercises the production Q orthogonality checker with independent known
 orthonormal fixtures, element corruption, duplicate columns, nonfinite values
-and immutable inputs/guards under fatal sanitizers. Use
+and immutable inputs/guards under fatal sanitizers. Host fixtures pin the existing
+inclusive `0.01f` criterion with boundary and adjacent-float off-diagonal cases,
+check positive/negative norm errors, and require every fixture's complete error
+count, N² pair total and ten-message cap. Use
 `--platform cuda --sweep --work-dir /tmp/gram-q-gpu` for actual measured-Q
 corruptions beyond the former eight-column cutoff, skipped normalization,
 bounded diagnostics and all 20 declared sizes with both warmer modes. Each GPU

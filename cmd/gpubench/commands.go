@@ -133,6 +133,10 @@ func cmdCompile(tierStr, suite, benchmark, platform string, jobs int, verbose bo
 		eprintf("[%3d/%d] %s ... ", i+1, len(cpp), b.Benchmark)
 
 		args := []string{"-C", b.Dir, fmt.Sprintf("PLATFORM=%s", plat)}
+		if b.Tier == 1 || b.Tier == 2 {
+			// Make's timestamps do not track platform or compiler flag changes.
+			args = append(args, "-B")
+		}
 		if jobs > 0 {
 			args = append(args, fmt.Sprintf("-j%d", jobs))
 		}

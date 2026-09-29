@@ -126,7 +126,7 @@ gpu_benchmarks/
 │   ├── atomic_operations/
 │   ├── warp_shuffle/
 │   └── empty_kernel/
-├── tier2/                          # Application benchmarks (62)
+├── tier2/                          # Application benchmarks (61)
 │   ├── Makefile
 │   ├── shoc_fft/
 │   ├── shoc_gemm/
@@ -169,7 +169,6 @@ gpu_benchmarks/
 │   ├── cuda_transpose/
 │   ├── heteromark_aes/
 │   ├── heteromark_fir/
-│   ├── heteromark_pagerank/
 │   ├── cuda_nbody/
 │   ├── cuda_convolution_separable/
 │   ├── cuda_scan_large/
@@ -323,7 +322,6 @@ The metric column names downstream quantities. See [measurement interpretation](
 | Other | `cuda_transpose` | Optimized matrix transpose |
 | HeteroMark | `heteromark_aes` | AES-256 encryption |
 | HeteroMark | `heteromark_fir` | FIR (Finite Impulse Response) filter |
-| HeteroMark | `heteromark_pagerank` | PageRank on synthetic graph |
 | CUDA SDK Extended | `cuda_nbody` | N-body gravitational simulation |
 | CUDA SDK Extended | `cuda_convolution_separable` | Separable 2D convolution |
 | CUDA SDK Extended | `cuda_scan_large` | Work-efficient parallel prefix sum |

@@ -33,6 +33,14 @@ last-level cache immediately before each timed launch. Repetition =
 | `BENCH_PARAM_size` / `--size` | Matrix dimension N (N×N) | 4096 |
 | `BENCH_PARAM_vector_add_warmup` | Cold-cache clock warmer on/off | true |
 
+The resolved dimension must be positive and satisfy `N*N <= INT_MAX`, because
+the GPU kernels and CPU reference use signed integer flat indices. On supported
+64-bit hosts with 32-bit `int`, the largest admitted dimension is 46340.
+Rejection happens before allocation or device access. All 22 declared sizes
+remain admitted; this arithmetic bound does not guarantee available memory or
+qualify arbitrary manual dimensions within the collection time budget. Existing
+positive CLI fallback and environment precedence are preserved.
+
 ## Files
 
 | File | Description |
@@ -97,7 +105,13 @@ partial tiles, bounded diagnostics and all 22 declared sizes with both warmer
 modes. Each process has a 60-second budget. Use a new work directory to preserve
 raw logs, source/binary hashes and outcomes. CI runs host checks and compiles GPU
 variants; GPU execution requires hardware. AMD hardware qualification and
-arbitrary manual-size admission remain separate.
+available-memory/time admission for manual sizes remain separate.
+
+`python3 tests/transpose_input_ranges.py --compiler clang++ --work-dir /tmp/transpose-input`
+checks the production parser, dimension guards and buffer arithmetic with fatal
+host sanitizers, including both sides of the 46340 boundary without allocating
+large matrices. Add `--binary /path/to/cuda_transpose` to require exact invalid
+input errors from the actual binary with GPUs hidden; CI runs this path too.
 
 ## Platform Notes
 

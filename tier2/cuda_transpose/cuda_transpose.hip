@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <climits>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -137,6 +138,16 @@ int main(int argc, char** argv) {
     const char* env_val;
     env_val = getenv("BENCH_PARAM_size");
     if (env_val) N = atoi(env_val);
+
+    if (N <= 0) {
+        fprintf(stderr, "Transpose size must be positive\n");
+        return EXIT_FAILURE;
+    }
+    // Both GPU variants and the CPU reference use signed int flat indices.
+    if ((unsigned long long)N * N > INT_MAX) {
+        fprintf(stderr, "Transpose size exceeds the signed index range\n");
+        return EXIT_FAILURE;
+    }
 
     size_t num_elems = (size_t)N * N;
     size_t bytes     = num_elems * sizeof(float);

@@ -1,110 +1,119 @@
-# lonestar_sssp — Single-Source Shortest Path (Bellman-Ford)
+# lonestar_sssp — synchronous topology-driven Bellman–Ford
 
-## Provenance & fidelity
+## Provenance and input
 
-Derived from the [Lonestar GPU](https://iss.oden.utexas.edu/?p=projects/galois/lonestar) suite — the `sssp` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+This portable reimplementation follows the topology-driven relaxation in
+[Lonestar GPU / GaloisGPU at `5b6ff19`](https://github.com/IntelligentSoftwareSystems/GaloisGPU/blob/5b6ff19b364fda39a80bda9920e1edb59e17086f/apps/sssp/main.cu).
+That historical version visits outgoing edges and uses atomic minimum distance
+updates. Later Lonestar versions use different, worklist-based algorithms;
+this benchmark does not implement those variants.
 
-- Topology-driven Bellman-Ford vs Lonestar's worklist SSSP; "inspired by" rather than a port. (Disclosed.)
+Two differences are intentional and owner-approved:
 
-Read this as "an SSSP benchmark in the spirit of Lonestar," not Lonestar's `sssp`.
+- Upstream updates distances in place within a launch. Here each round reads
+  an immutable snapshot, so thread scheduling cannot change logical propagation
+  rounds. The required snapshot copy is a timed GPU kernel.
+- Upstream reads a graph file. Here the existing deterministic synthetic CSR
+  graph is retained: xorshift32 seed 42, per-vertex degree
+  `max(1, floor(D/2) + rng % (D+1))`, destinations `rng % N`, integer weights
+  `1 + rng % 100`, and source vertex 0. It is not an upstream dataset.
 
-## Algorithm
+Input generation, all 81 declared vertex/degree configurations, and defaults
+are unchanged. Results from the former asynchronous implementation must be
+recollected; they do not describe this workload schedule.
 
-Computes single-source shortest paths on a random sparse directed graph using
-the Bellman-Ford algorithm on the GPU. The graph is stored in Compressed Sparse
-Row (CSR) format with random integer edge weights (1–100).
+## Algorithm and timing
 
-Each iteration launches one thread per vertex. Each thread relaxes all outgoing
-edges from its vertex using atomic min operations on the distance array. The
-algorithm repeats until no distance is updated (convergence).
+Each round first copies the current distances to a separate immutable array.
+One relaxation thread per vertex then attempts an `atomicMin` for every outgoing
+edge whose source distance was finite at round entry. The result array retains
+previous minima. A thread signals convergence with `atomicExch` if any candidate
+beats the **snapshot** destination distance. Both reads and this predicate are
+independent of competing atomic update order. Positive weights ensure convergence
+within N rounds, including the terminating no-change round.
 
-This is inspired by the Lonestar GPU benchmark suite's SSSP implementation.
+`sssp_snapshot_kernel` and `bellman_ford_kernel` each have an accumulated GPU-event
+and host-lap record. Their summed GPU time is the summary. Allocation, graph
+upload, initial distances, convergence-flag transfers and full CPU verification
+are outside GPU kernel timing. The entry warmer runs once, after initialization
+and before the first snapshot. Data reuse between subsequent kernels is part of
+the algorithm. No extra GPU computation is run for verification.
 
-## Parameters
+## Parameters and execution
 
-| Parameter    | Default | Description                    |
-|-------------|---------|--------------------------------|
-| `--vertices` | 65536   | Number of graph vertices       |
-| `--degree`   | 16      | Average edges per vertex       |
-| `--block_size` | 256   | Threads per block              |
+| Parameter | Default | Meaning |
+|---|---:|---|
+| `--vertices` | 65536 | Number of vertices |
+| `--degree` | 16 | Degree generator parameter |
+| `--block_size` | 256 | Threads per block |
 
-Environment variables (`BENCH_PARAM_vertices`, `BENCH_PARAM_degree`,
-`BENCH_PARAM_block_size`) override the flags. In addition:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BENCH_PARAM_vector_add_warmup` | true | Cold-cache calibration: boost the clock and evict the LLC before the timed run; set `false` to time as-is |
-
-## Build & Run
+`BENCH_PARAM_vertices`, `BENCH_PARAM_degree` and `BENCH_PARAM_block_size` override
+flags. `BENCH_PARAM_vector_add_warmup` defaults to `true`; `false` disables the
+entry warmer without promising a particular cache/clock state.
 
 ```bash
-# Auto-detect platform
-make
-./lonestar_sssp
-
-# Explicit platform
-make PLATFORM=cuda
-make PLATFORM=rocm
-
-# Custom parameters
-./lonestar_sssp --vertices 131072 --degree 8
+make PLATFORM=cuda  # or PLATFORM=rocm
+./lonestar_sssp --vertices 131072 --degree 16
 ```
 
-## Output Format
+## Work descriptors and verification
 
-**JSON lines to stdout:** the single timed run (Bellman-Ford until
-convergence) emits one `kernel` record with the accumulated GPU event time
-(`time_ms`) and host time (`host_time_ms`) of all Bellman-Ford iterations,
-then a summary whose `total_time_ms` equals the recorded GPU event time:
-```json
-{"type":"kernel","name":"bellman_ford_kernel","iter":0,"time_ms":12.345,"host_time_ms":13.101,"params":{"vertices":65536,"degree":16,"block_size":256,"verification":"full_cpu_distances_v1"}}
-{"type":"summary","total_time_ms":12.345}
-```
+Both kernel records carry the same parameters:
 
-**Human-readable to stderr:**
-```
-Device: AMD Radeon RX 7900 XTX (id=0)
-SSSP (Bellman-Ford)  |  Vertices: 65536  |  Edges: 1048576
+- `input: "xorshift32_seed42_v1"` and `algorithm: "topology_snapshot_v1"` identify
+  the graph generator and synchronous schedule.
+- `verification: "full_cpu_distances_rounds_v2"` identifies complete exact integer
+  comparison and expected-round verification.
+- `graph_edges` is the actual generated edge count; `iterations` is the actual
+  measured round count, including the terminating no-change round.
+- `edge_relaxations` counts outgoing edges from all vertices reachable at each
+  round's entry, summed across rounds. Each corresponds to one GPU `atomicMin`
+  attempt. Unreachable sources contribute zero. This is deterministic logical
+  work derived by the CPU reference, not a hardware counter or the number of
+  successful atomics. It is valid for passing runs, whose final distances and
+  round count are verified. Do not multiply `graph_edges * iterations`: early
+  rounds skip unreachable sources. Do not sum the duplicated work descriptor
+  across the two kernel records.
 
-gpu = 12.345 ms, host = 13.101 ms (8 BF iterations)
-Total GPU time: 12.345 ms
-PASS: 0 mismatches in 65536 vertices
-```
+Downstream attempted Medges/s can use `edge_relaxations / total_gpu_seconds / 1e6`,
+including the required snapshot cost. The binary reports raw timings and counts.
 
-## Metric (derived downstream)
+The independent CPU reference propagates only sources whose values changed in
+the previous round, with a full distance snapshot and sources scanned in CSR
+order. This reduces CPU reference work while producing the same synchronous
+trajectory. It separately tracks all currently reachable outgoing edges to
+calculate the GPU's logical work. Every actual measured final distance,
+including unreachable `INT_MAX`, is compared exactly; a round-count mismatch
+also fails. All distance mismatches are counted, at most ten are printed, and
+failures exit nonzero while retaining timing records. There is no sampled check
+or relaxed floating-point tolerance. CPU verification and downloads count toward
+the whole-process timeout.
 
-**Medges/sec** = `N_edges × BF_iterations / time_seconds / 1e6`
+## Regression checks
 
-Computed downstream from `time_ms` and params — not reported by the binary.
-
-## Verification
-
-Every actual measured GPU distance is compared exactly against the complete
-sequential CPU Bellman-Ford reference, including unreachable `INT_MAX` values.
-There is no sampled prefix or verification-only GPU rerun. All mismatches are
-counted, with at most ten vertex diagnostics; a mismatch exits nonzero. The
-kernel record identifies this policy as `verification: "full_cpu_distances_v1"`.
-The CPU reference, download and comparison are outside GPU timing but count
-toward the runner's whole-process budget. The existing reference already
-computed the entire distance vector before full comparison was enabled.
-
-Regression commands from the repository root (use new work directories):
+From the repository root, with new work directories:
 
 ```bash
 python3 tests/sssp_verification.py --host-only --compiler clang++ --work-dir /tmp/sssp-host
 python3 tests/sssp_verification.py --platform cuda --sweep --work-dir /tmp/sssp-gpu
+python3 tests/sssp_rounds.py --binary /tmp/sssp-gpu/faults/tier2/lonestar_sssp/lonestar_sssp --work-dir /tmp/sssp-rounds
 ```
 
-Host fixtures compare the production CPU reference with independent
-Floyd-Warshall distances. GPU tests corrupt actual post-timing distances,
-including the former cutoff and final vertex, check skipped-work rejection,
-bounded diagnostics and both warmer modes. The sweep covers all 81 declared
-vertex/degree configurations with a 60-second per-process limit. CI runs host
-checks and compiles the GPU variants; their execution requires hardware.
+Host tests cover 32,768 exhaustive graph/source/weight cases against independent
+Floyd–Warshall distances and dense snapshot round/work counts, plus weighted,
+self/parallel/unreachable and forward/reverse chain fixtures. The device sweep
+checks all 81 configurations in both warmer modes with a 60-second process limit,
+automatically rejects differing work descriptors between modes,
+corrupts actual final distances and rejects skipped launches. The round tests
+compare every intermediate GPU vector with an independent Python model and
+instrument actual atomic attempts in a separate test copy. They vary block size,
+repeat runs and reject a wrong round count even when final distances are correct.
+CI runs host tests and compiles device variants; execution requires hardware.
+CUDA sanitizer checks are supplementary: racecheck alone does not prove absence
+of global-memory races; separation of immutable reads and atomic writes provides
+the concurrency argument.
 
-Full final-distance coverage does not resolve the existing mixed ordinary and
-atomic distance accesses, plain convergence-flag writes, or schedule-dependent
-work. Those algorithm/concurrency and work-identity repairs remain separate
-under [issue #71](https://github.com/sarchlab/gpu_benchmarks/issues/71) R-09/R-10.
-This coverage change alone does not qualify SSSP for cross-GPU performance
-comparisons.
+This change addresses the SSSP algorithm/work contract. Arbitrary manual-input
+and capacity admission, whole-suite qualification and AMD hardware validation
+remain separate. It does not establish publication-quality performance on a
+shared H100.

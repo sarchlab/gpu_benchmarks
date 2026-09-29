@@ -1,7 +1,8 @@
 // lonestar_sssp.hip — Single-Source Shortest Path (Bellman-Ford) benchmark (HIP)
 //
 // Iterative edge relaxation on a random sparse graph stored in CSR format.
-// All edges are relaxed in parallel each iteration; repeats until no changes.
+// Each round reads an immutable distance snapshot and atomically relaxes
+// reachable outgoing edges into the result; repeats until no changes.
 //
 // Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
 //
@@ -15,11 +16,9 @@
 // Environment variables (override argv):
 //   BENCH_PARAM_vertices, BENCH_PARAM_degree, BENCH_PARAM_block_size
 //
-// Output (stdout): for the single timed run, one {"type":"kernel",...} JSON
-// line for bellman_ford_kernel carrying the accumulated GPU event time
-// (time_ms) and host time (host_time_ms) of all Bellman-Ford iterations
-// until convergence, then a summary whose total_time_ms is the SUM of all
-// recorded GPU event times. Medges/sec is derived downstream from time_ms and params.
+// Output: one accumulated timing record per kernel (snapshot and relaxation),
+// then their summed GPU time. Parameters identify the input, schedule, complete
+// verification, actual rounds, and derived logical edge-relaxation attempts.
 // Output (stderr): human-readable results
 
 #include "../../common/bench_timing.h"
@@ -28,6 +27,7 @@
 #include <cstring>
 #include <vector>
 #include <climits>
+#include "cpu_reference.h"
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -99,73 +99,51 @@ static void generate_csr_graph(int N, int avg_degree, uint32_t seed,
 // Each thread processes one vertex's outgoing edges
 // ---------------------------------------------------------------------------
 
+__global__ void sssp_snapshot_kernel(const int* dist, int* previous, int N) {
+    int u = blockIdx.x * blockDim.x + threadIdx.x;
+    if (u < N) previous[u] = dist[u];
+}
+
 __global__ void bellman_ford_kernel(const int* __restrict__ row_offsets,
                                     const int* __restrict__ col_indices,
                                     const int* __restrict__ weights,
+                                    const int* __restrict__ previous,
                                     int* __restrict__ dist,
                                     int* __restrict__ changed,
                                     int N) {
     int u = blockIdx.x * blockDim.x + threadIdx.x;
     if (u >= N) return;
 
-    int d_u = dist[u];
+    int d_u = previous[u];
     if (d_u == INT_MAX) return; // unreachable, skip
 
     int start = row_offsets[u];
     int end   = row_offsets[u + 1];
 
+    bool updated = false;
     for (int e = start; e < end; ++e) {
         int v = col_indices[e];
         int w = weights[e];
         int new_dist = d_u + w;
-        // Atomic min relaxation
-        int old = atomicMin(&dist[v], new_dist);
-        if (new_dist < old) {
-            *changed = 1;
-        }
+        // Every reachable edge makes one attempt. Only immutable previous
+        // values decide whether this vertex signals a change, so flag work
+        // does not depend on which competing atomicMin wins first.
+        atomicMin(&dist[v], new_dist);
+        if (new_dist < previous[v]) updated = true;
     }
-}
-
-// ---------------------------------------------------------------------------
-// CPU reference: Bellman-Ford
-// ---------------------------------------------------------------------------
-
-static int bellman_ford_cpu(int N, const std::vector<int>& row_offsets,
-                             const std::vector<int>& col_indices,
-                             const std::vector<int>& weights,
-                             std::vector<int>& dist, int source) {
-    dist.assign(N, INT_MAX);
-    dist[source] = 0;
-    int total_iters = 0;
-
-    for (int iter = 0; iter < N; ++iter) {
-        bool updated = false;
-        for (int u = 0; u < N; ++u) {
-            if (dist[u] == INT_MAX) continue;
-            for (int e = row_offsets[u]; e < row_offsets[u + 1]; ++e) {
-                int v = col_indices[e];
-                int w = weights[e];
-                if (dist[u] + w < dist[v]) {
-                    dist[v] = dist[u] + w;
-                    updated = true;
-                }
-            }
-        }
-        total_iters++;
-        if (!updated) break;
-    }
-    return total_iters;
+    if (updated) atomicExch(changed, 1);
 }
 
 // ---------------------------------------------------------------------------
 // GPU SSSP: run Bellman-Ford iterations
 // ---------------------------------------------------------------------------
 
-static int run_sssp_gpu(int N, int num_edges,
+static int run_sssp_gpu(int N,
                          int* d_row_offsets, int* d_col_indices,
-                         int* d_weights, int* d_dist, int* d_changed,
+                         int* d_weights, int* d_dist, int* d_previous, int* d_changed,
                          int source, int blkSize,
-                         bench_timer_t* timer, bench_lap_t* acc) {
+                         bench_timer_t* timer, bench_lap_t* snapshot_acc, bench_lap_t* acc) {
+    bench_lap_reset(snapshot_acc);
     bench_lap_reset(acc);
 
     // Reset per-pass state (untimed): distances back to INT_MAX / source = 0
@@ -188,9 +166,13 @@ static int run_sssp_gpu(int N, int num_edges,
         int h_changed = 0;
         HIP_CHECK(hipMemcpy(d_changed, &h_changed, sizeof(int), hipMemcpyHostToDevice));
 
+        // This copy is required by the synchronous algorithm, hence timed.
+        bench_lap_add(snapshot_acc, bench_time_op(timer, [&]() {
+            sssp_snapshot_kernel<<<dim3(gridSize), dim3(blockSize)>>>(d_dist, d_previous, N);
+        }));
         bench_lap_add(acc, bench_time_op(timer, [&]() {
             bellman_ford_kernel<<<dim3(gridSize), dim3(blockSize)>>>(
-                d_row_offsets, d_col_indices, d_weights, d_dist, d_changed, N);
+                d_row_offsets, d_col_indices, d_weights, d_previous, d_dist, d_changed, N);
         }));
 
         HIP_CHECK(hipMemcpy(&h_changed, d_changed, sizeof(int), hipMemcpyDeviceToHost));
@@ -244,11 +226,12 @@ int main(int argc, char** argv) {
             N, num_edges);
 
     // Allocate device memory
-    int *d_row_offsets, *d_col_indices, *d_weights, *d_dist, *d_changed;
+    int *d_row_offsets, *d_col_indices, *d_weights, *d_dist, *d_previous, *d_changed;
     HIP_CHECK(hipMalloc(&d_row_offsets, (N + 1) * sizeof(int)));
     HIP_CHECK(hipMalloc(&d_col_indices, num_edges * sizeof(int)));
     HIP_CHECK(hipMalloc(&d_weights, num_edges * sizeof(int)));
     HIP_CHECK(hipMalloc(&d_dist, N * sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_previous, N * sizeof(int)));
     HIP_CHECK(hipMalloc(&d_changed, sizeof(int)));
 
     // Copy graph structure to device
@@ -256,31 +239,14 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(d_col_indices, col_indices.data(), num_edges * sizeof(int), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_weights, weights.data(), num_edges * sizeof(int), hipMemcpyHostToDevice));
 
-    char params[160];
-    snprintf(params, sizeof(params),
-             "\"vertices\":%d,\"degree\":%d,\"block_size\":%d,"
-             "\"verification\":\"full_cpu_distances_v1\"",
-             vertices, degree, block_size);
-
     bench_timer_t timer;
     bench_timer_create(&timer);
-    bench_lap_t acc;
-
-    // -------------------------------------------------------------------
-    // Timed pass — one record with the accumulated kernel time
-    // -------------------------------------------------------------------
-    double total_gpu_ms = 0.0;
-    int pass_iters = run_sssp_gpu(N, num_edges, d_row_offsets, d_col_indices,
-                                  d_weights, d_dist, d_changed, source, block_size,
-                                  &timer, &acc);
-    bench_emit_iter("bellman_ford_kernel", 0, &acc, params);
-    total_gpu_ms += acc.gpu_ms;
-    fprintf(stderr, "gpu = %.3f ms, host = %.3f ms (%d BF iterations)\n",
-            acc.gpu_ms, acc.host_ms, pass_iters);
-
+    bench_lap_t snapshot_acc, acc;
+    int pass_iters = run_sssp_gpu(N, d_row_offsets, d_col_indices,
+                                  d_weights, d_dist, d_previous, d_changed, source, block_size,
+                                  &timer, &snapshot_acc, &acc);
     bench_timer_destroy(&timer);
-    bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
+    SsspWork work;
 
     bool verify_ok = true;
     // -------------------------------------------------------------------
@@ -291,7 +257,12 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemcpy(h_gpu_dist.data(), d_dist, N * sizeof(int), hipMemcpyDeviceToHost));
 
         std::vector<int> h_cpu_dist;
-        bellman_ford_cpu(N, row_offsets, col_indices, weights, h_cpu_dist, source);
+        int reference_iters = bellman_ford_cpu(
+            N, row_offsets, col_indices, weights, h_cpu_dist, source, &work);
+        if (pass_iters != reference_iters) {
+            fprintf(stderr, "FAIL: BF iterations GPU=%d CPU=%d\n", pass_iters, reference_iters);
+            verify_ok = false;
+        }
 
         int errors = 0;
         for (int i = 0; i < N; ++i) {
@@ -306,14 +277,28 @@ int main(int argc, char** argv) {
         if (errors > 0) {
             fprintf(stderr, "FAIL: %d mismatches in %d vertices\n", errors, N);
             verify_ok = false;
-        } else
+        } else if (verify_ok)
             fprintf(stderr, "PASS: 0 mismatches in %d vertices\n", N);
     }
+
+    char params[512];
+    snprintf(params, sizeof(params),
+             "\"vertices\":%d,\"degree\":%d,\"block_size\":%d,"
+             "\"input\":\"xorshift32_seed42_v1\",\"algorithm\":\"topology_snapshot_v1\","
+             "\"verification\":\"full_cpu_distances_rounds_v2\","
+             "\"graph_edges\":%d,\"iterations\":%d,\"edge_relaxations\":%llu",
+             vertices, degree, block_size, num_edges, pass_iters, work.edge_relaxations);
+    bench_emit_iter("sssp_snapshot_kernel", 0, &snapshot_acc, params);
+    bench_emit_iter("bellman_ford_kernel", 0, &acc, params);
+    bench_emit_summary(snapshot_acc.gpu_ms + acc.gpu_ms);
+    fprintf(stderr, "Total GPU time: %.3f ms (%d BF iterations, %llu edge attempts)\n",
+            snapshot_acc.gpu_ms + acc.gpu_ms, pass_iters, work.edge_relaxations);
 
     HIP_CHECK(hipFree(d_row_offsets));
     HIP_CHECK(hipFree(d_col_indices));
     HIP_CHECK(hipFree(d_weights));
     HIP_CHECK(hipFree(d_dist));
+    HIP_CHECK(hipFree(d_previous));
     HIP_CHECK(hipFree(d_changed));
 
     return verify_ok ? EXIT_SUCCESS : EXIT_FAILURE;

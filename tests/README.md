@@ -260,6 +260,13 @@ production configurations. The existing numerical criterion is unchanged by
 this coverage check. CI runs the host check and compiles the GPU variants; actual
 GPU runs retain raw output and source/binary hashes with a 60-second process limit.
 
+`python3 tests/heteromark_pagerank_input_ranges.py --compiler clang++ --work-dir /tmp/hpr-inputs`
+checks actual resolved integer guards, parser precedence and size expressions
+under fatal host sanitizers. It covers all 108 declared vertex/damping combinations,
+empty-work requests and the fixed-degree CSR limit. Add `--binary <heteromark_pagerank>`
+for exact GPU-hidden invalid-request diagnostics with no timing records. This does
+not change or qualify the benchmark's numerical criterion or upstream fidelity.
+
 `python3 tests/graph_cc_input_ranges.py --compiler clang++ --work-dir /tmp/cc-inputs`
 checks the actual preallocation guards and grid arithmetic under fatal host
 sanitizers. It covers all 69 declared configurations, symmetric CSR edge bounds,

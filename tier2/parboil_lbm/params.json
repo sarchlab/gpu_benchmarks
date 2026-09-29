@@ -2,7 +2,7 @@
   "benchmark": "parboil_lbm",
   "tier": 2,
   "suite": "parboil",
-  "description": "Lattice Boltzmann Method (D3Q19) fluid simulation on a regular 3D grid. Performs collide-stream operations with BGK collision operator and bounce-back boundary conditions.",
+  "description": "Pinned Parboil D3Q19 lid-driven cavity scatter simulation with full CPU trajectory verification on synthetic cubic grids.",
   "scaling_param": {
     "name": "grid_dim",
     "description": "Grid dimension N for NxNxN lattice",
@@ -38,15 +38,6 @@
   },
   "non_scaling_params": [
     {
-      "name": "block_size",
-      "description": "Number of threads per block",
-      "type": "int",
-      "default": 128,
-      "values": [
-        128
-      ]
-    },
-    {
       "name": "num_timesteps",
       "description": "Number of LBM timesteps per iteration",
       "type": "int",
@@ -55,15 +46,6 @@
         10,
         100,
         500
-      ]
-    },
-    {
-      "name": "tau",
-      "description": "BGK relaxation time parameter",
-      "type": "float",
-      "default": 0.7,
-      "values": [
-        0.7
       ]
     },
     {

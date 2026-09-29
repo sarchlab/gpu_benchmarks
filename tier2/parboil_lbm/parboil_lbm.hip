@@ -1,325 +1,45 @@
-// parboil_lbm.hip — Parboil LBM benchmark: Lattice Boltzmann Method D3Q19 (HIP)
-//
-// Simulates fluid flow using the D3Q19 Lattice Boltzmann Method on a
-// regular 3D grid. The collide-stream kernel applies the BGK collision
-// operator and streams to neighbor cells. Bounce-back boundary conditions
-// are applied at grid boundaries.
-//
-// Compiles with hipcc (AMD ROCm) or nvcc via HIP compatibility layer (CUDA).
-//
-// Environment variables:
-//   BENCH_PARAM_grid_dim, BENCH_PARAM_block_size, BENCH_PARAM_num_timesteps,
-//   BENCH_PARAM_tau
-//
-// Output (stdout): per timed pass, one {"type":"kernel",...} JSON line for
-// lbm_collide_stream_kernel carrying the GPU event time and host time
-// accumulated over the pass's num_timesteps kernel launches, then a summary
-// whose total_time_ms is the SUM of all recorded GPU event times. MLUPS
-// (N^3 * num_timesteps / time) is derived downstream from time_ms and params.
-// Output (stderr): human-readable results
-
+// Parboil D3Q19 LDC scatter operator; see README.md and UPSTREAM_LICENSE.
 #include "../../common/bench_timing.h"
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <cmath>
-#include <vector>
-#include <climits>
-
+#include "lbm_kernel.h"
+#include "lbm_reference.h"
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
-
-// ---------------------------------------------------------------------------
-// D3Q19 velocity set
-// ---------------------------------------------------------------------------
-
-#define Q 19
-
-__constant__ int d_ex[Q] = { 0, 1,-1, 0, 0, 0, 0, 1,-1, 1,-1, 1,-1, 1,-1, 0, 0, 0, 0};
-__constant__ int d_ey[Q] = { 0, 0, 0, 1,-1, 0, 0, 1, 1,-1,-1, 0, 0, 0, 0, 1,-1, 1,-1};
-__constant__ int d_ez[Q] = { 0, 0, 0, 0, 0, 1,-1, 0, 0, 0, 0, 1, 1,-1,-1, 1, 1,-1,-1};
-
-__constant__ float d_w[Q] = {
-    1.0f/3.0f,
-    1.0f/18.0f, 1.0f/18.0f, 1.0f/18.0f,
-    1.0f/18.0f, 1.0f/18.0f, 1.0f/18.0f,
-    1.0f/36.0f, 1.0f/36.0f, 1.0f/36.0f, 1.0f/36.0f,
-    1.0f/36.0f, 1.0f/36.0f, 1.0f/36.0f, 1.0f/36.0f,
-    1.0f/36.0f, 1.0f/36.0f, 1.0f/36.0f, 1.0f/36.0f
-};
-
-__constant__ int d_opp[Q] = {0, 2,1, 4,3, 6,5, 10,9,8,7, 14,13,12,11, 18,17,16,15};
-
-// Host copies
-static const int h_ex[Q] = { 0, 1,-1, 0, 0, 0, 0, 1,-1, 1,-1, 1,-1, 1,-1, 0, 0, 0, 0};
-static const int h_ey[Q] = { 0, 0, 0, 1,-1, 0, 0, 1, 1,-1,-1, 0, 0, 0, 0, 1,-1, 1,-1};
-static const int h_ez[Q] = { 0, 0, 0, 0, 0, 1,-1, 0, 0, 0, 0, 1, 1,-1,-1, 1, 1,-1,-1};
-static const float h_w[Q] = {
-    1.0f/3.0f,
-    1.0f/18.0f, 1.0f/18.0f, 1.0f/18.0f,
-    1.0f/18.0f, 1.0f/18.0f, 1.0f/18.0f,
-    1.0f/36.0f, 1.0f/36.0f, 1.0f/36.0f, 1.0f/36.0f,
-    1.0f/36.0f, 1.0f/36.0f, 1.0f/36.0f, 1.0f/36.0f,
-    1.0f/36.0f, 1.0f/36.0f, 1.0f/36.0f, 1.0f/36.0f
-};
-
-// ---------------------------------------------------------------------------
-// Kernel: Fused collide-stream with BGK collision and bounce-back
-// ---------------------------------------------------------------------------
-
-__global__ void lbm_collide_stream_kernel(
-    const float* __restrict__ f_src,
-    float*       __restrict__ f_dst,
-    int Nx, int Ny, int Nz,
-    float omega)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int N = Nx * Ny * Nz;
-    if (idx >= N) return;
-
-    int iz = idx / (Nx * Ny);
-    int iy = (idx / Nx) % Ny;
-    int ix = idx % Nx;
-
-    float f[Q];
-    for (int q = 0; q < Q; ++q) {
-        f[q] = f_src[q * N + idx];
+int main(int argc,char** argv)try {
+    (void)argc;(void)argv; // This benchmark's inputs are environment parameters.
+    setvbuf(stdout,nullptr,_IONBF,0);
+    const auto p=lbm::parameters();const lbm::Layout l(p.n);
+    int device=0;HIP_CHECK(hipGetDevice(&device));hipDeviceProp_t prop;
+    HIP_CHECK(hipGetDeviceProperties(&prop,device));
+    if(p.n>prop.maxThreadsPerBlock || p.n>prop.maxThreadsDim[0] ||
+       p.n>prop.maxGridSize[0] || p.n>prop.maxGridSize[1])
+        throw std::invalid_argument("LBM upstream row launch exceeds device limits");
+    fprintf(stderr,"Device: %s; LBM grid=%d steps=%d omega=1.95\n",prop.name,p.n,p.steps);
+    auto initial=lbm::input(l);
+    float *da,*db;HIP_CHECK(hipMalloc(&da,l.bytes()));HIP_CHECK(hipMalloc(&db,l.bytes()));
+    HIP_CHECK(hipMemcpy(da,initial.data(),l.bytes(),hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(db,initial.data(),l.bytes(),hipMemcpyHostToDevice));
+    std::vector<float>().swap(initial);
+    float *src=da+l.margin,*dst=db+l.margin;
+    bench_timer_t timer;bench_timer_create(&timer);bench_lap_t lap;bench_lap_reset(&lap);
+    bench_pass_warm();
+    for(int t=0;t<p.steps;++t) {
+        bench_lap_add(&lap,bench_time_op(&timer,[&](){
+            lbm::lbm_collide_stream_kernel<<<dim3(p.n,p.n),dim3(p.n)>>>(src,dst,l);
+        }));
+        std::swap(src,dst);
     }
-
-    float rho = 0.0f;
-    float ux = 0.0f, uy = 0.0f, uz = 0.0f;
-    for (int q = 0; q < Q; ++q) {
-        rho += f[q];
-        ux += f[q] * d_ex[q];
-        uy += f[q] * d_ey[q];
-        uz += f[q] * d_ez[q];
-    }
-    float inv_rho = 1.0f / fmaxf(rho, 1e-10f);
-    ux *= inv_rho;
-    uy *= inv_rho;
-    uz *= inv_rho;
-
-    float u2 = ux * ux + uy * uy + uz * uz;
-    float f_post[Q];
-    for (int q = 0; q < Q; ++q) {
-        float eu = (float)d_ex[q] * ux + (float)d_ey[q] * uy + (float)d_ez[q] * uz;
-        float f_eq = d_w[q] * rho * (1.0f + 3.0f * eu + 4.5f * eu * eu - 1.5f * u2);
-        f_post[q] = f[q] + omega * (f_eq - f[q]);
-    }
-
-    // Push streaming with link bounce-back. Boundary handling is decided
-    // per-link by whether the *destination* leaves the domain — NOT by whether
-    // the current cell is on a face. That distinction is what makes it correct:
-    //   - each in-domain stream slot f_dst[q*N + nidx] has exactly one writer,
-    //     the unique upwind neighbor along q;
-    //   - a bounce-back write f_dst[d_opp[q]*N + idx] targets precisely the slot
-    //     the (absent) out-of-domain neighbor would have streamed into.
-    // So every f_dst slot is written exactly once — no write-write race at the
-    // faces and no slot left stale. (The previous `is_boundary` branch made a
-    // boundary cell bounce back on *every* link, racing with interior neighbors
-    // streaming into it and starving the slots those neighbors should receive.)
-    for (int q = 0; q < Q; ++q) {
-        int nx = ix + d_ex[q];
-        int ny = iy + d_ey[q];
-        int nz = iz + d_ez[q];
-
-        if (nx >= 0 && nx < Nx && ny >= 0 && ny < Ny && nz >= 0 && nz < Nz) {
-            int nidx = nz * Nx * Ny + ny * Nx + nx;
-            f_dst[q * N + nidx] = f_post[q];
-        } else {
-            f_dst[d_opp[q] * N + idx] = f_post[q];
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// CPU reference
-// ---------------------------------------------------------------------------
-
-static void cpu_collide(
-    const float* f_src, float* rho_out, float* ux_out, float* uy_out,
-    float* uz_out, int idx, int N)
-{
-    float rho = 0.0f;
-    float ux = 0.0f, uy = 0.0f, uz = 0.0f;
-    for (int q = 0; q < Q; ++q) {
-        float fq = f_src[q * N + idx];
-        rho += fq;
-        ux += fq * h_ex[q];
-        uy += fq * h_ey[q];
-        uz += fq * h_ez[q];
-    }
-    float inv_rho = 1.0f / fmaxf(rho, 1e-10f);
-    *rho_out = rho;
-    *ux_out  = ux * inv_rho;
-    *uy_out  = uy * inv_rho;
-    *uz_out  = uz * inv_rho;
-}
-
-// ---------------------------------------------------------------------------
-// Simple PRNG
-// ---------------------------------------------------------------------------
-
-static inline unsigned int lcg_rand(unsigned int* state) {
-    *state = *state * 1664525u + 1013904223u;
-    return *state;
-}
-
-static inline float rand_float(unsigned int* state, float lo, float hi) {
-    return lo + (float)(lcg_rand(state) & 0xFFFF) / 65535.0f * (hi - lo);
-}
-
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
-int main(int argc, char** argv) {
-    setvbuf(stdout, NULL, _IONBF, 0);
-
-    int grid_dim     = 64;
-    int block_size   = 128;
-    int num_timesteps = 100;
-    float tau        = 0.7f;
-
-    const char* env_val;
-    env_val = getenv("BENCH_PARAM_grid_dim");
-    if (env_val) grid_dim = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_block_size");
-    if (env_val) block_size = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_num_timesteps");
-    if (env_val) num_timesteps = atoi(env_val);
-    env_val = getenv("BENCH_PARAM_tau");
-    if (env_val) tau = (float)atof(env_val);
-
-    if (grid_dim < 3 || block_size <= 0 || num_timesteps <= 0) {
-        fprintf(stderr, "LBM requires grid_dim>=3 and positive num_timesteps/block_size\n");
-        return EXIT_FAILURE;
-    }
-    if (grid_dim > INT_MAX / Q / grid_dim / grid_dim) {
-        fprintf(stderr, "LBM 19*grid_dim^3 exceeds INT_MAX\n");
-        return EXIT_FAILURE;
-    }
-
-    float omega = 1.0f / tau;
-    int Nx = grid_dim, Ny = grid_dim, Nz = grid_dim;
-    int N = Nx * Ny * Nz;
-
-    int device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    hipDeviceProp_t prop;
-    HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
-    fprintf(stderr, "Device: %s (id=%d)\n", prop.name, device_id);
-    fprintf(stderr, "LBM D3Q19  |  Grid: %dx%dx%d = %d  |  Timesteps: %d  |  "
-            "Tau: %.2f\n\n",
-            Nx, Ny, Nz, N, num_timesteps, tau);
-
-    // Initialize equilibrium distributions
-    size_t f_bytes = (size_t)Q * N * sizeof(float);
-    std::vector<float> h_f(Q * N);
-
-    unsigned int seed = 42;
-    for (int idx = 0; idx < N; ++idx) {
-        float rho = 1.0f + 0.001f * rand_float(&seed, -1.0f, 1.0f);
-        for (int q = 0; q < Q; ++q) {
-            h_f[q * N + idx] = h_w[q] * rho;
-        }
-    }
-
-    float *d_f_src, *d_f_dst;
-    HIP_CHECK(hipMalloc(&d_f_src, f_bytes));
-    HIP_CHECK(hipMalloc(&d_f_dst, f_bytes));
-
-    int gridSize = (int)(((long long)N + block_size - 1) / block_size);
-
-    char params[160];
-    snprintf(params, sizeof(params),
-             "\"grid_dim\":%d,\"block_size\":%d,\"num_timesteps\":%d,"
-             "\"tau\":%.2f",
-             grid_dim, block_size, num_timesteps, tau);
-
-    // Per-pass accumulator: each simulation pass launches the collide-stream
-    // kernel num_timesteps times; the accumulated GPU/host time of all
-    // timesteps within one pass becomes that pass's record.
-    bench_timer_t timer;
-    bench_timer_create(&timer);
-    bench_lap_t acc_lbm;
-
-    // One full simulation pass. The simulation evolves the distribution
-    // arrays in place (ping-pong), so the equilibrium initial state is
-    // re-uploaded at the start of every pass (untimed) to keep each pass's
-    // work identical. Only the kernel launches sit inside timed brackets;
-    // the host-side buffer swap stays outside.
-    auto run_lbm_pass = [&]() {
-        bench_lap_reset(&acc_lbm);
-
-        HIP_CHECK(hipMemcpy(d_f_src, h_f.data(), f_bytes, hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemset(d_f_dst, 0, f_bytes));
-
-        /* Cold-cache calibration: evict the LLC (and hold the clock high) after
-         * the per-pass H2D re-init so the pass's first kernel launch runs cold.
-         * No-op when BENCH_PARAM_vector_add_warmup is disabled. */
-        bench_pass_warm();
-
-        for (int t = 0; t < num_timesteps; ++t) {
-            bench_lap_add(&acc_lbm, bench_time_op(&timer, [&]() {
-                lbm_collide_stream_kernel<<<dim3(gridSize), dim3(block_size)>>>(
-                    d_f_src, d_f_dst, Nx, Ny, Nz, omega);
-            }));
-            float* tmp = d_f_src;
-            d_f_src = d_f_dst;
-            d_f_dst = tmp;
-        }
-    };
-
-    run_lbm_pass();
-
-    double total_gpu_ms = 0.0;
-    bench_emit_iter("lbm_collide_stream_kernel", 0, &acc_lbm, params);
-    total_gpu_ms += acc_lbm.gpu_ms;
-    fprintf(stderr, "gpu = %.3f ms, host = %.3f ms\n",
-            acc_lbm.gpu_ms, acc_lbm.host_ms);
-
     bench_timer_destroy(&timer);
-    bench_emit_summary(total_gpu_ms);
-    fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
-
-    // Verification
-    bool verify_ok = true;
-    {
-        std::vector<float> h_f_out(Q * N);
-        HIP_CHECK(hipMemcpy(h_f_out.data(), d_f_src, f_bytes, hipMemcpyDeviceToHost));
-
-        int verify_n = 128;
-        int errors = 0;
-        unsigned int vseed = 123;
-
-        for (int v = 0; v < verify_n; ++v) {
-            int ix = 1 + (lcg_rand(&vseed) % (Nx - 2));
-            int iy = 1 + (lcg_rand(&vseed) % (Ny - 2));
-            int iz = 1 + (lcg_rand(&vseed) % (Nz - 2));
-            int idx = iz * Nx * Ny + iy * Nx + ix;
-
-            float rho, ux, uy, uz;
-            cpu_collide(h_f_out.data(), &rho, &ux, &uy, &uz, idx, N);
-
-            if (rho < 0.5f || rho > 2.0f || std::isnan(rho)) {
-                if (errors < 10) {
-                    fprintf(stderr, "Suspicious density at (%d,%d,%d): rho=%.6f\n",
-                            ix, iy, iz, rho);
-                }
-                errors++;
-            }
-        }
-
-        if (errors > 0) {
-            fprintf(stderr, "FAIL: %d suspicious nodes in %d verified\n", errors, verify_n);
-            verify_ok = false;
-        } else {
-            fprintf(stderr, "PASS\n");
-        }
-    }
-
-    HIP_CHECK(hipFree(d_f_src));
-    HIP_CHECK(hipFree(d_f_dst));
-
-    return verify_ok ? 0 : 1;
-}
+    const unsigned workers=lbm::reference_workers(p.n);
+    char params[384];snprintf(params,sizeof(params),
+        "\"grid_dim\":%d,\"num_timesteps\":%d,\"block_size\":%d,\"omega\":1.95,"
+        "\"verification\":\"full_fp32_upstream_v1\",\"population_tolerance\":1e-5,"
+        "\"velocity_tolerance\":1e-5,\"reference_workers\":%u",p.n,p.steps,p.n,workers);
+    bench_emit_iter("lbm_collide_stream_kernel",0,&lap,params);bench_emit_summary(lap.gpu_ms);
+    std::vector<float> actual(l.entries);
+    HIP_CHECK(hipMemcpy(actual.data(),src-l.margin,l.bytes(),hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(da));HIP_CHECK(hipFree(db));
+    const auto expected=lbm::reference(l,p.steps,workers);
+    const auto result=lbm::compare(l,actual,expected);
+    fprintf(stderr,"%s: cells=%zu populations=%zu errors=%zu max_population=%.9g max_velocity=%.9g\n",
+        result.errors?"FAIL":"PASS",result.cells,result.populations,result.errors,result.max_population,result.max_velocity);
+    return result.errors?1:0;
+}catch(const std::exception& e){fprintf(stderr,"FAIL: %s\n",e.what());return 1;}

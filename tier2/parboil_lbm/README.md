@@ -1,107 +1,109 @@
-# tier2/parboil_lbm — Lattice Boltzmann Method D3Q19 (Parboil)
+# Parboil LBM: D3Q19 lid-driven cavity
 
-Benchmarks a Lattice Boltzmann Method (LBM) fluid simulation using the D3Q19 velocity set on a regular 3D grid. Each GPU thread processes one lattice node, performing a fused collide-stream operation with the BGK collision operator and bounce-back boundary conditions. Emits the run's kernel time; throughput in MLUPS (million lattice updates per second) is derived downstream.
+This benchmark restores Parboil's CUDA scatter collision/streaming operator,
+cell-level obstacle bounce-back, acceleration planes, equilibrium initialization,
+SoA populations and flag field. The upstream source is
+[`abduld/Parboil` at `a4c63da28f45699e9a274cbc49af3e067162aa2b`](https://github.com/abduld/Parboil/tree/a4c63da28f45699e9a274cbc49af3e067162aa2b/benchmarks/lbm/src).
+`UPSTREAM_LICENSE` retains its Illinois/NCSA license.
 
-## Provenance & fidelity
+## Workload and upstream differences
 
-Derived from the [Parboil benchmark suite](http://impact.crhc.illinois.edu/parboil/) — the `lbm` workload. Independent reimplementation for portable measurement, **not** upstream source, and **not** a faithful reproduction. It differs as follows:
+The GPU collision arithmetic and D3Q19 ordering are ported from
+`src/cuda/lbm_kernel.cu`. One block handles an x row; `block_size = grid_dim`.
+The relaxation rate is fixed at upstream `omega = 1.95`. Both ping-pong buffers
+start with equilibrium populations at all physical cells, zero padding, and
+identical flags. All six enclosure faces are obstacles. The inner z planes
+accelerate eligible cells to `(0.005, 0.002, 0)`.
 
-- Generic D3Q19 lid/channel LBM with link bounce-back; no obstacles and not Parboil's memory layout. (A prior write-write race at domain faces has been fixed.) It uses an SoA (structure-of-arrays) distribution layout with double-buffered ping-pong streaming, and does *not* reproduce the upstream Parboil cell layout (margin cells, per-cell flags, obstacle geometry).
+The owner-selected input uses reproducible cubic grids and the upstream-supported
+null obstacle-file option. It has **no additional input obstacles**, but retains
+the enclosure walls. It differs from the upstream fixed 120×120×150 grid and its
+published obstacle datasets. Padding stays at x+8 and z+4; two exterior z planes
+provide the real pointer margin. Dimensions and strides are runtime values.
+This is the upstream operator on our synthetic input, not a reproduction of the
+published dataset results. Prior results from the former local BGK/link-bounce
+implementation must be recollected.
 
-Read this as "an LBM benchmark in the spirit of Parboil," not Parboil's `lbm`.
+The CPU reference retains the independent `src/cpu/lbm.c` FP32 trajectory and
+its double-literal equilibrium coefficients. It uses AoS storage and bounded
+host workers. Initialization is adapted to the CUDA zero-padding/physical-cell
+contract: the original CPU driver's equilibrium-filled margins are not an
+oracle for the CUDA driver. Flag reads use defined bit copies instead of
+upstream type-punning. No CPU work is included in GPU timing.
 
-## Algorithm
+## Inputs and measurement
 
-- **NxNxN** 3D lattice (default: N=64, i.e. 262,144 nodes)
-- D3Q19 velocity set with 19 discrete velocities per node
-- BGK collision operator: f_post = f + ω(f_eq − f), where ω = 1/τ
-- Equilibrium distribution: f_eq = w_q × ρ × (1 + 3(e·u) + 4.5(e·u)² − 1.5|u|²)
-- Fused collide-stream kernel with bounce-back at domain boundaries
-- SoA distribution arrays, double-buffered and swapped each timestep
-- MLUPS = N³ × num_timesteps / time_sec / 10⁶ (derived downstream from the emitted times)
-- The near-equilibrium initial state is uploaded before the run (untimed); the run then advances the full `num_timesteps`
+| Environment variable | Meaning | Default |
+|---|---|---|
+| `BENCH_PARAM_grid_dim` | Cubic dimension | 64 |
+| `BENCH_PARAM_num_timesteps` | Timesteps in the single measured trajectory | 100 |
+| `BENCH_PARAM_vector_add_warmup` | Standard cold-cache clock warmer | true |
 
-## Measurement
+The old `BENCH_PARAM_tau` and `BENCH_PARAM_block_size` overrides are rejected;
+these quantities are fixed or derived by the upstream operator. The manifest
+retains 26 dimensions and three timestep counts (78 candidate combinations).
+`256³ / 500 steps` is explicitly excluded before GPU access or timing, per the
+owner's choice to retain the upstream accuracy requirement. Candidate membership
+does not establish qualification: only complete successful runs within the
+60-second process budget belong in performance collection.
 
-The simulation (all `num_timesteps` timesteps) runs **exactly once** per
-process execution (see the root README "Measurement Methodology"). With
-`BENCH_PARAM_vector_add_warmup` (default `true`), a vector-add warmer boosts
-the GPU clock and evicts the last-level cache immediately before the timed
-run. Repetition = `gpubench run --reps N`.
+Dimensions must be at least 3 and steps positive. Padded storage must satisfy
+`20 * (N+8) * N * (N+8) <= INT_MAX`, checked before multiplication or GPU access.
+The actual device must support the upstream row launch. Environment integer
+parsing retains `atoi` behavior; command-line flags are ignored. These admission
+checks are not host/device memory-capacity guarantees.
 
-## Parameters
+Both buffers are initialized once, followed by the standard untimed warmer,
+then exactly `num_timesteps` timed kernel launches. Pointer swaps are untimed.
+One `lbm_collide_stream_kernel` JSON record carries their summed GPU and host
+launch times; the summary repeats the GPU total. Repetitions use separate
+`gpubench run --reps N` processes. MLUPS is derived from
+`grid_dim^3 * num_timesteps / time_ms / 1000`.
 
-| Env var | Description | Default |
-|---------|-------------|---------|
-| `BENCH_PARAM_grid_dim` | Grid dimension N (N×N×N lattice) | 64 |
-| `BENCH_PARAM_block_size` | Threads per block | 128 |
-| `BENCH_PARAM_num_timesteps` | LBM timesteps per run | 100 |
-| `BENCH_PARAM_tau` | BGK relaxation time | 0.7 |
-| `BENCH_PARAM_vector_add_warmup` | Cold-cache clock warmer on/off | true |
+## Complete verification
 
-Resolved integer inputs require `grid_dim >= 3` (the density check samples
-interior nodes), positive `block_size` and positive `num_timesteps`. Requests
-outside the signed distribution-index range (`19 * grid_dim^3 <= INT_MAX`,
-so `grid_dim <= 483`) fail before dimension arithmetic, allocation or GPU
-access, with no timing records. Launch rounding uses wide arithmetic.
-All 78 declared grid/timestep combinations remain admitted. These bounds do
-not guarantee host/device capacity or hardware support for a manual block size.
-The existing environment parsing, tau behavior and ignored command-line flags
-are unchanged. This input check does not establish upstream fidelity or replace
-the sampled density check described below.
+Every ordinary execution computes the entire independent CPU trajectory and
+checks all physical cells, including every boundary and the final cell:
 
-## Files
+- All 19 populations must be finite and within absolute error `1e-5`.
+- The velocity vector from the upstream FP32 output recipe must have L2 error
+  at most the upstream `1e-5`; nonfinite velocity comparisons fail.
+- All physical flag fields must equal the prescribed input flags.
 
-| File | Description |
-|------|-------------|
-| `parboil_lbm.hip` | HIP source — portable ROCm/CUDA implementation |
-| `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
-| `params.json` | Parameter specification |
+The process prints checked-cell/population counts, mismatch count and maximum
+errors to stderr, and exits nonzero on failure. Padding is workspace rather
+than physical simulation output. Timing records emitted before a failed
+verification do not qualify the run for collection.
 
-## Build
+The excluded 256³/500 assessment completed in about 42 seconds, but its maximum
+velocity error was `1.0729538e-5`; the maximum population error was `6.5863132e-6`.
+We retain the threshold instead of fitting it to that point. These values are
+diagnostic qualification evidence, not published performance measurements.
+AMD hardware qualification remains deferred.
 
-```bash
-make               # auto-detect platform
-make PLATFORM=cuda
-make PLATFORM=rocm
+## Build and regression checks
+
+```sh
+make PLATFORM=cuda CUDA_ARCH=sm_90
+# or: make PLATFORM=rocm
+BENCH_PARAM_grid_dim=64 BENCH_PARAM_num_timesteps=100 ./parboil_lbm
 ```
 
-## Run
+From the repository root:
 
-```bash
-./parboil_lbm                                       # defaults: 64^3, 100 timesteps
-BENCH_PARAM_grid_dim=128 ./parboil_lbm              # larger grid
-BENCH_PARAM_num_timesteps=50 BENCH_PARAM_tau=1.0 ./parboil_lbm
+```sh
+python3 tests/lbm_input_ranges.py --compiler clang++ --work-dir /tmp/lbm-inputs
+c++ -O1 -std=c++14 -pthread -fsanitize=address,undefined tests/lbm_host.cpp -o /tmp/lbm-host
+/tmp/lbm-host
+python3 tests/lbm_measured_result.py --platform cuda --work-dir /tmp/lbm-measured
 ```
 
-## Output
-
-**stdout** — JSON lines: one `kernel` record (`iter:0`) with the GPU event and
-host times accumulated over the run's `num_timesteps` kernel launches, then a
-`summary` whose `total_time_ms` is the sum of all recorded GPU event times:
-```json
-{"type":"kernel","name":"lbm_collide_stream_kernel","iter":0,"time_ms":45.678900,"host_time_ms":46.102000,"params":{"grid_dim":64,"block_size":128,"num_timesteps":100,"tau":0.70}}
-{"type":"summary","total_time_ms":45.678900}
-```
-
-Derived metrics (MLUPS) are computed downstream from `time_ms` and params.
-
-**stderr** — human-readable:
-```
-Device: AMD Radeon RX 7900 XTX (id=0)
-LBM D3Q19  |  Grid: 64x64x64 = 262144  |  Timesteps: 100  |  Tau: 0.70
-
-gpu = 45.679 ms, host = 46.102 ms
-Total GPU time: 45.679 ms
-PASS
-```
-
-## Verification
-
-- 128 randomly-selected interior nodes are checked for reasonable density (0.5 < ρ < 2.0)
-- Near-equilibrium initialization ensures density should stay close to 1.0
-- Reports PASS/FAIL with details of suspicious nodes; on FAIL the process exits non-zero
-
-## Platform Notes
-
-- **CUDA/ROCm**: Uses `__constant__` memory for D3Q19 velocity vectors and weights; SoA layout for distribution functions
+The measured-result regression compiles test-only copies; production has no
+fault-injection controls. It rejects corrupted tail populations, nonfinite
+outputs/references, wrong flags and a missing timestep, with both warmer modes.
+It also compares all allocated GPU entries and initialization against frozen
+upstream CUDA sources for odd/even trajectories and multiple dimensions. Those
+fixtures retain upstream code (whitespace normalized); only compile-time cubic
+dimensions and the HIP/CUDA runtime wrapper are adapted. CPU host checks cover
+an analytical first step, serial/parallel equivalence, and complete verifier
+coverage. CI runs host tests and compiles GPU tests; actual GPU runs are separate.

@@ -23,6 +23,7 @@
 #include <cstdlib>
 #include <vector>
 #include <algorithm>
+#include <climits>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -180,7 +181,7 @@ static cc_run_result run_cc_gpu(int N, int max_iters, int block_size,
     for (int i = 0; i < N; ++i) h_init[i] = i;
     HIP_CHECK(hipMemcpy(d_labels, h_init.data(), N * sizeof(int), hipMemcpyHostToDevice));
 
-    int gridSize = (N + block_size - 1) / block_size;
+    int gridSize = (int)(((long long)N + block_size - 1) / block_size);
     int h_changed = 0;
     int iters_done = 0;
 
@@ -243,6 +244,19 @@ int main(int argc, char** argv) {
     if (env_val) block_size = atoi(env_val);
 
     int N = num_vertices;
+
+    if (N <= 0 || avg_degree < 0 || max_iterations <= 0 || block_size <= 0) {
+        fprintf(stderr, "CC num_vertices, max_iterations and block_size must be positive; avg_degree must be nonnegative\n");
+        return EXIT_FAILURE;
+    }
+    unsigned long long max_degree = (unsigned long long)avg_degree / 2 + avg_degree;
+    if (max_degree < 1) max_degree = 1;
+    // Each sampled edge inserts both directions; deduplication can only reduce
+    // this bound. Unsigned 64-bit arithmetic also covers the guard's worst case.
+    if (2ULL * N * max_degree > INT_MAX) {
+        fprintf(stderr, "CC maximum symmetric edge count exceeds INT_MAX\n");
+        return EXIT_FAILURE;
+    }
 
     // Generate CSR graph
     std::vector<int> row_offsets, col_indices;

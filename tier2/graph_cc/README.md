@@ -48,6 +48,21 @@ undirected graph is therefore about **2× `avg_degree`** — unlike `graph_pr` /
 propagation runs exactly once per execution; repetition across fresh processes
 is the harness's job (`gpubench run --reps N`).
 
+Resolved vertex count, iteration cap and block size must be positive; average
+degree must be nonnegative. Invalid requests fail before graph allocation or
+GPU access and emit no timing records. Positive caps still allow a verified
+partial trajectory without convergence. An environment degree of zero retains
+the minimum-one sampled endpoint per vertex, including existing self-edge
+removal and symmetric-edge deduplication. Environment `atoi` behavior is unchanged.
+
+A sufficient integer-safety bound requires
+`2 * N * max(1, floor(D/2) + D) <= INT_MAX` before allocating adjacency lists.
+It covers both directions of each sampled edge before deduplication, generated
+degrees and every CSR prefix. The guard uses unsigned 64-bit arithmetic; grid
+rounding is also widened. This bound keeps row sizes and padded vertex indices
+within signed int and preserves all 69 declared configurations. It does not
+guarantee memory capacity, manual block support or arbitrary runtime budgets.
+
 ## Build & Run
 
 ```bash

@@ -260,6 +260,15 @@ production configurations. The existing numerical criterion is unchanged by
 this coverage check. CI runs the host check and compiles the GPU variants; actual
 GPU runs retain raw output and source/binary hashes with a 60-second process limit.
 
+`python3 tests/graph_cc_input_ranges.py --compiler clang++ --work-dir /tmp/cc-inputs`
+checks the actual preallocation guards and grid arithmetic under fatal host
+sanitizers. It covers all 69 declared configurations, symmetric CSR edge bounds,
+unsigned 64-bit guard arithmetic, nonpositive iteration caps, degree zero,
+partial blocks and existing environment parsing. Add `--binary <graph_cc>` to
+check that invalid requests fail before GPU access with no timing records.
+Positive caps retain the defined partial-trajectory behavior; capacity and
+arbitrary manual runtime budgets remain separate.
+
 `python3 tests/graph_cc_verification.py --host-only --work-dir /tmp/cc-host`
 checks the production CPU label propagation against exact capped and converged
 trajectories, including disconnected and isolated vertices. Use `--platform cuda

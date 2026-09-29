@@ -68,6 +68,18 @@ manifest combinations. Every GPU process must finish within 60 seconds. CI
 compiles these GPU tests; their execution requires a GPU. Raw output, source and
 binary hashes and per-case outcomes remain in the new work directory.
 
+`python3 tests/convolution_verification.py --host-only --work-dir /tmp/conv-host`
+checks the production separable CPU reference against asymmetric known answers,
+direct 2D fixtures, zero-padding boundaries, immutable inputs and output guards
+with fatal host sanitizers. Use `--platform cuda --sweep --work-dir /tmp/conv-gpu`
+to check both measured GPU stages, actual post-timing finite/NaN faults beyond
+the former 512×512 region, partial tiles, both warmer modes and unavailable
+references. The sweep adds all 352 declared width/height/radius combinations
+with the warmer enabled. CI runs host checks and compiles GPU variants; their
+execution requires hardware. Use a new nonexistent work directory; raw logs,
+source/binary hashes and per-case outcomes are retained. Each GPU process must
+finish within 60 seconds.
+
 `python3 tests/parboil_sgemm_verification.py --host-only --work-dir /tmp/parboil-sgemm-host`
 checks the production FP32 reference against the original ordered recipe,
 independent rectangular/zero/identity results, nonzero initial C and beta, and

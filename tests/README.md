@@ -68,6 +68,18 @@ manifest combinations. Every GPU process must finish within 60 seconds. CI
 compiles these GPU tests; their execution requires a GPU. Raw output, source and
 binary hashes and per-case outcomes remain in the new work directory.
 
+`python3 tests/gramschmidt_q_verification.py --host-only --compiler clang++ --work-dir /tmp/gram-q-host`
+exercises the production Q orthogonality checker with independent known
+orthonormal fixtures, element corruption, duplicate columns, nonfinite values
+and immutable inputs/guards under fatal sanitizers. Use
+`--platform cuda --sweep --work-dir /tmp/gram-q-gpu` for actual measured-Q
+corruptions beyond the former eight-column cutoff, skipped normalization,
+bounded diagnostics and all 20 declared sizes with both warmer modes. Each GPU
+process has a 60-second limit. Use new directories to retain raw logs, hashes
+and outcomes. CI runs host checks and compiles GPU variants; their execution
+requires hardware. This checks Q orthogonality only; full QR reconstruction
+and final A workspace verification remain separate.
+
 `python3 tests/sssp_verification.py --host-only --compiler clang++ --work-dir /tmp/sssp-host`
 checks the actual CPU Bellman-Ford reference against 32,768 independent
 Floyd-Warshall cases and a weighted parallel/self-edge/unreachable fixture with

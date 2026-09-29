@@ -310,6 +310,9 @@ jobs:
           python3 tests/transpose_verification.py --host-only --compiler g++ --work-dir /tmp/transpose-host
           python3 tests/transpose_verification.py --platform cuda --work-dir /tmp/transpose-measured --compile-only
 
+      - name: Check transpose input and signed index ranges before GPU access
+        run: python3 tests/transpose_input_ranges.py --compiler g++ --binary /tmp/transpose-measured/production/tier2/cuda_transpose/cuda_transpose --work-dir /tmp/transpose-input-ranges
+
       - name: Check SSSP full reference and compile measured-distance regression
         run: |
           python3 tests/sssp_verification.py --host-only --compiler g++ --work-dir /tmp/sssp-reference-host

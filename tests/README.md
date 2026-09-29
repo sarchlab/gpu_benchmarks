@@ -68,6 +68,14 @@ manifest combinations. Every GPU process must finish within 60 seconds. CI
 compiles these GPU tests; their execution requires a GPU. Raw output, source and
 binary hashes and per-case outcomes remain in the new work directory.
 
+`python3 tests/transpose_input_ranges.py --compiler clang++ --work-dir /tmp/transpose-input`
+checks the actual production parser, positivity and signed flat-index bounds,
+and buffer arithmetic with fatal host sanitizers. It covers all declared sizes
+and both sides of the 46340 boundary without allocating large matrices. Add
+`--binary /path/to/cuda_transpose` to require exact invalid-input errors with
+GPUs hidden; CI runs this path too. Large manual sizes still need memory/time
+qualification.
+
 `python3 tests/shoc_sort_input_ranges.py --compiler clang++ --work-dir /tmp/sort-input`
 checks the actual production parser, nonpositive-input rejection, existing size
 rounding and wide buffer-byte arithmetic with fatal host sanitizers. Cases cross

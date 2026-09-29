@@ -149,7 +149,8 @@ checks the production reference against 32,768 Floyd-Warshall distance cases
 and an independent dense snapshot recurrence for round counts and edge work,
 plus self/parallel/unreachable and forward/reverse chain fixtures under fatal
 ASan/UBSan. Use `--platform cuda --sweep --work-dir /tmp/sssp-gpu` for all 81
-configurations in both warmer modes, complete measured-distance corruption,
+configurations in both warmer modes, automatic cross-mode work-identity checks,
+complete measured-distance corruption,
 skipped-work rejection and bounded diagnostics. Every process has a 60-second
 limit. CI runs host checks and compiles production and instrumented binaries.
 

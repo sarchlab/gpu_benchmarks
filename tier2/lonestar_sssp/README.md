@@ -103,6 +103,7 @@ Host tests cover 32,768 exhaustive graph/source/weight cases against independent
 Floyd–Warshall distances and dense snapshot round/work counts, plus weighted,
 self/parallel/unreachable and forward/reverse chain fixtures. The device sweep
 checks all 81 configurations in both warmer modes with a 60-second process limit,
+automatically rejects differing work descriptors between modes,
 corrupts actual final distances and rejects skipped launches. The round tests
 compare every intermediate GPU vector with an independent Python model and
 instrument actual atomic attempts in a separate test copy. They vary block size,

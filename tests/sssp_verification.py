@@ -97,6 +97,18 @@ def host_reference(root, work, compiler):
     print(p.stdout,end='')
 
 
+def consistent_work(cases):
+    """Every production configuration must have identical work in both modes."""
+    groups={}
+    for case in cases:
+        if case['variant']!='production':continue
+        key=(case['vertices'],case['degree'],case['block_size'])
+        params,modes=groups.setdefault(key,(case['params'],set()))
+        if case['params']!=params:return False
+        modes.add(case['warm'])
+    return bool(groups) and all(modes=={'false','true'} for _,modes in groups.values())
+
+
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--source',type=Path,default=Path(__file__).resolve().parents[1])
@@ -139,10 +151,11 @@ def main():
         cases += [('production',n,d,b,warm,None,0,False)
                   for n,d,b,warm in itertools.product(reversed(m['scaling_param']['values']),p['degree'],p['block_size'],('false','true'))]
     results=[]
-    def report(complete=False):
+    def report(complete=False,work_identity=None):
         data=dict(complete=complete,source_sha256=hashes,
                   binary_sha256={v:hashlib.sha256(p.read_bytes()).hexdigest() for v,p in binaries.items()},
-                  expected=len(cases),total=len(results),passed=sum(x['passed'] for x in results),cases=results)
+                  expected=len(cases),total=len(results),passed=sum(x['passed'] for x in results),
+                  work_identity=work_identity,cases=results)
         (work/'report.json').write_text(json.dumps(data,indent=2)+'\n');return data
     for variant,n,d,b,warm,index,count,skip in cases:
         label=f'{len(results):03d}-{variant}-{n}-{d}-{b}-{warm}-{index}-{count}-{skip}'
@@ -188,8 +201,10 @@ def main():
         results.append(dict(label=label,variant=variant,vertices=n,degree=d,block_size=b,warm=warm,
                             index=index,count=count,skip=skip,errors=errors,exit=code,seconds=seconds,params=params,passed=bool(passed)))
         report();print(f"{'PASS' if passed else 'FAIL'} {label}: {seconds:.3f}s",flush=True)
-    final=report(complete=True);print(f"{final['passed']}/{final['total']} SSSP complete-distance cases passed")
-    return 0 if final['passed']==len(cases) else 1
+    identity=consistent_work(results)
+    final=report(complete=True,work_identity=identity)
+    print(f"{final['passed']}/{final['total']} SSSP complete-distance cases passed; warmer work identity: {identity}")
+    return 0 if final['passed']==len(cases) and identity else 1
 
 
 if __name__=='__main__':

@@ -164,7 +164,7 @@ def main():
         return data
 
     for variant,w,h,r,warm,stage,at,count,nan,allocation in cases:
-        label = f'{variant}-{w}-{h}-{r}-{warm}-{stage}-{at}-{count}-{nan}-{allocation}'
+        label = f'{len(results):03d}-{variant}-{w}-{h}-{r}-{warm}-{stage}-{at}-{count}-{nan}-{allocation}'
         env = dict(clean_env, BENCH_PARAM_width=str(w), BENCH_PARAM_height=str(h),
                    BENCH_PARAM_radius=str(r), BENCH_PARAM_vector_add_warmup=warm)
         if stage:

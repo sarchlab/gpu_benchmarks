@@ -122,7 +122,7 @@ def main():
         return result
 
     for variant,n,warm,index,count,nan,unavailable in cases:
-        label = f'{variant}-{n}-{warm}-{index}-{count}-{nan}-{unavailable}'
+        label = f'{len(results):03d}-{variant}-{n}-{warm}-{index}-{count}-{nan}-{unavailable}'
         env = dict(clean, BENCH_PARAM_size=str(n), BENCH_PARAM_vector_add_warmup=warm)
         if index is not None:
             env['PARBOIL_SGEMM_TEST_INDEX'] = str(index)

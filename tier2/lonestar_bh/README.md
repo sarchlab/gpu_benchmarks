@@ -52,6 +52,13 @@ Environment variables (`BENCH_PARAM_bodies`, `BENCH_PARAM_timesteps`,
 |----------|---------|-------------|
 | `BENCH_PARAM_vector_add_warmup` | true | Optional clock/cache warmer after initial tree construction/uploads and before the first force kernel; `false` runs as-is |
 
+Resolved timesteps must be positive. Nonpositive environment overrides fail
+before body initialization, allocation or GPU access, with no timing records.
+Existing positive-only CLI fallback and environment precedence are preserved,
+as are all 400 declared body/timestep/theta combinations. This guard prevents
+empty simulations from being reported as successful zero-time measurements;
+it does not qualify body-size bounds or the measured trajectory.
+
 ## Entry policy for the accepted hybrid subset
 
 The initial body uploads, position downloads, CPU quadtree construction and

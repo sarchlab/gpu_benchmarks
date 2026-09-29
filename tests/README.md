@@ -381,6 +381,13 @@ the test; GPU runtime qualification is separate. This checks the restored R-09
 expression and does not claim that ordinary timing runs perform verification
 (R-13).
 
+`python3 tests/bh_positive_steps.py --compiler clang++ --work-dir /tmp/bh-positive-steps`
+checks the actual Barnes–Hut timestep guard, parser precedence and record fields
+under fatal host sanitizers. All 400 declared body/timestep/theta combinations,
+defaults, nonpositive overrides and CLI fallback are covered without allocation.
+Add `--binary <lonestar_bh>` for actual GPU-hidden invalid-request rejection
+with no timing records. This is input admission, not measured-trajectory checking.
+
 `bh_entry_order.py` checks actual Barnes–Hut CUDA timelines: initial body/tree
 transfers before the warmer, all force/integration timestep launches with their
 event brackets, and the existing separate verification launch. It requires an

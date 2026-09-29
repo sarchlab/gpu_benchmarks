@@ -140,6 +140,11 @@ jobs:
           make -C tier2/shoc_stencil2d PLATFORM=cuda
           python3 tests/shoc_stencil_input_ranges.py --compiler g++ --binary tier2/shoc_stencil2d/shoc_stencil2d --work-dir /tmp/shoc-stencil-input-ranges
 
+      - name: Check Barnes-Hut positive timestep admission
+        run: |
+          make -C tier2/lonestar_bh PLATFORM=cuda
+          python3 tests/bh_positive_steps.py --compiler g++ --binary tier2/lonestar_bh/lonestar_bh --work-dir /tmp/bh-positive-steps
+
       - name: Check pinned CFD solver, mesh geometry and measured-result hooks
         run: |
           python3 tests/cfd_host.py --compiler g++

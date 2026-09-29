@@ -374,6 +374,14 @@ the test; GPU runtime qualification is separate. This checks the restored R-09
 expression and does not claim that ordinary timing runs perform verification
 (R-13).
 
+`python3 tests/lbm_input_ranges.py --compiler clang++ --work-dir /tmp/lbm-inputs`
+checks LBM's actual resolved guards, distribution-array bounds, launch arithmetic
+and parameter records under fatal host sanitizers. It covers all 78 declared
+configurations, the 483/484 dimension boundary, positive-work requirements and
+existing environment/ignored-command-line behavior. Add `--binary <parboil_lbm>`
+for exact GPU-hidden rejection with no timing records. Numerical verification,
+upstream fidelity, capacity and hardware block support remain separate.
+
 `python3 tests/fdtd_input_ranges.py --compiler clang++ --work-dir /tmp/fdtd-inputs`
 checks actual FDTD-2D input guards, initialization bounds and allocation byte
 arithmetic under fatal host sanitizers. It covers all 60 declared configurations,

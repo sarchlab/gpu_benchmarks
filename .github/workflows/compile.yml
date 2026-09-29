@@ -140,6 +140,11 @@ jobs:
           make -C tier2/lonestar_bh PLATFORM=cuda
           python3 tests/bh_positive_steps.py --compiler g++ --binary tier2/lonestar_bh/lonestar_bh --work-dir /tmp/bh-positive-steps
 
+      - name: Check LBM integer input admission
+        run: |
+          make -C tier2/parboil_lbm PLATFORM=cuda
+          python3 tests/lbm_input_ranges.py --compiler g++ --binary tier2/parboil_lbm/parboil_lbm --work-dir /tmp/lbm-input-ranges
+
       - name: Check FDTD-2D input admission
         run: |
           make -C tier2/polybench_fdtd2d PLATFORM=cuda

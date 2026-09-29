@@ -61,8 +61,8 @@ make PLATFORM=rocm
 (`transpose_naive`, `transpose_optimized`), then a `summary` whose
 `total_time_ms` is the sum of both recorded GPU event times:
 ```
-{"type":"kernel","name":"transpose_naive","iter":0,"time_ms":1.234500,"host_time_ms":1.301000,"params":{"size":4096}}
-{"type":"kernel","name":"transpose_optimized","iter":0,"time_ms":0.567800,"host_time_ms":0.621000,"params":{"size":4096}}
+{"type":"kernel","name":"transpose_naive","iter":0,"time_ms":1.234500,"host_time_ms":1.301000,"params":{"size":4096,"verification":"full_cpu_v1"}}
+{"type":"kernel","name":"transpose_optimized","iter":0,"time_ms":0.567800,"host_time_ms":0.621000,"params":{"size":4096,"verification":"full_cpu_v1"}}
 {"type":"summary","total_time_ms":1.802300}
 ```
 
@@ -74,14 +74,30 @@ Device: AMD Radeon RX 7900 XTX (id=0)
 Matrix size: 4096×4096
 
 transpose_naive: gpu = 1.234 ms, host = 1.301 ms
-  Verification: PASS
+  Naive verification: PASS (0 mismatches in 16777216 elements)
 transpose_optimized: gpu = 0.568 ms, host = 0.621 ms
-  Verification: PASS
+  Optimized verification: PASS (0 mismatches in 16777216 elements)
 Total GPU time: 1.802 ms
 ```
 
-Each variant's output is verified against a CPU transpose (first 1000
-elements); on FAIL the process exits non-zero.
+Each variant's actual measured output is compared at every element against the
+CPU transpose, outside GPU timing. Both values must be finite, and the unchanged
+absolute error limit is `1e-5`. All mismatches are counted, with at most five
+detailed messages per variant; any mismatch makes the process exit nonzero.
+The `verification: full_cpu_v1` descriptor distinguishes complete coverage from
+the former first-1000-element check. Verification uses the existing full output
+downloads and CPU reference; it does not rerun either GPU kernel.
+
+`python3 tests/transpose_verification.py --host-only --work-dir /tmp/transpose-host`
+(from the repository root) checks the actual CPU reference against independent
+rectangular mappings, a known answer, bit preservation and memory guards. Use
+`--platform cuda --sweep --work-dir /tmp/transpose-gpu` for measured-device
+corruption at the first, cutoff, middle and final elements, skipped launches,
+partial tiles, bounded diagnostics and all 22 declared sizes with both warmer
+modes. Each process has a 60-second budget. Use a new work directory to preserve
+raw logs, source/binary hashes and outcomes. CI runs host checks and compiles GPU
+variants; GPU execution requires hardware. AMD hardware qualification and
+arbitrary manual-size admission remain separate.
 
 ## Platform Notes
 

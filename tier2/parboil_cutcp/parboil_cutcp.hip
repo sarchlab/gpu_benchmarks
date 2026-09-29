@@ -36,6 +36,7 @@
 #include <cstring>
 #include <cmath>
 #include <vector>
+#include "cpu_reference.h"
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -461,7 +462,7 @@ int main(int argc, char** argv) {
     char params[256];
     snprintf(params, sizeof(params),
              "\"num_atoms\":%d,\"lattice_dim\":%d,\"grid_spacing\":%.2f,"
-             "\"cutoff_radius\":%.1f,\"bin_depth\":%d,\"nbrlist_len\":%d",
+             "\"cutoff_radius\":%.1f,\"bin_depth\":%d,\"nbrlist_len\":%d,\"verification\":\"full_cpu_v1\"",
              num_atoms, lattice_dim, grid_spacing, cutoff, BIN_DEPTH, nbrlistlen);
 
     bench_timer_t timer;
@@ -520,45 +521,36 @@ int main(int argc, char** argv) {
         }
     }
 
-    // ---- verification: CPU reference over the binned atoms. With the
-    // overflow rejection above, every requested atom (barring q==0/out-of-range
-    // exclusions) is binned, so this reference covers the full problem the GPU
-    // computed — not a silently-truncated subset. ----
-    std::vector<float4> binned;
-    binned.reserve(num_atoms);
-    for (long b = 0; b < nbins * BIN_DEPTH; ++b)
-        if (binBaseAddr[b].w != 0.f) binned.push_back(binBaseAddr[b]);
-
-    int verify_n = 64, errors = 0;
-    unsigned int vseed = 12345;
-    for (int v = 0; v < verify_n; ++v) {
-        int i = lcg_rand(&vseed) % nx;
-        int j = lcg_rand(&vseed) % ny;
-        int k = lcg_rand(&vseed) % nz;
-        float x = i * h, y = j * h, z = k * h;   // relative to lo (=0)
-        float ref = 0.f;
-        for (const float4& a : binned) {
-            float dx = a.x - x, dy = a.y - y, dz = a.z - z;
-            float r2 = dx*dx + dy*dy + dz*dz;
-            if (r2 < cutoff2) {
-                float s = 1.f - r2 * inv_cutoff2;
-                ref += a.w * (1.f / sqrtf(r2)) * s * s;
+    // ---- verification: complete actual measured lattice, untimed ----
+    size_t errors = 0;
+    bool reference_failed = false;
+    try {
+        std::vector<float4> binned;
+        binned.reserve(num_atoms);
+        for (long b = 0; b < nbins * BIN_DEPTH; ++b)
+            if (binBaseAddr[b].w != 0.f) binned.push_back(binBaseAddr[b]);
+        const std::vector<float> expected =
+            cutcp_reference::potential(binned, nx, h, cutoff);
+        for (size_t v = 0; v < lattice.size(); ++v) {
+            float ref = expected[v];
+            float got = lattice[v];
+            float tol = 1e-3f * (fabsf(ref) + 1e-4f);
+            if (!std::isfinite(got) || !std::isfinite(ref) ||
+                fabsf(got - ref) > tol) {
+                if (errors < 10)
+                    fprintf(stderr, "Mismatch (%zu,%zu,%zu): got %.5f expected %.5f\n",
+                            v % nx, (v / nx) % ny, v / (size_t(nx) * ny), got, ref);
+                ++errors;
             }
         }
-        float got = lattice[(size_t)(k * ny + j) * nx + i];
-        float tol = 1e-3f * (fabsf(ref) + 1e-4f);
-        if (!std::isfinite(got) || !std::isfinite(ref) ||
-            fabsf(got - ref) > tol) {
-            if (errors < 5)
-                fprintf(stderr, "Mismatch (%d,%d,%d): got %.5f expected %.5f\n",
-                        i, j, k, got, ref);
-            errors++;
-        }
+        if (errors)
+            fprintf(stderr, "FAIL: %zu mismatches in %zu points\n", errors, lattice.size());
+        else
+            fprintf(stderr, "PASS (%zu points verified)\n", lattice.size());
+    } catch (const std::exception& error) {
+        fprintf(stderr, "FAIL: complete CPU reference unavailable: %s\n", error.what());
+        reference_failed = true;
     }
-    if (errors)
-        fprintf(stderr, "FAIL: %d mismatches in %d sampled points\n", errors, verify_n);
-    else
-        fprintf(stderr, "PASS (%d points verified)\n", verify_n);
 
     HIP_CHECK(hipFree(regionZeroCuda));
     HIP_CHECK(hipFree(binBaseCuda));
@@ -566,5 +558,5 @@ int main(int argc, char** argv) {
     free(binBaseAddr);
     free(bincntBaseAddr);
 
-    return (errors > 0) ? EXIT_FAILURE : EXIT_SUCCESS;
+    return (errors > 0 || reference_failed) ? EXIT_FAILURE : EXIT_SUCCESS;
 }

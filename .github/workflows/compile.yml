@@ -302,6 +302,11 @@ jobs:
           python3 tests/sssp_verification.py --host-only --compiler g++ --work-dir /tmp/sssp-reference-host
           python3 tests/sssp_verification.py --platform cuda --work-dir /tmp/sssp-measured-device --compile-only
 
+      - name: Check Gram-Schmidt all-column Q verification and compile measured-output regression
+        run: |
+          python3 tests/gramschmidt_q_verification.py --host-only --compiler g++ --work-dir /tmp/gram-q-host
+          python3 tests/gramschmidt_q_verification.py --platform cuda --work-dir /tmp/gram-q-measured --compile-only
+
       - name: Check binomial CPU reference (no GPU required)
         run: |
           g++ -std=c++14 -O3 -pthread -fsanitize=address,undefined -fno-sanitize-recover=all tests/binomial_cpu_reference.cpp -o /tmp/binomial-cpu-reference

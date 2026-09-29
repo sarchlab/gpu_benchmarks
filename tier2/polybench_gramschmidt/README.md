@@ -105,7 +105,7 @@ Prior measurements omitted reset time and must be recollected:
 
 
 ```
-{"type":"kernel","name":"gram_norm","iter":0,"time_ms":12.345600,"host_time_ms":13.010000,"params":{"m":512,"n":64}}
+{"type":"kernel","name":"gram_norm","iter":0,"time_ms":12.345600,"host_time_ms":13.010000,"params":{"m":512,"n":64,"q_orthogonality":"all_columns_v1"}}
 ...
 {"type":"summary","total_time_ms":45.622600}
 ```
@@ -123,14 +123,42 @@ computed downstream from the emitted `time_ms` and params.
 
 ## Orthogonality Verification
 
-After the timed run, the benchmark computes `Qᵀ Q` on the CPU for the
-first `min(8, N)` columns and checks:
+After the timed run, the benchmark downloads the actual measured Q and computes
+every entry of `Qᵀ Q` on the CPU, using all M rows and all N columns. The original
+FP32 row-order accumulation and absolute tolerance are preserved:
 
-- **Diagonal** elements: `|dot(Q[:,i], Q[:,i]) − 1| < 0.01`
-- **Off-diagonal** elements: `|dot(Q[:,i], Q[:,j])| < 0.01`
+- **Diagonal** elements: `|dot(Q[:,i], Q[:,i]) − 1| ≤ 0.01`
+- **Off-diagonal** elements: `|dot(Q[:,i], Q[:,j])| ≤ 0.01`
 
-A `PASS` / `FAIL` result is printed to stderr; on `FAIL` the process exits
-with a non-zero status.
+Nonfinite dot products fail. Every failing column pair is counted, with at most
+ten detailed diagnostics. A `PASS` / `FAIL` result is printed to stderr; on
+`FAIL` the process exits nonzero. There is no sampled column prefix or
+verification-only GPU rerun. The descriptor `q_orthogonality: "all_columns_v1"`
+identifies this property check in each kernel record. Download and CPU work are
+outside GPU timing but count toward the runner's whole-process budget.
+
+Orthogonality alone does not verify the QR factorization: an unrelated
+orthonormal Q would pass, and R and the final A workspace are not checked here.
+Complete measured-state verification remains a separate R-13 repair in
+[issue #71](https://github.com/sarchlab/gpu_benchmarks/issues/71). This coverage
+change alone does not establish overall performance-collection readiness.
+
+From the repository root, use new work directories:
+
+```bash
+python3 tests/gramschmidt_q_verification.py --host-only --compiler clang++ --work-dir /tmp/gram-q-host
+python3 tests/gramschmidt_q_verification.py --platform cuda --sweep --work-dir /tmp/gram-q-gpu
+```
+
+Host fixtures exercise the production checker with independently constructed
+orthonormal matrices, every-element corruptions, duplicate columns, nonfinite
+values and immutable inputs/guards under fatal sanitizers. GPU regressions
+corrupt the measured Q after timing, including the formerly unchecked columns,
+and reject skipped normalization and unit-norm duplicate columns. The sweep
+covers all 20 declared matrix sizes with both warmer modes, each within a
+60-second process limit. Raw logs, hashes and outcomes remain in the work
+directory. CI runs host fixtures and compiles GPU variants; execution requires
+hardware.
 
 ## Reset qualification
 
@@ -140,5 +168,5 @@ zero and untouched guards. CI compiles the test; running it requires a GPU.
 The shared [reset ordering test](../../tests/algorithmic_zero_order.py) uses
 actual NVIDIA Nsight timelines to verify reset order, every event bracket,
 absence of inter-stage runtime memsets/copies, and record/summary agreement.
-See [test instructions](../../tests/README.md). Full measured Q/R verification
-remains R-13 and AMD runtime qualification remains R-19.
+See [test instructions](../../tests/README.md). Full measured QR reconstruction
+and A workspace verification remain R-13; AMD runtime qualification remains R-19.

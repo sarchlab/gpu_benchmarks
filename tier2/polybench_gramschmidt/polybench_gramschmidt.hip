@@ -124,28 +124,30 @@ __global__ void gram_project(float* __restrict__ A,
 
 // ---------------------------------------------------------------------------
 // CPU orthogonality reference check: verify Q^T * Q ≈ I
-// Checks first `check` columns (up to min(8, N))
+// Checks every column pair of the actual measured Q.
 // ---------------------------------------------------------------------------
 static bool check_orthogonality(const float* Q, int M, int N)
 {
-    int check = (N < 8) ? N : 8;
-    bool pass = true;
-    for (int ci = 0; ci < check; ci++) {
-        for (int cj = 0; cj < check; cj++) {
+    size_t errors = 0;
+    for (int ci = 0; ci < N; ci++) {
+        for (int cj = 0; cj < N; cj++) {
             float dot = 0.0f;
             for (int i = 0; i < M; i++)
                 dot += Q[i * N + ci] * Q[i * N + cj];
             float expected = (ci == cj) ? 1.0f : 0.0f;
             if (!std::isfinite(dot) || !std::isfinite(expected) ||
                 fabsf(dot - expected) > 0.01f) {
-                fprintf(stderr,
-                        "ORTH FAIL: dot(Q[:,%d], Q[:,%d]) = %.6f  (expected %.1f)\n",
-                        ci, cj, dot, expected);
-                pass = false;
+                if (errors < 10)
+                    fprintf(stderr,
+                            "ORTH FAIL: dot(Q[:,%d], Q[:,%d]) = %.6f  (expected %.1f)\n",
+                            ci, cj, dot, expected);
+                ++errors;
             }
         }
     }
-    return pass;
+    fprintf(stderr, "Orthogonality: %zu failing pairs out of %zu\n",
+            errors, (size_t)N * N);
+    return errors == 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -203,7 +205,7 @@ int main(int argc, char** argv)
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"m\":%d,\"n\":%d",
+             "\"m\":%d,\"n\":%d,\"q_orthogonality\":\"all_columns_v1\"",
              M, N);
 
     // Per-kernel accumulators: the single run = one full QR factorization; each
@@ -290,8 +292,8 @@ int main(int argc, char** argv)
 
     // Orthogonality check
     bool orth_ok = check_orthogonality(h_Q, M, N);
-    fprintf(stderr, "Orthogonality check (first %d columns): %s\n\n",
-            (N < 8 ? N : 8), orth_ok ? "PASS" : "FAIL");
+    fprintf(stderr, "Orthogonality check (all %d columns): %s\n\n",
+            N, orth_ok ? "PASS" : "FAIL");
 
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);

@@ -13,7 +13,7 @@ output[i] = input[0] + input[1] + … + input[i-1]   (output[0] = 0)
 This is a classic parallel-computing primitive with read–modify–write memory
 access patterns.  The implementation uses a **work-efficient (Blelloch)
 two-phase scan** (up-sweep + down-sweep) with shared/threadgroup memory, and
-supports arrays of arbitrary size via recursive multi-block scan.  Derived from
+supports partial blocks via recursive multi-block scan.  Derived from
 the [SHOC benchmark suite](https://github.com/vetter/shoc).
 
 ## Provenance & fidelity
@@ -89,6 +89,16 @@ Environment variables override the flags:
 | `BENCH_PARAM_block_size` | `256` | Threads per block |
 | `BENCH_PARAM_vector_add_warmup` | `true` | Clock-boost + LLC-evict warmer before the timed run |
 
+Resolved `array_size` and `block_size` must be positive. The existing clamp of
+positive block sizes above 512 to 512 is preserved; after that clamp, the block
+size must be a power of two for the Blelloch tree. Padding to the next multiple
+of `2 * block_size` must fit in `int` (`INT_MAX`), as required by the kernel's
+signed indices. Invalid geometry exits with a diagnostic before device access
+or allocation. Padding and recursive block counts use wide host arithmetic.
+All 32 declared sizes and the default block size remain admitted. These bounds
+establish index representability, not available host/device memory or runtime.
+Existing CLI fallback and environment precedence are unchanged.
+
 ## Output
 
 **stdout** — JSON lines: one `kernel` record per kernel
@@ -142,7 +152,11 @@ settings and actual-device first/middle/tail corruption, nonfinite values,
 zeroed outputs and bounded error diagnostics. Each process has a 60-second
 budget; raw logs and source/binary hashes remain in the new work directory.
 CI runs host checks and compiles GPU variants; GPU execution requires hardware.
-Manual input/memory admission and AMD hardware qualification remain separate.
+`python3 tests/shoc_scan_input_ranges.py --compiler clang++ --work-dir /tmp/shoc-scan-inputs`
+checks actual parsing/padding/recursive expressions under fatal host sanitizers
+without allocation. Add `--binary /path/to/shoc_scan` to require exact invalid
+geometry diagnostics with GPUs hidden. Capacity admission, general parsing
+policy and AMD hardware qualification remain separate.
 
 ## Bandwidth Formula
 

@@ -149,7 +149,7 @@ __global__ void add_block_sums_kernel(
 static void scan_recursive(unsigned int* d_data, int N,
                            bench_timer_t* timer,
                            bench_lap_t* acc_block, bench_lap_t* acc_add) {
-    int numBlocks = (N + ELEMENTS_PER_BLOCK - 1) / ELEMENTS_PER_BLOCK;
+    int numBlocks = ((long long)N + ELEMENTS_PER_BLOCK - 1) / ELEMENTS_PER_BLOCK;
 
     unsigned int* d_block_sums = nullptr;
     if (numBlocks > 1) {
@@ -213,6 +213,11 @@ int main(int argc, char** argv) {
                          strcmp(verify_env, "skip") == 0));
 
     int N     = size;
+
+    if (N <= 0) {
+        fprintf(stderr, "Scan size must be positive\n");
+        return EXIT_FAILURE;
+    }
 
     size_t bytes = (size_t)N * sizeof(unsigned int);
 

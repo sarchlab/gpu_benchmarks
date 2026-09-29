@@ -260,6 +260,13 @@ production configurations. The existing numerical criterion is unchanged by
 this coverage check. CI runs the host check and compiles the GPU variants; actual
 GPU runs retain raw output and source/binary hashes with a 60-second process limit.
 
+`python3 tests/shoc_stencil_input_ranges.py --compiler clang++ --work-dir /tmp/shoc-stencil-inputs`
+checks the actual input guards, host size expressions and grid rounding under
+fatal host sanitizers. It covers all 60 declared configurations, positive work,
+the signed square-size boundary, partial blocks and CLI/environment precedence.
+Add `--binary <shoc_stencil2d>` for exact GPU-hidden invalid-request rejection
+with no timing records. Hardware block support and capacity remain separate.
+
 `python3 tests/heteromark_pagerank_input_ranges.py --compiler clang++ --work-dir /tmp/hpr-inputs`
 checks actual resolved integer guards, parser precedence and size expressions
 under fatal host sanitizers. It covers all 108 declared vertex/damping combinations,

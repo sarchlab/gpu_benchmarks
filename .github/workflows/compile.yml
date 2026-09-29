@@ -135,6 +135,11 @@ jobs:
           make -C tier2/heteromark_pagerank PLATFORM=cuda
           python3 tests/heteromark_pagerank_input_ranges.py --compiler g++ --binary tier2/heteromark_pagerank/heteromark_pagerank --work-dir /tmp/heteromark-pagerank-input-ranges
 
+      - name: Check SHOC Stencil2D input admission
+        run: |
+          make -C tier2/shoc_stencil2d PLATFORM=cuda
+          python3 tests/shoc_stencil_input_ranges.py --compiler g++ --binary tier2/shoc_stencil2d/shoc_stencil2d --work-dir /tmp/shoc-stencil-input-ranges
+
       - name: Check pinned CFD solver, mesh geometry and measured-result hooks
         run: |
           python3 tests/cfd_host.py --compiler g++

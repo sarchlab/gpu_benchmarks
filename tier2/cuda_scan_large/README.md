@@ -17,7 +17,7 @@ Read this as "a large-array scan benchmark in the spirit of the CUDA SDK sample,
   1. **Block-level scan** — each block of 512 elements performs an in-place exclusive scan using shared memory (up-sweep + down-sweep), stores block total
   2. **Scan of block sums** — recursively scan the array of block totals
   3. **Add block sums back** — add each scanned block total to all elements in the corresponding block
-- Handles arbitrarily large arrays via recursive decomposition
+- Handles multiple blocks via recursive decomposition
 - GB/s = 2 · N · sizeof(uint) / time\_sec / 10⁹ (derived downstream from the emitted times and params)
 
 ## Measurement
@@ -37,6 +37,15 @@ run. Repetition = `gpubench run --reps N`.
 
 `BENCH_PARAM_verify=false|0|skip` skips CPU verification (undeclared debug
 knob, not in `params.json` and never swept).
+
+The resolved size must be positive; rejection happens before allocation or
+device access, including when debug verification is disabled. Recursive block
+counts use wide host arithmetic, avoiding signed overflow near `INT_MAX`.
+Positive sizes representable as `int` retain their existing index geometry;
+on supported 64-bit hosts, buffer byte counts also remain representable.
+This does not guarantee available memory or qualify arbitrary manual sizes
+within the collection time budget. Existing positive CLI fallback and
+environment precedence are preserved.
 
 ## Files
 
@@ -95,6 +104,13 @@ PASS
 - Full element-wise comparison against CPU exclusive prefix sum
 - Exact match required (integer arithmetic, no floating-point tolerance)
 - On FAIL the process exits non-zero (skipped when `BENCH_PARAM_verify=false`)
+
+`python3 tests/scan_input_ranges.py --compiler clang++ --work-dir /tmp/scan-input`
+(from the repository root) checks the actual parser, positivity guard, buffer
+arithmetic and recursive block-count expression under fatal host sanitizers.
+It covers all declared sizes and integer boundaries without allocating large
+arrays. Add `--binary /path/to/cuda_scan_large` to require exact invalid-input
+errors from the actual binary with GPUs hidden; CI runs this path too.
 
 ## Platform Notes
 

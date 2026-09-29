@@ -68,6 +68,14 @@ manifest combinations. Every GPU process must finish within 60 seconds. CI
 compiles these GPU tests; their execution requires a GPU. Raw output, source and
 binary hashes and per-case outcomes remain in the new work directory.
 
+`python3 tests/scan_input_ranges.py --compiler clang++ --work-dir /tmp/scan-input`
+checks the production large-scan parser, positivity guard, buffer arithmetic and
+recursive block count under fatal host sanitizers. It covers all declared sizes
+and integer boundaries without allocating large arrays. Add `--binary
+/path/to/cuda_scan_large` to require exact invalid-input errors with GPUs hidden,
+including with debug verification disabled; CI runs this path too. Large manual
+sizes still need memory/time qualification.
+
 `python3 tests/transpose_input_ranges.py --compiler clang++ --work-dir /tmp/transpose-input`
 checks the actual production parser, positivity and signed flat-index bounds,
 and buffer arithmetic with fatal host sanitizers. It covers all declared sizes

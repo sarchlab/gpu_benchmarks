@@ -82,6 +82,7 @@ hashes in a new nonexistent work directory.
 `python3 tests/shoc_gemm_verification.py --host-only --work-dir /tmp/shoc-gemm-host`
 checks complete bitwise agreement with the original FP32 reference, independent
 rectangular known answers, zero/identity cases, guards and input preservation.
+Default worker selection is exercised below and at the 512² output threshold.
 Fatal host sanitizers also exercise zero and partial worker-creation failure.
 Use `--platform cuda --work-dir /tmp/shoc-gemm-gpu --sweep` for actual measured
 device-tail finite/NaN faults, partial tiles, bounded diagnostics, unavailable

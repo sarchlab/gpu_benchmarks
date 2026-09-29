@@ -68,6 +68,17 @@ manifest combinations. Every GPU process must finish within 60 seconds. CI
 compiles these GPU tests; their execution requires a GPU. Raw output, source and
 binary hashes and per-case outcomes remain in the new work directory.
 
+`python3 tests/parboil_sgemm_verification.py --host-only --work-dir /tmp/parboil-sgemm-host`
+checks the production FP32 reference against the original ordered recipe,
+independent rectangular/zero/identity results, nonzero initial C and beta, and
+automatic worker selection at the 512² output threshold. Fatal host sanitizers
+also exercise failed thread creation and memory guards. Use `--platform cuda
+--work-dir /tmp/parboil-sgemm-gpu --sweep` for actual measured finite/NaN faults,
+partial tiles, both warmers, unavailable references and all 22 declared sizes.
+CI executes host checks and compiles the GPU variants. Runtime GPU checks require
+hardware, enforce a 60-second process budget and retain raw logs and source/binary
+hashes in a new nonexistent work directory.
+
 `python3 tests/shoc_gemm_verification.py --host-only --work-dir /tmp/shoc-gemm-host`
 checks complete bitwise agreement with the original FP32 reference, independent
 rectangular known answers, zero/identity cases, guards and input preservation.

@@ -25,6 +25,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include "cpu_reference.h"
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -85,23 +86,6 @@ __global__ void sgemm_kernel(const float* __restrict__ A,
 }
 
 // ---------------------------------------------------------------------------
-// CPU reference for correctness check
-// ---------------------------------------------------------------------------
-
-static void sgemm_cpu(const float* A, const float* B, float* C,
-                      int N, float alpha, float beta) {
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < N; ++j) {
-            float s = 0.0f;
-            for (int k = 0; k < N; ++k) {
-                s += A[i * N + k] * B[k * N + j];
-            }
-            C[i * N + j] = alpha * s + beta * C[i * N + j];
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -138,6 +122,11 @@ int main(int argc, char** argv)
     float* h_B   = (float*)malloc(bytes);
     float* h_C   = (float*)malloc(bytes);
     float* h_ref = (float*)malloc(bytes);
+    if (!h_A || !h_B || !h_C || !h_ref) {
+        fprintf(stderr, "FAIL: complete host matrices unavailable\n");
+        free(h_A); free(h_B); free(h_C); free(h_ref);
+        return EXIT_FAILURE;
+    }
 
     // Initialize inputs
     for (int i = 0; i < N * N; ++i)
@@ -164,7 +153,7 @@ int main(int argc, char** argv)
 
     char params[160];
     snprintf(params, sizeof(params),
-             "\"size\":%d",
+             "\"size\":%d,\"verification\":\"full_cpu_v1\"",
              N);
 
     // Single timed launch (bench_run_once): the kernel rewrites C in place
@@ -178,37 +167,32 @@ int main(int argc, char** argv)
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
-    // Correctness check (only for small N to keep runtime short)
-    bool verify_ok = true;
-    if (N <= 256) {
-        // The single timed launch already computed C = alpha*A*B + beta*C from
-        // the pristine C; h_ref started as that same pristine C, so the CPU
-        // reference reproduces exactly what d_C now holds. Read it back and
-        // compare — no untimed relaunch of the kernel-under-test.
+    // Verify every measured output after timing; no skipped sizes or GPU rerun.
+    bool verify_ok = false;
+    try {
+        // h_ref retains pristine C; d_C holds the one measured update.
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipMemcpy(h_C, d_C, bytes, hipMemcpyDeviceToHost));
-        sgemm_cpu(h_A, h_B, h_ref, N, alpha, beta);
+        gemm_cpu(h_A, h_B, h_ref, N, N, N, alpha, beta);
 
-        int errors = 0;
-        for (int i = 0; i < N * N; ++i) {
+        const size_t count = (size_t)N * N;
+        size_t errors = 0;
+        for (size_t i = 0; i < count; ++i) {
             float diff = fabsf(h_C[i] - h_ref[i]);
             if (!std::isfinite(h_C[i]) || !std::isfinite(h_ref[i]) ||
                 diff > 1e-3f * fabsf(h_ref[i]) + 1e-4f) {
                 if (errors < 10) {
-                    fprintf(stderr, "Mismatch at %d: got %f, expected %f\n",
+                    fprintf(stderr, "Mismatch at %zu: got %f, expected %f\n",
                             i, h_C[i], h_ref[i]);
                 }
                 errors++;
             }
         }
-        if (errors > 0) {
-            fprintf(stderr, "FAIL: %d errors\n", errors);
-            verify_ok = false;
-        } else {
-            fprintf(stderr, "PASS\n");
-        }
-    } else {
-        fprintf(stderr, "Skipping verification for large size\n");
+        verify_ok = errors == 0;
+        fprintf(stderr, "%s: %zu mismatches in %zu values\n",
+                verify_ok ? "PASS" : "FAIL", errors, count);
+    } catch (const std::exception& error) {
+        fprintf(stderr, "FAIL: complete CPU reference unavailable: %s\n", error.what());
     }
 
     HIP_CHECK(hipFree(d_A));

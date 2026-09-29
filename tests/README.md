@@ -68,6 +68,18 @@ manifest combinations. Every GPU process must finish within 60 seconds. CI
 compiles these GPU tests; their execution requires a GPU. Raw output, source and
 binary hashes and per-case outcomes remain in the new work directory.
 
+`python3 tests/sssp_verification.py --host-only --compiler clang++ --work-dir /tmp/sssp-host`
+checks the actual CPU Bellman-Ford reference against 32,768 independent
+Floyd-Warshall cases and a weighted parallel/self-edge/unreachable fixture with
+fatal host sanitizers. Use `--platform cuda --sweep --work-dir /tmp/sssp-gpu`
+for actual measured-distance faults beyond the former 1024-vertex cutoff,
+skipped-work rejection, bounded diagnostics, both warmer modes and all 81
+declared vertex/degree configurations. CI runs host fixtures and compiles GPU
+variants; execution requires hardware. Use a new work directory to retain raw
+logs, source/binary hashes and outcomes. Each GPU process has a 60-second limit.
+These checks cover final distances; SSSP concurrency and deterministic work
+remain separate repairs.
+
 `python3 tests/convolution_verification.py --host-only --work-dir /tmp/conv-host`
 checks the production separable CPU reference against asymmetric known answers,
 direct 2D fixtures, zero-padding boundaries, immutable inputs and output guards

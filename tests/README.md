@@ -68,6 +68,14 @@ manifest combinations. Every GPU process must finish within 60 seconds. CI
 compiles these GPU tests; their execution requires a GPU. Raw output, source and
 binary hashes and per-case outcomes remain in the new work directory.
 
+`python3 tests/gramschmidt_input_ranges.py --compiler clang++ --work-dir /tmp/gram-input-host`
+checks the actual parser, resolved dimension guards, storage sizes and widened
+launch geometry with fatal host sanitizers, including signed-index boundaries
+without allocating large matrices. Add `--binary /path/to/polybench_gramschmidt`
+to require exact invalid-input diagnostics and no output from the actual binary
+with GPUs hidden. CI runs both paths. These are arithmetic-safety checks, not
+memory-capacity or arbitrary-override performance qualification.
+
 `python3 tests/gramschmidt_q_verification.py --host-only --compiler clang++ --work-dir /tmp/gram-q-host`
 exercises the production Q orthogonality checker with independent known
 orthonormal fixtures, element corruption, duplicate columns, nonfinite values

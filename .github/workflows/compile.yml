@@ -307,6 +307,9 @@ jobs:
           python3 tests/gramschmidt_q_verification.py --host-only --compiler g++ --work-dir /tmp/gram-q-host
           python3 tests/gramschmidt_q_verification.py --platform cuda --work-dir /tmp/gram-q-measured --compile-only
 
+      - name: Check Gram-Schmidt input and index ranges before GPU access
+        run: python3 tests/gramschmidt_input_ranges.py --compiler g++ --binary /tmp/gram-q-measured/production/tier2/polybench_gramschmidt/polybench_gramschmidt --work-dir /tmp/gram-input-ranges
+
       - name: Check binomial CPU reference (no GPU required)
         run: |
           g++ -std=c++14 -O3 -pthread -fsanitize=address,undefined -fno-sanitize-recover=all tests/binomial_cpu_reference.cpp -o /tmp/binomial-cpu-reference

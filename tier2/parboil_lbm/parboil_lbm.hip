@@ -24,6 +24,7 @@
 #include <cstring>
 #include <cmath>
 #include <vector>
+#include <climits>
 
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 
@@ -189,6 +190,15 @@ int main(int argc, char** argv) {
     env_val = getenv("BENCH_PARAM_tau");
     if (env_val) tau = (float)atof(env_val);
 
+    if (grid_dim < 3 || block_size <= 0 || num_timesteps <= 0) {
+        fprintf(stderr, "LBM requires grid_dim>=3 and positive num_timesteps/block_size\n");
+        return EXIT_FAILURE;
+    }
+    if (grid_dim > INT_MAX / Q / grid_dim / grid_dim) {
+        fprintf(stderr, "LBM 19*grid_dim^3 exceeds INT_MAX\n");
+        return EXIT_FAILURE;
+    }
+
     float omega = 1.0f / tau;
     int Nx = grid_dim, Ny = grid_dim, Nz = grid_dim;
     int N = Nx * Ny * Nz;
@@ -218,7 +228,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMalloc(&d_f_src, f_bytes));
     HIP_CHECK(hipMalloc(&d_f_dst, f_bytes));
 
-    int gridSize = (N + block_size - 1) / block_size;
+    int gridSize = (int)(((long long)N + block_size - 1) / block_size);
 
     char params[160];
     snprintf(params, sizeof(params),

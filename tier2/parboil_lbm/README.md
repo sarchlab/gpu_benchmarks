@@ -39,6 +39,17 @@ run. Repetition = `gpubench run --reps N`.
 | `BENCH_PARAM_tau` | BGK relaxation time | 0.7 |
 | `BENCH_PARAM_vector_add_warmup` | Cold-cache clock warmer on/off | true |
 
+Resolved integer inputs require `grid_dim >= 3` (the density check samples
+interior nodes), positive `block_size` and positive `num_timesteps`. Requests
+outside the signed distribution-index range (`19 * grid_dim^3 <= INT_MAX`,
+so `grid_dim <= 483`) fail before dimension arithmetic, allocation or GPU
+access, with no timing records. Launch rounding uses wide arithmetic.
+All 78 declared grid/timestep combinations remain admitted. These bounds do
+not guarantee host/device capacity or hardware support for a manual block size.
+The existing environment parsing, tau behavior and ignored command-line flags
+are unchanged. This input check does not establish upstream fidelity or replace
+the sampled density check described below.
+
 ## Files
 
 | File | Description |

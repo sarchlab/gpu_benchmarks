@@ -37,7 +37,8 @@ binary in fresh processes.
 
 | File | Description |
 |------|-------------|
-| `shoc_gemm.hip` | HIP source — tiled GEMM kernel + self-contained utilities |
+| `shoc_gemm.hip` | HIP source — timed tiled GEMM kernel and driver |
+| `cpu_reference.h` | Tiled, threaded full CPU reference used by verification and host tests |
 | `Makefile` | Auto-detecting build (ROCm→rocm, else→cuda) |
 
 ## Build

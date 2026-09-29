@@ -375,6 +375,11 @@ int main(int argc, char** argv) {
     float dt      = 0.001f;
     float eps2    = 0.01f;
 
+    if (timesteps <= 0) {
+        fprintf(stderr, "Barnes-Hut requires positive timesteps\n");
+        return EXIT_FAILURE;
+    }
+
     // Initialize bodies
     std::vector<float> h_px(N), h_py(N), h_vx(N), h_vy(N), h_mass(N);
     uint32_t rng = 12345;

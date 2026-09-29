@@ -46,6 +46,10 @@ retains 26 dimensions and three timestep counts (78 candidate combinations).
 owner's choice to retain the upstream accuracy requirement. Candidate membership
 does not establish qualification: only complete successful runs within the
 60-second process budget belong in performance collection.
+The CLI currently generates the full Cartesian product, so an unfiltered sweep
+also attempts the excluded point and reports a failed run/session at the end.
+This expected rejection is not a qualified measurement. Manifest-level skipping
+and platform-specific collection profiles remain separate work.
 
 Dimensions must be at least 3 and steps positive. Padded storage must satisfy
 `20 * (N+8) * N * (N+8) <= INT_MAX`, checked before multiplication or GPU access.

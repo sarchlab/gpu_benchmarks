@@ -8,8 +8,8 @@
 #include <mutex>
 #include <thread>
 namespace lbm {
-// A reference owns this pool. Tasks are non-throwing stencil loops over disjoint
-// output planes, with no allocation or shared accumulation. run is a phase
+// A reference owns this pool. Workers read disjoint source planes and scatter
+// to unique (cell,direction) slots, including adjacent planes. run is a phase
 // barrier; all workers stop and join on construction failure or destruction.
 class PlanePool {
     const unsigned workers;

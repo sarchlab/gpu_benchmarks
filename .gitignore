@@ -26,6 +26,14 @@ tier2/*/*
 !tier2/*/*.mm
 !tier2/*/params.json
 !tier2/npb_is/test_npb_is.py
+# Native CUDA ports live in tier2/<bench>/cuda/; keep sources, ignore binaries
+!tier2/*/cuda/
+tier2/*/cuda/*
+!tier2/*/cuda/Makefile
+!tier2/*/cuda/README.md
+!tier2/*/cuda/*.cu
+!tier2/*/cuda/*.h
+!tier2/*/cuda/params.json
 tier3/*/*
 !tier3/*/Makefile
 !tier3/*/README.md

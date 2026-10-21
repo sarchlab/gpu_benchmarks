@@ -3,7 +3,7 @@
 // 70ea4ca9047dc4ec9c3ca79b4c91b3b2cc1510e7
 // CUDA/stencils/jacobi-2d-imper/jacobi2D.cu (PolyBench/GPU 1.0).
 // N and _PB_N bind to the same runtime n. Bodies differ only in whitespace.
-// License: ../../tier2/polybench_jacobi2d/UPSTREAM_LICENSE.
+// License: ../../tier2/polybench_jacobi2d/hip/UPSTREAM_LICENSE.
 /**
  * jacobi2D.cu: This file is part of the PolyBench/GPU 1.0 test suite.
  *

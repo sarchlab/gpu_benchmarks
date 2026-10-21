@@ -1,0 +1,68 @@
+{
+  "benchmark": "rodinia_hotspot",
+  "tier": 2,
+  "suite": "rodinia",
+  "description": "Pinned Rodinia 3.1 HotSpot pyramidal stencil with FP32 state and upstream mixed arithmetic, stability-limited timestep when required, fixed iteration counts and complete FP64 CPU verification.",
+  "scaling_param": {
+    "name": "grid_size",
+    "description": "Grid dimension (NxN temperature grid)",
+    "type": "int",
+    "values": [
+      64,
+      128,
+      192,
+      256,
+      384,
+      512,
+      640,
+      768,
+      1024,
+      1280,
+      1536,
+      2048,
+      2560,
+      3072,
+      3584,
+      4096,
+      5120,
+      6144,
+      7168,
+      8192
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "total_iterations",
+      "description": "Fixed number of thermal time steps per process. Actual timestep and simulated duration are reported; limiting dt does not add steps.",
+      "type": "int",
+      "default": 360,
+      "values": [
+        360
+      ]
+    },
+    {
+      "name": "pyramid_height",
+      "description": "Time steps advanced per pyramidal launch (must be < BLOCK_SIZE/2 = 8)",
+      "type": "int",
+      "default": 2,
+      "values": [
+        1,
+        2,
+        4
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Run the vector-add warmer once before the timed trajectory. Subsequent dependent launches retain natural cache state; false disables the entry warmer.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "calculate_temp"
+  ]
+}

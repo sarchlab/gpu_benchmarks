@@ -59,11 +59,11 @@ def instrument(source):
 def build(repo, work, platform, hooks):
     work.mkdir(parents=True)
     shutil.copytree(repo/'common', work/'common')
-    folder = work/'tier2/npb_cg'
+    folder = work/'tier2/npb_cg/hip'
     folder.mkdir(parents=True)
     for name in ['Makefile', 'nas_cg.h', 'params.json']:
-        shutil.copy2(repo/'tier2/npb_cg'/name, folder/name)
-    source = (repo/'tier2/npb_cg/npb_cg.hip').read_text()
+        shutil.copy2(repo/'tier2/npb_cg/hip'/name, folder/name)
+    source = (repo/'tier2/npb_cg/hip/npb_cg.hip').read_text()
     (folder/'npb_cg.hip').write_text(instrument(source) if hooks else source)
     with (work/'build.log').open('w') as log:
         subprocess.run(['make', 'PLATFORM='+platform], cwd=folder, stdout=log,

@@ -115,7 +115,7 @@ def main():
         ap.error("--platform is required for GPU builds")
     args.source, args.work_dir = args.source.resolve(), args.work_dir.resolve()
     args.work_dir.mkdir(parents=True, exist_ok=False)
-    relative = Path("tier2/graph_pr")
+    relative = Path("tier2/graph_pr/hip")
     src = args.source / relative
     source = (src / "graph_pr.hip").read_text()
     if args.host_only:

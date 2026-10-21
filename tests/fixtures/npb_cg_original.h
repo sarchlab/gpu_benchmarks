@@ -67,7 +67,7 @@
 #include <cstdlib>
 #include <vector>
 #include <algorithm>
-#include "../../tier2/npb_cg/nas_cg.h"
+#include "../../tier2/npb_cg/hip/nas_cg.h"
 namespace pinned_cg {
 template<int NONZER> struct Original {
     using boolean=int;

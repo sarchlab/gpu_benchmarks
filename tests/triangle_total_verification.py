@@ -46,7 +46,7 @@ def main():
         args.work_dir.mkdir(parents=True, exist_ok=False)
     except FileExistsError:
         ap.error("--work-dir must name a new, nonexistent directory")
-    src, dst = args.source / "tier2/graph_tc", args.work_dir / "tier2/graph_tc"
+    src, dst = args.source / "tier2/graph_tc/hip", args.work_dir / "tier2/graph_tc/hip"
     dst.mkdir(parents=True)
     for name in ("graph_tc.hip", "Makefile", "params.json"):
         shutil.copy2(src / name, dst / name)

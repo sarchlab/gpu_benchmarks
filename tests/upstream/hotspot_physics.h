@@ -2,7 +2,7 @@
 // Frozen CUDA compute_tran_temp physics from HPC-FAIR/rodinia_3.1
 // 366b283456506ef2fe2c2b7dc5e83e941ffc5524, cuda/hotspot/hotspot.cu.
 // Copyright (c)2008-2011 University of Virginia. Complete license:
-// ../../tier2/rodinia_hotspot/UPSTREAM_LICENSE. Only namespace/return scaffolding added.
+// ../../tier2/rodinia_hotspot/hip/UPSTREAM_LICENSE. Only namespace/return scaffolding added.
 namespace pinned_hotspot {
 #define MAX_PD (3.0e6)
 #define PRECISION 0.001

@@ -1,5 +1,5 @@
 // Independent old-formula and known-answer checks for the full LU residual.
-#include "../tier2/rodinia_lud/lud_residual.h"
+#include "../tier2/rodinia_lud/hip/lud_residual.h"
 #include <cstdio>
 #include <cstring>
 #include <limits>

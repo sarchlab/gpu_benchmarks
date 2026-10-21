@@ -40,7 +40,7 @@ def instrument(source):
 
 
 def host_tests(root,work,compiler):
-    source=(root/'tier2/shoc_scan/shoc_scan.hip').read_text()
+    source=(root/'tier2/shoc_scan/hip/shoc_scan.hip').read_text()
     start='static void scan_cpu('
     end='// ---------------------------------------------------------------------------\n// Main'
     if source.count(start)!=1 or source.count(end)!=1:raise ValueError('SHOC scan CPU reference anchors missing')
@@ -68,7 +68,7 @@ def main():
     if not args.host_only and not args.platform:ap.error('--platform required')
     root,work=args.source.resolve(),args.work_dir.resolve();work.mkdir(parents=True,exist_ok=False)
     if args.host_only:host_tests(root,work,args.compiler);return 0
-    relative=Path('tier2/shoc_scan');src=root/relative;source=(src/'shoc_scan.hip').read_text()
+    relative=Path('tier2/shoc_scan/hip');src=root/relative;source=(src/'shoc_scan.hip').read_text()
     inputs=[relative/n for n in ('shoc_scan.hip','Makefile','params.json')]
     inputs += [Path('common')/n for n in ('bench_timing.h','bench_warmup.h','hip_cuda_compat.h')]
     hashes={str(p):hashlib.sha256((root/p).read_bytes()).hexdigest() for p in inputs}

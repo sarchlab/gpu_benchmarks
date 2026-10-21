@@ -8,7 +8,7 @@
 #include <utility>
 
 #define main benchmark_main
-#include "../tier2/polybench_2mm/polybench_2mm.hip"
+#include "../tier2/polybench_2mm/hip/polybench_2mm.hip"
 #undef main
 
 enum Input { GENERAL, UPSTREAM, RANK_ONE };

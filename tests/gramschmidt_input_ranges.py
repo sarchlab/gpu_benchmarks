@@ -47,7 +47,7 @@ def expected(m, n):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--source',type=Path,default=Path(__file__).resolve().parents[1]/
-                    'tier2/polybench_gramschmidt/polybench_gramschmidt.hip')
+                    'tier2/polybench_gramschmidt/hip/polybench_gramschmidt.hip')
     ap.add_argument('--compiler',default='c++')
     ap.add_argument('--binary',type=Path,help='Also run invalid cases on the actual binary with GPUs hidden')
     ap.add_argument('--work-dir',type=Path,required=True,help='New directory for source, binary and logs')

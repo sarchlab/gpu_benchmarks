@@ -1,0 +1,71 @@
+{
+  "benchmark": "polybench_2mm",
+  "tier": 2,
+  "suite": "polybench",
+  "description": "PolyBench 2MM expression: tmp = alpha*A*B, then D = tmp*C + beta*D for square single-precision matrices. Two dependent tiled products run once. Emits raw per-stage GPU times; leading-order logical work 4*N^3 is derived downstream.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Square matrix dimension N (NxN matrices)",
+    "type": "int",
+    "values": [
+      64,
+      96,
+      128,
+      192,
+      256,
+      384,
+      512,
+      640,
+      768,
+      896,
+      1024,
+      1152,
+      1280,
+      1536,
+      1792,
+      2048,
+      2304,
+      2560,
+      2816,
+      3072,
+      3328,
+      3584,
+      3840,
+      4096
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "alpha",
+      "description": "Scaling factor applied once to the first matrix product A*B.",
+      "type": "float",
+      "default": 1.5,
+      "values": [
+        1.5
+      ]
+    },
+    {
+      "name": "beta",
+      "description": "Scaling factor for the initial final-output matrix D; no initial temporary contribution.",
+      "type": "float",
+      "default": 1.2,
+      "values": [
+        1.2
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Run the clock/cache warmer after input uploads and before the complete two-stage pass. No warmer runs between products; achieved clock/cache state requires target qualification.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "mm_kernel_1",
+    "mm_kernel_2"
+  ]
+}

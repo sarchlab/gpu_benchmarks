@@ -30,7 +30,7 @@ def expected(steps, bodies=32768, theta=0.5):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[1]/'tier2/lonestar_bh/lonestar_bh.hip')
+    ap.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[1]/'tier2/lonestar_bh/hip/lonestar_bh.hip')
     ap.add_argument('--compiler', default='c++')
     ap.add_argument('--binary', type=Path, help='Check invalid requests against the actual GPU-hidden binary')
     ap.add_argument('--work-dir', type=Path, required=True)

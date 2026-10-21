@@ -56,14 +56,14 @@ def main():
     if len(fields)!=3 or 'H100' not in fields[0] or fields[1]!=args.device_uuid:
         raise ValueError('This qualification profile requires the specified H100 GPU')
     work=args.work_dir.resolve();work.mkdir(parents=True)
-    manifest=json.loads((repo/'tier2/cuda_nbody/params.json').read_text())
+    manifest=json.loads((repo/'tier2/cuda_nbody/hip/params.json').read_text())
     sizes=manifest['scaling_param']['values'];steps=next(x['values'] for x in manifest['non_scaling_params'] if x['name']=='timesteps')
-    files=['tier2/cuda_nbody/cuda_nbody.hip','tier2/cuda_nbody/Makefile','tier2/cuda_nbody/params.json','common/bench_timing.h','common/bench_warmup.h','common/hip_cuda_compat.h']
+    files=['tier2/cuda_nbody/hip/cuda_nbody.hip','tier2/cuda_nbody/hip/Makefile','tier2/cuda_nbody/hip/params.json','common/bench_timing.h','common/bench_warmup.h','common/hip_cuda_compat.h']
     hashes={f:digest(repo/f) for f in files}
     for relative in files:
         destination=work/'source'/relative;destination.parent.mkdir(parents=True,exist_ok=True)
         shutil.copy2(repo/relative,destination)
-    folder=work/'source/tier2/cuda_nbody';binary=folder/'cuda_nbody'
+    folder=work/'source/tier2/cuda_nbody/hip';binary=folder/'cuda_nbody'
     with (work/'build.log').open('w') as log:
         subprocess.run(['make','-B','PLATFORM=cuda','CUDA_ARCH=sm_90'],cwd=folder,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=120)
     binary_hash=digest(binary)
@@ -114,7 +114,7 @@ def main():
         if not admitted:continue
         destination=work/'collection'/f'timesteps-{t}'
         (destination/'tier1').mkdir(parents=True)
-        bench=destination/'tier2/cuda_nbody';bench.mkdir(parents=True)
+        bench=destination/'tier2/cuda_nbody/hip';bench.mkdir(parents=True)
         selected=json.loads(json.dumps(manifest));selected['scaling_param']['values']=admitted
         for control in selected['non_scaling_params']:
             if control['name']=='timesteps':control['default']=t;control['values']=[t]

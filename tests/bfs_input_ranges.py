@@ -38,7 +38,7 @@ def host_source(source):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compiler',default='c++')
-    parser.add_argument('--source',type=Path,default=Path(__file__).resolve().parents[1]/'tier2/rodinia_bfs/rodinia_bfs.hip')
+    parser.add_argument('--source',type=Path,default=Path(__file__).resolve().parents[1]/'tier2/rodinia_bfs/hip/rodinia_bfs.hip')
     args=parser.parse_args();clean={k:v for k,v in os.environ.items() if not k.startswith('BENCH_PARAM_')}
     values=[(1,0,1),(17,0,33),(33,5,3),(1025,80,513),(8388608,80,256),
             (0,0,1),(-1,20,256),(1,-1,256),(1,1,0),(1,1,-1),

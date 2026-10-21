@@ -116,7 +116,7 @@ def main():
         raise RuntimeError('Run without Python optimization')
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--compiler',default='c++')
-    ap.add_argument('--source',type=Path,default=Path(__file__).resolve().parents[1]/'tier2/altis_gups/altis_gups.hip')
+    ap.add_argument('--source',type=Path,default=Path(__file__).resolve().parents[1]/'tier2/altis_gups/hip/altis_gups.hip')
     args=ap.parse_args();source=args.source.read_text()
     manifest=json.loads((args.source.parent/'params.json').read_text())
     triples=list(itertools.product(manifest['scaling_param']['values'],[256],[16384,65536,262144]))

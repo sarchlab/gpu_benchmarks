@@ -9,12 +9,12 @@ def main():
     ap.add_argument('--work-dir',type=Path,required=True);a=ap.parse_args()
     a.work_dir.mkdir(parents=True,exist_ok=False)
     source=a.work_dir/'ranges.cpp';binary=a.work_dir/'ranges'
-    source.write_text(r'''#include "tier2/parboil_lbm/lbm_common.h"
+    source.write_text(r'''#include "tier2/parboil_lbm/hip/lbm_common.h"
 int main()try{const auto p=lbm::parameters();const lbm::Layout l(p.n);
 printf("%d %d %d %zu\n",p.n,p.steps,l.entries,l.bytes());return 0;
 }catch(const std::exception& e){fprintf(stderr,"FAIL: %s\n",e.what());return 1;}''')
     subprocess.run([a.compiler,'-std=c++14','-O1','-g','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-sanitize-recover=all','-I',str(ROOT),str(source),'-o',str(binary)],check=True)
-    manifest=json.loads((ROOT/'tier2/parboil_lbm/params.json').read_text())
+    manifest=json.loads((ROOT/'tier2/parboil_lbm/hip/params.json').read_text())
     ns=manifest['scaling_param']['values'];ts=next(p['values'] for p in manifest['non_scaling_params'] if p['name']=='num_timesteps')
     cases=[dict(grid_dim=str(n),num_timesteps=str(t)) for n,t in itertools.product(ns,ts)]
     cases += [dict(grid_dim=str(n),num_timesteps='1') for n in (-2147483648,-1,0,1,2,3,17,460,470,471,475,480,483,484,50000,2147483647)]

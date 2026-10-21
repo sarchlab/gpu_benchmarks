@@ -5,7 +5,7 @@
 #include <cstring>
 #include <vector>
 #include <limits>
-#include "../tier2/polybench_2mm/cpu_reference.h"
+#include "../tier2/polybench_2mm/hip/cpu_reference.h"
 int main() {
   int cases=0;
   const int sizes[]={1,2,3,15,16,17,31,32,33,64,65,96,128,129};

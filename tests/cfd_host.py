@@ -16,7 +16,7 @@ def main():
         subprocess.run([str(binary)],check=True,timeout=120)
         # Exercise both zero-worker and partial-worker creation failure using
         # isolated header copies; production has no failure-injection controls.
-        header=(repo/'tier2/altis_cfd/cfd_reference.h').read_text()
+        header=(repo/'tier2/altis_cfd/hip/cfd_reference.h').read_text()
         loop='for(unsigned i=1;i<count;++i)workers.emplace_back(work);'
         assert header.count(loop)==1
         for failure in ['std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again))','std::bad_alloc()']:
@@ -24,7 +24,7 @@ def main():
                 altered=header.replace(loop,'for(unsigned i=1;i<count;++i) { if(workers.size()=='+str(started)+')throw '+failure+'; workers.emplace_back(work); }')
                 altered=altered.replace('std::min(16u,available)','4u')  # force partial-team coverage on two-core CI
                 (work/'cfd_reference.h').write_text(altered)
-                fallback=work/'fallback.cpp';fallback.write_text((repo/'tests/cfd_reference.cpp').read_text().replace('../tier2/altis_cfd/cfd_reference.h','cfd_reference.h'))
+                fallback=work/'fallback.cpp';fallback.write_text((repo/'tests/cfd_reference.cpp').read_text().replace('../tier2/altis_cfd/hip/cfd_reference.h','cfd_reference.h'))
                 subprocess.run([args.compiler,*flags,'-I'+str(repo/'tests'),str(fallback),'-o',str(binary)],check=True)
                 subprocess.run([str(binary)],check=True,timeout=120)
         print('PASS: complete references survive system_error/bad_alloc at zero-worker and partial-worker creation')
@@ -40,7 +40,7 @@ def main():
             expected_function='check_farfield' if line.startswith('u[4]') else 'check_mesh'
             assert rejected.returncode!=0 and 'assert' in rejected.stderr.lower() and expected_function in rejected.stderr,rejected
         print('PASS: independent upstream setup rejects both former gamma-rounding mutations')
-        source=work/'parameters.cpp';source.write_text('#include "'+str(repo/'tier2/altis_cfd/cfd_reference.h')+'"\n'+r'''
+        source=work/'parameters.cpp';source.write_text('#include "'+str(repo/'tier2/altis_cfd/hip/cfd_reference.h')+'"\n'+r'''
 int main(int argc,char**argv)try{auto p=cfd::parameters(argc,argv);printf("%d,%d,%d\n",p.cells,p.block,p.padded);}
 catch(const std::exception&e){fprintf(stderr,"FAIL: %s\n",e.what());return 1;}
 ''')

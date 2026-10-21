@@ -1,4 +1,4 @@
-#include "../tier2/npb_cg/nas_cg.h"
+#include "../tier2/npb_cg/hip/nas_cg.h"
 #include "fixtures/npb_cg_original.h"
 #include <cassert>
 #include <cstring>

@@ -1,5 +1,5 @@
 #define main lbm_production_main
-#include "../tier2/parboil_lbm/parboil_lbm.hip"
+#include "../tier2/parboil_lbm/hip/parboil_lbm.hip"
 #undef main
 namespace pinned {
 #include "upstream/lbm/layout_config.h"

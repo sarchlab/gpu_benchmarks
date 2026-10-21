@@ -116,9 +116,8 @@ for n in 1024 16384 262144 1048576 8388608; do
 done
 ```
 
-The `gpubench` harness does not yet discover `cuda/` subdirectories, so
-`gpubench run` still builds and runs the original source one level up.
-[TODO for cuda]
+`gpubench compile/run --platform cuda` builds and runs this directory;
+`--platform rocm` uses [`../hip/`](../hip/).
 
 ## Output
 
@@ -178,7 +177,7 @@ measurements.
 
 ## Qualification and tests
 
-These items exist for the original source but have not yet been ported to or
+These items exist for [`../hip/`](../hip/) but have not yet been ported to or
 run against this CUDA build:
 
 - CPU-reference oracle test (`tests/bfs_reference_test.cpp`) — it checks the
@@ -188,7 +187,7 @@ run against this CUDA build:
 - Per-level work-count instrumentation test (`tests/bfs_work_counts.py`). [TODO for cuda]
 - Input-range tests (`tests/bfs_input_ranges.py`). [TODO for cuda]
 - Host-adapter concurrency/sanitizer test (`tests/bfs_concurrent_kernels.py`). [TODO for cuda]
-- CI compile job for `cuda/`. [TODO for cuda]
-- `gpubench` harness discovery of `cuda/`. [TODO for cuda]
+- CI compiles this directory through `gpubench compile --tier 2 --platform cuda`;
+  no CUDA-specific test job runs yet. [TODO for cuda]
 - H100 qualification of all 81 declared configurations, GPU sanitizer and
   timing-order checks, and A100 qualification. [TODO for cuda]

@@ -1,6 +1,6 @@
 #include <cstdio>
 #include <limits>
-#include "../tier2/polybench_fdtd2d/cpu_reference.h"
+#include "../tier2/polybench_fdtd2d/hip/cpu_reference.h"
 int main() {
     int cases=0;
     for(int rows:{1,2,3,17,33})for(int cols:{1,2,5,16,33})for(int steps:{1,2,10,50}) for(int dataset=0;dataset<3;++dataset) {

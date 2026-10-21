@@ -84,14 +84,93 @@ func findRepoRoot() string {
 	return ""
 }
 
-// discoverBenchmarks finds all benchmarks matching the given filters.
-func discoverBenchmarks(repoRoot string, tier *int, suite, benchmark string) []*BenchmarkParams {
-	pattern := filepath.Join(repoRoot, "tier*", "*", "params.json")
-	matches, err := filepath.Glob(pattern)
+// Platform source variants. A benchmark either keeps a single source tree
+// (tier*/<bench>/params.json) or one tree per platform in these
+// subdirectories (tier*/<bench>/hip/params.json, tier*/<bench>/cuda/params.json).
+const (
+	hipVariant  = "hip"
+	cudaVariant = "cuda"
+)
+
+// manifestPaths returns every params.json in the repository, including both
+// platform variants of a benchmark, sorted.
+func manifestPaths(repoRoot string) ([]string, error) {
+	var paths []string
+	for _, pattern := range []string{
+		filepath.Join(repoRoot, "tier*", "*", "params.json"),
+		filepath.Join(repoRoot, "tier*", "*", hipVariant, "params.json"),
+		filepath.Join(repoRoot, "tier*", "*", cudaVariant, "params.json"),
+	} {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			return nil, err
+		}
+		paths = append(paths, matches...)
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+// manifestVariant returns the platform variant ("hip" or "cuda") a manifest
+// belongs to, or "" for a single-tree benchmark.
+func manifestVariant(paramsPath string) string {
+	switch v := filepath.Base(filepath.Dir(paramsPath)); v {
+	case hipVariant, cudaVariant:
+		return v
+	}
+	return ""
+}
+
+// manifestBenchDir returns the benchmark directory (tier*/<bench>) that owns a
+// manifest, skipping the platform-variant subdirectory when there is one.
+func manifestBenchDir(paramsPath string) string {
+	d := filepath.Dir(paramsPath)
+	if manifestVariant(paramsPath) != "" {
+		return filepath.Dir(d)
+	}
+	return d
+}
+
+// selectPlatformManifests keeps one manifest per benchmark directory. A
+// single-tree benchmark is always kept. For a benchmark with platform
+// variants, cuda prefers cuda/ and falls back to hip/ (whose Makefile also
+// builds with nvcc); rocm uses hip/ only.
+func selectPlatformManifests(paths []string, platform string) []string {
+	variants := make(map[string]map[string]string)
+	var order []string
+	for _, pp := range paths {
+		dir := manifestBenchDir(pp)
+		if _, seen := variants[dir]; !seen {
+			variants[dir] = make(map[string]string)
+			order = append(order, dir)
+		}
+		variants[dir][manifestVariant(pp)] = pp
+	}
+
+	preference := []string{"", hipVariant}
+	if platform == "cuda" {
+		preference = []string{"", cudaVariant, hipVariant}
+	}
+	var selected []string
+	for _, dir := range order {
+		for _, v := range preference {
+			if pp, ok := variants[dir][v]; ok {
+				selected = append(selected, pp)
+				break
+			}
+		}
+	}
+	return selected
+}
+
+// discoverBenchmarks finds all benchmarks matching the given filters, using
+// the source variant that matches platform ("cuda" or "rocm").
+func discoverBenchmarks(repoRoot string, tier *int, suite, benchmark, platform string) []*BenchmarkParams {
+	paths, err := manifestPaths(repoRoot)
 	if err != nil {
 		return nil
 	}
-	sort.Strings(matches)
+	matches := selectPlatformManifests(paths, platform)
 
 	var results []*BenchmarkParams
 	for _, pp := range matches {

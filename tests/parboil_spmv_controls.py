@@ -40,7 +40,7 @@ int main(int argc, char** argv) {
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compiler', default='c++')
-    parser.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[1]/'tier2/parboil_spmv/parboil_spmv.hip')
+    parser.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[1]/'tier2/parboil_spmv/hip/parboil_spmv.hip')
     args = parser.parse_args()
     # Expected resolved controls are literal, independent of production parsing.
     cases = [([], {}, 131072,80,0,42),

@@ -1,6 +1,6 @@
 #include <cstdio>
 #include <cstring>
-#include "../tier2/shoc_gemm/cpu_reference.h"
+#include "../tier2/shoc_gemm/hip/cpu_reference.h"
 
 static void original(const float* A, const float* B, float* C,
                      int M, int N, int K, float alpha, float beta) {

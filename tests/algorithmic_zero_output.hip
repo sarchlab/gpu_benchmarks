@@ -2,9 +2,9 @@
 // and unchanged guards. Compile separately for each self-contained benchmark.
 #define main benchmark_main
 #if defined(TEST_GRAM_ZERO) && !defined(TEST_MG_ZERO)
-#include "../tier2/polybench_gramschmidt/polybench_gramschmidt.hip"
+#include "../tier2/polybench_gramschmidt/hip/polybench_gramschmidt.hip"
 #elif defined(TEST_MG_ZERO) && !defined(TEST_GRAM_ZERO)
-#include "../tier2/npb_mg/npb_mg.hip"
+#include "../tier2/npb_mg/hip/npb_mg.hip"
 #else
 #error Select exactly one of TEST_GRAM_ZERO or TEST_MG_ZERO
 #endif

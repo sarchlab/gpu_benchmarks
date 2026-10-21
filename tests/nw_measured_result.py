@@ -53,10 +53,10 @@ def instrument(source):
 def build(repo, work, platform, hooks):
     work.mkdir(parents=True)
     shutil.copytree(repo/'common', work/'common')
-    folder=work/'tier2/rodinia_nw';folder.mkdir(parents=True)
+    folder=work/'tier2/rodinia_nw/hip';folder.mkdir(parents=True)
     for name in ('Makefile','params.json'):
-        shutil.copy2(repo/'tier2/rodinia_nw'/name,folder/name)
-    source=(repo/'tier2/rodinia_nw/rodinia_nw.hip').read_text()
+        shutil.copy2(repo/'tier2/rodinia_nw/hip'/name,folder/name)
+    source=(repo/'tier2/rodinia_nw/hip/rodinia_nw.hip').read_text()
     (folder/'rodinia_nw.hip').write_text(instrument(source) if hooks else source)
     with (work/'build.log').open('w') as log:
         subprocess.run(['make','PLATFORM='+platform],cwd=folder,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=120)
@@ -107,7 +107,7 @@ def main():
     if args.compile_only:
         print('NW measured-result/score/resource hooks compiled; GPU tests not executed');return
     production=build(repo,work/'production',args.platform,False)
-    manifest=json.loads((repo/'tier2/rodinia_nw/params.json').read_text())
+    manifest=json.loads((repo/'tier2/rodinia_nw/hip/params.json').read_text())
     clean={k:v for k,v in os.environ.items() if not k.startswith(('BENCH_PARAM_','NW_TEST_'))}
     triples=[(2048,16,2),(1,1,1),(1,16,2),(16,16,10),(17,16,5),(17,3,2),(33,32,1),
              (64,32,5),(65,16,2),(256,16,1),(257,32,10),(4097,16,2)]

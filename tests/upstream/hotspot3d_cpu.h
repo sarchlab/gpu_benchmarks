@@ -2,7 +2,7 @@
 // Frozen numerical bodies from HPC-FAIR/rodinia_3.1 at
 // 366b283456506ef2fe2c2b7dc5e83e941ffc5524, cuda/hotspot3D/3D.cu.
 // Copyright (c)2008-2011 University of Virginia. See
-// ../../tier2/rodinia_hotspot3d/UPSTREAM_LICENSE for the complete license.
+// ../../tier2/rodinia_hotspot3d/hip/UPSTREAM_LICENSE for the complete license.
 // Adaptations: namespace/inline scaffolding, physics returned as a struct,
 // CPU final-buffer return (the upstream wrapper exposes the wrong parity).
 namespace pinned_hotspot3d {

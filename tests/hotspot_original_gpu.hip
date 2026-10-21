@@ -1,5 +1,5 @@
 #define main hotspot_production_main
-#include "../tier2/rodinia_hotspot/rodinia_hotspot.hip"
+#include "../tier2/rodinia_hotspot/hip/rodinia_hotspot.hip"
 #undef main
 #include "upstream/hotspot_physics.h"
 #include "upstream/hotspot_gpu.hip"

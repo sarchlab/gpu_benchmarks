@@ -1,0 +1,61 @@
+{
+  "benchmark": "polybench_fdtd2d",
+  "tier": 2,
+  "suite": "polybench",
+  "description": "2D Finite Difference Time Domain electromagnetic simulation with three field arrays (ex, ey, hz). Three GPU kernels update fields per time step. Every measured final ex/ey/hz value is checked against a complete independent double CPU recurrence after timing (verification=full_cpu_v1).",
+  "scaling_param": {
+    "name": "size",
+    "description": "Grid dimension N (NxN grid for each field array)",
+    "type": "int",
+    "values": [
+      64,
+      128,
+      192,
+      256,
+      384,
+      512,
+      640,
+      768,
+      1024,
+      1280,
+      1536,
+      2048,
+      2560,
+      3072,
+      3584,
+      4096,
+      5120,
+      6144,
+      7168,
+      8192
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "tmax",
+      "description": "Number of time steps per benchmark iteration",
+      "type": "int",
+      "default": 50,
+      "values": [
+        10,
+        50,
+        200
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "fdtd_update_ex",
+    "fdtd_update_ey",
+    "fdtd_update_hz"
+  ]
+}

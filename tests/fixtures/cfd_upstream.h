@@ -1,5 +1,5 @@
 // Frozen pinned Altis 042e2926d1fe9a5ea5b3e2d659b75bf925b152cc euler3d.cu solver bodies.
-// License: ../../tier2/altis_cfd/UPSTREAM_LICENSE. Original solver bodies and host setup;
+// License: ../../tier2/altis_cfd/hip/UPSTREAM_LICENSE. Original solver bodies and host setup;
 // the namespace and result wrapper expose independent upstream constants to tests.
 #pragma once
 namespace cfd_upstream {

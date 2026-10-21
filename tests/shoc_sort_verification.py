@@ -56,7 +56,7 @@ def instrument(source):
 
 
 def host_checks(root,work,compiler):
-    source=(root/'tier2/shoc_sort/shoc_sort.hip').read_text()
+    source=(root/'tier2/shoc_sort/hip/shoc_sort.hip').read_text()
     start='static bool verifySort('; end='// ---------------------------------------------------------------------------\n// Main'
     if source.count(start)!=1 or source.count(end)!=1: raise ValueError('Sort checker anchors missing')
     prefix='''#include <cstdio>
@@ -98,7 +98,7 @@ def main():
     if not args.host_only and not args.platform:ap.error('--platform required')
     root,work=args.source.resolve(),args.work_dir.resolve();work.mkdir(parents=True,exist_ok=False)
     if args.host_only:host_checks(root,work,args.compiler);return 0
-    rel=Path('tier2/shoc_sort');src=root/rel;source=(src/'shoc_sort.hip').read_text()
+    rel=Path('tier2/shoc_sort/hip');src=root/rel;source=(src/'shoc_sort.hip').read_text()
     inputs=[rel/n for n in ('shoc_sort.hip','Makefile','params.json')]
     inputs += [Path('common')/n for n in ('bench_timing.h','bench_warmup.h','hip_cuda_compat.h')]
     hashes={str(p):hashlib.sha256((root/p).read_bytes()).hexdigest() for p in inputs};binaries={}

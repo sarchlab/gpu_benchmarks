@@ -1,6 +1,6 @@
 // Compare the actual production kernels with frozen PolyBench/GPU kernels.
 #define main jacobi_benchmark_main
-#include "../tier2/polybench_jacobi2d/polybench_jacobi2d.hip"
+#include "../tier2/polybench_jacobi2d/hip/polybench_jacobi2d.hip"
 #undef main
 #include "fixtures/polybench_jacobi_original.h"
 #include "fixtures/polybench_jacobi_original_gpu.h"

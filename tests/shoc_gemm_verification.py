@@ -38,7 +38,7 @@ def instrument(source):
 ''' + reference)
 
 def host_tests(root, work, compiler):
-    relative=Path("tier2/shoc_gemm/cpu_reference.h")
+    relative=Path("tier2/shoc_gemm/hip/cpu_reference.h")
     original=(root/relative).read_text()
     for label,fail_at in (("normal",None),("no-threads",1),("partial-threads",2)):
         path=work/label
@@ -76,7 +76,7 @@ def main():
     if args.host_only:
         host_tests(args.source, args.work_dir, args.compiler)
         return 0
-    relative = Path('tier2/shoc_gemm')
+    relative = Path('tier2/shoc_gemm/hip')
     src = args.source / relative
     source = (src / 'shoc_gemm.hip').read_text()
     inputs = [relative / n for n in ('shoc_gemm.hip', 'cpu_reference.h', 'Makefile', 'params.json')]

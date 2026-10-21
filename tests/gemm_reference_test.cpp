@@ -1,6 +1,6 @@
 #include <cstdio>
 #include <limits>
-#include "../tier2/polybench_gemm/cpu_reference.h"
+#include "../tier2/polybench_gemm/hip/cpu_reference.h"
 int main() {
     int cases=0;
     for(int rows:{1,3,4,5,17,33,65})for(int cols:{1,7,31,32,33})for(int inner:{1,2,17,33})

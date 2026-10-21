@@ -14,9 +14,9 @@ def main():
     with tempfile.TemporaryDirectory(prefix='particlefilter-host-') as d:
         work=Path(d);binary=work/'test'
         subprocess.run([args.compiler,*flags,str(repo/'tests/particlefilter_reference.cpp'),'-o',str(binary)],check=True);subprocess.run([str(binary)],check=True,timeout=120)
-        folder=work/'tier2/altis_particlefilter';folder.mkdir(parents=True);tests=work/'tests';tests.mkdir();shutil.copytree(repo/'tests/fixtures',tests/'fixtures')
-        shutil.copy2(repo/'tests/particlefilter_reference.cpp',tests);shutil.copy2(repo/'tier2/altis_particlefilter/particlefilter_input.h',folder)
-        ref=(repo/'tier2/altis_particlefilter/particlefilter_reference.h').read_text();anchor='for(unsigned i=1;i<workers;++i)threads.emplace_back(work);';assert ref.count(anchor)==1
+        folder=work/'tier2/altis_particlefilter/hip';folder.mkdir(parents=True);tests=work/'tests';tests.mkdir();shutil.copytree(repo/'tests/fixtures',tests/'fixtures')
+        shutil.copy2(repo/'tests/particlefilter_reference.cpp',tests);shutil.copy2(repo/'tier2/altis_particlefilter/hip/particlefilter_input.h',folder)
+        ref=(repo/'tier2/altis_particlefilter/hip/particlefilter_reference.h').read_text();anchor='for(unsigned i=1;i<workers;++i)threads.emplace_back(work);';assert ref.count(anchor)==1
         for started in [0,2]:
             for failure in ['std::bad_alloc()','std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again))']:
                 modified=ref.replace('std::min(16u,std::max(1u,std::thread::hardware_concurrency()))','4u').replace(anchor,'for(unsigned i=1;i<workers;++i) {if(threads.size()=='+str(started)+')throw '+failure+';threads.emplace_back(work);}')

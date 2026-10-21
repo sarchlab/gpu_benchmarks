@@ -49,7 +49,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='verification-controls-') as temp:
         root=Path(temp)
         for name in BENCHMARKS:
-            path=args.source/'tier2'/name/(name+'.hip')
+            path=args.source/'tier2'/name/'hip'/(name+'.hip')
             source=path.read_text()
             cpp=root/(name+'.cpp');binary=root/name
             try:

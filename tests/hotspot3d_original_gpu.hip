@@ -1,5 +1,5 @@
 #define main hotspot3d_production_main
-#include "../tier2/rodinia_hotspot3d/rodinia_hotspot3d.hip"
+#include "../tier2/rodinia_hotspot3d/hip/rodinia_hotspot3d.hip"
 #undef main
 #include "upstream/hotspot3d_cpu.h"
 #include "upstream/hotspot3d_gpu.hip"

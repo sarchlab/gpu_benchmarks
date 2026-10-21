@@ -41,9 +41,9 @@ def instrument(source,header):
     return source,header
 
 def build(repo,work,platform,hooks):
-    work.mkdir(parents=True);shutil.copytree(repo/'common',work/'common');folder=work/'tier2/rodinia_hotspot';folder.mkdir(parents=True)
-    for name in ['Makefile','params.json']:shutil.copy2(repo/'tier2/rodinia_hotspot'/name,folder/name)
-    source=(repo/'tier2/rodinia_hotspot/rodinia_hotspot.hip').read_text();header=(repo/'tier2/rodinia_hotspot/hotspot_reference.h').read_text()
+    work.mkdir(parents=True);shutil.copytree(repo/'common',work/'common');folder=work/'tier2/rodinia_hotspot/hip';folder.mkdir(parents=True)
+    for name in ['Makefile','params.json']:shutil.copy2(repo/'tier2/rodinia_hotspot/hip'/name,folder/name)
+    source=(repo/'tier2/rodinia_hotspot/hip/rodinia_hotspot.hip').read_text();header=(repo/'tier2/rodinia_hotspot/hip/hotspot_reference.h').read_text()
     if hooks:source,header=instrument(source,header)
     (folder/'rodinia_hotspot.hip').write_text(source);(folder/'hotspot_reference.h').write_text(header)
     with (work/'build.log').open('w') as log:subprocess.run(['make','PLATFORM='+platform],cwd=folder,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=120)
@@ -103,7 +103,7 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--platform',choices=['cuda','rocm'],default='cuda');ap.add_argument('--work-dir',type=Path,required=True);ap.add_argument('--compile-only',action='store_true');args=ap.parse_args()
     repo=Path(__file__).resolve().parents[1];work=args.work_dir.resolve();hooks=build(repo,work/'instrumented',args.platform,True)
     if args.compile_only:print('HotSpot output/work/worker-failure hooks compiled; GPU tests not executed');return
-    production=build(repo,work/'production',args.platform,False);config=json.loads((repo/'tier2/rodinia_hotspot/params.json').read_text());sizes=config['scaling_param']['values'];heights=next(x['values'] for x in config['non_scaling_params'] if x['name']=='pyramid_height')
+    production=build(repo,work/'production',args.platform,False);config=json.loads((repo/'tier2/rodinia_hotspot/hip/params.json').read_text());sizes=config['scaling_param']['values'];heights=next(x['values'] for x in config['non_scaling_params'] if x['name']=='pyramid_height')
     cases=[(n,360,p,{}) for n in sizes for p in heights]
     cases += [(n,t,p,{}) for n in [1,2,15,16,17,31,32,33] for p in [1,2,4,7] for t in [1,3,8]]
     cases += [(17,10,p,{}) for p in [3,5,6]]+[(1536,5,3,{}),(8192,3,7,{}),(1385,3,7,{}),(1386,3,7,{})]

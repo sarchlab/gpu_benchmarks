@@ -19,13 +19,13 @@ SOURCE_SUFFIXES = {'.hip', '.h', '.hpp', '.cu', '.cuh', '.c', '.cc', '.cpp', '.i
 
 def source_paths(repo, benchmark):
     """Include new benchmark-local helpers rather than trusting a profile's list."""
-    folder = repo / 'tier2' / benchmark
-    paths = {f'tier2/{benchmark}/{name}' for name in
+    folder = repo / 'tier2' / benchmark / 'hip'
+    paths = {f'tier2/{benchmark}/hip/{name}' for name in
              (benchmark + '.hip', 'Makefile', 'params.json')}
     paths.update(str(path.relative_to(repo)) for path in folder.rglob('*')
                  if path.is_file() and path.suffix in SOURCE_SUFFIXES)
     if (folder / 'UPSTREAM_LICENSE').is_file():
-        paths.add(f'tier2/{benchmark}/UPSTREAM_LICENSE')
+        paths.add(f'tier2/{benchmark}/hip/UPSTREAM_LICENSE')
     return paths.union(COMMON)
 
 
@@ -37,7 +37,7 @@ def require(condition, message):
 def check_profile(repo, benchmark, profile=None):
     repo = Path(repo)
     axes, verification = PROFILES[benchmark]
-    folder = repo / 'tier2' / benchmark
+    folder = repo / 'tier2' / benchmark / 'hip'
     if profile is None:
         profile = json.loads((folder / 'h100_profile.json').read_text())
     require(type(profile) is dict, f'{benchmark}: expected a profile object')

@@ -1,0 +1,60 @@
+{
+  "benchmark": "altis_particlefilter",
+  "tier": 2,
+  "suite": "altis",
+  "description": "Pinned Altis double-precision video particle filter: GPU likelihood, reduction, normalization, sequential CDF, thresholds and linear resampling; ten updates and full measured-result verification.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Number of particles",
+    "type": "int",
+    "values": [
+      500,
+      750,
+      1000,
+      1500,
+      2000,
+      3000,
+      5000,
+      7500,
+      10000,
+      15000,
+      20000,
+      30000,
+      50000,
+      75000,
+      100000,
+      150000,
+      200000,
+      300000,
+      500000,
+      750000,
+      1000000,
+      1500000,
+      2000000,
+      3000000,
+      5000000,
+      7500000,
+      10000000
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "likelihood_kernel",
+    "sum_kernel",
+    "normalize_weights_kernel",
+    "cdf_kernel",
+    "thresholds_kernel",
+    "find_index_kernel"
+  ]
+}

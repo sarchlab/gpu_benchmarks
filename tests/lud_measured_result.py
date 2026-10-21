@@ -47,8 +47,8 @@ def main():
     args.source = args.source.resolve()
     args.work_dir = args.work_dir.resolve()
     args.work_dir.mkdir(parents=True, exist_ok=False)
-    src = args.source / "tier2/rodinia_lud"
-    dst = args.work_dir / "tier2/rodinia_lud"
+    src = args.source / "tier2/rodinia_lud/hip"
+    dst = args.work_dir / "tier2/rodinia_lud/hip"
     shutil.copytree(src, dst, ignore=shutil.ignore_patterns("rodinia_lud"))
     shutil.copytree(args.source / "common", args.work_dir / "common")
     source = (src / "rodinia_lud.hip").read_text()

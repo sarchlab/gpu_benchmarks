@@ -1,4 +1,4 @@
-#include "../tier2/altis_particlefilter/particlefilter_reference.h"
+#include "../tier2/altis_particlefilter/hip/particlefilter_reference.h"
 #include "fixtures/particlefilter_upstream_host.h"
 #include <cassert>
 #include <cstdio>

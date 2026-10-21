@@ -35,9 +35,9 @@ def instrument(s):
     return replace_once(s,'    const std::vector<double> expected=hotspot3d::reference(problem,coefficients,in);','    if(getenv("HS3D_TEST_REFERENCE_FAILURE"))throw std::bad_alloc();\n    const std::vector<double> expected=hotspot3d::reference(problem,coefficients,in);')
 
 def build(repo,work,platform,hooks):
-    work.mkdir(parents=True);shutil.copytree(repo/'common',work/'common');folder=work/'tier2/rodinia_hotspot3d';folder.mkdir(parents=True)
-    for name in ['Makefile','hotspot3d_reference.h','params.json']:shutil.copy2(repo/'tier2/rodinia_hotspot3d'/name,folder/name)
-    source=(repo/'tier2/rodinia_hotspot3d/rodinia_hotspot3d.hip').read_text();(folder/'rodinia_hotspot3d.hip').write_text(instrument(source) if hooks else source)
+    work.mkdir(parents=True);shutil.copytree(repo/'common',work/'common');folder=work/'tier2/rodinia_hotspot3d/hip';folder.mkdir(parents=True)
+    for name in ['Makefile','hotspot3d_reference.h','params.json']:shutil.copy2(repo/'tier2/rodinia_hotspot3d/hip'/name,folder/name)
+    source=(repo/'tier2/rodinia_hotspot3d/hip/rodinia_hotspot3d.hip').read_text();(folder/'rodinia_hotspot3d.hip').write_text(instrument(source) if hooks else source)
     with (work/'build.log').open('w') as log:subprocess.run(['make','PLATFORM='+platform],cwd=folder,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=120)
     return folder/'rodinia_hotspot3d'
 
@@ -76,7 +76,7 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--platform',choices=['cuda','rocm'],default='cuda');ap.add_argument('--work-dir',type=Path,required=True);ap.add_argument('--compile-only',action='store_true');args=ap.parse_args()
     repo=Path(__file__).resolve().parents[1];work=args.work_dir.resolve();hooks=build(repo,work/'instrumented',args.platform,True)
     if args.compile_only:print('HotSpot3D actual-output/storage hooks compiled; GPU tests not executed');return
-    production=build(repo,work/'production',args.platform,False);manifest=json.loads((repo/'tier2/rodinia_hotspot3d/params.json').read_text())
+    production=build(repo,work/'production',args.platform,False);manifest=json.loads((repo/'tier2/rodinia_hotspot3d/hip/params.json').read_text())
     sizes=manifest['scaling_param']['values'];steps=next(p['values'] for p in manifest['non_scaling_params'] if p['name']=='num_iterations')
     cases=[(n,t,8,80.0,{}) for n in sizes for t in steps]
     cases += [(n,t,b,a,{}) for n,t,b,a in [(1,1,1,80.0),(1,2,8,80.0),(2,3,1,80.0),(3,3,10,80.0),(17,2,8,80.0),(17,3,8,80.125),(17,3,8,-20.5),(17,3,8,0.0),(17,3,8,79.9)]]

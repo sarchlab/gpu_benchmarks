@@ -1,6 +1,6 @@
 #include <cstdio>
 #include <limits>
-#include "../tier2/polybench_correlation/cpu_reference.h"
+#include "../tier2/polybench_correlation/hip/cpu_reference.h"
 static bool close_reference(double actual,long double expected) {
     return std::isfinite(actual)&&std::isfinite(expected)&&
         std::fabs((long double)actual-expected)<=1e-12L*std::max(1.0L,std::fabs(expected));

@@ -147,8 +147,8 @@ def main():
     shutil.copytree(args.source / "common", args.work_dir / "common")
     results = []
     for name in args.benchmark or sorted(SITES):
-        src = args.source / "tier2" / name
-        dest = args.work_dir / "tier2" / name
+        src = args.source / "tier2" / name / "hip"
+        dest = args.work_dir / "tier2" / name / "hip"
         dest.mkdir(parents=True)
         for filename in ("Makefile", "params.json"):
             shutil.copy2(src / filename, dest / filename)

@@ -1,4 +1,4 @@
-#include "../tier2/polybench_jacobi2d/jacobi_reference.h"
+#include "../tier2/polybench_jacobi2d/hip/jacobi_reference.h"
 #include "fixtures/polybench_jacobi_original.h"
 #include <limits>
 static void require(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}

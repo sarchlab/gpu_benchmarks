@@ -1,7 +1,7 @@
 // Frozen functions from utcs-scea/altis 042e2926d1fe9a5ea5b3e2d659b75bf925b152cc
 // src/cuda/level2/particlefilter/ex_particle_CUDA_float_seq.cu
 // Original file SHA256: 1e3eff2700178cb79957bd6244d7a73b4bc41ba2554530c422a2f31b66045ad4
-// Copyright and terms: ../../tier2/altis_particlefilter/UPSTREAM_LICENSE.
+// Copyright and terms: ../../tier2/altis_particlefilter/hip/UPSTREAM_LICENSE.
 #pragma once
 // d_randu uses defined wrap; d_randn repairs only log(0). All other frozen
 // function bodies below are unchanged except trailing whitespace. The regression driver decomposes the

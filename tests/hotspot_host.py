@@ -14,7 +14,7 @@ def main():
         work=Path(name);exe=work/'test'
         subprocess.run([args.compiler,*flags,str(repo/'tests/hotspot_reference.cpp'),'-o',str(exe)],check=True)
         subprocess.run([str(exe),*(['--all-inputs'] if args.all_inputs else [])],check=True,timeout=300)
-        source=work/'params.cpp';source.write_text('#include "'+str(repo/'tier2/rodinia_hotspot/hotspot_reference.h')+'"\n'+r"""
+        source=work/'params.cpp';source.write_text('#include "'+str(repo/'tier2/rodinia_hotspot/hip/hotspot_reference.h')+'"\n'+r"""
 int main(int argc,char**argv)try{auto p=hotspot::parameters(argc,argv);auto g=hotspot::geometry(p);printf("%d,%d,%d,%d,%llu\n",p.n,p.steps,p.pyramid,g.blocks,(unsigned long long)g.launches);}
 catch(const std::exception& e){fprintf(stderr,"FAIL: %s\n",e.what());return 1;}
 """)
@@ -35,7 +35,7 @@ catch(const std::exception& e){fprintf(stderr,"FAIL: %s\n",e.what());return 1;}
             assert (run.returncode==1 and not run.stdout and run.stderr.startswith('FAIL:')) if want is None else (run.returncode==0 and not run.stderr and run.stdout.strip()==want),(values,cli,run)
         print(f'PASS: {len(cases)} actual parameter/precedence/overflow cases')
         # Inject partial thread-creation failures only into an isolated header.
-        header=(repo/'tier2/rodinia_hotspot/hotspot_reference.h').read_text();anchor='                threads.emplace_back([this,id]() {';assert header.count(anchor)==1
+        header=(repo/'tier2/rodinia_hotspot/hip/hotspot_reference.h').read_text();anchor='                threads.emplace_back([this,id]() {';assert header.count(anchor)==1
         header=header.replace(anchor,'                if(const char* fail=std::getenv("HS2D_TEST_WORKER_FAIL_AFTER"))if(id-1==static_cast<unsigned>(std::strtoul(fail,nullptr,10)))throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again));\n'+anchor)
         (work/'hotspot_reference.h').write_text(header);source.write_text(r"""#include "hotspot_reference.h"
 int main()try{hotspot::RowPool pool(8);return 2;}catch(const std::system_error&){return 0;}

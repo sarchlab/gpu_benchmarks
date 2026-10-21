@@ -41,9 +41,9 @@ static void upload_farfield()''')
     return s
 
 def build(repo,work,platform,hooks):
-    work.mkdir(parents=True);shutil.copytree(repo/'common',work/'common');folder=work/'tier2/altis_cfd';folder.mkdir(parents=True)
-    for name in ['Makefile','cfd_reference.h','cfd_kernels.h','params.json']:shutil.copy2(repo/'tier2/altis_cfd'/name,folder/name)
-    source=(repo/'tier2/altis_cfd/altis_cfd.hip').read_text();(folder/'altis_cfd.hip').write_text(instrument(source) if hooks else source)
+    work.mkdir(parents=True);shutil.copytree(repo/'common',work/'common');folder=work/'tier2/altis_cfd/hip';folder.mkdir(parents=True)
+    for name in ['Makefile','cfd_reference.h','cfd_kernels.h','params.json']:shutil.copy2(repo/'tier2/altis_cfd/hip'/name,folder/name)
+    source=(repo/'tier2/altis_cfd/hip/altis_cfd.hip').read_text();(folder/'altis_cfd.hip').write_text(instrument(source) if hooks else source)
     with (work/'build.log').open('w') as log:subprocess.run(['make','PLATFORM='+platform],cwd=folder,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=120)
     return folder/'altis_cfd'
 
@@ -76,7 +76,7 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--platform',choices=['cuda','rocm'],default='cuda');ap.add_argument('--work-dir',type=Path,required=True);ap.add_argument('--compile-only',action='store_true');args=ap.parse_args()
     repo=Path(__file__).resolve().parents[1];work=args.work_dir.resolve();instrumented=build(repo,work/'instrumented',args.platform,True)
     if args.compile_only:print('CFD actual-output/omission/failure hooks compiled; no GPU execution claimed');return
-    production=build(repo,work/'production',args.platform,False);manifest=json.loads((repo/'tier2/altis_cfd/params.json').read_text());sizes=manifest['scaling_param']['values']
+    production=build(repo,work/'production',args.platform,False);manifest=json.loads((repo/'tier2/altis_cfd/hip/params.json').read_text());sizes=manifest['scaling_param']['values']
     cases=[(n,256,{}) for n in sizes]
     cases += [(n,b,{}) for n,b in [(1,1),(2,7),(5,32),(6,64),(7,128),(31,256),(503,7),(503,31),(503,512),(503,1024),(97000,256)]]
     n,b=503,256;padded=(n+b-1)//b*b

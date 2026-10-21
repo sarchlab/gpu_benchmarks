@@ -41,7 +41,7 @@ def main():
         ap.error("runtime sanitizer checks currently require CUDA Compute Sanitizer")
     args.source,args.work_dir = args.source.resolve(),args.work_dir.resolve()
     args.work_dir.mkdir(parents=True,exist_ok=False)
-    relative = Path("tier2/parboil_cutcp")
+    relative = Path("tier2/parboil_cutcp/hip")
     src = args.source / relative
     source = (src / "parboil_cutcp.hip").read_text()
     inputs = [relative / n for n in ("parboil_cutcp.hip","cpu_reference.h","Makefile","params.json")]

@@ -42,9 +42,9 @@ def main():
     ap.add_argument('--work-dir',type=Path,required=True)
     ap.add_argument('--compile-only',action='store_true')
     args=ap.parse_args();repo=Path(__file__).resolve().parents[1];work=args.work_dir.resolve();work.mkdir(parents=True)
-    shutil.copytree(repo/'common',work/'common');folder=work/'tier2/cuda_nbody';folder.mkdir(parents=True)
-    for name in ('Makefile','params.json'):shutil.copy2(repo/'tier2/cuda_nbody'/name,folder/name)
-    (folder/'cuda_nbody.hip').write_text(instrument((repo/'tier2/cuda_nbody/cuda_nbody.hip').read_text()))
+    shutil.copytree(repo/'common',work/'common');folder=work/'tier2/cuda_nbody/hip';folder.mkdir(parents=True)
+    for name in ('Makefile','params.json'):shutil.copy2(repo/'tier2/cuda_nbody/hip'/name,folder/name)
+    (folder/'cuda_nbody.hip').write_text(instrument((repo/'tier2/cuda_nbody/hip/cuda_nbody.hip').read_text()))
     with (work/'build.log').open('w') as log:
         subprocess.run(['make','PLATFORM='+args.platform],cwd=folder,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=120)
     if args.compile_only:

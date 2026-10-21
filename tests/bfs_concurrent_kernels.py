@@ -60,7 +60,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compiler',default='c++')
     parser.add_argument('--sanitizer',choices=('address','thread'),default='address')
-    parser.add_argument('--source',type=Path,default=Path(__file__).resolve().parents[1]/'tier2/rodinia_bfs/rodinia_bfs.hip')
+    parser.add_argument('--source',type=Path,default=Path(__file__).resolve().parents[1]/'tier2/rodinia_bfs/hip/rodinia_bfs.hip')
     args=parser.parse_args();source=args.source.read_text()
     start=source.index('__global__ void bfs_kernel');end=source.index('// Graph generation',start)
     kernels=source[start:end]

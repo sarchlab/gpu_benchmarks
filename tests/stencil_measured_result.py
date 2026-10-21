@@ -65,7 +65,7 @@ def main():
     args.source,args.work_dir=args.source.resolve(),args.work_dir.resolve()
     try:args.work_dir.mkdir(parents=True,exist_ok=False)
     except FileExistsError:ap.error("--work-dir must name a new, nonexistent directory")
-    src=args.source/"tier2/parboil_stencil";dst=args.work_dir/"tier2/parboil_stencil"
+    src=args.source/"tier2/parboil_stencil/hip";dst=args.work_dir/"tier2/parboil_stencil/hip"
     dst.mkdir(parents=True)
     shutil.copytree(args.source/"common",args.work_dir/"common")
     for name in ("Makefile","params.json"):

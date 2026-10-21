@@ -1,4 +1,4 @@
-#include "../tier2/rodinia_hotspot/hotspot_reference.h"
+#include "../tier2/rodinia_hotspot/hip/hotspot_reference.h"
 #include "upstream/hotspot_physics.h"
 #include <cassert>
 

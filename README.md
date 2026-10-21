@@ -127,7 +127,8 @@ gpu_benchmarks/
 │   ├── warp_shuffle/
 │   └── empty_kernel/
 ├── tier2/                          # Application benchmarks (61)
-│   ├── Makefile
+│   ├── Makefile                    # builds <bench>/cuda (NVIDIA) or <bench>/hip (ROCm)
+│   │                               # each <bench>/ holds hip/ (HIP source) and cuda/ (native CUDA port)
 │   ├── shoc_fft/
 │   ├── shoc_gemm/
 │   ├── shoc_reduction/
@@ -325,8 +326,8 @@ The metric column names downstream quantities. See [measurement interpretation](
 | CUDA SDK Extended | `cuda_nbody` | N-body gravitational simulation |
 | CUDA SDK Extended | `cuda_convolution_separable` | Separable 2D convolution |
 | CUDA SDK Extended | `cuda_scan_large` | Work-efficient parallel prefix sum |
-| [Unresolved attribution](tier2/tango_blackscholes/README.md#provenance--fidelity) | `tango_blackscholes` | Black-Scholes option pricing (legacy Tango identifier) |
-| [Unresolved attribution](tier2/tango_binomial_options/README.md#provenance--fidelity) | `tango_binomial_options` | American put option pricing (legacy Tango identifier) |
+| [Unresolved attribution](tier2/tango_blackscholes/hip/README.md#provenance--fidelity) | `tango_blackscholes` | Black-Scholes option pricing (legacy Tango identifier) |
+| [Unresolved attribution](tier2/tango_binomial_options/hip/README.md#provenance--fidelity) | `tango_binomial_options` | American put option pricing (legacy Tango identifier) |
 | NPB-GPU | `npb_ep` | Embarrassingly Parallel (EP) |
 | NPB-GPU | `npb_is` | Integer Sort (IS) |
 | NPB-GPU | `npb_cg` | Conjugate Gradient (CG) |

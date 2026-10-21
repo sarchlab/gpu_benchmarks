@@ -1,0 +1,65 @@
+{
+  "benchmark": "chai_cedd",
+  "tier": 2,
+  "suite": "chai",
+  "description": "Pinned Chai four-stage byte CEDD: 3x3 Gaussian with per-term truncation, Sobel magnitude/direction, strict non-maximum suppression, fixed 10/70 midpoint thresholding. One frame per process; full measured-output CPU verification after timing.",
+  "scaling_param": {
+    "name": "width",
+    "description": "Image width in pixels (W= parameter). Height is set independently via the `height` parameter (default 2048), so the image is not necessarily square; total pixels = width \u00d7 height.",
+    "type": "int",
+    "values": [
+      64,
+      128,
+      256,
+      384,
+      512,
+      640,
+      768,
+      1024,
+      1280,
+      1536,
+      2048,
+      2560,
+      3072,
+      3584,
+      4096,
+      5120,
+      6144,
+      7168,
+      8192,
+      10240,
+      12288,
+      16384
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "height",
+      "description": "Image height in pixels (H= parameter)",
+      "type": "int",
+      "default": 2048,
+      "values": [
+        512,
+        1024,
+        2048,
+        4096
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Optional shared clock/cache warmer after input upload and scratch initialization, before the first timed stage only. Dependent stages retain naturally evolving state; false leaves the incoming state as-is.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "gaussian_kernel",
+    "sobel_kernel",
+    "non_max_supp_kernel",
+    "hyst_kernel"
+  ]
+}

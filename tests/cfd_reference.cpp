@@ -1,4 +1,4 @@
-#include "../tier2/altis_cfd/cfd_reference.h"
+#include "../tier2/altis_cfd/hip/cfd_reference.h"
 #include <map>
 #include <set>
 #include <cassert>
@@ -13,7 +13,7 @@ static Index blockDim{1},blockIdx{0},threadIdx{0};
 #define __global__
 #define __constant__
 #include "fixtures/cfd_upstream.h"
-#include "../tier2/altis_cfd/cfd_kernels.h"
+#include "../tier2/altis_cfd/hip/cfd_kernels.h"
 #undef __device__
 #undef __host__
 #undef __global__

@@ -44,7 +44,12 @@ def benchmark_sort_key(item: dict[str, Any]) -> tuple[int, str, str]:
 
 def load_benchmarks() -> list[dict[str, Any]]:
     benchmarks = []
-    for path in sorted(REPO_ROOT.glob("tier*/*/params.json")):
+    # Single-tree benchmarks keep tier*/<bench>/params.json; benchmarks with
+    # per-platform trees keep identical manifests in hip/ and cuda/, so the
+    # hip/ copy stands for both.
+    paths = list(REPO_ROOT.glob("tier*/*/params.json"))
+    paths += REPO_ROOT.glob("tier*/*/hip/params.json")
+    for path in sorted(paths):
         data = json.loads(path.read_text())
         data["_path"] = path.relative_to(REPO_ROOT).as_posix()
         benchmarks.append(data)

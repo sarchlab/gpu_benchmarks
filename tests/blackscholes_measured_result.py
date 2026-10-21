@@ -91,8 +91,8 @@ def main():
         args.work_dir.mkdir(parents=True, exist_ok=False)
     except FileExistsError:
         parser.error('--work-dir must name a new, nonexistent directory')
-    source_dir = args.source/'tier2/tango_blackscholes'
-    target = args.work_dir/'tier2/tango_blackscholes'
+    source_dir = args.source/'tier2/tango_blackscholes/hip'
+    target = args.work_dir/'tier2/tango_blackscholes/hip'
     target.mkdir(parents=True)
     shutil.copytree(args.source/'common', args.work_dir/'common')
     for name in ('Makefile', 'params.json'):

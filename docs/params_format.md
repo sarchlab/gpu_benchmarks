@@ -2,7 +2,7 @@
 
 ## Overview
 
-Every benchmark directory contains a `params.json` file that fully describes the benchmark's identity, parameters, and kernel structure. The CLI tool discovers benchmarks by walking `tier*/*/params.json` and uses these files to drive compilation, parameterized execution, and result recording.
+Every benchmark directory contains a `params.json` file that fully describes the benchmark's identity, parameters, and kernel structure. The CLI tool discovers benchmarks by walking `tier*/*/params.json` and, for benchmarks with one source tree per platform, `tier*/*/hip/params.json` and `tier*/*/cuda/params.json` (it uses `cuda/` for `--platform cuda` and `hip/` for `rocm`; the two manifests must be identical). It uses these files to drive compilation, parameterized execution, and result recording.
 
 ## Schema
 
@@ -276,7 +276,7 @@ This higher-tier example illustrates the optional metric descriptors; it does no
 A valid `params.json` must satisfy:
 
 1. `benchmark` matches the directory name
-2. `tier` matches the parent directory (e.g., `tier2/rodinia_hotspot/` → `tier: 2`)
+2. `tier` matches the parent directory (e.g., `tier2/rodinia_hotspot/` → `tier: 2`); for a platform tree such as `tier2/rodinia_hotspot/cuda/`, `benchmark` and `tier` are checked against `rodinia_hotspot` and `tier2`
 3. Each non-scaling param has `default` that appears in its `values` list
 4. All `kernels` entries are unique strings
 5. Parameter names are valid identifiers (`[a-z][a-z0-9_]*`)

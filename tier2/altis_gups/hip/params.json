@@ -1,0 +1,68 @@
+{
+  "benchmark": "altis_gups",
+  "tier": 2,
+  "suite": "altis",
+  "description": "Altis RandomAccess: exactly 4*N LFSR XOR updates to a power-of-two table, using retrying 64-bit CAS or paired 32-bit XOR atomics; full measured-table CPU verification.",
+  "scaling_param": {
+    "name": "table_size",
+    "description": "Number of 64-bit table entries; must be a positive power of two. Logical update count is exactly four times this size.",
+    "type": "int",
+    "values": [
+      65536,
+      131072,
+      262144,
+      524288,
+      1048576,
+      2097152,
+      4194304,
+      8388608,
+      16777216
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        256
+      ]
+    },
+    {
+      "name": "atomic_mode",
+      "description": "Pinned atomic implementation: retrying 64-bit CAS or paired 32-bit XOR operations.",
+      "type": "enum",
+      "default": "xor",
+      "values": [
+        "cas",
+        "xor"
+      ]
+    },
+    {
+      "name": "num_threads",
+      "description": "Requested GPU thread count; rounds up to full blocks and partitions the same fixed 4*N logical update stream.",
+      "type": "int",
+      "default": 65536,
+      "values": [
+        16384,
+        65536,
+        262144
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "gups_cas_kernel",
+    "gups_xor_kernel"
+  ]
+}

@@ -1,7 +1,7 @@
 // Test actual GPU stages and the production timed pass with independent host
 // integer/double references, complete byte comparisons and allocation guards.
 #define main benchmark_main
-#include "../tier2/chai_cedd/chai_cedd.hip"
+#include "../tier2/chai_cedd/hip/chai_cedd.hip"
 #undef main
 
 static unsigned char direction_ref(int gx,int gy) {

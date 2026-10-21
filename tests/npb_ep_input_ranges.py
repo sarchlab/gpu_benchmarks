@@ -57,7 +57,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compiler', default='c++')
     parser.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[1] /
-                        'tier2/npb_ep/npb_ep.hip')
+                        'tier2/npb_ep/hip/npb_ep.hip')
     args = parser.parse_args()
     pairs = [(m, 256) for m in [-INT_MAX-1, -1, 0, 1, 16, 17, 23, 33, 36, 40, 46,
                                47, 48, 78, 79, 80, INT_MAX]]

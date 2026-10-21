@@ -80,7 +80,7 @@ def parameter_source(source):
 
 
 def main():
-    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--compiler',default='c++');ap.add_argument('--source',type=Path,default=Path(__file__).resolve().parents[1]/'tier2/cuda_nbody/cuda_nbody.hip');args=ap.parse_args()
+    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--compiler',default='c++');ap.add_argument('--source',type=Path,default=Path(__file__).resolve().parents[1]/'tier2/cuda_nbody/hip/cuda_nbody.hip');args=ap.parse_args()
     with tempfile.TemporaryDirectory(prefix='nbody-reference-') as tmp:
         cpp=Path(tmp)/'reference.cpp';binary=Path(tmp)/'reference';cpp.write_text(host_source(args.source.read_text()))
         subprocess.run([args.compiler,'-std=c++14','-O3','-fsanitize=address,undefined','-fno-sanitize-recover=all',str(cpp),'-o',str(binary)],check=True,timeout=60)

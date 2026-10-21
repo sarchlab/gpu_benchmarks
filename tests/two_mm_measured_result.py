@@ -64,7 +64,7 @@ def main():
     args=ap.parse_args();args.source,args.work_dir=args.source.resolve(),args.work_dir.resolve()
     try:args.work_dir.mkdir(parents=True,exist_ok=False)
     except FileExistsError:ap.error("--work-dir must name a new, nonexistent directory")
-    src=args.source/"tier2/polybench_2mm";dst=args.work_dir/"tier2/polybench_2mm";dst.mkdir(parents=True)
+    src=args.source/"tier2/polybench_2mm/hip";dst=args.work_dir/"tier2/polybench_2mm/hip";dst.mkdir(parents=True)
     shutil.copytree(args.source/"common",args.work_dir/"common")
     for name in ("Makefile","params.json"):shutil.copy2(src/name,dst/name)
     for header in src.glob("*.h"):shutil.copy2(header,dst/header.name)

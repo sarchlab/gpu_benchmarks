@@ -5,7 +5,7 @@
 //   1. bfs_kernel  — for each frontier node, write cost to unvisited neighbors
 //   2. bfs_update  — promote newly-discovered nodes into the next frontier
 //
-// Native CUDA port of ../rodinia_bfs.hip (same kernels, driver and
+// Native CUDA port of ../hip/rodinia_bfs.hip (same kernels, driver and
 // output). Compiles with nvcc; no architecture-specific features are used
 // (any sm_70+ GPU; intended targets are A100 sm_80 and H100 sm_90).
 //

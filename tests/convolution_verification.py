@@ -111,7 +111,7 @@ def main():
         ap.error('--platform required')
     args.source, args.work_dir = args.source.resolve(), args.work_dir.resolve()
     args.work_dir.mkdir(parents=True, exist_ok=False)
-    relative = Path('tier2/cuda_convolution_separable')
+    relative = Path('tier2/cuda_convolution_separable/hip')
     src = args.source / relative
     source = (src / 'cuda_convolution_separable.hip').read_text()
     if args.host_only:

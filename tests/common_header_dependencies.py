@@ -13,7 +13,7 @@ import os
 def check(repo):
     headers = [Path('common') / n for n in
                ('bench_timing.h', 'bench_warmup.h', 'hip_cuda_compat.h')]
-    makefiles = sorted(repo.glob('tier[12]/*/Makefile'))
+    makefiles = sorted([*repo.glob('tier1/*/Makefile'), *repo.glob('tier2/*/hip/Makefile')])
     if not makefiles:
         raise RuntimeError('No Tier 1/2 Makefiles found')
     targets = []

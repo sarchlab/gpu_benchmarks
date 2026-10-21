@@ -82,7 +82,7 @@ def main():
     args=ap.parse_args();args.source=args.source.resolve();args.work_dir=args.work_dir.resolve()
     try:args.work_dir.mkdir(parents=True,exist_ok=False)
     except FileExistsError:ap.error('--work-dir must be new')
-    src=args.source/'tier2/rodinia_kmeans';dst=args.work_dir/'tier2/rodinia_kmeans';dst.mkdir(parents=True)
+    src=args.source/'tier2/rodinia_kmeans/hip';dst=args.work_dir/'tier2/rodinia_kmeans/hip';dst.mkdir(parents=True)
     shutil.copytree(args.source/'common',args.work_dir/'common')
     for name in ('Makefile','params.json','cpu_reference.h'):shutil.copy2(src/name,dst/name)
     source=(src/'rodinia_kmeans.hip').read_text();(dst/'rodinia_kmeans.hip').write_text(instrument(source))

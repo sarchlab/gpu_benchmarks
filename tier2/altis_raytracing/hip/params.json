@@ -1,0 +1,71 @@
+{
+  "benchmark": "altis_raytracing",
+  "tier": 2,
+  "suite": "altis",
+  "description": "Simple ray tracing: casts rays through an image plane, intersects with N spheres, shades nearest hit with Phong lighting. Each thread handles one pixel.",
+  "scaling_param": {
+    "name": "width",
+    "description": "Image width in pixels (height is set independently via the height parameter)",
+    "type": "int",
+    "values": [
+      64,
+      128,
+      256,
+      384,
+      512,
+      640,
+      768,
+      1024,
+      1280,
+      1536,
+      1792,
+      2048,
+      2560,
+      3072,
+      3584,
+      4096,
+      5120,
+      6144,
+      7168,
+      8192
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "height",
+      "description": "Image height in pixels",
+      "type": "int",
+      "default": 1024,
+      "values": [
+        512,
+        1024,
+        2048,
+        4096
+      ]
+    },
+    {
+      "name": "spheres",
+      "description": "Number of spheres in the scene",
+      "type": "int",
+      "default": 64,
+      "values": [
+        8,
+        64,
+        256
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "raytrace_kernel"
+  ]
+}

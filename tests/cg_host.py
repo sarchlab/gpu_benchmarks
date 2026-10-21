@@ -17,8 +17,8 @@ def main():
     ap.add_argument('--thread-sanitizer', action='store_true')
     args = ap.parse_args()
     repo = Path(__file__).resolve().parents[1]
-    source = (repo/'tier2/npb_cg/npb_cg.hip').read_text()
-    header = (repo/'tier2/npb_cg/nas_cg.h').read_text()
+    source = (repo/'tier2/npb_cg/hip/npb_cg.hip').read_text()
+    header = (repo/'tier2/npb_cg/hip/nas_cg.h').read_text()
     clean = {k: v for k, v in os.environ.items() if not k.startswith('BENCH_PARAM_')}
     flags = ['-std=c++14', '-O2', '-pthread', '-fno-sanitize-recover=all',
              '-fsanitize=thread' if args.thread_sanitizer else '-fsanitize=address,undefined']
@@ -64,7 +64,7 @@ int main() {
         end = 'static double ratio('
         assert source.count(start) == source.count(end) == 1
         cpp.write_text('#include <cerrno>\n#include <climits>\n#include <cstring>\n#include <cstdlib>\n'
-            '#include "'+str(repo/'tier2/npb_cg/nas_cg.h')+'"\n'+
+            '#include "'+str(repo/'tier2/npb_cg/hip/nas_cg.h')+'"\n'+
             start+source.split(start, 1)[1].split(end, 1)[0] + r'''
 int main(int argc,char**argv) try {
     int b;const auto* c=parameters(argc,argv,&b);

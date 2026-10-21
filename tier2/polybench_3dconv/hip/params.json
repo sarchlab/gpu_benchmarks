@@ -1,0 +1,62 @@
+{
+  "benchmark": "polybench_3dconv",
+  "tier": 2,
+  "suite": "polybench",
+  "description": "Fixed PolyBench/GPU 3D interior stencil: the pinned 15-term expression, including repeated offsets, with one independent 3D-grid launch. Preserves 25 volume sizes; output borders are initialized to zero before timing. Verifies every actual measured output afterward with a full CPU reference and emits raw timing plus fixed operator/verification identities.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Volume dimension N (NxNxN grid)",
+    "type": "int",
+    "values": [
+      16,
+      24,
+      32,
+      40,
+      48,
+      56,
+      64,
+      80,
+      96,
+      112,
+      128,
+      144,
+      160,
+      176,
+      192,
+      224,
+      256,
+      288,
+      320,
+      352,
+      384,
+      416,
+      448,
+      480,
+      512
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Threads per block dimension (3D block of block_size^3)",
+      "type": "int",
+      "default": 8,
+      "values": [
+        8
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "When true, run the untimed vector-add warmer before the measured stencil to raise clocks and disturb cache state; qualify the resulting state on the target. False disables the warmer.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "conv3d_kernel"
+  ]
+}

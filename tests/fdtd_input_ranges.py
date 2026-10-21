@@ -39,7 +39,7 @@ def expected(n, steps):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[1]/'tier2/polybench_fdtd2d/polybench_fdtd2d.hip')
+    ap.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[1]/'tier2/polybench_fdtd2d/hip/polybench_fdtd2d.hip')
     ap.add_argument('--compiler', default='c++')
     ap.add_argument('--binary', type=Path, help='Check invalid cases against the actual GPU-hidden binary')
     ap.add_argument('--work-dir', type=Path, required=True)

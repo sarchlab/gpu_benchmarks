@@ -1,6 +1,6 @@
-#include "../tier2/polybench_atax/cpu_reference.h"
-#include "../tier2/polybench_bicg/cpu_reference.h"
-#include "../tier2/polybench_mvt/cpu_reference.h"
+#include "../tier2/polybench_atax/hip/cpu_reference.h"
+#include "../tier2/polybench_bicg/hip/cpu_reference.h"
+#include "../tier2/polybench_mvt/hip/cpu_reference.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>

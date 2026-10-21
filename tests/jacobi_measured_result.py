@@ -44,11 +44,11 @@ def instrument(source):
 def build(repo, work, platform, hooks):
     work.mkdir(parents=True)
     shutil.copytree(repo / 'common', work / 'common')
-    folder = work / 'tier2/polybench_jacobi2d'
+    folder = work / 'tier2/polybench_jacobi2d/hip'
     folder.mkdir(parents=True)
     for name in ['Makefile', 'jacobi_reference.h', 'params.json']:
-        shutil.copy2(repo / 'tier2/polybench_jacobi2d' / name, folder / name)
-    source = (repo / 'tier2/polybench_jacobi2d/polybench_jacobi2d.hip').read_text()
+        shutil.copy2(repo / 'tier2/polybench_jacobi2d/hip' / name, folder / name)
+    source = (repo / 'tier2/polybench_jacobi2d/hip/polybench_jacobi2d.hip').read_text()
     (folder / 'polybench_jacobi2d.hip').write_text(instrument(source) if hooks else source)
     with (work / 'build.log').open('w') as log:
         subprocess.run(['make', 'PLATFORM=' + platform], cwd=folder, stdout=log,
@@ -103,7 +103,7 @@ def main():
         print('Jacobi full-grid and storage hooks compiled; GPU tests not executed')
         return
     production = build(repo, work / 'production', args.platform, False)
-    manifest = json.loads((repo / 'tier2/polybench_jacobi2d/params.json').read_text())
+    manifest = json.loads((repo / 'tier2/polybench_jacobi2d/hip/params.json').read_text())
     sizes = manifest['scaling_param']['values']
     timesteps = next(p['values'] for p in manifest['non_scaling_params'] if p['name'] == 'tsteps')
     cases = [(n, t, {}) for n in sizes for t in timesteps]

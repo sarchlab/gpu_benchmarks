@@ -1,6 +1,6 @@
 // Check the production GPU operator with independent spatial basis weights.
 #define main benchmark_main
-#include "../tier2/polybench_3dconv/polybench_3dconv.hip"
+#include "../tier2/polybench_3dconv/hip/polybench_3dconv.hip"
 #undef main
 #include <limits>
 #include <vector>

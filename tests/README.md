@@ -1,5 +1,11 @@
 # GPU regression checks
 
+The Tier 2 checks below build and test the HIP sources in `tier2/<bench>/hip/`
+(with `PLATFORM=cuda` they compile through nvcc). CUDA versions of the Tier 2
+`bench_output_test` sources live in [`cuda/`](cuda/) and are built by the
+`tier2/<bench>/cuda/` Makefiles; the Python and host checks have not been ported
+to the native CUDA trees yet.
+
 The CI CPU-reference builds and Python host sanitizer checks use
 `-fno-sanitize-recover=all`, so detected sanitizer errors fail the check. Include
 this flag when compiling a sanitized host test manually.
@@ -42,7 +48,7 @@ configuration list with complete checks and the 60-second process limit, records
 all exclusions, and generates workspaces containing only admitted combinations
 for the existing harness. `python3 tests/nbody_profile_records.py` checks 28
 qualification classifications, including malformed timing/verification evidence,
-explicit completed-process overruns and unexpected failures. See the [N-body README](../tier2/cuda_nbody/README.md).
+explicit completed-process overruns and unexpected failures. See the [N-body README](../tier2/cuda_nbody/hip/README.md).
 
 `python3 tests/h100_profile_identity.py` checks that the committed N-body and
 Particle Filter H100 profiles still match the current benchmark sources,
@@ -170,7 +176,7 @@ CLI/environment precedence. Add `--binary <lonestar_sssp>` to require exact
 invalid-input diagnostics and empty timing output from the GPU-hidden production
 binary. These are integer-safety checks, not capacity or runtime qualification.
 
-`python3 tests/sssp_rounds.py --binary /tmp/sssp-gpu/faults/tier2/lonestar_sssp/lonestar_sssp --work-dir /tmp/sssp-rounds`
+`python3 tests/sssp_rounds.py --binary /tmp/sssp-gpu/faults/tier2/lonestar_sssp/hip/lonestar_sssp --work-dir /tmp/sssp-rounds`
 checks every GPU round against an independent Python snapshot model, and counts
 actual atomic relaxation attempts in a test-only kernel copy. It covers small
 random graphs, weighted competing paths, self/parallel edges, unreachable
@@ -368,7 +374,7 @@ separately. Correct outputs do not replace target instruction-count checks.
 both matrix results against independent double products, pinned upstream square
 inputs, and exact rank-one references through N=4096. Guarded output and a
 NaN-poisoned initial temporary detect missing writes or an invalid initial
-contribution. Run `make -C tier2/polybench_2mm PLATFORM=cuda test` (or `rocm`), or
+contribution. Run `make -C tier2/polybench_2mm/hip PLATFORM=cuda test` (or `rocm`), or
 run `bench_output_test --rank-one N` for an individual declared size. CI compiles
 the test; GPU runtime qualification is separate. This checks the restored R-09
 expression and does not claim that ordinary timing runs perform verification
@@ -407,7 +413,7 @@ with no timing records. This is input admission, not measured-trajectory checkin
 transfers before the warmer, all force/integration timestep launches with their
 event brackets, and the existing separate verification launch. It requires an
 NVIDIA GPU, `nsys`, a built binary and a new directory. Run
-`python3 tests/bh_entry_order.py --binary tier2/lonestar_bh/lonestar_bh --work-dir /tmp/bh-entry`.
+`python3 tests/bh_entry_order.py --binary tier2/lonestar_bh/hip/lonestar_bh --work-dir /tmp/bh-entry`.
 Assertions must be enabled; optimized Python is rejected. Captures and reports
 are retained; timeouts abort and may leave a partial report. CI does not run this
 functional GPU check, and its profiled timings are not performance results.
@@ -421,8 +427,8 @@ and a new output directory:
 
 ```sh
 python3 tests/algorithmic_zero_order.py \
-  --gram-binary tier2/polybench_gramschmidt/polybench_gramschmidt \
-  --mg-binary tier2/npb_mg/npb_mg --work-dir /tmp/reset-order
+  --gram-binary tier2/polybench_gramschmidt/hip/polybench_gramschmidt \
+  --mg-binary tier2/npb_mg/hip/npb_mg --work-dir /tmp/reset-order
 ```
 
 It checks the full timed kernel sequence (including resets), individual event
@@ -444,14 +450,14 @@ momentum and output/reference values.
 non-saturating signed inputs, nonzero momentum and pinned initialization. It
 compares every input/output weight and momentum value, activation and delta
 against an independent dense double reference. Run `make test PLATFORM=cuda`
-(or `rocm`) from `tier2/rodinia_backprop`; `bench_output_test --upstream N`
+(or `rocm`) from `tier2/rodinia_backprop/hip`; `bench_output_test --upstream N`
 checks an individual declared size. CI compiles the test; GPU execution and
 ordinary timing-run verification are separate qualification steps.
 
 `two_d_convolution_output.hip` checks the pinned signed PolyBench/GPU operator
 with nine exact unit-impulse outputs and full signed-matrix references, including
 rectangular strides, partial tiles, NaN-poisoned interiors and untouched borders
-and guards. Run `make test PLATFORM=cuda` (or `rocm`) in `tier2/polybench_2dconv`;
+and guards. Run `make test PLATFORM=cuda` (or `rocm`) in `tier2/polybench_2dconv/hip`;
 `bench_output_test --size N` checks a declared size, and `--impulse 0` through
 `--impulse 8` isolate the nine coefficients. Ordinary timing runs also check
 every measured output after timing under fixed policy `full_cpu_v1`.
@@ -464,7 +470,7 @@ requires target qualification.
 sequence against an independent dense reference: exact center/neighbor
 impulses, signed rectangular grids, partial tiles, odd/even/100-step sequences,
 NaN-poisoned first destinations, both buffers' boundaries and allocation guards.
-Run `make test PLATFORM=cuda` (or `rocm`) in `tier2/parboil_stencil`, or
+Run `make test PLATFORM=cuda` (or `rocm`) in `tier2/parboil_stencil/hip`, or
 `BENCH_PARAM_vector_add_warmup=false ./bench_output_test --case N T` for a
 particular declared configuration. CI compiles the test; runtime execution and
 ordinary timing-run verification remain separate qualification steps.
@@ -481,7 +487,7 @@ separate toolchains and hardware qualification.
 
 ### Fixed 3D convolution output
 
-`make -C tier2/polybench_3dconv PLATFORM=cuda test` (or `PLATFORM=rocm`)
+`make -C tier2/polybench_3dconv/hip PLATFORM=cuda test` (or `PLATFORM=rocm`)
 requires an actual GPU. `three_d_convolution_output.hip` includes the production
 kernel and compares all 27 spatial basis inputs and 40 signed-volume/block
 combinations with an independent spatial-weight reference. Exactly representable
@@ -502,7 +508,7 @@ pairs cannot come from a byte-valued Sobel patch: both sums have the same four
 corner values modulo two. Some impossible pairs cross a float angular bin
 boundary differently from the ideal double reference; these are excluded by
 the proved stencil invariant, not by an output mismatch allowance. Run
-`make -C tier2/chai_cedd PLATFORM=cuda test` (or `PLATFORM=rocm`).
+`make -C tier2/chai_cedd/hip PLATFORM=cuda test` (or `PLATFORM=rocm`).
 `bench_output_test --case W H` checks a chosen shape. Byte outputs have no
 NaN/Inf representation; corruption tests should alter actual output bytes,
 including the last interior pixel and preserved border, after timing.
@@ -634,7 +640,7 @@ CI compiles the GPU test. Counters and observation copies are absent from the
 production benchmark. `python3 tests/bfs_work_counts_test.py` runs in CI without
 a GPU and rejects missing or duplicate instrumentation anchors explicitly.
 
-The [BFS benchmark notes](../tier2/rodinia_bfs/README.md) describe the immutable
+The [BFS benchmark notes](../tier2/rodinia_bfs/hip/README.md) describe the immutable
 level-entry visited mask, race-free atomic stores, pinned upstream stages and
 intentional instruction/traffic changes. Logical operation counts are not
 physical memory-traffic measurements; AMD execution remains deferred.
@@ -826,7 +832,7 @@ nonfinite output, diagnostic caps and setup/reference failure. Each process has
 a 60-second limit and must preserve both kernel records, geometry/work metadata,
 timing sums and failure status. `--compile-only` does not claim GPU execution.
 
-`make -C tier2/polybench_jacobi2d PLATFORM=cuda test` compares the actual
+`make -C tier2/polybench_jacobi2d/hip PLATFORM=cuda test` compares the actual
 production kernels against frozen upstream GPU bodies under the original 32×8
 mapping, including both entire output grids and inputs. `bench_output_test`
 accepts the same `--n` and `--tsteps` controls for full-domain qualification.
@@ -873,7 +879,7 @@ within 60 seconds. All cases check metadata, timing sums, complete verification
 counts and exit status. Use a fresh work directory. `--compile-only` compiles the
 fault hooks without claiming GPU execution; CI uses it plus host tests.
 
-`make -C tier2/rodinia_hotspot3d PLATFORM=cuda test` compares the entire actual
+`make -C tier2/rodinia_hotspot3d/hip PLATFORM=cuda test` compares the entire actual
 production result with the frozen z-marching GPU body on a partial grid.
 `bench_output_test --grid_size N --num_iterations T` supports full-profile
 comparisons. Both complete GPU grids must satisfy the derived bound against the
@@ -904,7 +910,7 @@ checks. Every process has a 60-second limit; all records, work, timesteps,
 verification counts and exit statuses are checked. Use a fresh output directory.
 `--compile-only` builds the hooks without claiming GPU execution; CI uses it.
 
-`make -C tier2/rodinia_hotspot PLATFORM=cuda test` compares the entire production
+`make -C tier2/rodinia_hotspot/hip PLATFORM=cuda test` compares the entire production
 result with the frozen original CUDA kernel. `bench_output_test --grid_size N
 --total_iterations T --pyramid_height P` supports full-profile and partial-tail
 comparison. Both use the approved dt for N; the fixture kernel body is unchanged.
@@ -929,7 +935,7 @@ all final and auxiliary buffers, padding and largest tails, capped diagnostics,
 omitted solver stages, and setup/reference failure. Each process has a 60-second
 limit and preserves its output. Use a fresh directory. CI uses `--compile-only`.
 
-`make -C tier2/altis_cfd PLATFORM=cuda test` compares every stage with frozen
+`make -C tier2/altis_cfd/hip PLATFORM=cuda test` compares every stage with frozen
 Altis revision `042e2926d1fe9a5ea5b3e2d659b75bf925b152cc` kernels. The
 `bench_output_test --size N --block_size B` binary also supports full-size
 comparisons; all 10 copies, 10 step-factor buffers, 30 flux buffers and 30 state

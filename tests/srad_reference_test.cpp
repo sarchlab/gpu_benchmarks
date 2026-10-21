@@ -2,7 +2,7 @@
 // 366b283456506ef2fe2c2b7dc5e83e941ffc5524; wrapper uses the suite ROI.
 #include <cstdio>
 #include <limits>
-#include "../tier2/rodinia_srad/cpu_reference.h"
+#include "../tier2/rodinia_srad/hip/cpu_reference.h"
 struct Original {std::vector<float> J,c,dN,dS,dW,dE;};
 static Original original(const std::vector<float>& input,int rows,int cols,int niter,float lambda) {
     Original result;result.J=input;size_t n=input.size();result.c.resize(n);result.dN.resize(n);result.dS.resize(n);result.dW.resize(n);result.dE.resize(n);

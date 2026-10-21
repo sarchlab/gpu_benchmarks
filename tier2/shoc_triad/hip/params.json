@@ -1,0 +1,69 @@
+{
+  "benchmark": "shoc_triad",
+  "tier": 2,
+  "suite": "shoc",
+  "description": "Stream Triad: a[i] = b[i] + scalar * c[i]. Classic memory bandwidth benchmark; per-iteration kernel times are emitted and GB/s is derived downstream.",
+  "scaling_param": {
+    "name": "array_size",
+    "description": "Number of float elements in each array",
+    "type": "int",
+    "values": [
+      1024,
+      1536,
+      2048,
+      3072,
+      4096,
+      6144,
+      8192,
+      12288,
+      16384,
+      24576,
+      32768,
+      49152,
+      65536,
+      98304,
+      131072,
+      196608,
+      262144,
+      393216,
+      524288,
+      786432,
+      1048576,
+      1572864,
+      2097152,
+      3145728,
+      4194304,
+      6291456,
+      8388608,
+      16777216,
+      33554432,
+      67108864,
+      134217728,
+      268435456
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "GPU thread-block size",
+      "type": "int",
+      "default": 256,
+      "values": [
+        256
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "triad_kernel"
+  ]
+}

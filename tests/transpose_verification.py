@@ -44,7 +44,7 @@ def instrument(source):
 
 
 def host_reference(root,work,compiler):
-    source=(root/'tier2/cuda_transpose/cuda_transpose.hip').read_text()
+    source=(root/'tier2/cuda_transpose/hip/cuda_transpose.hip').read_text()
     start='static void transpose_cpu('
     end='// ---------------------------------------------------------------------------\n// Main'
     if source.count(start)!=1 or source.count(end)!=1:
@@ -74,7 +74,7 @@ def main():
     root,work=args.source.resolve(),args.work_dir.resolve(); work.mkdir(parents=True,exist_ok=False)
     if args.host_only:
         host_reference(root,work,args.compiler); return 0
-    relative=Path('tier2/cuda_transpose'); src=root/relative
+    relative=Path('tier2/cuda_transpose/hip'); src=root/relative
     source=(src/'cuda_transpose.hip').read_text()
     inputs=[relative/n for n in ('cuda_transpose.hip','Makefile','params.json')]
     inputs += [Path('common')/n for n in ('bench_timing.h','bench_warmup.h','hip_cuda_compat.h')]

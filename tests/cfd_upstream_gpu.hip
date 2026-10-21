@@ -1,6 +1,6 @@
 // Compare every stage with the frozen pinned Altis kernels on identical inputs.
 #define main cfd_production_main
-#include "../tier2/altis_cfd/altis_cfd.hip"
+#include "../tier2/altis_cfd/hip/altis_cfd.hip"
 #undef main
 #include "fixtures/cfd_upstream.h"
 #include <cstdint>

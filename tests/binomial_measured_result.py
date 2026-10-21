@@ -92,8 +92,8 @@ def main():
         args.work_dir.mkdir(parents=True, exist_ok=False)
     except FileExistsError:
         parser.error('--work-dir must name a new, nonexistent directory')
-    source_dir = args.source/'tier2/tango_binomial_options'
-    target = args.work_dir/'tier2/tango_binomial_options'
+    source_dir = args.source/'tier2/tango_binomial_options/hip'
+    target = args.work_dir/'tier2/tango_binomial_options/hip'
     target.mkdir(parents=True)
     shutil.copytree(args.source/'common', args.work_dir/'common')
     for name in ('Makefile', 'params.json'):

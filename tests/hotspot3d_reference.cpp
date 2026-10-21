@@ -1,4 +1,4 @@
-#include "../tier2/rodinia_hotspot3d/hotspot3d_reference.h"
+#include "../tier2/rodinia_hotspot3d/hip/hotspot3d_reference.h"
 #include "upstream/hotspot3d_cpu.h"
 #include <cassert>
 #include <cstring>

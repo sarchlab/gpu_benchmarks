@@ -2,7 +2,7 @@
 
 ## Overview
 
-`gpubench` is a Go CLI tool that compiles, runs, and collects results from the GPU benchmark suite. It discovers benchmarks by walking `tier*/*/params.json`, drives parameterized execution, and stores all results in an SQLite database.
+`gpubench` is a Go CLI tool that compiles, runs, and collects results from the GPU benchmark suite. It discovers benchmarks by walking `tier*/*/params.json` (plus the per-platform `tier*/*/hip/` and `tier*/*/cuda/` trees), drives parameterized execution, and stores all results in an SQLite database.
 
 **Location:** `cmd/gpubench/` (Go package, build with `go build -o gpubench ./cmd/gpubench`)
 
@@ -240,7 +240,8 @@ Benchmarks are discovered by walking the repository directory tree:
 
 ```go
 func discoverBenchmarks(repoRoot string, tier int, suite, benchmark string) []Benchmark {
-    // Walks tier*/*/params.json, parses each, applies filters,
+    // Walks tier*/*/params.json and tier*/*/{hip,cuda}/params.json, keeps the
+    // variant for the platform (cuda/ for cuda, hip/ for rocm), parses each, applies filters,
     // returns sorted list of discovered benchmarks.
 }
 ```
@@ -251,10 +252,10 @@ func discoverBenchmarks(repoRoot string, tier int, suite, benchmark string) []Be
 
 ```bash
 # Compile (if not already compiled)
-make -C tier2/rodinia_hotspot PLATFORM=cuda
+make -C tier2/rodinia_hotspot/cuda
 
 # Run with parameters
-cd tier2/rodinia_hotspot
+cd tier2/rodinia_hotspot/cuda
 BENCH_PARAM_grid_size=1024 BENCH_PARAM_total_iterations=360 BENCH_PARAM_pyramid_height=2 \
     ./rodinia_hotspot
 ```

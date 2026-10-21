@@ -63,8 +63,8 @@ jobs:
 
       - name: Check k-means input admission (no GPU required)
         run: |
-          make -C tier2/rodinia_kmeans PLATFORM=cuda
-          python3 tests/kmeans_input_parameters.py --compiler g++ --binary tier2/rodinia_kmeans/rodinia_kmeans
+          make -C tier2/rodinia_kmeans/hip PLATFORM=cuda
+          python3 tests/kmeans_input_parameters.py --compiler g++ --binary tier2/rodinia_kmeans/hip/rodinia_kmeans
 
       - name: Check atomic attempts, count bounds and measured-result hooks
         run: |
@@ -122,54 +122,54 @@ jobs:
         run: |
           python3 tests/graph_pr_verification.py --host-only --compiler g++ --work-dir /tmp/graph-pr-host
           python3 tests/graph_pr_verification.py --platform cuda --compile-only --work-dir /tmp/graph-pr-measured
-          python3 tests/graph_pr_input_ranges.py --compiler g++ --binary /tmp/graph-pr-measured/production/tier2/graph_pr/graph_pr --work-dir /tmp/graph-pr-input-ranges
+          python3 tests/graph_pr_input_ranges.py --compiler g++ --binary /tmp/graph-pr-measured/production/tier2/graph_pr/hip/graph_pr --work-dir /tmp/graph-pr-input-ranges
 
       - name: Check complete CC labels and compile measured-output regression
         run: |
           python3 tests/graph_cc_verification.py --host-only --compiler g++ --work-dir /tmp/graph-cc-host
           python3 tests/graph_cc_verification.py --platform cuda --compile-only --work-dir /tmp/graph-cc-measured
-          python3 tests/graph_cc_input_ranges.py --compiler g++ --binary /tmp/graph-cc-measured/production/tier2/graph_cc/graph_cc --work-dir /tmp/graph-cc-input-ranges
+          python3 tests/graph_cc_input_ranges.py --compiler g++ --binary /tmp/graph-cc-measured/production/tier2/graph_cc/hip/graph_cc --work-dir /tmp/graph-cc-input-ranges
 
       - name: Check SHOC Stencil2D input admission
         run: |
-          make -C tier2/shoc_stencil2d PLATFORM=cuda
-          python3 tests/shoc_stencil_input_ranges.py --compiler g++ --binary tier2/shoc_stencil2d/shoc_stencil2d --work-dir /tmp/shoc-stencil-input-ranges
+          make -C tier2/shoc_stencil2d/hip PLATFORM=cuda
+          python3 tests/shoc_stencil_input_ranges.py --compiler g++ --binary tier2/shoc_stencil2d/hip/shoc_stencil2d --work-dir /tmp/shoc-stencil-input-ranges
 
       - name: Check Barnes-Hut positive timestep admission
         run: |
-          make -C tier2/lonestar_bh PLATFORM=cuda
-          python3 tests/bh_positive_steps.py --compiler g++ --binary tier2/lonestar_bh/lonestar_bh --work-dir /tmp/bh-positive-steps
+          make -C tier2/lonestar_bh/hip PLATFORM=cuda
+          python3 tests/bh_positive_steps.py --compiler g++ --binary tier2/lonestar_bh/hip/lonestar_bh --work-dir /tmp/bh-positive-steps
 
       - name: Check restored LBM inputs, full reference and measured-output hooks
         run: |
-          make -C tier2/parboil_lbm PLATFORM=cuda
-          python3 tests/lbm_input_ranges.py --compiler g++ --binary tier2/parboil_lbm/parboil_lbm --work-dir /tmp/lbm-input-ranges
+          make -C tier2/parboil_lbm/hip PLATFORM=cuda
+          python3 tests/lbm_input_ranges.py --compiler g++ --binary tier2/parboil_lbm/hip/parboil_lbm --work-dir /tmp/lbm-input-ranges
           g++ -O1 -g -std=c++14 -pthread -fsanitize=address,undefined -fno-sanitize-recover=all tests/lbm_host.cpp -o /tmp/lbm-host
           /tmp/lbm-host
           python3 tests/lbm_measured_result.py --platform cuda --compile-only --work-dir /tmp/lbm-measured
 
       - name: Check FDTD-2D input admission
         run: |
-          make -C tier2/polybench_fdtd2d PLATFORM=cuda
-          python3 tests/fdtd_input_ranges.py --compiler g++ --binary tier2/polybench_fdtd2d/polybench_fdtd2d --work-dir /tmp/fdtd-input-ranges
+          make -C tier2/polybench_fdtd2d/hip PLATFORM=cuda
+          python3 tests/fdtd_input_ranges.py --compiler g++ --binary tier2/polybench_fdtd2d/hip/polybench_fdtd2d --work-dir /tmp/fdtd-input-ranges
 
       - name: Check pinned CFD solver, mesh geometry and measured-result hooks
         run: |
           python3 tests/cfd_host.py --compiler g++
           python3 tests/cfd_measured_result.py --platform cuda --work-dir /tmp/cfd-measured --compile-only
-          make -C tier2/altis_cfd PLATFORM=cuda bench_output_test
+          make -C tier2/altis_cfd/hip PLATFORM=cuda bench_output_test
 
       - name: Check pinned HotSpot physics, complete references and measured-result hooks
         run: |
           python3 tests/hotspot_host.py --compiler g++
           python3 tests/hotspot_measured_result.py --platform cuda --work-dir /tmp/hotspot-measured --compile-only
-          make -C tier2/rodinia_hotspot PLATFORM=cuda bench_output_test
+          make -C tier2/rodinia_hotspot/hip PLATFORM=cuda bench_output_test
 
       - name: Check pinned HotSpot3D physics, full references and measured-result hooks
         run: |
           python3 tests/hotspot3d_host.py --compiler g++
           python3 tests/hotspot3d_measured_result.py --platform cuda --work-dir /tmp/hotspot3d-measured --compile-only
-          make -C tier2/rodinia_hotspot3d PLATFORM=cuda bench_output_test
+          make -C tier2/rodinia_hotspot3d/hip PLATFORM=cuda bench_output_test
 
       - name: Check pinned NAS CG inputs, reference, worker cleanup and measured-result hooks
         run: |
@@ -185,7 +185,7 @@ jobs:
         run: |
           python3 tests/jacobi_host.py --compiler g++
           python3 tests/jacobi_measured_result.py --platform cuda --work-dir /tmp/jacobi-measured --compile-only
-          make -C tier2/polybench_jacobi2d PLATFORM=cuda bench_output_test
+          make -C tier2/polybench_jacobi2d/hip PLATFORM=cuda bench_output_test
 
       - name: Check GUPS stream, complete table verification and controls
         run: |
@@ -223,10 +223,10 @@ jobs:
         run: python3 tests/srad_measured_result.py --platform cuda --work-dir /tmp/srad-measured-result --compile-only
 
       - name: Reject nonpositive SRAD parameters (no GPU required)
-        run: python3 tests/srad_invalid_parameters.py --binary /tmp/srad-measured-result/tier2/rodinia_srad/rodinia_srad
+        run: python3 tests/srad_invalid_parameters.py --binary /tmp/srad-measured-result/tier2/rodinia_srad/hip/rodinia_srad
 
       - name: Check SRAD index-range admission (no GPU required)
-        run: python3 tests/srad_index_range.py --compiler g++ --binary /tmp/srad-measured-result/tier2/rodinia_srad/rodinia_srad
+        run: python3 tests/srad_index_range.py --compiler g++ --binary /tmp/srad-measured-result/tier2/rodinia_srad/hip/rodinia_srad
 
       - name: Check complete FDTD CPU reference (no GPU required)
         run: |
@@ -328,7 +328,7 @@ jobs:
           python3 tests/shoc_sort_verification.py --platform cuda --work-dir /tmp/sort-pairs-measured --compile-only
 
       - name: Check SHOC sort positive sizes and wide buffer-byte counts
-        run: python3 tests/shoc_sort_input_ranges.py --compiler g++ --binary /tmp/sort-pairs-measured/production/tier2/shoc_sort/shoc_sort --work-dir /tmp/sort-input-ranges
+        run: python3 tests/shoc_sort_input_ranges.py --compiler g++ --binary /tmp/sort-pairs-measured/production/tier2/shoc_sort/hip/shoc_sort --work-dir /tmp/sort-input-ranges
 
       - name: Check full transpose reference and compile measured-output regression
         run: |
@@ -336,24 +336,24 @@ jobs:
           python3 tests/transpose_verification.py --platform cuda --work-dir /tmp/transpose-measured --compile-only
 
       - name: Check transpose input and signed index ranges before GPU access
-        run: python3 tests/transpose_input_ranges.py --compiler g++ --binary /tmp/transpose-measured/production/tier2/cuda_transpose/cuda_transpose --work-dir /tmp/transpose-input-ranges
+        run: python3 tests/transpose_input_ranges.py --compiler g++ --binary /tmp/transpose-measured/production/tier2/cuda_transpose/hip/cuda_transpose --work-dir /tmp/transpose-input-ranges
 
       - name: Check recursive scan input and block-count arithmetic
         run: |
-          make -C tier2/cuda_scan_large PLATFORM=cuda CUDA_ARCH=sm_90
-          python3 tests/scan_input_ranges.py --compiler g++ --binary tier2/cuda_scan_large/cuda_scan_large --work-dir /tmp/scan-input-ranges
+          make -C tier2/cuda_scan_large/hip PLATFORM=cuda CUDA_ARCH=sm_90
+          python3 tests/scan_input_ranges.py --compiler g++ --binary tier2/cuda_scan_large/hip/cuda_scan_large --work-dir /tmp/scan-input-ranges
 
       - name: Check SHOC scan reference precision and compile measured-output regression
         run: |
           python3 tests/shoc_scan_reference.py --host-only --compiler g++ --work-dir /tmp/shoc-scan-reference-host
           python3 tests/shoc_scan_reference.py --platform cuda --work-dir /tmp/shoc-scan-reference-device --compile-only
-          python3 tests/shoc_scan_input_ranges.py --compiler g++ --binary /tmp/shoc-scan-reference-device/production/tier2/shoc_scan/shoc_scan --work-dir /tmp/shoc-scan-input-ranges
+          python3 tests/shoc_scan_input_ranges.py --compiler g++ --binary /tmp/shoc-scan-reference-device/production/tier2/shoc_scan/hip/shoc_scan --work-dir /tmp/shoc-scan-input-ranges
 
       - name: Check SSSP distances, deterministic rounds and compile GPU regressions
         run: |
           python3 tests/sssp_verification.py --host-only --compiler g++ --work-dir /tmp/sssp-reference-host
           python3 tests/sssp_verification.py --platform cuda --work-dir /tmp/sssp-measured-device --compile-only
-          python3 tests/sssp_input_ranges.py --compiler g++ --binary /tmp/sssp-measured-device/production/tier2/lonestar_sssp/lonestar_sssp --work-dir /tmp/sssp-input-ranges
+          python3 tests/sssp_input_ranges.py --compiler g++ --binary /tmp/sssp-measured-device/production/tier2/lonestar_sssp/hip/lonestar_sssp --work-dir /tmp/sssp-input-ranges
 
       - name: Check Gram-Schmidt all-column Q verification and compile measured-output regression
         run: |
@@ -361,7 +361,7 @@ jobs:
           python3 tests/gramschmidt_q_verification.py --platform cuda --work-dir /tmp/gram-q-measured --compile-only
 
       - name: Check Gram-Schmidt input and index ranges before GPU access
-        run: python3 tests/gramschmidt_input_ranges.py --compiler g++ --binary /tmp/gram-q-measured/production/tier2/polybench_gramschmidt/polybench_gramschmidt --work-dir /tmp/gram-input-ranges
+        run: python3 tests/gramschmidt_input_ranges.py --compiler g++ --binary /tmp/gram-q-measured/production/tier2/polybench_gramschmidt/hip/polybench_gramschmidt --work-dir /tmp/gram-input-ranges
 
       - name: Check binomial CPU reference (no GPU required)
         run: |
@@ -456,27 +456,27 @@ jobs:
         run: ./gpubench compile --tier 2 --platform cuda
 
       - name: Compile 2MM production-pass reference test (GPU required to run)
-        run: make -C tier2/polybench_2mm PLATFORM=cuda bench_output_test
+        run: make -C tier2/polybench_2mm/hip PLATFORM=cuda bench_output_test
 
       - name: Compile algorithmic reset output tests (GPU required to run)
         run: |
-          make -C tier2/polybench_gramschmidt PLATFORM=cuda bench_output_test
-          make -C tier2/npb_mg PLATFORM=cuda bench_output_test
+          make -C tier2/polybench_gramschmidt/hip PLATFORM=cuda bench_output_test
+          make -C tier2/npb_mg/hip PLATFORM=cuda bench_output_test
 
       - name: Compile backprop production-epoch reference test (GPU required to run)
-        run: make -C tier2/rodinia_backprop PLATFORM=cuda bench_output_test
+        run: make -C tier2/rodinia_backprop/hip PLATFORM=cuda bench_output_test
 
       - name: Compile 2D convolution operator test (GPU required to run)
-        run: make -C tier2/polybench_2dconv PLATFORM=cuda bench_output_test
+        run: make -C tier2/polybench_2dconv/hip PLATFORM=cuda bench_output_test
 
       - name: Compile Chai CEDD operator reference test (GPU required to run)
-        run: make -C tier2/chai_cedd PLATFORM=cuda bench_output_test
+        run: make -C tier2/chai_cedd/hip PLATFORM=cuda bench_output_test
 
       - name: Compile 3D convolution operator test (GPU required to run)
-        run: make -C tier2/polybench_3dconv PLATFORM=cuda bench_output_test
+        run: make -C tier2/polybench_3dconv/hip PLATFORM=cuda bench_output_test
 
       - name: Compile Parboil stencil production-pass test (GPU required to run)
-        run: make -C tier2/parboil_stencil PLATFORM=cuda bench_output_test
+        run: make -C tier2/parboil_stencil/hip PLATFORM=cuda bench_output_test
 
       - name: Compile binomial measured-result tests (GPU required to run)
         run: python3 tests/binomial_measured_result.py --platform cuda --work-dir /tmp/binomial-measured --compile-only

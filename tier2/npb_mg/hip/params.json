@@ -1,0 +1,50 @@
+{
+  "benchmark": "npb_mg",
+  "tier": 2,
+  "suite": "npb",
+  "description": "NAS MG standard S/W/A/B/C: FP64 periodic multigrid, pinned NAS input and V-cycle, full measured hierarchy verification and published final L2 check.",
+  "scaling_param": {
+    "name": "npb_class",
+    "description": "Standard NAS class; A and B share grid256 but have different iterations and smoother coefficients. Default A.",
+    "type": "enum",
+    "values": [
+      "S",
+      "W",
+      "A",
+      "B",
+      "C"
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Power-of-two cap for row stencils and threads for norm/boundary/zero kernels, 1..1024. Restriction and interpolation retain upstream class/level-specific row widths.",
+      "type": "int",
+      "default": 256,
+      "values": [
+        256
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Run one vector-add warmer after setup and before the complete measured NAS algorithm. Intended entry cache/clock preparation; no guarantee of residency or clock rate.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "comm3_gpu_kernel_1",
+    "comm3_gpu_kernel_2",
+    "comm3_gpu_kernel_3",
+    "interp_gpu_kernel",
+    "norm2u3_gpu_kernel",
+    "psinv_gpu_kernel",
+    "resid_gpu_kernel",
+    "rprj3_gpu_kernel",
+    "coarse_zero"
+  ]
+}

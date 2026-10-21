@@ -1,6 +1,6 @@
 // Frozen pre-repair scalar recurrence from 8a4eb5c. Keep the per-node powf
 // oracle independent of the production payoff cache and parallel scheduler.
-#include "../tier2/tango_binomial_options/cpu_reference.h"
+#include "../tier2/tango_binomial_options/hip/cpu_reference.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

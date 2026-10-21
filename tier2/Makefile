@@ -1,10 +1,28 @@
 # Tier 2 — Application Benchmarks
-# Invokes make in each benchmark subdirectory that has a Makefile.
+# Each benchmark keeps one source tree per platform:
+#   <bench>/hip/   original HIP sources (hipcc, or nvcc via hip_cuda_compat.h)
+#   <bench>/cuda/  native CUDA port (nvcc)
+# PLATFORM=cuda builds every cuda/ tree (falling back to hip/ for a benchmark
+# without one); PLATFORM=rocm builds every hip/ tree. This matches the
+# variant gpubench selects for each platform.
 
-# Pass PLATFORM down to sub-makes
 PLATFORM ?= auto
+ifeq ($(PLATFORM),auto)
+  ifneq ($(wildcard /opt/rocm),)
+    override PLATFORM := rocm
+  else
+    override PLATFORM := cuda
+  endif
+endif
 
-SUBDIRS := $(patsubst %/Makefile,%,$(wildcard */Makefile))
+BENCHES  := $(sort $(patsubst %/,%,$(dir $(wildcard */hip/Makefile */cuda/Makefile))))
+BENCHES  := $(sort $(patsubst %/hip,%,$(patsubst %/cuda,%,$(BENCHES))))
+
+ifeq ($(PLATFORM),rocm)
+  SUBDIRS := $(foreach b,$(BENCHES),$(if $(wildcard $(b)/hip/Makefile),$(b)/hip))
+else
+  SUBDIRS := $(foreach b,$(BENCHES),$(if $(wildcard $(b)/cuda/Makefile),$(b)/cuda,$(b)/hip))
+endif
 
 .PHONY: all clean $(SUBDIRS)
 

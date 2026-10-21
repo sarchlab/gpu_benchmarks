@@ -95,7 +95,7 @@ def main():
     if not args.host_only and not args.platform: ap.error("--platform is required for GPU builds")
     args.source,args.work_dir=args.source.resolve(),args.work_dir.resolve()
     args.work_dir.mkdir(parents=True,exist_ok=False)
-    relative=Path("tier2/graph_cc");src=args.source/relative
+    relative=Path("tier2/graph_cc/hip");src=args.source/relative
     source=(src/"graph_cc.hip").read_text()
     if args.host_only:
         host_reference(source,args.work_dir,args.compiler)

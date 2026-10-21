@@ -54,7 +54,7 @@ def frozen(s):
 def build(repo,work,platform,kind):
     for f in FILES:
         dst=work/f;dst.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(repo/f,dst)
-    folder=work/'tier2/altis_particlefilter';source=(folder/'altis_particlefilter.hip').read_text()
+    folder=work/'tier2/altis_particlefilter/hip';source=(folder/'altis_particlefilter.hip').read_text()
     if kind=='instrumented':source=instrument(source)
     if kind=='frozen':
         shutil.copy2(repo/'tests/fixtures/particlefilter_upstream_gpu.h',folder)

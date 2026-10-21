@@ -48,7 +48,7 @@ def expected(n,b):
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--source',type=Path,default=Path(__file__).resolve().parents[1]/'tier2/shoc_scan/shoc_scan.hip')
+    ap.add_argument('--source',type=Path,default=Path(__file__).resolve().parents[1]/'tier2/shoc_scan/hip/shoc_scan.hip')
     ap.add_argument('--compiler',default='c++')
     ap.add_argument('--binary',type=Path,help='Require exact invalid-input diagnostics from the actual GPU-hidden binary')
     ap.add_argument('--work-dir',type=Path,required=True)

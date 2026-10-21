@@ -1,4 +1,4 @@
-#include "../tier2/rodinia_bfs/cpu_reference.h"
+#include "../tier2/rodinia_bfs/hip/cpu_reference.h"
 #include <algorithm>
 #include <cstdio>
 

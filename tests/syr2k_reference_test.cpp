@@ -1,6 +1,6 @@
 #include <cstdio>
 #include <limits>
-#include "../tier2/polybench_syr2k/cpu_reference.h"
+#include "../tier2/polybench_syr2k/hip/cpu_reference.h"
 
 int main() {
     int cases = 0;

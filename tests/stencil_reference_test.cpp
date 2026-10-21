@@ -1,4 +1,4 @@
-#include "../tier2/parboil_stencil/cpu_reference.h"
+#include "../tier2/parboil_stencil/hip/cpu_reference.h"
 #include <cstdio>
 #include <limits>
 

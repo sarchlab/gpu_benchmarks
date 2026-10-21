@@ -1,0 +1,44 @@
+{
+  "benchmark": "npb_ep",
+  "tier": 2,
+  "suite": "npb",
+  "description": "NAS Parallel Benchmarks Embarrassingly Parallel (EP): faithful port of the NPB-GPU EP kernel. Generates 2^(M+1) pseudorandom numbers with the NAS 46-bit linear congruential generator (randlc), forms Gaussian deviate pairs by the Marsaglia polar acceptance-rejection method, tallies them into 10 concentric square annuli, and accumulates the Sx/Sy sums. Purely compute-bound. The class exponent M sets the problem size (M=24 Class S, 28 Class A, 30 Class B, 32 Class C).",
+  "scaling_param": {
+    "name": "m",
+    "description": "Class exponent M: generates 2^(M+1) random numbers over 2^(M-16) threads (M=24 S, 25 W, 28 A, 30 B, 32 C)",
+    "type": "int",
+    "values": [
+      24,
+      25,
+      28,
+      30,
+      32
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        128,
+        256,
+        512
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "gpu_kernel"
+  ]
+}

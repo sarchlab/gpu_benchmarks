@@ -1,6 +1,6 @@
 // Independent pinned-operator checks of the actual production GPU kernel.
 #define main benchmark_main
-#include "../tier2/polybench_2dconv/polybench_2dconv.hip"
+#include "../tier2/polybench_2dconv/hip/polybench_2dconv.hip"
 #undef main
 
 #include <algorithm>

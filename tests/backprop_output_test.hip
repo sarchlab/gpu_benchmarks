@@ -1,7 +1,7 @@
 // Independent dense, double-precision reference for the actual production
 // hybrid epoch. Non-saturating inputs exercise every dependency and momentum.
 #define main benchmark_main
-#include "../tier2/rodinia_backprop/rodinia_backprop.hip"
+#include "../tier2/rodinia_backprop/hip/rodinia_backprop.hip"
 #undef main
 
 #include <algorithm>

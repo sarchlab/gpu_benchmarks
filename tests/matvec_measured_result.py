@@ -68,7 +68,7 @@ def main():
     shutil.copytree(args.source / "common", args.work_dir / "common")
     sources = {}
     for name in FIELDS:
-        relative = Path("tier2") / ("polybench_" + name)
+        relative = Path("tier2") / ("polybench_" + name) / "hip"
         src, dst = args.source / relative, args.work_dir / relative
         dst.mkdir(parents=True)
         for file in ("Makefile", "params.json"):
@@ -103,7 +103,7 @@ def main():
                    BENCH_PARAM_vector_add_warmup=warm)
         if field:
             env.update(MATVEC_TEST_FIELD=field, MATVEC_TEST_INDEX=str(index), MATVEC_TEST_KIND=kind)
-        dst = args.work_dir / "tier2" / ("polybench_" + name)
+        dst = args.work_dir / "tier2" / ("polybench_" + name) / "hip"
         begin = time.monotonic()
         try:
             proc = subprocess.run([str(dst / ("polybench_" + name))], cwd=dst, env=env,

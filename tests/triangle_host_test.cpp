@@ -1,4 +1,4 @@
-#include "../tier2/graph_tc/graph_tc_host.h"
+#include "../tier2/graph_tc/hip/graph_tc_host.h"
 #include <cstdio>
 #include <set>
 

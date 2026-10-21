@@ -14,7 +14,7 @@ def main():
         work=Path(d);binary=work/'test'
         subprocess.run([args.compiler,*flags,str(repo/'tests/hotspot3d_reference.cpp'),'-o',str(binary)],check=True)
         subprocess.run([str(binary),*(['--all-inputs'] if args.all_inputs else [])],check=True,timeout=300)
-        source=work/'params.cpp';source.write_text('#include "'+str(repo/'tier2/rodinia_hotspot3d/hotspot3d_reference.h')+'"\n'+r"""
+        source=work/'params.cpp';source.write_text('#include "'+str(repo/'tier2/rodinia_hotspot3d/hip/hotspot3d_reference.h')+'"\n'+r"""
 int main(int argc,char**argv)try{auto p=hotspot3d::parameters(argc,argv);hotspot3d::admissible(hotspot3d::coefficients(p.n));printf("%d,%d,%d,%.17g,%.9g\n",p.n,p.block,p.steps,p.requested_ambient,p.ambient);}
 catch(const std::exception& e){fprintf(stderr,"FAIL: %s\n",e.what());return 1;}
 """)

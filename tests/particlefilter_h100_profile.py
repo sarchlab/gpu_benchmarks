@@ -12,7 +12,7 @@ import subprocess
 import time
 
 NAMES=['likelihood_kernel','sum_kernel','normalize_weights_kernel','cdf_kernel','thresholds_kernel','find_index_kernel']
-FILES=['tier2/altis_particlefilter/'+x for x in ['altis_particlefilter.hip','particlefilter_input.h','particlefilter_reference.h','particlefilter_kernels.h','Makefile','params.json','UPSTREAM_LICENSE']]+['common/'+x for x in ['bench_timing.h','bench_warmup.h','hip_cuda_compat.h']]
+FILES=['tier2/altis_particlefilter/hip/'+x for x in ['altis_particlefilter.hip','particlefilter_input.h','particlefilter_reference.h','particlefilter_kernels.h','Makefile','params.json','UPSTREAM_LICENSE']]+['common/'+x for x in ['bench_timing.h','bench_warmup.h','hip_cuda_compat.h']]
 
 def digest(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def expected_params(n):
@@ -55,7 +55,7 @@ def main():
     hashes={f:digest(repo/f) for f in FILES}
     for f in FILES:
         dst=work/'source'/f;dst.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(repo/f,dst)
-    folder=work/'source/tier2/altis_particlefilter';binary=folder/'altis_particlefilter'
+    folder=work/'source/tier2/altis_particlefilter/hip';binary=folder/'altis_particlefilter'
     build=['make','-B','PLATFORM=cuda','CUDA_ARCH=sm_90']
     with (work/'build.log').open('w') as log:subprocess.run(build,cwd=folder,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=120)
     binary_hash=digest(binary);manifest=json.loads((folder/'params.json').read_text())
@@ -82,7 +82,7 @@ def main():
     if digest(binary)!=binary_hash or {f:digest(repo/f) for f in FILES}!=hashes or {f:digest(work/'source'/f) for f in FILES}!=hashes:raise ValueError('Source or binary changed during qualification')
     sizes=[row['size'] for row in profile['configurations'] if row['status']=='qualified']
     if not sizes:raise ValueError('No complete qualified configuration')
-    collection=work/'collection';(collection/'tier1').mkdir(parents=True);target=collection/'tier2/altis_particlefilter';target.mkdir(parents=True)
+    collection=work/'collection';(collection/'tier1').mkdir(parents=True);target=collection/'tier2/altis_particlefilter/hip';target.mkdir(parents=True)
     selected=json.loads(json.dumps(manifest));selected['scaling_param']['values']=sizes
     for control in selected['non_scaling_params']:
         if control['name']=='vector_add_warmup':control['default']='true';control['values']=['true']

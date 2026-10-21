@@ -35,7 +35,7 @@ def expected(n,verify=True):
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--source',type=Path,default=Path(__file__).resolve().parents[1]/'tier2/cuda_scan_large/cuda_scan_large.hip')
+    ap.add_argument('--source',type=Path,default=Path(__file__).resolve().parents[1]/'tier2/cuda_scan_large/hip/cuda_scan_large.hip')
     ap.add_argument('--compiler',default='c++')
     ap.add_argument('--binary',type=Path,help='Also require exact invalid-input errors from the actual binary with GPUs hidden')
     ap.add_argument('--work-dir',type=Path,required=True,help='New directory for source, binary and raw logs')

@@ -1,4 +1,4 @@
-#include "../tier2/parboil_cutcp/cpu_reference.h"
+#include "../tier2/parboil_cutcp/hip/cpu_reference.h"
 #include <climits>
 #include <cstdio>
 #include <cstring>

@@ -4,7 +4,7 @@ from pathlib import Path
 import bfs_measured_result
 import bfs_work_counts
 
-source = (Path(__file__).resolve().parents[1]/'tier2/rodinia_bfs/rodinia_bfs.hip').read_text()
+source = (Path(__file__).resolve().parents[1]/'tier2/rodinia_bfs/hip/rodinia_bfs.hip').read_text()
 # Representative setup, eligibility, shared-store, observation and launch anchors.
 anchors = ['#define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)\n',
            '    // Host arrays for BFS state',

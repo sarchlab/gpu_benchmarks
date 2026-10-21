@@ -21,7 +21,7 @@ import (
 func cmdList(tierStr, suite string, jsonOut bool) int {
 	repoRoot := findRepoRoot()
 	tier := parseTier(tierStr)
-	benchmarks := discoverBenchmarks(repoRoot, tier, suite, "")
+	benchmarks := discoverBenchmarks(repoRoot, tier, suite, "", detectPlatform())
 	if len(benchmarks) == 0 {
 		eprint("No benchmarks found.")
 		return ExitNoBench
@@ -92,7 +92,7 @@ func cmdCompile(tierStr, suite, benchmark, platform string, jobs int, verbose bo
 		plat = detectPlatform()
 	}
 
-	benchmarks := discoverBenchmarks(repoRoot, tier, suite, benchmark)
+	benchmarks := discoverBenchmarks(repoRoot, tier, suite, benchmark, plat)
 	if len(benchmarks) == 0 {
 		eprint("No benchmarks found matching filters.")
 		return ExitNoBench
@@ -292,7 +292,7 @@ func checkDuplicateValues(vals []interface{}, prefix string) []string {
 }
 
 func validateParams(params map[string]interface{}, paramsPath string) (errs, warns []string) {
-	bdir := filepath.Dir(paramsPath)
+	bdir := manifestBenchDir(paramsPath)
 	dirName := filepath.Base(bdir)
 	tierDir := filepath.Base(filepath.Dir(bdir))
 
@@ -515,7 +515,7 @@ func cmdValidate(tierStr, suite, benchmark string) int {
 func validateManifestFiles(repoRoot string, tier *int, suite, benchmark string) int {
 	// Validation must inspect malformed manifests too. Typed benchmark discovery
 	// skips files it cannot decode, which would hide their errors in a mixed tree.
-	paths, err := filepath.Glob(filepath.Join(repoRoot, "tier*", "*", "params.json"))
+	paths, err := manifestPaths(repoRoot)
 	if err != nil {
 		eprint("Cannot find manifests: " + err.Error())
 		return ExitSomeFailed
@@ -523,7 +523,7 @@ func validateManifestFiles(repoRoot string, tier *int, suite, benchmark string) 
 
 	totalErrors, totalWarnings, valid, selected := 0, 0, 0, 0
 	for _, pp := range paths {
-		bdir := filepath.Dir(pp)
+		bdir := manifestBenchDir(pp)
 		if benchmark != "" && filepath.Base(bdir) != benchmark {
 			continue
 		}
@@ -560,6 +560,14 @@ func validateManifestFiles(repoRoot string, tier *int, suite, benchmark string) 
 		selected++
 
 		es, ws := validateParams(params, pp)
+		// Both platform variants describe the same benchmark and must sweep the
+		// same configurations, so the cuda/ manifest must match hip/ exactly.
+		if manifestVariant(pp) == cudaVariant {
+			hipPath := filepath.Join(bdir, hipVariant, "params.json")
+			if hipData, err := os.ReadFile(hipPath); err == nil && string(hipData) != string(data) {
+				es = append(es, "params.json differs from "+filepath.Join(hipVariant, "params.json"))
+			}
+		}
 		if len(es) > 0 {
 			fmt.Printf("✗ %s\n", rel)
 			for _, e := range es {
@@ -963,7 +971,7 @@ func cmdRun(args runArgs) int {
 		reps = 1
 	}
 
-	benchmarks := discoverBenchmarks(repoRoot, tier, args.suite, args.benchmark)
+	benchmarks := discoverBenchmarks(repoRoot, tier, args.suite, args.benchmark, plat)
 	if len(benchmarks) == 0 {
 		eprint("No benchmarks found matching filters.")
 		return ExitNoBench

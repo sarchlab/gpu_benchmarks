@@ -1,0 +1,75 @@
+{
+  "benchmark": "rodinia_kmeans",
+  "tier": 2,
+  "suite": "rodinia",
+  "description": "K-means clustering adapted from Rodinia 3.1. Feature-major inversion, nearest-center arithmetic, constant-memory centers and CPU centroid sums are retained; texture loads use __ldg. The local driver uses synthetic LCG input seeded with 42 and exactly max_iter assignments, with accumulated per-kernel timing. Upstream uses file input and convergence control.",
+  "scaling_param": {
+    "name": "points",
+    "description": "Number of data points to cluster",
+    "type": "int",
+    "values": [
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768,
+      49152,
+      65536,
+      98304,
+      100000,
+      131072,
+      196608,
+      262144,
+      393216,
+      524288,
+      786432,
+      1048576,
+      2097152,
+      4194304
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "features",
+      "description": "Number of features per data point (constant-memory limit: clusters*features <= 1088)",
+      "type": "int",
+      "default": 34,
+      "values": [
+        34
+      ]
+    },
+    {
+      "name": "clusters",
+      "description": "Number of clusters (K)",
+      "type": "int",
+      "default": 5,
+      "values": [
+        5
+      ]
+    },
+    {
+      "name": "max_iter",
+      "description": "K-means assignment iterations per timed pass",
+      "type": "int",
+      "default": 10,
+      "values": [
+        10
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "invert_mapping",
+    "kmeansPoint"
+  ]
+}

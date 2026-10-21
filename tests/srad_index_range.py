@@ -15,7 +15,7 @@ from srad_invalid_parameters import run_case
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path,
-                        default=Path(__file__).resolve().parents[1] / "tier2/rodinia_srad/rodinia_srad.hip")
+                        default=Path(__file__).resolve().parents[1] / "tier2/rodinia_srad/hip/rodinia_srad.hip")
     parser.add_argument("--compiler", default="c++")
     parser.add_argument("--binary", type=Path, help="Also test oversized inputs against the real GPU binary")
     parser.add_argument("--report", type=Path)

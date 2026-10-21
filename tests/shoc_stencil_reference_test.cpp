@@ -1,4 +1,4 @@
-#include "../tier2/shoc_stencil2d/cpu_reference.h"
+#include "../tier2/shoc_stencil2d/hip/cpu_reference.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>

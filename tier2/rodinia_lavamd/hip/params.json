@@ -1,0 +1,45 @@
+{
+  "benchmark": "rodinia_lavamd",
+  "tier": 2,
+  "suite": "rodinia",
+  "description": "Rodinia LavaMD short-range molecular dynamics. Faithful port: the original kernel_gpu_cuda force kernel, which stages the home box and each neighbor box's particles into shared memory before the all-pairs interaction and uses the modified-Lennard-Jones/Gaussian potential (vij=exp(-a2*r2), fs=2*vij). Space is a boxes1d^3 grid of boxes with 100 particles each; one block per home box. Checks all four measured energy/force components against an independent complete double CPU reference after timing (verification=full_cpu_v1).",
+  "scaling_param": {
+    "name": "boxes1d",
+    "description": "Boxes per dimension (total boxes = boxes1d^3, particles = boxes1d^3 * 100)",
+    "type": "int",
+    "values": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      18,
+      20
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "kernel_gpu_cuda"
+  ]
+}

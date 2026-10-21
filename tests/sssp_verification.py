@@ -86,7 +86,7 @@ def instrument(source):
 
 
 def host_reference(root, work, compiler):
-    text='#include <cstdio>\n'+(root/'tier2/lonestar_sssp/cpu_reference.h').read_text().replace('#pragma once','')
+    text='#include <cstdio>\n'+(root/'tier2/lonestar_sssp/hip/cpu_reference.h').read_text().replace('#pragma once','')
     text+=(root/'tests/sssp_reference_test.cpp').read_text()
     path=work/'reference.cpp';path.write_text(text);binary=work/'reference'
     subprocess.run([compiler,'-O3','-std=c++14','-Wall','-Wextra','-Werror',
@@ -123,7 +123,7 @@ def main():
     root,work=args.source.resolve(),args.work_dir.resolve();work.mkdir(parents=True,exist_ok=False)
     if args.host_only:
         host_reference(root,work,args.compiler);return 0
-    relative=Path('tier2/lonestar_sssp');src=root/relative;source=(src/'lonestar_sssp.hip').read_text()
+    relative=Path('tier2/lonestar_sssp/hip');src=root/relative;source=(src/'lonestar_sssp.hip').read_text()
     inputs=[relative/n for n in ('lonestar_sssp.hip','cpu_reference.h','Makefile','params.json')]
     inputs += [Path('common')/n for n in ('bench_timing.h','bench_warmup.h','hip_cuda_compat.h')]
     hashes={str(p):hashlib.sha256((root/p).read_bytes()).hexdigest() for p in inputs}

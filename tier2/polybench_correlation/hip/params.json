@@ -1,0 +1,65 @@
+{
+  "benchmark": "polybench_correlation",
+  "tier": 2,
+  "suite": "polybench",
+  "description": "Compute correlation matrix from a data matrix (M samples x N features, M=N). Steps: mean, stddev, normalize, correlation (matmul-like). Derived from the PolyBench/GPU benchmark suite. Checks all four measured outputs against complete independent CPU references after timing (verification=full_cpu_v1).",
+  "scaling_param": {
+    "name": "size",
+    "description": "Data matrix dimension N (MxN where M=N)",
+    "type": "int",
+    "values": [
+      64,
+      96,
+      128,
+      192,
+      256,
+      320,
+      384,
+      448,
+      512,
+      640,
+      768,
+      896,
+      1024,
+      1280,
+      1536,
+      1792,
+      2048,
+      2304,
+      2560,
+      2816,
+      3072,
+      3328,
+      3584,
+      3840,
+      4096
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Number of threads per block for 1D kernels (mean, stddev, normalize)",
+      "type": "int",
+      "default": 256,
+      "values": [
+        256
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "mean_kernel",
+    "stddev_kernel",
+    "normalize_kernel",
+    "correlation_kernel"
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "benchmark": "lonestar_bh",
+  "tier": 2,
+  "suite": "lonestar",
+  "description": "Barnes-Hut N-body simulation using 2D quadtree. Tree built on CPU, flattened for GPU. GPU computes forces by tree traversal and integrates positions/velocities.",
+  "scaling_param": {
+    "name": "bodies",
+    "description": "Number of bodies in the simulation",
+    "type": "int",
+    "values": [
+      256,
+      384,
+      512,
+      768,
+      1024,
+      1536,
+      2048,
+      3072,
+      4096,
+      6144,
+      8192,
+      12288,
+      16384,
+      24576,
+      32768,
+      49152,
+      65536,
+      98304,
+      131072,
+      196608,
+      262144,
+      393216,
+      524288,
+      786432,
+      1048576
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "timesteps",
+      "description": "Number of simulation timesteps",
+      "type": "int",
+      "default": 10,
+      "values": [
+        1,
+        5,
+        10,
+        20
+      ]
+    },
+    {
+      "name": "theta",
+      "description": "Barnes-Hut opening angle (controls accuracy vs speed tradeoff)",
+      "type": "float",
+      "default": 0.5,
+      "values": [
+        0.3,
+        0.5,
+        0.7,
+        1.0
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Run the optional clock/cache warmer after initial CPU tree construction and uploads, immediately before the first force kernel. No warmer between kernels or later timesteps; subsequent hybrid-stage state requires target qualification.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "bh_force_kernel",
+    "integrate_kernel"
+  ]
+}

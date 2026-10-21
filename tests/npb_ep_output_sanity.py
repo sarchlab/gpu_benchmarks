@@ -56,7 +56,7 @@ def instrument(source):
 
 
 def host_tests(root, work, compiler):
-    source = (root / 'tier2/npb_ep/npb_ep.hip').read_text()
+    source = (root / 'tier2/npb_ep/hip/npb_ep.hip').read_text()
     start, end = 'static size_t reduce_and_check_partials(', '// Argument parsing'
     if source.count(start) != 1 or source.count(end) != 1:
         raise ValueError('EP production reduction anchors missing')
@@ -96,7 +96,7 @@ def main():
     if args.host_only:
         host_tests(root,work,args.compiler)
         return 0
-    relative = Path('tier2/npb_ep'); src = root / relative
+    relative = Path('tier2/npb_ep/hip'); src = root / relative
     source = (src / 'npb_ep.hip').read_text()
     inputs = [relative / n for n in ('npb_ep.hip','Makefile','params.json')]
     inputs += [Path('common') / n for n in ('bench_timing.h','bench_warmup.h','hip_cuda_compat.h')]

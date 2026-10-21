@@ -1,6 +1,6 @@
 // Independent full-state checks of the actual production timestep sequence.
 #define main benchmark_main
-#include "../tier2/parboil_stencil/parboil_stencil.hip"
+#include "../tier2/parboil_stencil/hip/parboil_stencil.hip"
 #undef main
 
 #include <algorithm>

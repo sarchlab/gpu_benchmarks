@@ -1,0 +1,47 @@
+{
+  "benchmark": "npb_cg",
+  "tier": 2,
+  "suite": "npb",
+  "description": "NAS CG inverse-power iteration in FP64, standard classes S/W/A/B/C, full actual-result CPU verification and published zeta checks.",
+  "scaling_param": {
+    "name": "matrix_size",
+    "description": "Matrix size selecting the complete standard NAS class S, W, A, B or C; class fixes sparsity, shift and iteration counts.",
+    "type": "int",
+    "values": [
+      1400,
+      7000,
+      14000,
+      75000,
+      150000
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        256
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Run one untimed vector-add warmer before the complete CG algorithm, intended to establish entry clock/cache conditions. Set false to skip it; no cache-state guarantee is implied.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "cg_init_kernel",
+    "spmv_kernel",
+    "dot_product_kernel",
+    "axpy_kernel",
+    "direction_kernel",
+    "normalize_kernel"
+  ]
+}

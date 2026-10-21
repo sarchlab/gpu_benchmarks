@@ -1,4 +1,4 @@
-#include "../tier2/npb_mg/mg_reference.h"
+#include "../tier2/npb_mg/hip/mg_reference.h"
 #include "fixtures/npb_mg_original.h"
 #include <cstring>
 #include <limits>

@@ -1,4 +1,4 @@
-#include "../tier2/parboil_lbm/lbm_reference.h"
+#include "../tier2/parboil_lbm/hip/lbm_reference.h"
 #include <cassert>
 #include <limits>
 int main() {

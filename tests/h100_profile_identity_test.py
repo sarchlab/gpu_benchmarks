@@ -24,7 +24,7 @@ class ProfileIdentityTest(unittest.TestCase):
         self.repo = Path(self.temporary.name)
         self.profiles = {}
         for benchmark in BENCHMARKS:
-            relative = f'tier2/{benchmark}/h100_profile.json'
+            relative = f'tier2/{benchmark}/hip/h100_profile.json'
             profile = json.loads((REPO / relative).read_text())
             self.profiles[benchmark] = profile
             for name in [relative, *profile['source_sha256']]:
@@ -35,7 +35,7 @@ class ProfileIdentityTest(unittest.TestCase):
     def test_current_profiles_and_unrelated_docs(self):
         for benchmark, expected in [('cuda_nbody', (75, 23)), ('altis_particlefilter', (27, 24))]:
             with self.subTest(benchmark=benchmark):
-                (self.repo / 'tier2' / benchmark / 'README.md').write_text('Documentation only.\n')
+                (self.repo / 'tier2' / benchmark / 'hip' / 'README.md').write_text('Documentation only.\n')
                 self.assertEqual(check_profile(self.repo, benchmark), expected)
 
     def test_every_recorded_input_and_digest(self):
@@ -66,7 +66,7 @@ class ProfileIdentityTest(unittest.TestCase):
                     del bad['source_sha256'][name]
                     with self.assertRaisesRegex(ValueError, 'source coverage differs'):
                         check_profile(self.repo, benchmark, bad)
-            extra = self.repo / 'tier2' / benchmark / 'new_runtime_helper.h'
+            extra = self.repo / 'tier2' / benchmark / 'hip' / 'new_runtime_helper.h'
             extra.write_text('// A newly introduced runtime dependency.\n')
             with self.assertRaisesRegex(ValueError, 'source coverage differs'):
                 check_profile(self.repo, benchmark, profile)
@@ -97,7 +97,7 @@ class ProfileIdentityTest(unittest.TestCase):
 
     def test_changed_candidates_cannot_be_hidden_by_refreshing_manifest_hash(self):
         for benchmark, profile in self.profiles.items():
-            name = f'tier2/{benchmark}/params.json'
+            name = f'tier2/{benchmark}/hip/params.json'
             path = self.repo / name
             original = json.loads(path.read_text())
             for change in ('add-size', 'remove-size', 'add-axis', 'add-timestep'):

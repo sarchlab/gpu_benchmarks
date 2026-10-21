@@ -75,8 +75,8 @@ def main():
         args.work_dir.mkdir(parents=True, exist_ok=False)
     except FileExistsError:
         ap.error("--work-dir must name a new, nonexistent directory")
-    src = args.source / "tier2/rodinia_srad"
-    dst = args.work_dir / "tier2/rodinia_srad"
+    src = args.source / "tier2/rodinia_srad/hip"
+    dst = args.work_dir / "tier2/rodinia_srad/hip"
     dst.mkdir(parents=True)
     shutil.copytree(args.source / "common", args.work_dir / "common")
     for name in ("Makefile", "params.json"):

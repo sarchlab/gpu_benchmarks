@@ -1,6 +1,6 @@
 #include <cstdio>
 #include <limits>
-#include "../tier2/polybench_3mm/cpu_reference.h"
+#include "../tier2/polybench_3mm/hip/cpu_reference.h"
 template<class Left,class Right>
 static std::vector<long double> scalar_product(const std::vector<Left>& a,const std::vector<Right>& b,int rows,int cols,int inner) {
     std::vector<long double> out((size_t)rows*cols);

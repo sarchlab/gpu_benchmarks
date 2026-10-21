@@ -19,7 +19,7 @@ def main():
         work=Path(directory);binary=work/'test'
         subprocess.run([args.compiler,*flags,str(repo/'tests/jacobi_reference.cpp'),'-o',str(binary)],check=True)
         subprocess.run([str(binary),*(['--all-inputs'] if args.all_inputs else [])],check=True,timeout=300)
-        cpp=work/'parameters.cpp';cpp.write_text('#include "'+str(repo/'tier2/polybench_jacobi2d/jacobi_reference.h')+'"\n'+r'''
+        cpp=work/'parameters.cpp';cpp.write_text('#include "'+str(repo/'tier2/polybench_jacobi2d/hip/jacobi_reference.h')+'"\n'+r'''
 int main(int argc,char**argv)try{auto p=jacobi::parameters(argc,argv);printf("%d,%d\n",p.n,p.steps);}
 catch(const std::exception& e){fprintf(stderr,"FAIL: %s\n",e.what());return 1;}
 ''')

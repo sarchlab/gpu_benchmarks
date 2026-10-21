@@ -1,6 +1,6 @@
 #include <cstdio>
 #include <limits>
-#include "../tier2/rodinia_lavamd/cpu_reference.h"
+#include "../tier2/rodinia_lavamd/hip/cpu_reference.h"
 struct Particle {double v,x,y,z;};
 static bool close_reference(double actual,long double expected) {
     return std::isfinite(actual) && std::isfinite(expected) &&

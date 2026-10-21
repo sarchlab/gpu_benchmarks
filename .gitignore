@@ -14,18 +14,30 @@ tier1/mixbench/mixbench
 tier1/pcie_bandwidth/pcie_bandwidth
 tier1/shared_mem_bandwidth/shared_mem_bandwidth
 tier1/warp_shuffle/warp_shuffle
+# Each tier2 benchmark keeps one source tree per platform: tier2/<bench>/hip/
+# (original HIP sources) and tier2/<bench>/cuda/ (native CUDA port). Keep
+# sources, ignore built binaries.
 tier2/*/*
-!tier2/*/Makefile
-!tier2/*/README.md
-!tier2/*/*.hip
-!tier2/*/bench.cu
-!tier2/*/bench.hip
-!tier2/*/*.cu
-!tier2/*/*.h
-!tier2/*/*.metal
-!tier2/*/*.mm
-!tier2/*/params.json
-!tier2/npb_is/test_npb_is.py
+!tier2/*/hip/
+!tier2/*/cuda/
+tier2/*/hip/*
+tier2/*/cuda/*
+!tier2/*/hip/Makefile
+!tier2/*/hip/README.md
+!tier2/*/hip/*.hip
+!tier2/*/hip/*.h
+!tier2/*/hip/params.json
+!tier2/*/hip/UPSTREAM_LICENSE
+!tier2/*/hip/h100_profile.json
+!tier2/*/hip/.gitignore
+!tier2/npb_is/hip/test_npb_is.py
+!tier2/*/cuda/Makefile
+!tier2/*/cuda/README.md
+!tier2/*/cuda/*.cu
+!tier2/*/cuda/*.h
+!tier2/*/cuda/params.json
+!tier2/*/cuda/UPSTREAM_LICENSE
+!tier2/npb_is/cuda/test_npb_is.py
 tier3/*/*
 !tier3/*/Makefile
 !tier3/*/README.md

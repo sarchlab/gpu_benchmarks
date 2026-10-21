@@ -16,8 +16,8 @@ def main():
     ap.add_argument('--thread-sanitizer', action='store_true')
     args = ap.parse_args()
     repo = Path(__file__).resolve().parents[1]
-    source = (repo/'tier2/npb_mg/npb_mg.hip').read_text()
-    header = (repo/'tier2/npb_mg/nas_mg.h').read_text()
+    source = (repo/'tier2/npb_mg/hip/npb_mg.hip').read_text()
+    header = (repo/'tier2/npb_mg/hip/nas_mg.h').read_text()
     flags = ['-std=c++14','-O2','-pthread','-fno-sanitize-recover=all',
              '-fsanitize=thread' if args.thread_sanitizer else '-fsanitize=address,undefined']
     clean = {k:v for k,v in os.environ.items() if not k.startswith('BENCH_PARAM_')}
@@ -29,7 +29,7 @@ def main():
         assert header.count(anchor) == 1
         (work/'nas_mg.h').write_text(header.replace(anchor,
             '                if(static_cast<int>(id)-1==mg_fail_after)throw std::runtime_error("injected worker creation failure");\n'+anchor))
-        (work/'mg_reference.h').write_bytes((repo/'tier2/npb_mg/mg_reference.h').read_bytes())
+        (work/'mg_reference.h').write_bytes((repo/'tier2/npb_mg/hip/mg_reference.h').read_bytes())
         cpp = work/'pool.cpp';cpp.write_text(r'''
 static int mg_fail_after=-1;
 #include "mg_reference.h"
@@ -55,7 +55,7 @@ int main() {
         start='static int integer(';end='int main('
         assert source.count(start)==source.count(end)==1
         cpp.write_text('#include <cerrno>\n#include <climits>\n#include <cstring>\n#include <cstdlib>\n'
-            '#include "'+str(repo/'tier2/npb_mg/nas_mg.h')+'"\n'+start+source.split(start,1)[1].split(end,1)[0]+r'''
+            '#include "'+str(repo/'tier2/npb_mg/hip/nas_mg.h')+'"\n'+start+source.split(start,1)[1].split(end,1)[0]+r'''
 int main(int argc,char**argv) try {
     int b;const auto c=*parameters(argc,argv,&b);
     printf("%c,%d,%d,%d\n",c.name,c.n,c.iterations,b);

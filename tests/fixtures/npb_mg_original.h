@@ -65,7 +65,7 @@
  */
 
 
-#include "../../tier2/npb_mg/nas_mg.h"
+#include "../../tier2/npb_mg/hip/nas_mg.h"
 namespace pinned_mg {
 struct Original {
     static constexpr int M=515,MM=10,MAXLEVEL=10,ONE=1;

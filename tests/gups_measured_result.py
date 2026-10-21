@@ -48,10 +48,10 @@ def instrument(source):
 def build(repo,work,platform,hooks):
     work.mkdir(parents=True)
     shutil.copytree(repo/'common',work/'common')
-    folder=work/'tier2/altis_gups';folder.mkdir(parents=True)
+    folder=work/'tier2/altis_gups/hip';folder.mkdir(parents=True)
     for name in ['Makefile','params.json']:
-        shutil.copy2(repo/'tier2/altis_gups'/name,folder/name)
-    source=(repo/'tier2/altis_gups/altis_gups.hip').read_text()
+        shutil.copy2(repo/'tier2/altis_gups/hip'/name,folder/name)
+    source=(repo/'tier2/altis_gups/hip/altis_gups.hip').read_text()
     (folder/'altis_gups.hip').write_text(instrument(source) if hooks else source)
     with (work/'build.log').open('w') as log:
         subprocess.run(['make','PLATFORM='+platform],cwd=folder,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=120)
@@ -94,7 +94,7 @@ def main():
     if args.compile_only:
         print('GUPS measured-table/storage hooks compiled; GPU tests not executed');return
     production=build(repo,work/'production',args.platform,False)
-    manifest=json.loads((repo/'tier2/altis_gups/params.json').read_text())
+    manifest=json.loads((repo/'tier2/altis_gups/hip/params.json').read_text())
     clean={k:v for k,v in os.environ.items() if not k.startswith(('BENCH_PARAM_','GUPS_TEST_'))}
     controls=[(n,b,t,mode) for n,b,t in [(1048576,256,65536),(1,1,1),(1,256,1),(16,3,7),
               (1024,32,33),(65536,1024,65536),(131072,64,65537)] for mode in ['cas','xor']]

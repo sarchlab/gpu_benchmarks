@@ -112,7 +112,7 @@ def main():
         raise RuntimeError("Run without Python optimization")
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--compiler', default='c++')
-    ap.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[1]/'tier2/rodinia_nw/rodinia_nw.hip')
+    ap.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[1]/'tier2/rodinia_nw/hip/rodinia_nw.hip')
     args = ap.parse_args()
     source = args.source.read_text()
     manifest = json.loads((args.source.parent/'params.json').read_text())

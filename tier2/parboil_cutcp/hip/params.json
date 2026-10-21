@@ -1,0 +1,70 @@
+{
+  "benchmark": "parboil_cutcp",
+  "tier": 2,
+  "suite": "parboil",
+  "description": "Coulombic potential with distance cutoff (CUTCP), cutoff-binning implementation. Atoms are geometrically hashed into a 4 A lattice of bins; the potential lattice is computed in 8^3-point regions where each thread block walks only neighboring bins within the cutoff (constant-memory NbrList stencil) staging bins through shared memory. Faithful port of the Parboil cuda kernel cuda_cutoff_potential_lattice6overlap; emits per-iteration kernel times.",
+  "scaling_param": {
+    "name": "num_atoms",
+    "description": "Number of charged atoms hashed into the fixed-capacity (BIN_DEPTH=16) bin lattice. Bins have a fixed depth, so peak per-bin occupancy must stay <= BIN_DEPTH or the run is rejected before measurement (an overflow would otherwise compute and verify a silently-truncated problem). Values are capped so every point scales real work at the default lattice_dim=144 (peak occupancy stays within BIN_DEPTH across the full range, ~1..8 atoms/bin mean); larger lattice_dim values raise the ceiling. See issue #63 C-02/D-02(b).",
+    "type": "int",
+    "values": [
+      5000,
+      8000,
+      12000,
+      16000,
+      20000,
+      25000,
+      30000,
+      35000,
+      40000,
+      45000
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "lattice_dim",
+      "description": "Potential-lattice side length (nx=ny=nz, multiple of 8). Larger dims spread the fixed atom count over more bins, lowering peak occupancy. Values are constrained to >=144 so the full num_atoms sweep (up to 45000) stays within the fixed BIN_DEPTH at every lattice_dim; smaller lattices (64/96/128) overflow at these atom counts and are excluded (issue #63, D-02(b)).",
+      "type": "int",
+      "default": 144,
+      "values": [
+        144,
+        160,
+        192,
+        256
+      ]
+    },
+    {
+      "name": "grid_spacing",
+      "description": "Lattice spacing h in Angstroms (0.5 keeps BIN_LENGTH/(8h)=1)",
+      "type": "float",
+      "default": 0.5,
+      "values": [
+        0.5
+      ]
+    },
+    {
+      "name": "cutoff_radius",
+      "description": "Cutoff distance for charge interactions in Angstroms",
+      "type": "float",
+      "default": 12.0,
+      "values": [
+        8.0,
+        12.0,
+        16.0
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "cuda_cutoff_potential_lattice6overlap"
+  ]
+}

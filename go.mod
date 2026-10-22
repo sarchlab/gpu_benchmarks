@@ -1,9 +1,9 @@
 module github.com/sarchlab/gpu_benchmarks
 
-go 1.21
+go 1.24
 
 require (
-	github.com/klauspost/compress v1.17.11
+	github.com/klauspost/compress v1.18.7
 	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/spf13/cobra v1.8.1
 )

@@ -80,7 +80,7 @@ def main():
     spec=importlib.util.spec_from_file_location('bfs_graphs',args.source/'tests/bfs_measured_result.py')
     graphs=importlib.util.module_from_spec(spec);spec.loader.exec_module(graphs)
     src=args.source/'tier2/rodinia_bfs/hip';dst=args.work_dir/'tier2/rodinia_bfs/hip';dst.mkdir(parents=True)
-    shutil.copytree(args.source/'common',args.work_dir/'common')
+    shutil.copytree(args.source/'common_hip',args.work_dir/'common_hip')
     for name in ('Makefile','params.json','cpu_reference.h'):shutil.copy2(src/name,dst/name)
     source=(src/'rodinia_bfs.hip').read_text();(dst/'rodinia_bfs.hip').write_text(instrument(source,graphs.HOOK))
     with (args.work_dir/'build.log').open('w') as log:

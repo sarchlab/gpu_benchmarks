@@ -12,7 +12,7 @@ PROFILES = {
     'cuda_nbody': (('bodies', 'timesteps'), 'full_cpu_v1'),
     'altis_particlefilter': (('size',), 'full_final_aux_cpu_fp64_v1'),
 }
-COMMON = tuple('common/' + name for name in
+COMMON = tuple('common_hip/' + name for name in
                ('bench_timing.h', 'bench_warmup.h', 'hip_cuda_compat.h'))
 SOURCE_SUFFIXES = {'.hip', '.h', '.hpp', '.cu', '.cuh', '.c', '.cc', '.cpp', '.inc'}
 

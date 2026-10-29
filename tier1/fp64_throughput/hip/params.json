@@ -1,0 +1,63 @@
+{
+  "benchmark": "fp64_throughput",
+  "tier": 1,
+  "suite": "microbench",
+  "description": "Times FP64 FMA work at the recorded grid geometry. The declared sweep uses one block. Emits raw GPU time and workload descriptors; derive throughput only after verifying counted-work preservation in the compiled target binary.",
+  "scaling_param": {
+    "name": "fmas_per_thread",
+    "description": "Number of FMA operations per thread per kernel invocation; controls total compute work",
+    "type": "int",
+    "values": [
+      256,
+      512,
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768,
+      65536,
+      131072,
+      262144,
+      524288,
+      1048576
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "num_blocks",
+      "description": "Number of thread blocks in the grid; the declared sweep uses one block. Multiplying a single-block rate by SM/CU count is an extrapolation model, not a measured device-wide rate.",
+      "type": "int",
+      "default": 1,
+      "values": [
+        1
+      ]
+    },
+    {
+      "name": "threads_per_block",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        1,
+        32,
+        64,
+        256,
+        1024
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "When true, run the untimed vector-add warmer before each timed operation to raise clocks and disturb cache state; qualify the resulting state on the target. False disables the warmer without promising a particular cache state.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "fp64_fma_kernel"
+  ]
+}

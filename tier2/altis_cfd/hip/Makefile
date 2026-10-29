@@ -49,10 +49,10 @@ endif
 
 all: $(TARGET)
 
-$(TARGET): $(SRC) cfd_reference.h cfd_kernels.h ../../../common/bench_timing.h ../../../common/bench_warmup.h ../../../common/hip_cuda_compat.h
+$(TARGET): $(SRC) cfd_reference.h cfd_kernels.h ../../../common_hip/bench_timing.h ../../../common_hip/bench_warmup.h ../../../common_hip/hip_cuda_compat.h
 	$(CC) $(CFLAGS) $< -o $@
 
-bench_output_test: ../../../tests/cfd_upstream_gpu.hip ../../../tests/fixtures/cfd_upstream.h $(SRC) cfd_reference.h cfd_kernels.h ../../../common/bench_timing.h ../../../common/bench_warmup.h ../../../common/hip_cuda_compat.h
+bench_output_test: ../../../tests/cfd_upstream_gpu.hip ../../../tests/fixtures/cfd_upstream.h $(SRC) cfd_reference.h cfd_kernels.h ../../../common_hip/bench_timing.h ../../../common_hip/bench_warmup.h ../../../common_hip/hip_cuda_compat.h
 	$(CC) $(CFLAGS) $< -o $@
 
 test: bench_output_test

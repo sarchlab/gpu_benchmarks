@@ -63,10 +63,10 @@ def main():
     args=ap.parse_args()
     repo=Path(__file__).resolve().parents[1]; work=args.work_dir.resolve()
     work.mkdir(parents=True)
-    for relative in ('common','tier1/cache_bandwidth'):
+    for relative in ('common_hip','tier1/cache_bandwidth/hip'):
         shutil.copytree(repo/relative,work/relative,dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns('cache_bandwidth','__pycache__'))
-    directory=work/'tier1/cache_bandwidth'
+    directory=work/'tier1/cache_bandwidth/hip'
     subprocess.run(['make','PLATFORM=cuda','CUDA_ARCH='+args.cuda_arch,'-B'],cwd=directory,check=True,timeout=120)
     topology=directory/'topology.hip'
     topology.write_text(kernel_test((directory/'cache_bandwidth.hip').read_text()))

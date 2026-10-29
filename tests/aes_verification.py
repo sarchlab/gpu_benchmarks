@@ -125,14 +125,14 @@ def main():
         host_reference(source, args.work_dir, args.compiler)
         return 0
     inputs = [relative / name for name in ("heteromark_aes.hip", "Makefile", "params.json")]
-    inputs += [Path("common") / name for name in ("bench_timing.h", "bench_warmup.h", "hip_cuda_compat.h")]
+    inputs += [Path("common_hip") / name for name in ("bench_timing.h", "bench_warmup.h", "hip_cuda_compat.h")]
     hashes = {str(p): hashlib.sha256((args.source / p).read_bytes()).hexdigest() for p in inputs}
     binaries = {}
     for variant in ("production", "faults"):
         root = args.work_dir / variant
         dst = root / relative
         dst.mkdir(parents=True)
-        shutil.copytree(args.source / "common", root / "common")
+        shutil.copytree(args.source / "common_hip", root / "common_hip")
         for name in ("Makefile", "params.json"):
             shutil.copy2(src / name, dst / name)
         (dst / "heteromark_aes.hip").write_text(source if variant == "production" else instrument(source))

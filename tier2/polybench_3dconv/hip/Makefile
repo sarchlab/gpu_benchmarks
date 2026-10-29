@@ -49,10 +49,10 @@ endif
 
 all: $(TARGET)
 
-$(TARGET): $(SRC) ../../../common/bench_timing.h ../../../common/bench_warmup.h ../../../common/hip_cuda_compat.h
+$(TARGET): $(SRC) ../../../common_hip/bench_timing.h ../../../common_hip/bench_warmup.h ../../../common_hip/hip_cuda_compat.h
 	$(CC) $(CFLAGS) $< -o $@
 
-bench_output_test: ../../../tests/three_d_convolution_output.hip $(SRC) ../../../common/bench_timing.h ../../../common/bench_warmup.h ../../../common/hip_cuda_compat.h
+bench_output_test: ../../../tests/three_d_convolution_output.hip $(SRC) ../../../common_hip/bench_timing.h ../../../common_hip/bench_warmup.h ../../../common_hip/hip_cuda_compat.h
 	$(CC) $(CFLAGS) $< -o $@
 
 test: bench_output_test

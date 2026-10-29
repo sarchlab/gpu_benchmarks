@@ -49,10 +49,10 @@ endif
 
 all: $(TARGET)
 
-$(TARGET): $(SRC) jacobi_reference.h ../../../common/bench_timing.h ../../../common/bench_warmup.h ../../../common/hip_cuda_compat.h
+$(TARGET): $(SRC) jacobi_reference.h ../../../common_hip/bench_timing.h ../../../common_hip/bench_warmup.h ../../../common_hip/hip_cuda_compat.h
 	$(CC) $(CFLAGS) $< -o $@
 
-bench_output_test: ../../../tests/jacobi_original_gpu.hip $(SRC) jacobi_reference.h ../../../tests/fixtures/polybench_jacobi_original.h ../../../tests/fixtures/polybench_jacobi_original_gpu.h ../../../common/bench_timing.h ../../../common/bench_warmup.h ../../../common/hip_cuda_compat.h
+bench_output_test: ../../../tests/jacobi_original_gpu.hip $(SRC) jacobi_reference.h ../../../tests/fixtures/polybench_jacobi_original.h ../../../tests/fixtures/polybench_jacobi_original_gpu.h ../../../common_hip/bench_timing.h ../../../common_hip/bench_warmup.h ../../../common_hip/hip_cuda_compat.h
 	$(CC) $(CFLAGS) $< -o $@
 
 test: bench_output_test

@@ -37,7 +37,7 @@
 // then a summary whose total_time_ms is the SUM of all passes' GPU event times.
 // Output (stderr): human-readable EP results + NAS verification.
 
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

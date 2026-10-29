@@ -1,6 +1,6 @@
 // Rodinia 3.1 HotSpot3D, portable one-cell mapping.
 // See README.md for the pinned source and UPSTREAM_LICENSE for notices.
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include "hotspot3d_reference.h"
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 

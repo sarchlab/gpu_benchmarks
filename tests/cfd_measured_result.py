@@ -41,7 +41,7 @@ static void upload_farfield()''')
     return s
 
 def build(repo,work,platform,hooks):
-    work.mkdir(parents=True);shutil.copytree(repo/'common',work/'common');folder=work/'tier2/altis_cfd/hip';folder.mkdir(parents=True)
+    work.mkdir(parents=True);shutil.copytree(repo/'common_hip',work/'common_hip');folder=work/'tier2/altis_cfd/hip';folder.mkdir(parents=True)
     for name in ['Makefile','cfd_reference.h','cfd_kernels.h','params.json']:shutil.copy2(repo/'tier2/altis_cfd/hip'/name,folder/name)
     source=(repo/'tier2/altis_cfd/hip/altis_cfd.hip').read_text();(folder/'altis_cfd.hip').write_text(instrument(source) if hooks else source)
     with (work/'build.log').open('w') as log:subprocess.run(['make','PLATFORM='+platform],cwd=folder,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=120)

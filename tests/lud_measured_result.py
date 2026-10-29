@@ -50,7 +50,7 @@ def main():
     src = args.source / "tier2/rodinia_lud/hip"
     dst = args.work_dir / "tier2/rodinia_lud/hip"
     shutil.copytree(src, dst, ignore=shutil.ignore_patterns("rodinia_lud"))
-    shutil.copytree(args.source / "common", args.work_dir / "common")
+    shutil.copytree(args.source / "common_hip", args.work_dir / "common_hip")
     source = (src / "rodinia_lud.hip").read_text()
     (dst / "rodinia_lud.hip").write_text(instrument(source))
     with (args.work_dir / "build.log").open("w") as log:

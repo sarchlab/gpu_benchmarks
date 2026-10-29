@@ -49,7 +49,7 @@ endif
 
 all: $(TARGET)
 
-COMMON := ../../../common/bench_timing.h ../../../common/bench_warmup.h ../../../common/hip_cuda_compat.h
+COMMON := ../../../common_hip/bench_timing.h ../../../common_hip/bench_warmup.h ../../../common_hip/hip_cuda_compat.h
 
 $(TARGET): $(SRC) cpu_reference.h $(COMMON)
 	$(CC) $(CFLAGS) $< -o $@

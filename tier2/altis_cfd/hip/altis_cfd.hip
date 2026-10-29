@@ -1,6 +1,6 @@
 // Pinned Altis Euler solver with owner-approved synthetic tetrahedral input.
 // See README.md and UPSTREAM_LICENSE for source, input and measurement details.
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include "cfd_reference.h"
 #include "cfd_kernels.h"
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)

@@ -37,7 +37,7 @@
 // Preserve the four byte-valued operators and A/B ping-pong dependencies.
 // Port changes: bounded cooperative halo loads, complete partial tiles, defined
 // scratch borders, shared timing protocol and full measured-output verification.
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include <algorithm>
 #include <cerrno>
 #include <climits>

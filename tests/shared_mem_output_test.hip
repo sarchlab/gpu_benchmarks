@@ -4,7 +4,7 @@
 #include <vector>
 
 #define main benchmark_main
-#include "../tier1/shared_mem_bandwidth/shared_mem_bandwidth.hip"
+#include "../tier1/shared_mem_bandwidth/hip/shared_mem_bandwidth.hip"
 #undef main
 
 static float reference(int elements, int iterations)

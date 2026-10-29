@@ -93,7 +93,7 @@ def main():
     try:args.work_dir.mkdir(parents=True,exist_ok=False)
     except FileExistsError:ap.error("--work-dir must name a new, nonexistent directory")
     src=args.source/"tier2/rodinia_bfs/hip";dst=args.work_dir/"tier2/rodinia_bfs/hip";dst.mkdir(parents=True)
-    shutil.copytree(args.source/"common",args.work_dir/"common")
+    shutil.copytree(args.source/"common_hip",args.work_dir/"common_hip")
     for name in ("Makefile","params.json"):
         shutil.copy2(src/name,dst/name)
     for header in src.glob("*.h"):

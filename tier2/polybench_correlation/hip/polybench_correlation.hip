@@ -17,7 +17,7 @@
 // params.
 // Output (stderr): device info, timing details
 
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

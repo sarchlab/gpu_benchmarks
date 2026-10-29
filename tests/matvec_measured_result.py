@@ -65,7 +65,7 @@ def main():
         args.work_dir.mkdir(parents=True, exist_ok=False)
     except FileExistsError:
         ap.error("--work-dir must name a new, nonexistent directory")
-    shutil.copytree(args.source / "common", args.work_dir / "common")
+    shutil.copytree(args.source / "common_hip", args.work_dir / "common_hip")
     sources = {}
     for name in FIELDS:
         relative = Path("tier2") / ("polybench_" + name) / "hip"

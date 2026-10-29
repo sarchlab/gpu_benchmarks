@@ -58,7 +58,7 @@ def instrument(source):
 
 def build(repo, work, platform, hooks):
     work.mkdir(parents=True)
-    shutil.copytree(repo/'common', work/'common')
+    shutil.copytree(repo/'common_hip', work/'common_hip')
     folder = work/'tier2/npb_cg/hip'
     folder.mkdir(parents=True)
     for name in ['Makefile', 'nas_cg.h', 'params.json']:

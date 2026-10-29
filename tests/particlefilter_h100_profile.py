@@ -12,7 +12,7 @@ import subprocess
 import time
 
 NAMES=['likelihood_kernel','sum_kernel','normalize_weights_kernel','cdf_kernel','thresholds_kernel','find_index_kernel']
-FILES=['tier2/altis_particlefilter/hip/'+x for x in ['altis_particlefilter.hip','particlefilter_input.h','particlefilter_reference.h','particlefilter_kernels.h','Makefile','params.json','UPSTREAM_LICENSE']]+['common/'+x for x in ['bench_timing.h','bench_warmup.h','hip_cuda_compat.h']]
+FILES=['tier2/altis_particlefilter/hip/'+x for x in ['altis_particlefilter.hip','particlefilter_input.h','particlefilter_reference.h','particlefilter_kernels.h','Makefile','params.json','UPSTREAM_LICENSE']]+['common_hip/'+x for x in ['bench_timing.h','bench_warmup.h','hip_cuda_compat.h']]
 
 def digest(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def expected_params(n):

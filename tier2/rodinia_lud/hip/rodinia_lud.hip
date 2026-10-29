@@ -24,7 +24,7 @@
 // and params.
 // Output (stderr): device info, per-pass timing, verification result
 
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include "lud_residual.h"
 #include <cstdio>
 #include <cstdlib>

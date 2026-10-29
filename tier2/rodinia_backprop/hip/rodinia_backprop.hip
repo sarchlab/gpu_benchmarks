@@ -12,7 +12,7 @@
 // rounded down to a multiple of16, with a minimum of16. JSON output contains
 // two accumulated kernel records and their summed GPU event time.
 
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

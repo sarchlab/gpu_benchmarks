@@ -1,0 +1,71 @@
+{
+  "benchmark": "pcie_bandwidth",
+  "tier": 1,
+  "suite": "microbench",
+  "description": "Times host-device transfers with pinned or pageable host memory. H2D and D2H report one-direction payload intervals; bidirectional submits both directions on two streams and reports an aggregate interval. Actual overlap requires runtime/device qualification. Emits raw times and transfer descriptors.",
+  "scaling_param": {
+    "name": "buffer_size_mb",
+    "description": "Transfer buffer size in MiB per direction; controls total data volume",
+    "type": "int",
+    "values": [
+      1,
+      2,
+      4,
+      8,
+      12,
+      16,
+      24,
+      32,
+      48,
+      64,
+      96,
+      128,
+      192,
+      256,
+      384,
+      512,
+      768,
+      1024,
+      1536,
+      2048,
+      3072,
+      4096
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "transfer_type",
+      "description": "Transfer mode. Fixed at 'all': a single run measures H2D, D2H, and bidirectional and emits one record per mode (memcpy_h2d, memcpy_d2h, memcpy_bidir), so downstream distinguishes them by kernel name. The individual modes h2d/d2h/bidir remain selectable via BENCH_PARAM_transfer_type but are omitted from the sweep, where 'all' would otherwise duplicate the three singles.",
+      "type": "enum",
+      "default": "all",
+      "values": [
+        "all"
+      ]
+    },
+    {
+      "name": "use_pinned_memory",
+      "description": "Whether to use pinned (page-locked) host memory for transfers",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "When true, run the untimed vector-add warmer before each timed operation to raise clocks and disturb cache state; qualify the resulting state on the target. False disables the warmer without promising a particular cache state.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "memcpy_h2d",
+    "memcpy_d2h",
+    "memcpy_bidir"
+  ]
+}

@@ -144,7 +144,7 @@ def main():
     ap.add_argument("--compile-only", action="store_true", help="prepare and compile; do not claim runtime verification")
     args = ap.parse_args()
     args.work_dir.mkdir(parents=True, exist_ok=False)
-    shutil.copytree(args.source / "common", args.work_dir / "common")
+    shutil.copytree(args.source / "common_hip", args.work_dir / "common_hip")
     results = []
     for name in args.benchmark or sorted(SITES):
         src = args.source / "tier2" / name / "hip"

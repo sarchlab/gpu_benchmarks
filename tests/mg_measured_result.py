@@ -87,7 +87,7 @@ def instrument(source):
 
 
 def build(repo,work,platform,hooks):
-    work.mkdir(parents=True);shutil.copytree(repo/'common',work/'common')
+    work.mkdir(parents=True);shutil.copytree(repo/'common_hip',work/'common_hip')
     folder=work/'tier2/npb_mg/hip';folder.mkdir(parents=True)
     for name in ['Makefile','nas_mg.h','mg_reference.h','mg_kernels.h','params.json']:
         shutil.copy2(repo/'tier2/npb_mg/hip'/name,folder/name)

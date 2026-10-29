@@ -78,7 +78,7 @@ def main():
     src = args.source / "tier2/rodinia_srad/hip"
     dst = args.work_dir / "tier2/rodinia_srad/hip"
     dst.mkdir(parents=True)
-    shutil.copytree(args.source / "common", args.work_dir / "common")
+    shutil.copytree(args.source / "common_hip", args.work_dir / "common_hip")
     for name in ("Makefile", "params.json"):
         shutil.copy2(src / name, dst / name)
     for header in src.glob("*.h"):

@@ -95,7 +95,7 @@ def main():
     source_dir = args.source/'tier2/tango_binomial_options/hip'
     target = args.work_dir/'tier2/tango_binomial_options/hip'
     target.mkdir(parents=True)
-    shutil.copytree(args.source/'common', args.work_dir/'common')
+    shutil.copytree(args.source/'common_hip', args.work_dir/'common_hip')
     for name in ('Makefile', 'params.json'):
         shutil.copy2(source_dir/name, target/name)
     source = (source_dir/'tango_binomial_options.hip').read_text()

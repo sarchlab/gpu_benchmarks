@@ -121,4 +121,4 @@ compiles both production and fault variants; execution requires GPU hardware.
 
 ## Platform Notes
 
-- **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `npb_ep.hip` via `common/hip_cuda_compat.h`. Uses double precision (NAS spec); double `atomicAdd` requires sm_60+ (any modern NVIDIA GPU) or any GCN/CDNA GPU.
+- **CUDA/ROCm**: compiled with `nvcc`/`hipcc` from `npb_ep.hip` via `common_hip/hip_cuda_compat.h`. Uses double precision (NAS spec); double `atomicAdd` requires sm_60+ (any modern NVIDIA GPU) or any GCN/CDNA GPU.

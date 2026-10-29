@@ -71,7 +71,7 @@ def expected(ws, mode, bpc, tpb, units, free, grid, threads):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--compiler', default='c++')
-    ap.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[1] / 'tier1/cache_bandwidth/cache_bandwidth.hip')
+    ap.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[1] / 'tier1/cache_bandwidth/hip/cache_bandwidth.hip')
     args = ap.parse_args()
     cases = []
 

@@ -1,5 +1,5 @@
 // Parboil D3Q19 LDC scatter operator; see README.md and UPSTREAM_LICENSE.
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include "lbm_kernel.h"
 #include "lbm_reference.h"
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)

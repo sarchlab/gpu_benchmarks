@@ -43,7 +43,7 @@ def instrument(source):
 
 def build(repo, work, platform, hooks):
     work.mkdir(parents=True)
-    shutil.copytree(repo / 'common', work / 'common')
+    shutil.copytree(repo / 'common_hip', work / 'common_hip')
     folder = work / 'tier2/polybench_jacobi2d/hip'
     folder.mkdir(parents=True)
     for name in ['Makefile', 'jacobi_reference.h', 'params.json']:

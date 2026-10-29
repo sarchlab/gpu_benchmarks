@@ -1,6 +1,6 @@
 // PolyBench/GPU 1.0 Jacobi-2D: stencil A->B, then interior copy B->A.
 // Pin and source attribution: README.md and UPSTREAM_LICENSE.
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include "jacobi_reference.h"
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 

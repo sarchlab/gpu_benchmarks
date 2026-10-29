@@ -20,7 +20,7 @@
 // summary whose total_time_ms equals that GPU event time. GFLOPS
 // (2*N^3 / time) is derived downstream from time_ms and params.
 
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

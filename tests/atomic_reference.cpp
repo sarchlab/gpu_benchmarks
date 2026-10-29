@@ -1,4 +1,4 @@
-#include "../tier1/atomic_operations/atomic_reference.h"
+#include "../tier1/atomic_operations/hip/atomic_reference.h"
 #include <cassert>
 int main() {
     using namespace atomic_bench;

@@ -1,22 +1,23 @@
 # Compiled binaries (executables with no extension in benchmark dirs)
-tier1/*/bench
-tier1/*/bench_*
-tier1/atomic_operations/atomic_operations
-tier1/cache_bandwidth/cache_bandwidth
-tier1/cache_latency/cache_latency
-tier1/empty_kernel/empty_kernel
-tier1/fp16_throughput/fp16_throughput
-tier1/fp32_throughput/fp32_throughput
-tier1/fp64_throughput/fp64_throughput
-tier1/int32_throughput/int32_throughput
-tier1/memory_bandwidth/memory_bandwidth
-tier1/mixbench/mixbench
-tier1/pcie_bandwidth/pcie_bandwidth
-tier1/shared_mem_bandwidth/shared_mem_bandwidth
-tier1/warp_shuffle/warp_shuffle
-# Each tier2 benchmark keeps one source tree per platform: tier2/<bench>/hip/
-# (original HIP sources) and tier2/<bench>/cuda/ (native CUDA port). Keep
-# sources, ignore built binaries.
+# Tier 1 and Tier 2 benchmarks keep one source tree per platform:
+# tier<N>/<bench>/hip/ (original HIP sources) and tier<N>/<bench>/cuda/
+# (native CUDA port). Keep sources, ignore built binaries.
+tier1/*/*
+!tier1/*/hip/
+!tier1/*/cuda/
+tier1/*/hip/*
+tier1/*/cuda/*
+!tier1/*/hip/Makefile
+!tier1/*/hip/README.md
+!tier1/*/hip/*.hip
+!tier1/*/hip/*.h
+!tier1/*/hip/params.json
+!tier1/*/hip/.gitkeep
+!tier1/*/cuda/Makefile
+!tier1/*/cuda/README.md
+!tier1/*/cuda/*.cu
+!tier1/*/cuda/*.h
+!tier1/*/cuda/params.json
 tier2/*/*
 !tier2/*/hip/
 !tier2/*/cuda/

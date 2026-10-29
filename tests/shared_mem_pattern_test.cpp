@@ -1,4 +1,4 @@
-#include "../tier1/shared_mem_bandwidth/shared_mem_pattern.h"
+#include "../tier1/shared_mem_bandwidth/hip/shared_mem_pattern.h"
 #include <array>
 #include <cstdio>
 #include <vector>

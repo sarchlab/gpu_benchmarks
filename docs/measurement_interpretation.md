@@ -45,7 +45,7 @@ default cold entry. Keep `cache_entry`, `primer_launches`, `warmup_accesses` and
 `num_accesses` with the result. A capped primer, separate launch placement and
 compiled load policy prevent inferring a guaranteed cache level or hit rate from
 array size alone. A timed launch can still incur an initial L1 fill. See the
-[benchmark methodology](../tier1/cache_latency/README.md) for target limits and
+[benchmark methodology](../tier1/cache_latency/hip/README.md) for target limits and
 trace replay: preserve the primer's state, exclude its work from measured latency.
 
 ## Empty dispatch and timing resolution
@@ -103,7 +103,7 @@ payload rate instead of substituting a nominal PCIe generation rate.
 
 ## Mixbench's nominal intensity model
 
-The local [kernel](../tier1/mixbench/mixbench.hip) loads one `float`, runs a dependent
+The local [kernel](../tier1/mixbench/hip/mixbench.hip) loads one `float`, runs a dependent
 `fmaf` loop, and stores one `float` for each active element. The host computes
 `num_fmas = max(1, int(4 * flops_per_byte))`. For the declared ratios:
 

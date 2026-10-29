@@ -1,0 +1,81 @@
+{
+  "benchmark": "cache_latency",
+  "tier": 1,
+  "suite": "microbench",
+  "description": "Single-thread dependent pointer chase with primed entry: optional clock/cache warmer, untimed capped chain primer, then one timed chase. The primer remains when the warmer is disabled, including trace capture. Reports effective timed/primer accesses and primed entry identity; derive ns/access from raw GPU event time downstream. Cache-level hits and misses require target qualification; a separate primer does not guarantee L1 residency.",
+  "scaling_param": {
+    "name": "array_bytes",
+    "description": "Array size in bytes; sweeps the dependent chase footprint across target cache capacities",
+    "type": "int",
+    "values": [
+      4096,
+      8192,
+      16384,
+      32768,
+      49152,
+      65536,
+      131072,
+      262144,
+      524288,
+      1048576,
+      2097152,
+      3145728,
+      4194304,
+      6291456,
+      8388608,
+      16777216,
+      33554432,
+      67108864,
+      134217728,
+      201326592,
+      268435456,
+      402653184,
+      536870912,
+      1073741824,
+      2147483648,
+      4294967296
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "cacheline_bytes",
+      "description": "Configured byte spacing between chase nodes; qualify physical cache-line/sector size on the target",
+      "type": "int",
+      "default": 64,
+      "values": [
+        64
+      ]
+    },
+    {
+      "name": "measure_laps",
+      "description": "Requested timed laps after the untimed primer; effective accesses are clamped to the documented floor/ceiling",
+      "type": "int",
+      "default": 4,
+      "values": [
+        4
+      ]
+    },
+    {
+      "name": "rng_seed",
+      "description": "Random seed for chain permutation (reproducibility)",
+      "type": "int",
+      "default": 42,
+      "values": [
+        42
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "When true, run the clock/cache warmer BEFORE the untimed pointer-chase primer. False skips only the warmer. The timed chase always follows the primer: an explicit resident-cache entry exception.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "pointer_chase_kernel"
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "benchmark": "memory_bandwidth",
+  "tier": 1,
+  "suite": "microbench",
+  "description": "Times one device-to-device runtime copy per process in the declared 13-size sweep. Host setup allocations are pinned and the initial host-to-device upload is untimed. Direct-binary H2D/D2H/all modes remain supported outside this sweep; pcie_bandwidth provides declared host-transfer coverage. Emits raw GPU event and host bracket times; derive labeled payload or logical read-plus-write rates downstream.",
+  "scaling_param": {
+    "name": "buffer_size_mb",
+    "description": "Transfer buffer size in MiB; controls the total data volume per transfer",
+    "type": "int",
+    "values": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32,
+      64,
+      128,
+      256,
+      512,
+      1024,
+      2048,
+      4096
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "transfer_type",
+      "description": "Declared sweep is D2D only. The binary also accepts h2d, d2h and all for direct use and records the selected value; the kernels list covers all supported record names, not the set required in each run.",
+      "type": "enum",
+      "default": "d2d",
+      "values": [
+        "d2d"
+      ]
+    },
+    {
+      "name": "use_pinned_memory",
+      "description": "Declared sweep fixes pinned host setup buffers. This controls the two host allocations and initial upload, not the device allocations or timed D2D copy. The direct binary also accepts false for pageable host buffers.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "When true, run the untimed vector-add warmer before each selected copy to raise clocks and disturb cache state; qualify the resulting state on the target. False disables the warmer without promising a particular cache state.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "memcpy_h2d",
+    "memcpy_d2h",
+    "memcpy_d2d"
+  ]
+}

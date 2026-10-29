@@ -49,7 +49,7 @@ endif
 
 all: $(TARGET)
 
-$(TARGET): $(SRC) particlefilter_input.h particlefilter_reference.h particlefilter_kernels.h ../../../common/bench_timing.h ../../../common/bench_warmup.h ../../../common/hip_cuda_compat.h
+$(TARGET): $(SRC) particlefilter_input.h particlefilter_reference.h particlefilter_kernels.h ../../../common_hip/bench_timing.h ../../../common_hip/bench_warmup.h ../../../common_hip/hip_cuda_compat.h
 	$(CC) $(CFLAGS) $< -o $@
 
 clean:

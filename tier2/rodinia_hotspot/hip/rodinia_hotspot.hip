@@ -1,5 +1,5 @@
 // Pinned Rodinia 3.1 HotSpot pyramidal kernel; see README.md / UPSTREAM_LICENSE.
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include "hotspot_reference.h"
 #define HIP_CHECK(cmd) BENCH_TIMING_CHECK(cmd)
 #define BLOCK_SIZE 16

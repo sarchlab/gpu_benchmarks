@@ -22,7 +22,7 @@
 // (total_flops = 2*NI*NK*NJ + 2*NJ*NM*NL + 2*NI*NJ*NL) is derived downstream.
 // Output (stderr): device info, timing
 
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

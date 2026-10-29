@@ -16,14 +16,14 @@
   "reference_workers": 1,
   "vector_add_warmup": true,
   "source_sha256": {
-    "tier2/cuda_nbody/hip/cuda_nbody.hip": "e9a37fdd514128620ee085918a6812ef2e0f668e96ba4fa2a1b2bae593b021c5",
-    "tier2/cuda_nbody/hip/Makefile": "e5889d7e5113a603bc029783b2279f145d4d7cab9b579a4465ad83ff8cf4daf5",
+    "tier2/cuda_nbody/hip/cuda_nbody.hip": "1bec2581b5343d3e435512dc0d09ac14f1e2121a5740462571e8cd5dabb4b365",
+    "tier2/cuda_nbody/hip/Makefile": "d2ad79d95bfaa8d51ba7a0804b54df7d18e6832b37e381ba1d541fd659621e93",
     "tier2/cuda_nbody/hip/params.json": "aaeae11bfcc6a23ffdf428b7ae949f82666f54d1ae64f155144247990823fef4",
-    "common/bench_timing.h": "37c56f043bb3b8cb7df1c47e288a291415a662a2db0e1ac463da22e62ed85019",
-    "common/bench_warmup.h": "43f81e49b21acfe804e4fc545569882579cde78f48e1721452c4ba248a75c2b4",
-    "common/hip_cuda_compat.h": "12d0d8dfb4da122820401e78a3ab8301f6cb940b302f82bfab05d5a85081287c"
+    "common_hip/bench_timing.h": "37c56f043bb3b8cb7df1c47e288a291415a662a2db0e1ac463da22e62ed85019",
+    "common_hip/bench_warmup.h": "43f81e49b21acfe804e4fc545569882579cde78f48e1721452c4ba248a75c2b4",
+    "common_hip/hip_cuda_compat.h": "12d0d8dfb4da122820401e78a3ab8301f6cb940b302f82bfab05d5a85081287c"
   },
-  "binary_sha256": "114277767a0726194e2e345799b7f008a7d342077cb7f5986dd019ec2a9af7fd",
+  "binary_sha256": "8050972dc11c005816e26bcfe5f6d04a411efdd83c7e3a2e51f9a25f521eab01",
   "build_command": [
     "make",
     "-B",
@@ -34,7 +34,7 @@
     {
       "bodies": 256,
       "timesteps": 1,
-      "wall_seconds": 0.3947697249241173,
+      "wall_seconds": 0.39265696704387665,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -43,7 +43,7 @@
     {
       "bodies": 256,
       "timesteps": 10,
-      "wall_seconds": 0.37555071897804737,
+      "wall_seconds": 0.38560993084684014,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -52,7 +52,7 @@
     {
       "bodies": 256,
       "timesteps": 50,
-      "wall_seconds": 0.3910044849617407,
+      "wall_seconds": 0.3911057370714843,
       "exit_code": 1,
       "status": "unsupported",
       "reason": "cpu_gpu_trajectory_mismatch",
@@ -61,7 +61,7 @@
     {
       "bodies": 384,
       "timesteps": 1,
-      "wall_seconds": 0.37489317904692143,
+      "wall_seconds": 0.3763396830763668,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -70,7 +70,7 @@
     {
       "bodies": 384,
       "timesteps": 10,
-      "wall_seconds": 0.389512785943225,
+      "wall_seconds": 0.38525285199284554,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -79,7 +79,7 @@
     {
       "bodies": 384,
       "timesteps": 50,
-      "wall_seconds": 0.40746884199324995,
+      "wall_seconds": 0.4072005089838058,
       "exit_code": 1,
       "status": "unsupported",
       "reason": "cpu_gpu_trajectory_mismatch",
@@ -88,7 +88,7 @@
     {
       "bodies": 512,
       "timesteps": 1,
-      "wall_seconds": 0.3731245199451223,
+      "wall_seconds": 0.3774986448697746,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -97,7 +97,7 @@
     {
       "bodies": 512,
       "timesteps": 10,
-      "wall_seconds": 0.38758315704762936,
+      "wall_seconds": 0.39010522491298616,
       "exit_code": 1,
       "status": "unsupported",
       "reason": "cpu_gpu_trajectory_mismatch",
@@ -106,7 +106,7 @@
     {
       "bodies": 512,
       "timesteps": 50,
-      "wall_seconds": 0.4293345770565793,
+      "wall_seconds": 0.44598793191835284,
       "exit_code": 1,
       "status": "unsupported",
       "reason": "cpu_gpu_trajectory_mismatch",
@@ -115,7 +115,7 @@
     {
       "bodies": 768,
       "timesteps": 1,
-      "wall_seconds": 0.3762933189282194,
+      "wall_seconds": 0.3906083160545677,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -124,7 +124,7 @@
     {
       "bodies": 768,
       "timesteps": 10,
-      "wall_seconds": 0.39294838497880846,
+      "wall_seconds": 0.41953707998618484,
       "exit_code": 1,
       "status": "unsupported",
       "reason": "cpu_gpu_trajectory_mismatch",
@@ -133,7 +133,7 @@
     {
       "bodies": 768,
       "timesteps": 50,
-      "wall_seconds": 0.49560746108181775,
+      "wall_seconds": 0.5206167239230126,
       "exit_code": 1,
       "status": "unsupported",
       "reason": "cpu_gpu_trajectory_mismatch",
@@ -142,7 +142,7 @@
     {
       "bodies": 1024,
       "timesteps": 1,
-      "wall_seconds": 0.37427073100116104,
+      "wall_seconds": 0.3861150520388037,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -151,7 +151,7 @@
     {
       "bodies": 1024,
       "timesteps": 10,
-      "wall_seconds": 0.4145088109653443,
+      "wall_seconds": 0.42624790593981743,
       "exit_code": 1,
       "status": "unsupported",
       "reason": "cpu_gpu_trajectory_mismatch",
@@ -160,7 +160,7 @@
     {
       "bodies": 1024,
       "timesteps": 50,
-      "wall_seconds": 0.5915017189690843,
+      "wall_seconds": 0.6132531710900366,
       "exit_code": 1,
       "status": "unsupported",
       "reason": "cpu_gpu_trajectory_mismatch",
@@ -169,7 +169,7 @@
     {
       "bodies": 1536,
       "timesteps": 1,
-      "wall_seconds": 0.3849870680132881,
+      "wall_seconds": 0.39300691802054644,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -178,7 +178,7 @@
     {
       "bodies": 1536,
       "timesteps": 10,
-      "wall_seconds": 0.4673162780236453,
+      "wall_seconds": 0.491599699947983,
       "exit_code": 1,
       "status": "unsupported",
       "reason": "cpu_gpu_trajectory_mismatch",
@@ -187,7 +187,7 @@
     {
       "bodies": 1536,
       "timesteps": 50,
-      "wall_seconds": 0.8641668040072545,
+      "wall_seconds": 0.9036224437877536,
       "exit_code": 1,
       "status": "unsupported",
       "reason": "cpu_gpu_trajectory_mismatch",
@@ -196,7 +196,7 @@
     {
       "bodies": 2048,
       "timesteps": 1,
-      "wall_seconds": 0.38645455799996853,
+      "wall_seconds": 0.4143762751482427,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -205,7 +205,7 @@
     {
       "bodies": 2048,
       "timesteps": 10,
-      "wall_seconds": 0.544827350997366,
+      "wall_seconds": 0.5700689649675041,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -214,7 +214,7 @@
     {
       "bodies": 2048,
       "timesteps": 50,
-      "wall_seconds": 1.2611311310902238,
+      "wall_seconds": 1.31677264906466,
       "exit_code": 1,
       "status": "unsupported",
       "reason": "cpu_gpu_trajectory_mismatch",
@@ -223,7 +223,7 @@
     {
       "bodies": 3072,
       "timesteps": 1,
-      "wall_seconds": 0.41202089202124625,
+      "wall_seconds": 0.4298277790658176,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -232,7 +232,7 @@
     {
       "bodies": 3072,
       "timesteps": 10,
-      "wall_seconds": 0.7796450461028144,
+      "wall_seconds": 0.8042890010401607,
       "exit_code": 1,
       "status": "unsupported",
       "reason": "cpu_gpu_trajectory_mismatch",
@@ -241,7 +241,7 @@
     {
       "bodies": 3072,
       "timesteps": 50,
-      "wall_seconds": 2.3283286029472947,
+      "wall_seconds": 2.4621616730000824,
       "exit_code": 1,
       "status": "unsupported",
       "reason": "cpu_gpu_trajectory_mismatch",
@@ -250,7 +250,7 @@
     {
       "bodies": 4096,
       "timesteps": 1,
-      "wall_seconds": 0.45263846404850483,
+      "wall_seconds": 0.4605089840479195,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -259,7 +259,7 @@
     {
       "bodies": 4096,
       "timesteps": 10,
-      "wall_seconds": 1.062190180993639,
+      "wall_seconds": 1.1230389459524304,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -268,7 +268,7 @@
     {
       "bodies": 4096,
       "timesteps": 50,
-      "wall_seconds": 3.869201341061853,
+      "wall_seconds": 4.050954465987161,
       "exit_code": 1,
       "status": "unsupported",
       "reason": "cpu_gpu_trajectory_mismatch",
@@ -277,7 +277,7 @@
     {
       "bodies": 6144,
       "timesteps": 1,
-      "wall_seconds": 0.5306332278996706,
+      "wall_seconds": 0.539359088987112,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -286,7 +286,7 @@
     {
       "bodies": 6144,
       "timesteps": 10,
-      "wall_seconds": 1.9453465819824487,
+      "wall_seconds": 2.0067396122030914,
       "exit_code": 1,
       "status": "unsupported",
       "reason": "cpu_gpu_trajectory_mismatch",
@@ -295,7 +295,7 @@
     {
       "bodies": 6144,
       "timesteps": 50,
-      "wall_seconds": 8.202250206028111,
+      "wall_seconds": 8.522602748125792,
       "exit_code": 1,
       "status": "unsupported",
       "reason": "cpu_gpu_trajectory_mismatch",
@@ -304,7 +304,7 @@
     {
       "bodies": 8192,
       "timesteps": 1,
-      "wall_seconds": 0.6527598240645602,
+      "wall_seconds": 0.6787241450510919,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -313,7 +313,7 @@
     {
       "bodies": 8192,
       "timesteps": 10,
-      "wall_seconds": 3.17440102098044,
+      "wall_seconds": 3.245346201118082,
       "exit_code": 1,
       "status": "unsupported",
       "reason": "cpu_gpu_trajectory_mismatch",
@@ -322,7 +322,7 @@
     {
       "bodies": 8192,
       "timesteps": 50,
-      "wall_seconds": 14.288883688976057,
+      "wall_seconds": 14.874476351076737,
       "exit_code": 1,
       "status": "unsupported",
       "reason": "cpu_gpu_trajectory_mismatch",
@@ -331,7 +331,7 @@
     {
       "bodies": 12288,
       "timesteps": 1,
-      "wall_seconds": 1.0016709850169718,
+      "wall_seconds": 1.024914172012359,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -340,7 +340,7 @@
     {
       "bodies": 12288,
       "timesteps": 10,
-      "wall_seconds": 6.599646062008105,
+      "wall_seconds": 6.856841505970806,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -355,7 +355,7 @@
     {
       "bodies": 16384,
       "timesteps": 1,
-      "wall_seconds": 1.5120129729621112,
+      "wall_seconds": 1.5417453809641302,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -364,7 +364,7 @@
     {
       "bodies": 16384,
       "timesteps": 10,
-      "wall_seconds": 11.398636851925403,
+      "wall_seconds": 11.939667640952393,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -379,7 +379,7 @@
     {
       "bodies": 24576,
       "timesteps": 1,
-      "wall_seconds": 2.881629597977735,
+      "wall_seconds": 3.010655937017873,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -400,7 +400,7 @@
     {
       "bodies": 32768,
       "timesteps": 1,
-      "wall_seconds": 4.81934848590754,
+      "wall_seconds": 5.05204698885791,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -421,7 +421,7 @@
     {
       "bodies": 49152,
       "timesteps": 1,
-      "wall_seconds": 10.353637270978652,
+      "wall_seconds": 10.976882135961205,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -442,7 +442,7 @@
     {
       "bodies": 65536,
       "timesteps": 1,
-      "wall_seconds": 18.058400045032613,
+      "wall_seconds": 19.08130996185355,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",

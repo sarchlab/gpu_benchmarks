@@ -46,6 +46,8 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include <cuda_fp16.h>
+
 #include "../../../common_cuda/bench_timing.h"
 
 // ---------------------------------------------------------------------------

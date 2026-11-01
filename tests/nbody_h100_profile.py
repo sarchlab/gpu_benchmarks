@@ -58,7 +58,7 @@ def main():
     work=args.work_dir.resolve();work.mkdir(parents=True)
     manifest=json.loads((repo/'tier2/cuda_nbody/hip/params.json').read_text())
     sizes=manifest['scaling_param']['values'];steps=next(x['values'] for x in manifest['non_scaling_params'] if x['name']=='timesteps')
-    files=['tier2/cuda_nbody/hip/cuda_nbody.hip','tier2/cuda_nbody/hip/Makefile','tier2/cuda_nbody/hip/params.json','common/bench_timing.h','common/bench_warmup.h','common/hip_cuda_compat.h']
+    files=['tier2/cuda_nbody/hip/cuda_nbody.hip','tier2/cuda_nbody/hip/Makefile','tier2/cuda_nbody/hip/params.json','common_hip/bench_timing.h','common_hip/bench_warmup.h','common_hip/hip_cuda_compat.h']
     hashes={f:digest(repo/f) for f in files}
     for relative in files:
         destination=work/'source'/relative;destination.parent.mkdir(parents=True,exist_ok=True)

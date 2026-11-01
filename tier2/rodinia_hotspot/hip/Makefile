@@ -49,10 +49,10 @@ endif
 
 all: $(TARGET)
 
-$(TARGET): $(SRC) hotspot_reference.h ../../../common/bench_timing.h ../../../common/bench_warmup.h ../../../common/hip_cuda_compat.h
+$(TARGET): $(SRC) hotspot_reference.h ../../../common_hip/bench_timing.h ../../../common_hip/bench_warmup.h ../../../common_hip/hip_cuda_compat.h
 	$(CC) $(CFLAGS) $< -o $@
 
-bench_output_test: ../../../tests/hotspot_original_gpu.hip $(SRC) hotspot_reference.h ../../../tests/upstream/hotspot_physics.h ../../../tests/upstream/hotspot_gpu.hip ../../../common/bench_timing.h ../../../common/bench_warmup.h ../../../common/hip_cuda_compat.h
+bench_output_test: ../../../tests/hotspot_original_gpu.hip $(SRC) hotspot_reference.h ../../../tests/upstream/hotspot_physics.h ../../../tests/upstream/hotspot_gpu.hip ../../../common_hip/bench_timing.h ../../../common_hip/bench_warmup.h ../../../common_hip/hip_cuda_compat.h
 	$(CC) $(CFLAGS) $< -o $@
 
 test: bench_output_test

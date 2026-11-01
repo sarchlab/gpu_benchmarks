@@ -351,7 +351,7 @@ GPU, `nsys`, a built `cache_latency` binary, and a new output directory:
 
 ```sh
 python3 tests/cache_latency_order.py \
-  --binary tier1/cache_latency/cache_latency --work-dir /tmp/cache-order
+  --binary tier1/cache_latency/hip/cache_latency --work-dir /tmp/cache-order
 ```
 
 The four cases cover warmer on/off, a small chain, and the primer-cap boundary.
@@ -359,13 +359,13 @@ Captures, profiler logs, and `report.json` are retained. A nonzero profiler/expo
 exit is recorded as a failed case; a timeout aborts the run and may leave a
 partial report. CI does not run this GPU check. Profiled times establish ordering,
 not performance or a physical cache hit rate. See
-[the benchmark documentation](../tier1/cache_latency/README.md) for interpretation
+[the benchmark documentation](../tier1/cache_latency/hip/README.md) for interpretation
 and trace-replay requirements.
 
 `shuffle_output_test.hip` checks every output lane of the production Tier 1
 shuffle kernels against closed-form lane origins, including odd/even operation
 counts, both wave boundaries, multiple blocks and guarded output allocations.
-Run `make -C tier1/warp_shuffle PLATFORM=cuda test` (or `PLATFORM=rocm`) on a
+Run `make -C tier1/warp_shuffle/hip PLATFORM=cuda test` (or `PLATFORM=rocm`) on a
 compatible GPU. It uses the selected device's native width. CI compiles the test;
 CUDA and AMD native wave32/wave64 runtime qualification must be recorded
 separately. Correct outputs do not replace target instruction-count checks.

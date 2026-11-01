@@ -441,16 +441,16 @@ jobs:
 
       - name: Compile FMA output regression tests (GPU required to run)
         run: |
-          make -C tier1/fp32_throughput PLATFORM=cuda bench_output_test
-          make -C tier1/fp64_throughput PLATFORM=cuda bench_output_test
+          make -C tier1/fp32_throughput/hip PLATFORM=cuda bench_output_test
+          make -C tier1/fp64_throughput/hip PLATFORM=cuda bench_output_test
 
       - name: Check shared-memory ownership and compile GPU output test
         run: |
-          make -C tier1/shared_mem_bandwidth test-pattern
-          make -C tier1/shared_mem_bandwidth PLATFORM=cuda bench_output_test
+          make -C tier1/shared_mem_bandwidth/hip test-pattern
+          make -C tier1/shared_mem_bandwidth/hip PLATFORM=cuda bench_output_test
 
       - name: Compile native shuffle output test (GPU required to run)
-        run: make -C tier1/warp_shuffle PLATFORM=cuda bench_output_test
+        run: make -C tier1/warp_shuffle/hip PLATFORM=cuda bench_output_test
 
       - name: Compile Tier 2 (CUDA)
         run: ./gpubench compile --tier 2 --platform cuda

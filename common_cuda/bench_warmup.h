@@ -1,7 +1,7 @@
 /**
  * bench_warmup.h  (native CUDA)
  *
- * Native CUDA counterpart of common/bench_warmup.h: identical warmer kernel,
+ * Native CUDA counterpart of common_hip/bench_warmup.h: identical warmer kernel,
  * buffer size and sustained-load target, so cold-cache calibration is the same
  * methodology on both builds.
  *

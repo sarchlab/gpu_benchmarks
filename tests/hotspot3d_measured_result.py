@@ -35,7 +35,7 @@ def instrument(s):
     return replace_once(s,'    const std::vector<double> expected=hotspot3d::reference(problem,coefficients,in);','    if(getenv("HS3D_TEST_REFERENCE_FAILURE"))throw std::bad_alloc();\n    const std::vector<double> expected=hotspot3d::reference(problem,coefficients,in);')
 
 def build(repo,work,platform,hooks):
-    work.mkdir(parents=True);shutil.copytree(repo/'common',work/'common');folder=work/'tier2/rodinia_hotspot3d/hip';folder.mkdir(parents=True)
+    work.mkdir(parents=True);shutil.copytree(repo/'common_hip',work/'common_hip');folder=work/'tier2/rodinia_hotspot3d/hip';folder.mkdir(parents=True)
     for name in ['Makefile','hotspot3d_reference.h','params.json']:shutil.copy2(repo/'tier2/rodinia_hotspot3d/hip'/name,folder/name)
     source=(repo/'tier2/rodinia_hotspot3d/hip/rodinia_hotspot3d.hip').read_text();(folder/'rodinia_hotspot3d.hip').write_text(instrument(source) if hooks else source)
     with (work/'build.log').open('w') as log:subprocess.run(['make','PLATFORM='+platform],cwd=folder,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=120)

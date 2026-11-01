@@ -31,7 +31,7 @@
 // recorded GPU event times.
 // Output (stderr): verification result and device info.
 
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

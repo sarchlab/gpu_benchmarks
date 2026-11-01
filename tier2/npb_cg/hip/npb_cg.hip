@@ -1,7 +1,7 @@
 // NAS CG inverse-power benchmark, standard classes S/W/A/B/C.
 // Algorithm pin: GMAP/NPB-GPU 3f12d84920ee315ab00ef283717c1e74b68f4d00,
 // CUDA/CG/cg.cu. The NAS problem and CPU reference are in nas_cg.h.
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include "nas_cg.h"
 #include <cerrno>
 #include <climits>

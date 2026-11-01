@@ -2,7 +2,7 @@
 // Operator pin: PolyBench-ACC 70ea4ca, CUDA/stencils/convolution-3d.
 // The repeated k-1 offsets below are present in both pinned CPU and GPU code.
 // One timed stencil launch; full measured-output verification follows timing.
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include <algorithm>
 #include <cerrno>
 #include <climits>

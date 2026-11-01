@@ -80,14 +80,14 @@ def main():
     src = args.source / relative
     source = (src / 'parboil_sgemm.hip').read_text()
     inputs = [relative / n for n in ('parboil_sgemm.hip', 'cpu_reference.h', 'Makefile', 'params.json')]
-    inputs += [Path('common') / n for n in ('bench_timing.h', 'bench_warmup.h', 'hip_cuda_compat.h')]
+    inputs += [Path('common_hip') / n for n in ('bench_timing.h', 'bench_warmup.h', 'hip_cuda_compat.h')]
     hashes = {str(p):hashlib.sha256((args.source / p).read_bytes()).hexdigest() for p in inputs}
     binaries = {}
     for variant in ('production', 'faults'):
         root = args.work_dir / variant
         dst = root / relative
         dst.mkdir(parents=True)
-        shutil.copytree(args.source / 'common', root / 'common')
+        shutil.copytree(args.source / 'common_hip', root / 'common_hip')
         for n in ('Makefile', 'params.json', 'cpu_reference.h'):
             shutil.copy2(src / n, dst / n)
         (dst / 'parboil_sgemm.hip').write_text(source if variant == 'production' else instrument(source))

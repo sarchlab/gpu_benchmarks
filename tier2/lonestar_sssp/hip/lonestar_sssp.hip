@@ -21,7 +21,7 @@
 // verification, actual rounds, and derived logical edge-relaxation attempts.
 // Output (stderr): human-readable results
 
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

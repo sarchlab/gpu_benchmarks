@@ -33,7 +33,7 @@
 // whose total_time_ms is the SUM of all recorded GPU event times. Effective bandwidth is derived downstream
 // from time_ms and params.
 
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

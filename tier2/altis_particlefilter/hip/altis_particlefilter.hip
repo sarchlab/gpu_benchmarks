@@ -1,5 +1,5 @@
 // Pinned Altis/Rodinia GPU particle filter; see README.md and UPSTREAM_LICENSE.
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include "particlefilter_reference.h"
 #include "particlefilter_kernels.h"
 #include <type_traits>

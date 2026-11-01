@@ -125,13 +125,13 @@ class ProfileIdentityTest(unittest.TestCase):
         valid = subprocess.run(command, capture_output=True, text=True, timeout=20)
         self.assertEqual(valid.returncode, 0, valid.stderr)
         self.assertEqual(valid.stdout.count('PASS:'), 2)
-        path = self.repo / 'common/bench_timing.h'
+        path = self.repo / 'common_hip/bench_timing.h'
         path.write_bytes(path.read_bytes() + b'\n// shared input changed\n')
         for benchmark in BENCHMARKS:
             bad = subprocess.run(command + ['--benchmark', benchmark], capture_output=True,
                                  text=True, timeout=20)
             self.assertNotEqual(bad.returncode, 0)
-            self.assertIn('stale source hash for common/bench_timing.h', bad.stderr)
+            self.assertIn('stale source hash for common_hip/bench_timing.h', bad.stderr)
             self.assertIn('Requalify on H100', bad.stderr)
 
 

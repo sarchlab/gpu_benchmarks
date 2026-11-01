@@ -35,7 +35,7 @@
 // summary whose total_time_ms is the SUM of all recorded GPU event times.
 // Output (stderr): human-readable results + verification PASS/FAIL
 
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

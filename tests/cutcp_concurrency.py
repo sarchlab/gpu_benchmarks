@@ -45,7 +45,7 @@ def main():
     src = args.source / relative
     source = (src / "parboil_cutcp.hip").read_text()
     inputs = [relative / n for n in ("parboil_cutcp.hip","cpu_reference.h","Makefile","params.json")]
-    inputs += [Path("common") / n for n in ("bench_timing.h","bench_warmup.h","hip_cuda_compat.h")]
+    inputs += [Path("common_hip") / n for n in ("bench_timing.h","bench_warmup.h","hip_cuda_compat.h")]
     hashes = {str(p):hashlib.sha256((args.source/p).read_bytes()).hexdigest() for p in inputs}
     variants = dict(production=source,dump=instrument(source))
     if args.baseline_source:
@@ -55,7 +55,7 @@ def main():
         root = args.work_dir / name
         dst = root / relative
         dst.mkdir(parents=True)
-        shutil.copytree(args.source/"common",root/"common")
+        shutil.copytree(args.source/"common_hip",root/"common_hip")
         for f in ("Makefile","params.json","cpu_reference.h"):
             shutil.copy2(src/f,dst/f)
         (dst/"parboil_cutcp.hip").write_text(text)

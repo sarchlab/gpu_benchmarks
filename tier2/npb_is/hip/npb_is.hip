@@ -54,7 +54,7 @@
 // all recorded GPU event times. Keys-ranked/sec is derived downstream.
 // Output (stderr): human-readable results
 
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

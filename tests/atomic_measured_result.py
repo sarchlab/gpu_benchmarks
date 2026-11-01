@@ -32,10 +32,10 @@ def instrument(s):
         '    if(getenv("ATOMIC_TEST_REFERENCE_FAILURE"))throw std::bad_alloc();\n    const atomic_bench::Verification result=atomic_bench::verify(p,counter,successes);')
 
 def build(repo,work,platform,hooks):
-    work.mkdir(parents=True);shutil.copytree(repo/'common',work/'common')
-    folder=work/'tier1/atomic_operations';folder.mkdir(parents=True)
-    for name in ['Makefile','atomic_reference.h','params.json']:shutil.copy2(repo/'tier1/atomic_operations'/name,folder/name)
-    source=(repo/'tier1/atomic_operations/atomic_operations.hip').read_text()
+    work.mkdir(parents=True);shutil.copytree(repo/'common_hip',work/'common_hip')
+    folder=work/'tier1/atomic_operations/hip';folder.mkdir(parents=True)
+    for name in ['Makefile','atomic_reference.h','params.json']:shutil.copy2(repo/'tier1/atomic_operations/hip'/name,folder/name)
+    source=(repo/'tier1/atomic_operations/hip/atomic_operations.hip').read_text()
     (folder/'atomic_operations.hip').write_text(instrument(source) if hooks else source)
     with (work/'build.log').open('w') as log:
         subprocess.run(['make','PLATFORM='+platform],cwd=folder,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=120)
@@ -73,7 +73,7 @@ def main():
     hooks=build(repo,work/'instrumented',args.platform,True)
     if args.compile_only:print('Atomic result/storage hooks compiled; GPU tests not executed');return
     production=build(repo,work/'production',args.platform,False)
-    manifest=json.loads((repo/'tier1/atomic_operations/params.json').read_text())
+    manifest=json.loads((repo/'tier1/atomic_operations/hip/params.json').read_text())
     cases=[(ops,2048,256,op,{}) for ops in manifest['scaling_param']['values'] for op in ['atomicAdd','atomicCAS','atomicMin']]
     cases += [(ops,blocks,block,op,{}) for ops,blocks,block in [(1,1,1),(3,1,1),(7,3,17),(31,2,1024)] for op in ['atomicAdd','atomicCAS','atomicMin']]
     cases += [(7,3,17,op,{'ATOMIC_TEST_COUNTER':'1'}) for op in ['atomicAdd','atomicCAS','atomicMin']]

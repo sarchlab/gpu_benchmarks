@@ -5,7 +5,7 @@
 #include <vector>
 
 #define main benchmark_main
-#include "../tier1/warp_shuffle/warp_shuffle.hip"
+#include "../tier1/warp_shuffle/hip/warp_shuffle.hip"
 #undef main
 
 int main()

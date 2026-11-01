@@ -52,7 +52,7 @@ def main():
         shutil.copy2(src / name, dst / name)
     for header in src.glob("*.h"):
         shutil.copy2(header, dst / header.name)
-    shutil.copytree(args.source / "common", args.work_dir / "common")
+    shutil.copytree(args.source / "common_hip", args.work_dir / "common_hip")
     source = (src / "graph_tc.hip").read_text()
     (dst / "graph_tc.hip").write_text(instrument(source))
     with (args.work_dir / "build.log").open("w") as log:

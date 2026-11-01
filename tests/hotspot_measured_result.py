@@ -41,7 +41,7 @@ def instrument(source,header):
     return source,header
 
 def build(repo,work,platform,hooks):
-    work.mkdir(parents=True);shutil.copytree(repo/'common',work/'common');folder=work/'tier2/rodinia_hotspot/hip';folder.mkdir(parents=True)
+    work.mkdir(parents=True);shutil.copytree(repo/'common_hip',work/'common_hip');folder=work/'tier2/rodinia_hotspot/hip';folder.mkdir(parents=True)
     for name in ['Makefile','params.json']:shutil.copy2(repo/'tier2/rodinia_hotspot/hip'/name,folder/name)
     source=(repo/'tier2/rodinia_hotspot/hip/rodinia_hotspot.hip').read_text();header=(repo/'tier2/rodinia_hotspot/hip/hotspot_reference.h').read_text()
     if hooks:source,header=instrument(source,header)

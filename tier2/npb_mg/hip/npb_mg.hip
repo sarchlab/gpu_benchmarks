@@ -1,5 +1,5 @@
 // NAS MG S/W/A/B/C. See README.md for the exact upstream and timing contract.
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include "mg_reference.h"
 #include "mg_kernels.h"
 #include <cerrno>

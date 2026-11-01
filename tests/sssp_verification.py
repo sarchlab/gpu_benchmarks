@@ -125,11 +125,11 @@ def main():
         host_reference(root,work,args.compiler);return 0
     relative=Path('tier2/lonestar_sssp/hip');src=root/relative;source=(src/'lonestar_sssp.hip').read_text()
     inputs=[relative/n for n in ('lonestar_sssp.hip','cpu_reference.h','Makefile','params.json')]
-    inputs += [Path('common')/n for n in ('bench_timing.h','bench_warmup.h','hip_cuda_compat.h')]
+    inputs += [Path('common_hip')/n for n in ('bench_timing.h','bench_warmup.h','hip_cuda_compat.h')]
     hashes={str(p):hashlib.sha256((root/p).read_bytes()).hexdigest() for p in inputs}
     binaries={}
     for variant in ('production','faults'):
-        dst=work/variant/relative;dst.mkdir(parents=True);shutil.copytree(root/'common',work/variant/'common')
+        dst=work/variant/relative;dst.mkdir(parents=True);shutil.copytree(root/'common_hip',work/variant/'common_hip')
         for name in ('Makefile','params.json','cpu_reference.h'):shutil.copy2(src/name,dst/name)
         (dst/'lonestar_sssp.hip').write_text(source if variant=='production' else instrument(source))
         with (work/variant/'build.log').open('w') as log:

@@ -7,7 +7,7 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--platform',choices=['cuda','rocm'],default='cuda')
     ap.add_argument('--compile-only',action='store_true');ap.add_argument('--work-dir',type=Path,required=True);a=ap.parse_args()
     work=a.work_dir.resolve();work.mkdir(parents=True,exist_ok=False)
-    for path in ('common','tier2/parboil_lbm/hip','tests/upstream/lbm'):
+    for path in ('common_hip','tier2/parboil_lbm/hip','tests/upstream/lbm'):
         shutil.copytree(ROOT/path,work/path,ignore=shutil.ignore_patterns('parboil_lbm','original_gpu_*'))
     shutil.copyfile(ROOT/'tests/lbm_original_gpu.hip',work/'tests/lbm_original_gpu.hip')
     d=work/'tier2/parboil_lbm/hip';source=d/'parboil_lbm.hip';text=source.read_text()

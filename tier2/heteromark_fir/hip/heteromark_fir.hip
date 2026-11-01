@@ -24,7 +24,7 @@
 // downstream from time_ms and params.
 // Output (stderr): human-readable results
 
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

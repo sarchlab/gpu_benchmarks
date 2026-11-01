@@ -59,7 +59,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compiler', default='c++')
     parser.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[1] /
-                        'tier1/cache_latency/cache_latency.hip')
+                        'tier1/cache_latency/hip/cache_latency.hip')
     args = parser.parse_args()
     pairs = [(0, 64), (-1, 64), (1, 64), (127, 64), (129, 64), (130, 64), (131, 64),
              (128, 64), (132, 64), (8, 4), (256, 12), (4096, 0), (4096, 3),

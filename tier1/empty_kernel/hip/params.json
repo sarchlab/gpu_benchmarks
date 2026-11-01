@@ -1,0 +1,51 @@
+{
+  "benchmark": "empty_kernel",
+  "tier": 1,
+  "suite": "microbench",
+  "description": "Times the GPU event interval for one empty dispatch and the host bracket around event recording, launch, and synchronization. Neither interval isolates host launch-call latency. Sweep grid geometry; interpret very short times against the target timer resolution.",
+  "scaling_param": {
+    "name": "num_blocks",
+    "description": "Number of thread blocks in the (empty) grid; primary axis for launch/scheduling overhead",
+    "type": "int",
+    "values": [
+      1,
+      8,
+      64,
+      512,
+      4096,
+      32768,
+      100000,
+      262144,
+      500000,
+      1000000,
+      2097152
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Threads per block in the empty grid",
+      "type": "int",
+      "default": 256,
+      "values": [
+        32,
+        64,
+        256,
+        1024
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "When true, run the untimed vector-add warmer before each timed operation to raise clocks and disturb cache state; qualify the resulting state on the target. False disables the warmer without promising a particular cache state.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "empty_kernel"
+  ]
+}

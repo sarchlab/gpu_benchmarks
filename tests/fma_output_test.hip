@@ -7,7 +7,7 @@
 
 #define main benchmark_main
 #if defined(TEST_FP32)
-#include "../tier1/fp32_throughput/fp32_throughput.hip"
+#include "../tier1/fp32_throughput/hip/fp32_throughput.hip"
 using Scalar = float;
 #define FMA_KERNEL fp32_fma_kernel
 static Scalar reference_fma(Scalar a, Scalar b, Scalar c) { return fmaf(a, b, c); }
@@ -15,7 +15,7 @@ static constexpr Scalar multiplier = 1.0000001f;
 static constexpr Scalar addend = 0.0000001f;
 static constexpr double tolerance = 5e-6;
 #elif defined(TEST_FP64)
-#include "../tier1/fp64_throughput/fp64_throughput.hip"
+#include "../tier1/fp64_throughput/hip/fp64_throughput.hip"
 using Scalar = double;
 #define FMA_KERNEL fp64_fma_kernel
 static Scalar reference_fma(Scalar a, Scalar b, Scalar c) { return fma(a, b, c); }

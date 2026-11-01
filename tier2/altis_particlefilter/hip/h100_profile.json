@@ -16,18 +16,18 @@
   "host_logical_cpus": 128,
   "vector_add_warmup": true,
   "source_sha256": {
-    "tier2/altis_particlefilter/hip/altis_particlefilter.hip": "be6f39ea4b6e36e9d087000f13fa3ae6058cde8006a4cc0927abef9a7c966d17",
+    "tier2/altis_particlefilter/hip/altis_particlefilter.hip": "607b75a4d3c8a2eb33e2d9af99faef89830aafb2e188f9e855396f0ab98d9370",
     "tier2/altis_particlefilter/hip/particlefilter_input.h": "dd98675fef71a29de7020b28c45de4eec342c91f37058bac96b13415ec4c073e",
     "tier2/altis_particlefilter/hip/particlefilter_reference.h": "41339220febb6bcfc0b7091136fd63feadbf116c734e38350ab5c43ded452b76",
     "tier2/altis_particlefilter/hip/particlefilter_kernels.h": "3f8b3e51d5b76ac83de6fc142cba238663b83a895d652f77bb3f8bf829ae4391",
-    "tier2/altis_particlefilter/hip/Makefile": "4874e6fe955c0c74e4d2c22c39bdf25c97bb39882727b8849f175517d119c249",
+    "tier2/altis_particlefilter/hip/Makefile": "e561e03e7d91165c5f190a2a264e48d64d2e2e30d282727dcdd5c5ae3760061f",
     "tier2/altis_particlefilter/hip/params.json": "f900db5320cd8c0cece793dda7fd49b3047282e147451737db40917b30b4f063",
     "tier2/altis_particlefilter/hip/UPSTREAM_LICENSE": "3af0d71d876dba1d711492bd7572acfcd0d665b69429947d4b5d97530b22c9b3",
-    "common/bench_timing.h": "37c56f043bb3b8cb7df1c47e288a291415a662a2db0e1ac463da22e62ed85019",
-    "common/bench_warmup.h": "43f81e49b21acfe804e4fc545569882579cde78f48e1721452c4ba248a75c2b4",
-    "common/hip_cuda_compat.h": "12d0d8dfb4da122820401e78a3ab8301f6cb940b302f82bfab05d5a85081287c"
+    "common_hip/bench_timing.h": "37c56f043bb3b8cb7df1c47e288a291415a662a2db0e1ac463da22e62ed85019",
+    "common_hip/bench_warmup.h": "43f81e49b21acfe804e4fc545569882579cde78f48e1721452c4ba248a75c2b4",
+    "common_hip/hip_cuda_compat.h": "12d0d8dfb4da122820401e78a3ab8301f6cb940b302f82bfab05d5a85081287c"
   },
-  "binary_sha256": "3fafd23e8b010ead8c3da9d194f262541ba6d2e35bba2673b0b07441751c902d",
+  "binary_sha256": "ee029a40d083348868034e904a9e7b97443500883ea873cab0e06ecd9121ba82",
   "build_command": [
     "make",
     "-B",
@@ -37,7 +37,7 @@
   "configurations": [
     {
       "size": 500,
-      "wall_seconds": 0.39336889097467065,
+      "wall_seconds": 0.39789315895177424,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -45,7 +45,7 @@
     },
     {
       "size": 750,
-      "wall_seconds": 0.3874588320031762,
+      "wall_seconds": 0.38797825993970037,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -53,7 +53,7 @@
     },
     {
       "size": 1000,
-      "wall_seconds": 0.3676877849502489,
+      "wall_seconds": 0.37743340199813247,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -61,7 +61,7 @@
     },
     {
       "size": 1500,
-      "wall_seconds": 0.3875933620147407,
+      "wall_seconds": 0.3870634299237281,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -69,7 +69,7 @@
     },
     {
       "size": 2000,
-      "wall_seconds": 0.38897905102930963,
+      "wall_seconds": 0.4003516510128975,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -77,7 +77,7 @@
     },
     {
       "size": 3000,
-      "wall_seconds": 0.3919070909032598,
+      "wall_seconds": 0.4028760518413037,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -85,7 +85,7 @@
     },
     {
       "size": 5000,
-      "wall_seconds": 0.4020130590070039,
+      "wall_seconds": 0.4044435638934374,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -93,7 +93,7 @@
     },
     {
       "size": 7500,
-      "wall_seconds": 0.4048753089737147,
+      "wall_seconds": 0.41216412000358105,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -101,7 +101,7 @@
     },
     {
       "size": 10000,
-      "wall_seconds": 0.41266037803143263,
+      "wall_seconds": 0.41708417516201735,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -109,7 +109,7 @@
     },
     {
       "size": 15000,
-      "wall_seconds": 0.42443417594768107,
+      "wall_seconds": 0.42739917198196054,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -117,7 +117,7 @@
     },
     {
       "size": 20000,
-      "wall_seconds": 0.4340415549231693,
+      "wall_seconds": 0.4485759809613228,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -125,7 +125,7 @@
     },
     {
       "size": 30000,
-      "wall_seconds": 0.45280819199979305,
+      "wall_seconds": 0.4592850401531905,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -133,7 +133,7 @@
     },
     {
       "size": 50000,
-      "wall_seconds": 0.4977341649355367,
+      "wall_seconds": 0.4986151419579983,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -141,7 +141,7 @@
     },
     {
       "size": 75000,
-      "wall_seconds": 0.5551136380527169,
+      "wall_seconds": 0.5575208610389382,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -149,7 +149,7 @@
     },
     {
       "size": 100000,
-      "wall_seconds": 0.6029291589511558,
+      "wall_seconds": 0.6483480450697243,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -157,7 +157,7 @@
     },
     {
       "size": 150000,
-      "wall_seconds": 0.7158389730611816,
+      "wall_seconds": 0.7294026520103216,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -165,7 +165,7 @@
     },
     {
       "size": 200000,
-      "wall_seconds": 0.8433340350165963,
+      "wall_seconds": 0.8670952960383147,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -173,7 +173,7 @@
     },
     {
       "size": 300000,
-      "wall_seconds": 1.1158715049969032,
+      "wall_seconds": 1.1431783840525895,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -181,7 +181,7 @@
     },
     {
       "size": 500000,
-      "wall_seconds": 1.8273413199931383,
+      "wall_seconds": 1.8767081089317799,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -189,7 +189,7 @@
     },
     {
       "size": 750000,
-      "wall_seconds": 2.9966677399352193,
+      "wall_seconds": 3.106123381992802,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -197,7 +197,7 @@
     },
     {
       "size": 1000000,
-      "wall_seconds": 4.454461243003607,
+      "wall_seconds": 4.417802574113011,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -205,7 +205,7 @@
     },
     {
       "size": 1500000,
-      "wall_seconds": 8.231245678034611,
+      "wall_seconds": 8.230446965899318,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -213,7 +213,7 @@
     },
     {
       "size": 2000000,
-      "wall_seconds": 13.309599003987387,
+      "wall_seconds": 13.314741778885946,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -221,7 +221,7 @@
     },
     {
       "size": 3000000,
-      "wall_seconds": 27.16146972903516,
+      "wall_seconds": 27.19251574180089,
       "exit_code": 0,
       "status": "qualified",
       "reason": "complete_measured_state_pass",
@@ -229,21 +229,21 @@
     },
     {
       "size": 5000000,
-      "wall_seconds": 60.15257691696752,
+      "wall_seconds": 60.14993014186621,
       "exit_code": null,
       "status": "unsupported",
       "reason": "process_timeout"
     },
     {
       "size": 7500000,
-      "wall_seconds": 60.14971518993843,
+      "wall_seconds": 60.15347912884317,
       "exit_code": null,
       "status": "unsupported",
       "reason": "process_timeout"
     },
     {
       "size": 10000000,
-      "wall_seconds": 60.15529559308197,
+      "wall_seconds": 60.153636660892516,
       "exit_code": null,
       "status": "unsupported",
       "reason": "process_timeout"

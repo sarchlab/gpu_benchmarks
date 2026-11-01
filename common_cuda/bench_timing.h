@@ -2,7 +2,7 @@
  * bench_timing.h  (native CUDA)
  *
  * Shared measurement harness for tier1/tier2 CUDA benchmarks. Native CUDA
- * counterpart of common/bench_timing.h: same contract, output protocol and
+ * counterpart of common_hip/bench_timing.h: same contract, output protocol and
  * timing brackets, written directly against the CUDA runtime API.
  *
  * Contract:

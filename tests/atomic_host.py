@@ -15,7 +15,7 @@ def main():
         work=Path(d);binary=work/'test'
         subprocess.run([args.compiler,*flags,str(repo/'tests/atomic_reference.cpp'),'-o',str(binary)],check=True)
         subprocess.run([str(binary)],check=True,timeout=30)
-        src=work/'parameters.cpp';src.write_text('#include "'+str(repo/'tier1/atomic_operations/atomic_reference.h')+'"\n'+r"""
+        src=work/'parameters.cpp';src.write_text('#include "'+str(repo/'tier1/atomic_operations/hip/atomic_reference.h')+'"\n'+r"""
 int main(int argc,char**argv)try{auto p=atomic_bench::parameters(argc,argv);printf("%d,%d,%d,%s\n",p.ops,p.blocks,p.block,p.operation);}
 catch(const std::exception& e){fprintf(stderr,"FAIL: %s\n",e.what());return 1;}
 """)

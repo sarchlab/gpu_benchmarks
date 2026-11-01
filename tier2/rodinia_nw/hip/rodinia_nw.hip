@@ -7,7 +7,7 @@
 // Defaults: N=2048, B=16, P=2. Manual N rounds up to a multiple of B.
 // See README for the pinned source, effective work, verification and limits.
 
-#include "../../../common/bench_timing.h"
+#include "../../../common_hip/bench_timing.h"
 #include <algorithm>
 #include <climits>
 #include <cstdio>

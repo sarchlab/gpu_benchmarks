@@ -34,9 +34,9 @@ The rules split cleanly by implementation language: everything that matters when
 
 1. **Preserve the upstream algorithm; source-level identity is not required.** A Tier 2 benchmark may be an independent HIP/CUDA reimplementation rather than a copy of the upstream source. It is faithful when it preserves the upstream workload's problem definition, mathematical operations or recurrence, algorithmic stages and data dependencies, boundary and termination rules, and asymptotic work and parameter scaling. Exact source text, host scaffolding, memory layout, tiling, thread/block mapping, and kernel decomposition may differ, and portability or correctness fixes are allowed, provided they do not change those algorithmic semantics. Material implementation differences must be documented. Omitting a defining stage, substituting a different algorithm or numerical problem, changing update or convergence semantics, moving defining GPU work out of the measured workload, or changing how work scales is not faithful; such a variant must be brought into alignment or identified as a different benchmark rather than presented as the upstream workload.
 
-2. **HIP and CUDA share one source.** Each benchmark is a single `.hip` file that compiles under both `hipcc` (AMD) and `nvcc` (NVIDIA) via `common/hip_cuda_compat.h`. There are no per-vendor copies that could diverge or acquire vendor-specific overhead.
+2. **HIP and CUDA share one source.** Each benchmark is a single `.hip` file that compiles under both `hipcc` (AMD) and `nvcc` (NVIDIA) via `common_hip/hip_cuda_compat.h`. There are no per-vendor copies that could diverge or acquire vendor-specific overhead. Tier 1 and Tier 2 additionally keep a native CUDA port of each benchmark in `<bench>/cuda/` (next to the original `<bench>/hip/`); it is a rename-only translation of the HIP source and is what `gpubench --platform cuda` runs.
 
-3. **Minimize common code; keep it header-only.** The shared infrastructure is three headers (`common/hip_cuda_compat.h`, `common/bench_timing.h`, `common/bench_warmup.h`) — nothing to build or link separately, so every benchmark compiles standalone with one compiler invocation.
+3. **Minimize common code; keep it header-only.** The shared infrastructure is three headers (`common_hip/hip_cuda_compat.h`, `common_hip/bench_timing.h`, `common_hip/bench_warmup.h`) — nothing to build or link separately, so every benchmark compiles standalone with one compiler invocation.
 
 **Measurement:**
 
@@ -47,7 +47,7 @@ The rules split cleanly by implementation language: everything that matters when
    - Sustained ALU and memory traffic is intended to raise clocks from idle.
    - Touching the separate scratch buffer is intended to evict the benchmark's working set from the last-level cache without priming its own buffers.
 
-   Verify that the scratch footprint exceeds the relevant cache capacity and qualify clock/cache effects on the target GPU. Benchmarks whose subject requires resident data must document their entry-policy exception. [`cache_latency`](tier1/cache_latency/README.md) runs the warmer first, then an untimed pointer-chase primer, then the timed chase. The primer remains when the warmer is disabled and must be replayed without counting its time in a simulator; actual cache residency still requires target qualification. The warmer is controlled by one measurement parameter read from the environment:
+   Verify that the scratch footprint exceeds the relevant cache capacity and qualify clock/cache effects on the target GPU. Benchmarks whose subject requires resident data must document their entry-policy exception. [`cache_latency`](tier1/cache_latency/hip/README.md) runs the warmer first, then an untimed pointer-chase primer, then the timed chase. The primer remains when the warmer is disabled and must be replayed without counting its time in a simulator; actual cache residency still requires target qualification. The warmer is controlled by one measurement parameter read from the environment:
 
    | Parameter | Env var | Default | Meaning |
    |-----------|---------|---------|---------|
@@ -89,7 +89,7 @@ Each benchmark declares its parameters in `params.json`; the sweep is structured
 
 4. **Store raw, derive downstream.** Every run's parameters, per-kernel times, and summary land in SQLite exactly as emitted; GFLOPS/GB/s/latency are computed later by analysis scripts, never at collection time.
 
-5. **Traces omit the warmer.** During NVBit trace collection the harness forces `vector_add_warmup=false`. The raw capture retains benchmark-launched kernels, including `cache_latency`'s untimed primer. Replay must preserve its primed state while excluding primer work from measured latency; see the [cache-latency replay requirements](tier1/cache_latency/README.md).
+5. **Traces omit the warmer.** During NVBit trace collection the harness forces `vector_add_warmup=false`. The raw capture retains benchmark-launched kernels, including `cache_latency`'s untimed primer. Replay must preserve its primed state while excluding primer work from measured latency; see the [cache-latency replay requirements](tier1/cache_latency/hip/README.md).
 
 ---
 
@@ -271,7 +271,7 @@ The metric column names downstream quantities. See [measurement interpretation](
 | `pcie_bandwidth` | GB/s | PCIe/Thunderbolt host-device transfer bandwidth |
 | `mixbench` | GFLOPS/GB/s | Nominal compute/logical-byte intensity sweep |
 | `shared_mem_bandwidth` | GB/s | Shared/threadgroup memory bandwidth (single SM/CU) |
-| `atomic_operations` | Gattempts/s | [Fixed-attempt contended Add/CAS/Min](tier1/atomic_operations/README.md); CAS includes an atomic read and success bookkeeping |
+| `atomic_operations` | Gattempts/s | [Fixed-attempt contended Add/CAS/Min](tier1/atomic_operations/hip/README.md); CAS includes an atomic read and success bookkeeping |
 | `warp_shuffle` | Gops/s | Warp/SIMD shuffle issue rate (single SM/CU, dependent chain) |
 | `cache_bandwidth` | GB/s | Cache-hierarchy bandwidth vs working-set size (shared/private modes) |
 | `empty_kernel` | µs | Empty-dispatch GPU event interval and host bracket time |

@@ -70,11 +70,11 @@ def main():
     if args.host_only:host_tests(root,work,args.compiler);return 0
     relative=Path('tier2/shoc_scan/hip');src=root/relative;source=(src/'shoc_scan.hip').read_text()
     inputs=[relative/n for n in ('shoc_scan.hip','Makefile','params.json')]
-    inputs += [Path('common')/n for n in ('bench_timing.h','bench_warmup.h','hip_cuda_compat.h')]
+    inputs += [Path('common_hip')/n for n in ('bench_timing.h','bench_warmup.h','hip_cuda_compat.h')]
     hashes={str(p):hashlib.sha256((root/p).read_bytes()).hexdigest() for p in inputs}
     binaries={}
     for variant in ('production','faults'):
-        dst=work/variant/relative;dst.mkdir(parents=True);shutil.copytree(root/'common',work/variant/'common')
+        dst=work/variant/relative;dst.mkdir(parents=True);shutil.copytree(root/'common_hip',work/variant/'common_hip')
         for name in ('Makefile','params.json'):shutil.copy2(src/name,dst/name)
         (dst/'shoc_scan.hip').write_text(source if variant=='production' else instrument(source))
         with (work/variant/'build.log').open('w') as log:

@@ -32,14 +32,22 @@ Working files (all git-ignored) stay under scripts/:
   logs/<stamp>.log  driver log, ending with the size/ratio table
   logs/<stamp>.gpubench.log  raw gpubench output
   tmp/              demo trace root (wiped at the start of every demo)
+
+Demo: one tiny configuration of every benchmark (or of --benchmarks): its
+smallest ok size and, among the non-scaling combinations at that size, the one
+with the smallest median GPU time in the guidance DB (least work / fewest
+launches). Default timeout there is 600 s.
   .build/           Accel-Sim checkout, NVBit and the built tools
 
 Usage (from the repo root on the server):
   python3 scripts/trace_collect.py setup     # build tracer, post-processor, gpubench
-  python3 scripts/trace_collect.py demo      # 6 small configs into scripts/tmp/, verified
+  python3 scripts/trace_collect.py demo      # 1 tiny config per benchmark into scripts/tmp/
   python3 scripts/trace_collect.py run       # everything, into the trace root (tmux)
   python3 scripts/trace_collect.py stats     # print the table from index.db
-Rerunning `run` resumes: configurations already ok or timed out are skipped
+A configuration whose program launches no kernel (e.g. memory_bandwidth and
+pcie_bandwidth only call cudaMemcpy) has nothing to trace; it is recorded as
+no_kernels, with no data directory.
+Rerunning `run` resumes: configurations already ok, no_kernels or timed out are skipped
 (--force retraces them); errors are retried.
 
 Python 3.6+, stdlib only. Needs nvcc, nvidia-smi, xz, git, wget, make, bc,
@@ -64,8 +72,6 @@ ACCEL_SIM_URL = 'https://github.com/accel-sim/accel-sim-framework.git'
 ACCEL_SIM_COMMIT = '7ba54ded60c4ba0083410c37d22d719166acd6dc'   # dev, 2026-10-27
 DEFAULT_TRACE_ROOT = '/scratch/data/enze/gpu_benchmarks_trace'
 DEFAULT_GUIDANCE_DB = os.path.join('ground_truth_h100_all', 'ground_truth_all.db')
-DEMO_BENCHMARKS = ['fp32_throughput', 'memory_bandwidth', 'polybench_gemm',
-                   'rodinia_hotspot', 'cuda_nbody', 'shoc_spmv']
 MEASUREMENT_PARAMS = {'vector_add_warmup'}
 PLATFORM = 'cuda'
 TRACER = 'v2.0'
@@ -87,7 +93,7 @@ CREATE TABLE IF NOT EXISTS traces (
     non_scaling_params_json TEXT NOT NULL,
     config_json             TEXT NOT NULL,
     config_dir              TEXT,
-    status                  TEXT NOT NULL,   -- ok | timeout | error
+    status                  TEXT NOT NULL,   -- ok | no_kernels | timeout | error
     n_kernels               INTEGER,
     size_s0                 INTEGER,         -- uncompressed .trace bytes
     size_s1                 INTEGER,         -- .trace.xz bytes
@@ -161,14 +167,15 @@ class Config:
         self.trace_id = '%s-%s' % (
             bench, hashlib.sha256(self.config_json.encode()).hexdigest()[:12])
 
+        self.size_rank = 0        # position in params.json's scaling values
+
     @property
     def group(self):
         return (self.tier, self.bench, self.ns_json)
 
     def sort_key(self):
-        v = self.sp_value
-        return (self.tier, self.bench, self.ns_json,
-                (0, v, '') if isinstance(v, (int, float)) else (1, 0, str(v)))
+        # Declared order, not value order: e.g. npb_mg classes run S, W, A, B, C.
+        return (self.tier, self.bench, self.ns_json, self.size_rank, fmt_value(self.sp_value))
 
 
 class Collector:
@@ -293,31 +300,45 @@ class Collector:
         con.close()
         tiers = set(int(t) for t in self.a.tiers.split(','))
         seen = {}
+        ranks = {}
         for tier, bench, spn, spv, nsp in rows:
             if int(tier) not in tiers:
                 continue
             if self.a.benchmarks and bench not in self.a.benchmarks:
                 continue
             c = Config(tier, bench, spn, spv, json.loads(nsp or '{}'))
+            if bench not in ranks:
+                p = os.path.join(self.repo, 'tier%d' % c.tier, bench, PLATFORM, 'params.json')
+                with open(p) as f:
+                    vals = json.load(f)['scaling_param']['values']
+                ranks[bench] = {fmt_value(v): i for i, v in enumerate(vals)}
+            c.size_rank = ranks[bench].get(fmt_value(c.sp_value), len(ranks[bench]))
             seen[c.trace_id] = c
         return sorted(seen.values(), key=Config.sort_key)
 
     def demo_configs(self, allc):
-        """Smallest size at the default non-scaling values of each demo benchmark."""
-        out = []
-        for bench in self.a.demo_benchmarks:
-            cands = [c for c in allc if c.bench == bench]
-            if not cands:
-                self.say('demo: %s has no ok configuration in the guidance DB, skipped' % bench)
-                continue
-            p = os.path.join(self.repo, 'tier%d' % cands[0].tier, bench, PLATFORM, 'params.json')
-            with open(p) as f:
-                defaults = {q['name']: canon(q['default'])
-                            for q in json.load(f).get('non_scaling_params', [])
-                            if q['name'] not in MEASUREMENT_PARAMS}
-            dflt = [c for c in cands if c.ns == defaults] or cands
-            out.append(min(dflt, key=Config.sort_key))
-        return out
+        """Per benchmark: smallest size, then the combination with least GPU time."""
+        con = sqlite3.connect('file:%s?mode=ro' % self.a.guidance_db, uri=True)
+        rows = con.execute(
+            "SELECT tier, benchmark, scaling_param_name, scaling_param_value,"
+            " non_scaling_params_json, total_time_ms FROM runs"
+            " WHERE status = 'ok' AND total_time_ms IS NOT NULL").fetchall()
+        con.close()
+        times = {}
+        for tier, bench, spn, spv, nsp, t in rows:
+            times.setdefault(Config(tier, bench, spn, spv, json.loads(nsp or '{}')).trace_id,
+                             []).append(t)
+
+        def median(v):
+            v = sorted(v)
+            return v[len(v) // 2]
+        best = {}
+        for c in allc:
+            key = (c.size_rank, median(times[c.trace_id]) if c.trace_id in times else float('inf'),
+                   c.sort_key())
+            if c.bench not in best or key < best[c.bench][0]:
+                best[c.bench] = (key, c)
+        return sorted((c for _, c in best.values()), key=Config.sort_key)
 
     # ── one configuration ─────────────────────────────────────────────────
     def compile(self, tier, bench):
@@ -416,6 +437,13 @@ class Collector:
         names = set(os.listdir(traces)) if os.path.isdir(traces) else set()
         xz = sorted(n for n in names if n.endswith('.trace.xz'))
         tz = sorted(n for n in names if n.endswith('.tracez'))
+        lists = [n for n in names if n.startswith('kernelslist') and n.endswith('.g')]
+        if lists and not refs and not xz and not tz:
+            # Post-processed fine, but the program launched no kernel (only
+            # memcpys), so gpubench reports it incomplete. Nothing to keep.
+            return 'no_kernels', {'wall_sec': round(wall, 1), 'n_kernels': 0,
+                                  'config_dir': os.path.basename(cfg_dir)}, \
+                'program launched no kernel (kernelslist.g has only memcpys)'
         if rc != 0 or not refs or any(r not in names for r in refs) or len(xz) != len(tz):
             return 'error', {'wall_sec': wall, 'config_dir': os.path.basename(cfg_dir)}, \
                 'gpubench exit %s, %d listed / %d .tracez / %d .trace.xz (see %s)' % (
@@ -463,11 +491,12 @@ class Collector:
         self.say('trace root %s, timeout %ds, min free %d GB, %s' % (
             self.root, self.a.timeout, self.a.min_free_gb, info.get('gpu', '')))
         self.say('csv: %s' % self.csv_path)
-        todo = [c for c in configs if force or status.get(c.trace_id) not in ('ok', 'timeout')]
+        todo = [c for c in configs
+                if force or status.get(c.trace_id) not in ('ok', 'no_kernels', 'timeout')]
         self.done = 0
         timed_out = set(c.group for c in configs if status.get(c.trace_id) == 'timeout')
         self.total = len(todo)
-        self.say('%d configurations, %d to trace (%d already ok/timeout in index.db)' % (
+        self.say('%d configurations, %d to trace (%d already done or timed out in index.db)' % (
             len(configs), len(todo), len(configs) - len(todo)))
         if self.a.dry_run:
             for c in todo:
@@ -546,25 +575,27 @@ class Collector:
         con = self.db()
         rows = con.execute(
             "SELECT benchmark, MIN(tier), SUM(status='ok'), SUM(status='timeout'),"
-            " SUM(status='error'), SUM(CASE WHEN status='ok' THEN size_s0 END),"
+            " SUM(status='error'), SUM(status='no_kernels'),"
+            " SUM(CASE WHEN status='ok' THEN size_s0 END),"
             " SUM(CASE WHEN status='ok' THEN size_s1 END),"
             " SUM(CASE WHEN status='ok' THEN size_s2 END)"
             " FROM traces GROUP BY benchmark ORDER BY MIN(tier), benchmark").fetchall()
         con.close()
         head = ('benchmark', '#configs', 'S0_raw', 'S1_trace.xz', 'S2_tracez',
-                'S1_ratio', 'S2_ratio', '#timeout', '#error')
+                'S1_ratio', 'S2_ratio', '#timeout', '#error', '#no_kernels')
         lines = []
-        tot = [0, 0, 0, 0, 0, 0]
-        for b, _, ok, to, er, s0, s1, s2 in rows:
+        tot = [0, 0, 0, 0, 0, 0, 0]
+        for b, _, ok, to, er, nk, s0, s1, s2 in rows:
             s0, s1, s2 = s0 or 0, s1 or 0, s2 or 0
             lines.append((b, ok, human(s0), human(s1), human(s2),
                           '%.6f' % (s1 / s0) if s0 else '-', '%.6f' % (s2 / s0) if s0 else '-',
-                          to, er))
-            for i, v in enumerate((ok, to, er, s0, s1, s2)):
+                          to, er, nk))
+            for i, v in enumerate((ok, to, er, nk, s0, s1, s2)):
                 tot[i] += v or 0
-        ok, to, er, s0, s1, s2 = tot
+        ok, to, er, nk, s0, s1, s2 = tot
         lines.append(('TOTAL', ok, human(s0), human(s1), human(s2),
-                      '%.6f' % (s1 / s0) if s0 else '-', '%.6f' % (s2 / s0) if s0 else '-', to, er))
+                      '%.6f' % (s1 / s0) if s0 else '-', '%.6f' % (s2 / s0) if s0 else '-',
+                      to, er, nk))
         widths = [max(len(str(r[i])) for r in [head] + lines) for i in range(len(head))]
         fmt = '  '.join(('%%-%ds' if i == 0 else '%%%ds') % w for i, w in enumerate(widths))
         table = [fmt % head] + [fmt % tuple(r) for r in lines]
@@ -579,6 +610,7 @@ def demo(a):
     col = Collector(a, root, 'demo')
     col.say('demo: cleared %s' % tmp)
     picks = col.demo_configs(col.configs())
+    col.say('demo: %d benchmarks, one tiny configuration each' % len(picks))
     for c in picks:
         col.say('demo pick %s %s=%s %s' % (c.trace_id, c.sp_name, fmt_value(c.sp_value), c.ns_json))
     if not col.run(picks):
@@ -598,10 +630,13 @@ def demo(a):
     con = col.db()
     rows = con.execute('SELECT trace_id, status, n_kernels FROM traces').fetchall()
     con.close()
-    ok = [r for r in rows if r[1] == 'ok']
+    ok = [r for r in rows if r[1] in ('ok', 'no_kernels')]
     problems = []
     for tid, st, nk in rows:
         d = os.path.join(col.data, tid, 'traces')
+        if st == 'no_kernels':
+            col.say('  %s  no kernels (memcpy only), nothing stored' % tid)
+            continue
         if st != 'ok':
             problems.append('%s: status %s' % (tid, st))
             continue
@@ -615,8 +650,9 @@ def demo(a):
             problems.append('%s: %d .trace.xz left behind' % (tid, len(leftovers)))
         col.say('  %s  %d kernels  %d files' % (tid, nk, len(os.listdir(d)) if os.path.isdir(d) else 0))
     dirs = sorted(x for x in os.listdir(col.data)) if os.path.isdir(col.data) else []
-    if len(dirs) != len(rows):
-        problems.append('data/ has %d entries, index.db has %d rows' % (len(dirs), len(rows)))
+    stored = [r for r in rows if r[1] == 'ok']
+    if len(dirs) != len(stored):
+        problems.append('data/ has %d entries, index.db has %d ok rows' % (len(dirs), len(stored)))
     col.stats()
     col.say('demo: %d/%d picked configurations traced ok, data/ entries %d, problems: %s' % (
         len(ok), len(picks), len(dirs), '; '.join(problems) or 'none'))
@@ -677,8 +713,8 @@ def main():
                          '(default: <repo>/%s)' % DEFAULT_GUIDANCE_DB)
     ap.add_argument('--tiers', default='1,2')
     ap.add_argument('--benchmarks', default='', help='comma-separated subset (default: all)')
-    ap.add_argument('--demo-benchmarks', default=','.join(DEMO_BENCHMARKS))
-    ap.add_argument('--timeout', type=int, default=3600, help='per trace (and per post-processing), seconds')
+    ap.add_argument('--timeout', type=int, default=None,
+                    help='per trace (and per post-processing), seconds (default: 3600, demo 600)')
     ap.add_argument('--min-free-gb', type=int, default=None,
                     help='stop when the trace root has less free space '
                          '(default: 200 for run on /scratch, 10 for demo in scripts/tmp)')
@@ -688,11 +724,12 @@ def main():
     ap.add_argument('--arch', default='sm_90', help='setup: tracer build arch (H100 = sm_90)')
     a = ap.parse_args()
     a.repo = os.path.dirname(here)
+    if a.timeout is None:
+        a.timeout = 600 if a.mode == 'demo' else 3600
     if a.min_free_gb is None:
         a.min_free_gb = 10 if a.mode == 'demo' else 200
     a.guidance_db = os.path.abspath(a.guidance_db or os.path.join(a.repo, DEFAULT_GUIDANCE_DB))
     a.benchmarks = set(x.strip() for x in a.benchmarks.split(',') if x.strip())
-    a.demo_benchmarks = [x.strip() for x in a.demo_benchmarks.split(',') if x.strip()]
     try:
         if a.mode == 'setup':
             sys.exit(setup(a))

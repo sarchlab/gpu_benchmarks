@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 // ScalingParam represents the scaling parameter in params.json.
@@ -450,4 +451,69 @@ func toFloat(v interface{}) *float64 {
 	default:
 		return nil
 	}
+}
+
+// paramPin is one --param name=value request.
+type paramPin struct {
+	Name  string
+	Value string
+}
+
+// parseParamPins parses repeated --param name=value flags.
+func parseParamPins(raw []string) ([]paramPin, error) {
+	var pins []paramPin
+	seen := map[string]bool{}
+	for _, r := range raw {
+		name, value, ok := strings.Cut(r, "=")
+		name, value = strings.TrimSpace(name), strings.TrimSpace(value)
+		if !ok || name == "" || value == "" {
+			return nil, fmt.Errorf("invalid --param %q (want name=value)", r)
+		}
+		if seen[name] {
+			return nil, fmt.Errorf("--param %s given more than once", name)
+		}
+		seen[name] = true
+		pins = append(pins, paramPin{name, value})
+	}
+	return pins, nil
+}
+
+// pinNonScaling returns a copy of params whose pinned non-scaling params have
+// exactly one value (also used as the default), so both sweep modes produce
+// only that value. The value must be one of the declared values, and the
+// declared value itself is kept so its JSON type stays unchanged. Measurement
+// params have their own flags (e.g. --vector-add-warmup) and cannot be pinned.
+func pinNonScaling(params *BenchmarkParams, pins []paramPin) (*BenchmarkParams, error) {
+	out := *params
+	out.NonScalingParams = append([]NonScalingParam(nil), params.NonScalingParams...)
+	for _, pin := range pins {
+		if measurementParams[pin.Name] {
+			return nil, fmt.Errorf("--param %s: measurement param, use its own flag", pin.Name)
+		}
+		found := false
+		for i, p := range out.NonScalingParams {
+			if p.Name != pin.Name {
+				continue
+			}
+			found = true
+			var match interface{}
+			ok := false
+			for _, v := range p.Values {
+				if formatValue(v) == pin.Value {
+					match, ok = v, true
+					break
+				}
+			}
+			if !ok {
+				return nil, fmt.Errorf("--param %s=%s: not a declared value", pin.Name, pin.Value)
+			}
+			p.Values = []interface{}{match}
+			p.Default = match
+			out.NonScalingParams[i] = p
+		}
+		if !found {
+			return nil, fmt.Errorf("--param %s: no such non-scaling param", pin.Name)
+		}
+	}
+	return &out, nil
 }

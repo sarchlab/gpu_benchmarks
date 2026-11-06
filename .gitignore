@@ -109,3 +109,8 @@ compile_errors.log
 # Status dashboard dependencies/build output
 /status-dashboard/node_modules/
 /status-dashboard/dist/
+
+# scripts/trace_collect.py working files: only the scripts themselves are tracked
+scripts/logs/
+scripts/tmp/
+scripts/.build/

@@ -54,6 +54,8 @@ gpubench run \
 | `--post-process <binary>` | Optional post-processing binary run after each benchmark | — |
 | `--resume-trace` | Skip configs that already have complete or timed-out trace outputs | `false` |
 | `--trace-clean-incomplete` | When resuming, remove incomplete config trace directories before retrying | `false` |
+| `--tracer <v1\|v2.0>` | Trace pipeline: `v1` (`.trace.zst`, described below) or `v2.0` (Accel-Sim 2.0 `.tracez`, see [Accel-Sim 2.0 traces](#accel-sim-20-traces---tracer-v20)) | `v1` |
+| `--param <name=value>` | Pin a non-scaling parameter to one declared value (repeatable, needs `--benchmark`); also works without tracing | — |
 
 ### What happens internally
 
@@ -136,6 +138,39 @@ If a trace run times out, `gpubench` deletes that config's trace data and writes
 `<trace-output>/<benchmark>/<config>/traces/trace_timeout.json`. This keeps
 large partial traces from consuming disk space and lets future
 `--resume-trace` runs skip the same timeout-prone config instead of retrying it.
+
+### Accel-Sim 2.0 traces (`--tracer v2.0`)
+
+`--tracer v2.0` drives the upstream
+[Accel-Sim](https://github.com/accel-sim/accel-sim-framework) NVBit tracer and
+its post-processor instead of the `v1` tracer:
+
+```bash
+gpubench run --benchmark cuda_nbody --scaling-values 256 --param timesteps=10 \
+  --collect-trace <accel-sim>/util/tracer_nvbit/tracer_tool/tracer_tool.so \
+  --tracer v2.0 \
+  --post-process <accel-sim>/util/tracer_nvbit/tracer_tool/traces-processing/post-traces-processing \
+  --trace-output ./my_traces --reps 1
+```
+
+- The tracer writes `kernel-*.trace.xz` (memory addresses already stored as
+  base+stride or base+delta, then streamed through `xz -1`); gpubench pins
+  `TOOL_COMPRESS=1` and `TRACE_FILE_COMPRESS=1`.
+- `--post-process` is required. It receives the config's `traces/` directory
+  (every context's kernel list) and turns each `.trace.xz` into a `.tracez`:
+  instructions grouped per thread block and warp, in 2048-instruction chunks,
+  each zstd-compressed with a dictionary trained on the kernel, plus an index
+  so the simulator can read it page by page. It writes `kernelslist.g`.
+- Post-processing gets the trace timeout instead of `v1`'s 300 s, and a failed
+  or incomplete post-process counts as a failed config.
+- A config is complete when a `kernelslist*.g` lists at least one `.tracez`
+  and every listed `.tracez` exists; this is also what `--resume-trace` checks.
+  The `.trace.xz` files are intermediates and can be deleted afterwards.
+- `--trace-sample` (live block sampling) is `v1`-only.
+
+`scripts/trace_collect.py` uses this mode to trace every successful
+configuration of a timing DB and records the size of each stage (raw text,
+`.trace.xz`, `.tracez`); see its `--help`.
 
 ## Step 3: Output Structure
 

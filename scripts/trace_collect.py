@@ -32,12 +32,14 @@ Working files (all git-ignored) stay under scripts/:
   logs/<stamp>.log  driver log, ending with the size/ratio table
   logs/<stamp>.gpubench.log  raw gpubench output
   tmp/              demo trace root (wiped at the start of every demo)
+  .build/           Accel-Sim checkout, NVBit and the built tools
 
 Demo: one tiny configuration of every benchmark (or of --benchmarks): its
 smallest ok size and, among the non-scaling combinations at that size, the one
 with the smallest median GPU time in the guidance DB (least work / fewest
-launches). Default timeout there is 600 s.
-  .build/           Accel-Sim checkout, NVBit and the built tools
+launches).
+
+Timeout: 600 s per configuration (trace + post-processing each), for run and demo.
 
 Usage (from the repo root on the server):
   python3 scripts/trace_collect.py setup     # build tracer, post-processor, gpubench
@@ -48,7 +50,11 @@ A configuration whose program launches no kernel (e.g. memory_bandwidth and
 pcie_bandwidth only call cudaMemcpy) has nothing to trace; it is recorded as
 no_kernels, with no data directory.
 Rerunning `run` resumes: configurations already ok, no_kernels or timed out are skipped
-(--force retraces them); errors are retried.
+(--force retraces them); errors are retried. --retry-timeouts retraces only the
+timed-out ones (e.g. with a larger --timeout); once a size passes, the larger
+sizes of that combination that were skipped behind it are traced too.
+--max-timeouts-per-bench N (default 0 = no limit): after N timeouts in one
+benchmark (any combinations), its remaining configurations are skipped.
 
 Python 3.6+, stdlib only. Needs nvcc, nvidia-smi, xz, git, wget, make, bc,
 libzstd-dev and Go (gpubench).
@@ -491,10 +497,22 @@ class Collector:
         self.say('trace root %s, timeout %ds, min free %d GB, %s' % (
             self.root, self.a.timeout, self.a.min_free_gb, info.get('gpu', '')))
         self.say('csv: %s' % self.csv_path)
-        todo = [c for c in configs
-                if force or status.get(c.trace_id) not in ('ok', 'no_kernels', 'timeout')]
+        skip = ('ok', 'no_kernels') if self.a.retry_timeouts else ('ok', 'no_kernels', 'timeout')
+        todo = [c for c in configs if force or status.get(c.trace_id) not in skip]
         self.done = 0
-        timed_out = set(c.group for c in configs if status.get(c.trace_id) == 'timeout')
+        # Combinations with a timed-out size: their larger sizes are skipped.
+        # With --retry-timeouts the timed-out sizes are retried first (sizes run
+        # smallest first), so the block is rebuilt from this run's results.
+        fresh = force or self.a.retry_timeouts
+        timed_out = set() if fresh else \
+            set(c.group for c in configs if status.get(c.trace_id) == 'timeout')
+        # Timeouts per benchmark, for --max-timeouts-per-bench.
+        bench_timeouts = {}
+        if not fresh:
+            for c in configs:
+                if status.get(c.trace_id) == 'timeout':
+                    bench_timeouts[(c.tier, c.bench)] = bench_timeouts.get((c.tier, c.bench), 0) + 1
+        max_to = self.a.max_timeouts_per_bench
         self.total = len(todo)
         self.say('%d configurations, %d to trace (%d already done or timed out in index.db)' % (
             len(configs), len(todo), len(configs) - len(todo)))
@@ -521,6 +539,13 @@ class Collector:
                     free_gb, self.root, self.a.min_free_gb)
                 self.say('STOP: ' + self.stopped)
                 return True
+            if max_to and bench_timeouts.get((c.tier, c.bench), 0) >= max_to:
+                row.update(status='skipped_bench_timeouts', timestring_end=now_str(), time_span_sec=0,
+                           error_message='%d configurations of this benchmark timed out' % max_to)
+                self.csv_write(row)
+                self.say('[%s] skip %s (%d timeouts in %s)' % (row['progress'], c.trace_id,
+                                                               max_to, c.bench))
+                continue
             if c.group in timed_out:
                 row.update(status='skipped_after_timeout', timestring_end=now_str(), time_span_sec=0,
                            error_message='a smaller size of this combination timed out')
@@ -542,6 +567,7 @@ class Collector:
                 return False
             if st == 'timeout':
                 timed_out.add(c.group)
+                bench_timeouts[(c.tier, c.bench)] = bench_timeouts.get((c.tier, c.bench), 0) + 1
             if st == 'ok' or status.get(c.trace_id) != 'ok':
                 # A failed retrace never overwrites an existing ok trace.
                 db_fields = dict(fields, status=st, error_message=msg or None)
@@ -714,18 +740,23 @@ def main():
     ap.add_argument('--tiers', default='1,2')
     ap.add_argument('--benchmarks', default='', help='comma-separated subset (default: all)')
     ap.add_argument('--timeout', type=int, default=None,
-                    help='per trace (and per post-processing), seconds (default: 3600, demo 600)')
+                    help='per trace (and per post-processing), seconds (default: 600)')
     ap.add_argument('--min-free-gb', type=int, default=None,
                     help='stop when the trace root has less free space '
                          '(default: 200 for run on /scratch, 10 for demo in scripts/tmp)')
     ap.add_argument('--force', action='store_true', help='retrace configurations already ok/timed out')
+    ap.add_argument('--retry-timeouts', action='store_true',
+                    help='retrace only configurations that timed out (keep ok ones)')
+    ap.add_argument('--max-timeouts-per-bench', type=int, default=0,
+                    help='skip the rest of a benchmark after this many timeouts (0 = no limit; '
+                         'default: %(default)s)')
     ap.add_argument('--skip-compile', action='store_true')
     ap.add_argument('--dry-run', action='store_true', help='print the plan only')
     ap.add_argument('--arch', default='sm_90', help='setup: tracer build arch (H100 = sm_90)')
     a = ap.parse_args()
     a.repo = os.path.dirname(here)
     if a.timeout is None:
-        a.timeout = 600 if a.mode == 'demo' else 3600
+        a.timeout = 600
     if a.min_free_gb is None:
         a.min_free_gb = 10 if a.mode == 'demo' else 200
     a.guidance_db = os.path.abspath(a.guidance_db or os.path.join(a.repo, DEFAULT_GUIDANCE_DB))

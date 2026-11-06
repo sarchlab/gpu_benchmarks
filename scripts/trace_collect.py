@@ -195,6 +195,7 @@ class Collector:
         self.gb_log_path = os.path.join(logs, self.tag + '.gpubench.log')
         self.log_f = open(self.log_path, 'a')
         self.child = None
+        self.stopped = ''         # set when the disk guard stops a run
         self.done = 0
         self.total = 0
 
@@ -487,7 +488,9 @@ class Collector:
                 row.update(status='stopped_low_disk', timestring_end=now_str(), time_span_sec=0,
                            error_message='%.1f GB free < --min-free-gb %d' % (free_gb, self.a.min_free_gb))
                 self.csv_write(row)
-                self.say('STOP: only %.1f GB free on %s (< %d GB)' % (free_gb, self.root, self.a.min_free_gb))
+                self.stopped = 'only %.1f GB free on %s (< --min-free-gb %d)' % (
+                    free_gb, self.root, self.a.min_free_gb)
+                self.say('STOP: ' + self.stopped)
                 return True
             if c.group in timed_out:
                 row.update(status='skipped_after_timeout', timestring_end=now_str(), time_span_sec=0,
@@ -582,6 +585,9 @@ def demo(a):
         return 130
     if a.dry_run:
         return 0
+    if col.stopped:
+        col.say('demo aborted: %s' % col.stopped)
+        return 1
     # Replacement check: retrace the first pick; its trace_id and directory
     # must stay the same and index.db must still hold one row for it.
     if picks:
@@ -673,13 +679,17 @@ def main():
     ap.add_argument('--benchmarks', default='', help='comma-separated subset (default: all)')
     ap.add_argument('--demo-benchmarks', default=','.join(DEMO_BENCHMARKS))
     ap.add_argument('--timeout', type=int, default=3600, help='per trace (and per post-processing), seconds')
-    ap.add_argument('--min-free-gb', type=int, default=200, help='stop when the trace root has less free space')
+    ap.add_argument('--min-free-gb', type=int, default=None,
+                    help='stop when the trace root has less free space '
+                         '(default: 200 for run on /scratch, 10 for demo in scripts/tmp)')
     ap.add_argument('--force', action='store_true', help='retrace configurations already ok/timed out')
     ap.add_argument('--skip-compile', action='store_true')
     ap.add_argument('--dry-run', action='store_true', help='print the plan only')
     ap.add_argument('--arch', default='sm_90', help='setup: tracer build arch (H100 = sm_90)')
     a = ap.parse_args()
     a.repo = os.path.dirname(here)
+    if a.min_free_gb is None:
+        a.min_free_gb = 10 if a.mode == 'demo' else 200
     a.guidance_db = os.path.abspath(a.guidance_db or os.path.join(a.repo, DEFAULT_GUIDANCE_DB))
     a.benchmarks = set(x.strip() for x in a.benchmarks.split(',') if x.strip())
     a.demo_benchmarks = [x.strip() for x in a.demo_benchmarks.split(',') if x.strip()]

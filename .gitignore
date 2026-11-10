@@ -114,3 +114,8 @@ compile_errors.log
 scripts/logs/
 scripts/tmp/
 scripts/.build/
+
+ground_truth_h100/
+ground_truth_h100_all/
+gt_smoke/
+run_ground_truth*.py

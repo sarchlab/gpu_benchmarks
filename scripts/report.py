@@ -309,11 +309,6 @@ def simulation_tab(sims, sim_runs, version, index_ok, gt):
         ('Peak memory', '%.1f GB' % (max([s['peak_rss_mb'] or 0 for s in rows] or [0]) / 1024),
          'largest single simulation'),
     ]
-    run_rows = ''.join('<tr><td><code>%s</code></td><td>%s</td><td class="n">%s</td><td class="n">%s</td>'
-                       '<td>%s</td><td>%s</td><td>%s</td></tr>' % (
-                           e(r['stamp']), e(r['mode'] or ''), r['jobs'] or '', r['timeout_sec'] or '',
-                           e(r['started_at'] or ''), e(r['finished_at'] or ''), e(r['outcome'] or ''))
-                       for r in runs)
     note = ('MGPUSim NVIDIA, <code>%s</code> @ <code>%s</code>, device %s at %s MHz. Collected %s to %s. '
             'Traces are expanded from .tracez to .traceg with Accel-Sim traceDsm before each simulation; '
             'the timeout applies to the simulator only.' % (
@@ -324,11 +319,8 @@ def simulation_tab(sims, sim_runs, version, index_ok, gt):
         ('Tier', 1), ('Benchmark', 0), ('Simulated / traced', 1), ('Timeout', None), ('Skipped', None),
         ('Error', None), ('Instructions', 1), ('Simulator time', 1), ('Instr/s', 1), ('Peak memory', 1),
         ('Largest simulated', None), ('Its time', 1), ('Error message', None)], trs)
-    runs_t = ('<section><h2>Runs</h2><div class="tablewrap"><table class="plain"><thead><tr><th>Stamp</th>'
-              '<th>Mode</th><th>Jobs</th><th>Timeout (s)</th><th>Started</th><th>Finished</th>'
-              '<th>Outcome</th></tr></thead><tbody>%s</tbody></table></div></section>' % run_rows)
     return head + tiles_html(tiles) + '<p class="muted">%s</p>' % note + \
-        '<section><h2>Per benchmark</h2>%s%s</section>' % (tier_filter('s-t', len(benches)), table) + runs_t
+        '<section><h2>Per benchmark</h2>%s%s</section>' % (tier_filter('s-t', len(benches)), table)
 
 
 def report_data(gt, sims, version):
@@ -831,7 +823,7 @@ body.anchored #panel-report .suite, body.anchored #panel-report .bench {
 .legend2 i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 5px; border-radius: 2px; }
 </style>
 </head>
-<body>
+<body class="anchored">
 <div class="tabs"><nav aria-label="Report sections">
   <a href="#report" data-tab="report">Report</a>
   <a href="#trace" data-tab="trace">Trace</a>
@@ -844,8 +836,8 @@ body.anchored #panel-report .suite, body.anchored #panel-report .bench {
     <p class="muted">Generated {{generated}} from {{sources}}</p></div>
     <div class="modebox">
       <div class="modesw" role="group" aria-label="Simulation values">
-        <button type="button" id="mode-raw" data-mode="raw" aria-pressed="true">Raw</button>
-        <button type="button" id="mode-anc" data-mode="anc" aria-pressed="false">First-point anchored</button>
+        <button type="button" id="mode-raw" data-mode="raw" aria-pressed="false">Raw</button>
+        <button type="button" id="mode-anc" data-mode="anc" aria-pressed="true">First-point anchored</button>
       </div>
       <p class="mode-desc"><span class="mr">Simulated cycles as MGPUSim reports them.</span><span class="ma">Each
       trajectory's simulation is shifted by one constant so its first configuration matches hardware; MRE and
@@ -957,7 +949,7 @@ body.anchored #panel-report .suite, body.anchored #panel-report .bench {
     var v = x * 100, a = Math.abs(v);
     return (v >= 0 ? '+' : '−') + a.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '%';
   }
-  var MODE = 'raw';
+  var MODE = 'anc';
   function draw(i) {
     var b = B[i], sel = document.getElementById('combo-' + i);
     var c = b.combos[sel ? +sel.value : 0], P = c.p, anc = MODE === 'anc', M = c[MODE];
@@ -1064,7 +1056,6 @@ body.anchored #panel-report .suite, body.anchored #panel-report .bench {
     document.querySelectorAll('.modesw button').forEach(function (b) {
       b.setAttribute('aria-pressed', b.dataset.mode === MODE ? 'true' : 'false');
     });
-    try { localStorage.setItem('report-mode', MODE); } catch (err) {}
     B.forEach(function (b, i) { draw(i); });
   }
   document.querySelectorAll('.modesw button').forEach(function (b) {
@@ -1074,9 +1065,7 @@ body.anchored #panel-report .suite, body.anchored #panel-report .bench {
     var s = document.getElementById('combo-' + i);
     if (s) s.addEventListener('change', function () { draw(i); });
   });
-  var saved = 'raw';
-  try { saved = localStorage.getItem('report-mode') || 'raw'; } catch (err) {}
-  setMode(saved);
+  setMode('anc');
 })();
 </script>
 </body>

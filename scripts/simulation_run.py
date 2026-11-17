@@ -19,8 +19,13 @@ process writes the database, the CSV and the logs, so nothing interleaves;
 workers only run the subprocesses. Within one benchmark + non-scaling
 combination the sizes run one after another, smallest first; once one times
 out the larger sizes of that combination are skipped (as in trace_collect.py).
-Different combinations run in parallel, heaviest first. New work is held back
-while available memory or free disk is below --min-free-mem-gb / --min-free-gb.
+Different combinations run in parallel, heaviest first. Memory: a simulation
+needs roughly 20-40x the raw trace size S0, so a job starts only while the sum of
+the estimates (--mem-per-s0 x S0) of running jobs stays within --mem-budget-gb;
+a job larger than the budget runs alone. New work is also held back while
+available memory or free disk is below --min-free-mem-gb / --min-free-gb.
+--timeout limits the simulator; expanding the .tracez files (4 traceDsm at a
+time) has its own limit of the same length.
 
 Results: scripts/logs_simulation/simulation.db, table `sims`, one row per
 (trace_id, sim_version). sim_version is the mgpusim commit (+ "-dirty" with
@@ -74,12 +79,14 @@ DEFAULT_MGPUSIM = os.path.expanduser('~/workspace/mgpusim')
 MGPUSIM_BRANCH = 'nvidia_ready_for_merge'
 DEFAULT_GT_DB = os.path.join('ground_truth_h100_all', 'ground_truth_all.db')
 DEVICE = 'H100'
+DSM_PARALLEL = 4          # traceDsm processes per configuration
+BACKFILL_SEC = 600        # how long smaller jobs may overtake one waiting for memory
 
 CSV_COLS = [
     'progress', 'timestring_start', 'timestring_end', 'time_span_sec', 'tier', 'benchmark',
     'trace_id', 'scaling_param', 'scaling_value', 'non_scaling_params', 'status', 'n_kernels',
     'sim_cycles', 'sim_time_us', 'num_insts', 'traceg_bytes', 'convert_sec', 'sim_sec',
-    'peak_rss_mb', 'running', 'free_mem_gb', 'free_disk_gb', 'error_message',
+    'peak_rss_mb', 'mem_est_gb', 'running', 'free_mem_gb', 'free_disk_gb', 'error_message',
 ]
 
 SCHEMA = """
@@ -431,7 +438,6 @@ class Simulator:
     def simulate(self, job):
         """Returns (status, fields, message, raw_output). No shared state touched."""
         t0 = time.time()
-        deadline = t0 + self.a.timeout
         src = os.path.join(self.trace_root, job.data_path, 'traces')
         work = os.path.join(self.staging, job.trace_id)
         raw = []
@@ -449,24 +455,16 @@ class Simulator:
                 hdr = tracez_header(os.path.join(src, name))
                 m = re.search(r'^-kernel name = (.+)$', hdr, re.M)
                 launches.append(m.group(1).strip() if m else name)
-            # expand .tracez -> .traceg (traceDsm writes next to its input path)
-            for name in tz:
-                os.symlink(os.path.join(src, name), os.path.join(work, name))
-                out_path = os.path.join(work, 'traceDsm.out')
-                with open(out_path, 'w') as of:
-                    p = subprocess.Popen([self.dsm_bin, os.path.join(work, name)], cwd=work,
-                                         stdout=of, stderr=subprocess.STDOUT, preexec_fn=os.setpgrp)
-                    st, rc, _ = wait_child(p, deadline, self.stop_event)
-                with open(out_path, errors='replace') as of:
-                    o = of.read()
-                if st != 'done':
-                    return st, {'convert_sec': round(time.time() - t0, 1)}, \
-                        ('timeout after %ds (while expanding .tracez)' % self.a.timeout
-                         if st == 'timeout' else st), o[-2000:]
-                if rc != 0:
-                    return 'error', {'convert_sec': round(time.time() - t0, 1)}, \
-                        'traceDsm exit %d on %s: %s' % (rc, name, one_line(o[-300:])), o[-4000:]
-                os.remove(os.path.join(work, name))
+            # expand .tracez -> .traceg (traceDsm writes next to its input path),
+            # DSM_PARALLEL at a time, under its own time limit
+            st, rc, o, bad = self.expand(work, src, tz, t0 + self.a.timeout)
+            if st != 'done':
+                return st, {'convert_sec': round(time.time() - t0, 1)}, \
+                    ('timeout after %ds (while expanding .tracez)' % self.a.timeout
+                     if st == 'timeout' else st), o[-2000:]
+            if rc != 0:
+                return 'error', {'convert_sec': round(time.time() - t0, 1)}, \
+                    'traceDsm exit %d on %s: %s' % (rc, bad, one_line(o[-300:])), o[-4000:]
             traceg = sum(os.path.getsize(os.path.join(work, n[:-len('.tracez')] + '.traceg'))
                          for n in tz)
             with open(os.path.join(work, 'kernelslist.g'), 'w') as f:
@@ -481,7 +479,7 @@ class Simulator:
                 p = subprocess.Popen([self.sim_bin, '-trace-dir', work, '-device', DEVICE],
                                      cwd=work, stdout=of, stderr=subprocess.STDOUT,
                                      preexec_fn=os.setpgrp)
-                st, rc, rss = wait_child(p, deadline, self.stop_event)
+                st, rc, rss = wait_child(p, t1 + self.a.timeout, self.stop_event)
             sim_sec = round(time.time() - t1, 1)
             with open(out_path, errors='replace') as of:
                 out = of.read()
@@ -516,13 +514,68 @@ class Simulator:
         finally:
             shutil.rmtree(work, ignore_errors=True)
 
+    def expand(self, work, src, names, deadline):
+        """Run traceDsm on every .tracez, DSM_PARALLEL at once.
+
+        Returns (status, rc, output, failing name); status as in wait_child.
+        """
+        todo = list(names)
+        active = {}                                   # pid -> (proc, name, out path)
+        try:
+            while todo or active:
+                while todo and len(active) < DSM_PARALLEL:
+                    name = todo.pop(0)
+                    link = os.path.join(work, name)
+                    os.symlink(os.path.join(src, name), link)
+                    out_path = link + '.dsm.out'
+                    with open(out_path, 'w') as of:
+                        p = subprocess.Popen([self.dsm_bin, link], cwd=work, stdout=of,
+                                             stderr=subprocess.STDOUT, preexec_fn=os.setpgrp)
+                    active[p.pid] = (p, name, out_path)
+                for pid in list(active):
+                    got, st, _ = os.wait4(pid, os.WNOHANG)
+                    if got != pid:
+                        continue
+                    p, name, out_path = active.pop(pid)
+                    rc = os.WEXITSTATUS(st) if os.WIFEXITED(st) else -os.WTERMSIG(st)
+                    p.returncode = rc
+                    with open(out_path, errors='replace') as of:
+                        o = of.read()
+                    if rc != 0:
+                        return 'done', rc, o, name
+                    os.remove(os.path.join(work, name))
+                    os.remove(out_path)
+                if self.stop_event.is_set():
+                    return 'interrupted', -9, '', ''
+                if time.time() > deadline:
+                    return 'timeout', -9, '', ''
+                if active:
+                    time.sleep(0.2)
+            return 'done', 0, '', ''
+        finally:
+            for p, _, _ in active.values():     # on error / timeout / interrupt
+                try:
+                    os.killpg(p.pid, signal.SIGKILL)
+                except OSError:
+                    pass
+                try:
+                    os.wait4(p.pid, 0)
+                    p.returncode = -9
+                except OSError:
+                    pass
+
+    def mem_est_gb(self, job):
+        """Expected simulator peak memory: --mem-per-s0 x raw trace size."""
+        return max(0.5, self.a.mem_per_s0 * job.s0 / 1e9)
+
     # ── main loop ─────────────────────────────────────────────────────────
     def run(self, jobs, force=False):
         self.say('mgpusim %s @ %s, simulator %s, device %s' % (self.branch, self.version,
                                                               self.sim_bin, DEVICE))
-        self.say('trace root %s, db %s, jobs %d, timeout %ds, min free mem %d GB, min free disk %d GB'
-                 % (self.trace_root, self.db_path, self.a.jobs, self.a.timeout,
-                    self.a.min_free_mem_gb, self.a.min_free_gb))
+        self.say('trace root %s, db %s, jobs %d, timeout %ds (simulator only), memory budget %d GB'
+                 ' (estimate %g x S0), min free mem %d GB, min free disk %d GB'
+                 % (self.trace_root, self.db_path, self.a.jobs, self.a.timeout, self.a.mem_budget_gb,
+                    self.a.mem_per_s0, self.a.min_free_mem_gb, self.a.min_free_gb))
         self.say('csv: %s' % self.csv_path)
         status = self.done_status()
         # skipped_after_timeout rows are decided again on every run
@@ -550,7 +603,8 @@ class Simulator:
         order = sorted(chains, key=lambda g: -sum(j.s0 for j in chains[g]))
         pending = [chains[g] for g in order]          # list of lists, consumed in order
         results = queue.Queue()
-        running = {}                                   # thread -> (job, start str, start time)
+        running = {}                                   # trace_id -> (job, start str, start time, est GB)
+        waiting = {}                                   # trace_id -> time it first waited for memory
         busy_groups = set()
         total, done = len(todo), 0
         outcome = 'finished'
@@ -560,11 +614,8 @@ class Simulator:
         def worker(job):
             results.put((job, self.simulate(job)))
 
-        def next_job():
-            for chain in pending:
-                if chain and chain[0].group not in busy_groups:
-                    return chain
-            return None
+        def heads():
+            return [c for c in pending if c and c[0].group not in busy_groups]
 
         def write_row(job, st, fields, msg, started, t_start):
             row = {'progress': '%d/%d' % (done, total), 'timestring_start': started,
@@ -572,7 +623,8 @@ class Simulator:
                    'tier': job.tier, 'benchmark': job.bench, 'trace_id': job.trace_id,
                    'scaling_param': job.sp_name, 'scaling_value': job.sp_value,
                    'non_scaling_params': job.ns_json, 'status': st, 'n_kernels': job.n_kernels,
-                   'running': len(running), 'free_mem_gb': '%.0f' % min(mem_available_gb(), 1e6),
+                   'running': len(running), 'mem_est_gb': '%.1f' % self.mem_est_gb(job),
+                   'free_mem_gb': '%.0f' % min(mem_available_gb(), 1e6),
                    'free_disk_gb': '%.0f' % (shutil.disk_usage(self.trace_root).free / 1e9),
                    'error_message': one_line(msg)}
             for k in ('sim_cycles', 'sim_time_us', 'num_insts', 'traceg_bytes', 'convert_sec',
@@ -584,12 +636,12 @@ class Simulator:
             while True:
                 # dispatch while there is room and resources
                 while len(running) < self.a.jobs and not self.stop_event.is_set():
-                    chain = next_job()
-                    if chain is None:
+                    hs = heads()
+                    if not hs:
                         break
-                    job = chain[0]
-                    if job.group in timed_out:
-                        chain.pop(0)
+                    skip_chain = next((c for c in hs if c[0].group in timed_out), None)
+                    if skip_chain is not None:
+                        job = skip_chain.pop(0)
                         done += 1
                         if status.get(job.trace_id) in (None, 'error', 'skipped_after_timeout'):
                             # never replaces a real result (ok / timeout)
@@ -609,10 +661,28 @@ class Simulator:
                             self.say('STOP: ' + outcome)
                             self.stop_event.set()
                         break
-                    chain.pop(0)
+                    # memory budget: the first chain goes when its estimate fits (or
+                    # alone); while it waits, smaller jobs may backfill for up to
+                    # BACKFILL_SEC, then nothing new starts until it fits.
+                    free = self.a.mem_budget_gb - sum(v[3] for v in running.values())
+                    first = hs[0][0]
+                    if self.mem_est_gb(first) <= free or not running:
+                        chain = hs[0]
+                    else:
+                        if first.trace_id not in waiting:
+                            waiting[first.trace_id] = time.time()
+                            self.say('waiting for memory: %s needs ~%.1f GB, %.1f GB of the budget free'
+                                     % (first.trace_id, self.mem_est_gb(first), max(free, 0)))
+                        chain = None
+                        if time.time() - waiting[first.trace_id] < BACKFILL_SEC:
+                            chain = next((c for c in hs[1:] if self.mem_est_gb(c[0]) <= free), None)
+                        if chain is None:
+                            break
+                    job = chain.pop(0)
+                    waiting.pop(job.trace_id, None)
                     busy_groups.add(job.group)
                     t = threading.Thread(target=worker, args=(job,), daemon=True)
-                    running[job.trace_id] = (job, now_str(), time.time())
+                    running[job.trace_id] = (job, now_str(), time.time(), self.mem_est_gb(job))
                     t.start()
                 pending[:] = [c for c in pending if c]
                 if not running and (not pending or self.stop_event.is_set()):
@@ -621,7 +691,7 @@ class Simulator:
                     job, (st, fields, msg, raw) = results.get(timeout=5)
                 except queue.Empty:
                     continue
-                _, started, t_start = running.pop(job.trace_id)
+                _, started, t_start, _ = running.pop(job.trace_id)
                 busy_groups.discard(job.group)
                 if st == 'interrupted':
                     continue
@@ -770,9 +840,15 @@ def main():
     ap.add_argument('--mgpusim', default=DEFAULT_MGPUSIM, help='mgpusim checkout (default: %(default)s)')
     ap.add_argument('--gt-db', default=None, help='ground-truth DB for the demo kernel-name check '
                     '(default: <repo>/%s)' % DEFAULT_GT_DB)
-    ap.add_argument('--jobs', type=int, default=None, help='simulations at once (default: 16, demo 8)')
+    ap.add_argument('--jobs', type=int, default=None, help='simulations at once (default: 32, demo 8)')
+    ap.add_argument('--mem-budget-gb', type=int, default=180,
+                    help='sum of the memory estimates of running simulations (default: %(default)s)')
+    ap.add_argument('--mem-per-s0', type=float, default=40,
+                    help='memory estimate per byte of raw trace S0 (demo peak was 38x; '
+                         'default: %(default)s)')
     ap.add_argument('--timeout', type=int, default=None,
-                    help='per configuration, seconds (default: 3600, demo 600)')
+                    help='simulator time limit per configuration, seconds; expanding the '
+                         '.tracez files has its own limit of the same length (default: 3600, demo 600)')
     ap.add_argument('--min-free-mem-gb', type=int, default=32,
                     help='hold new work below this much available memory (default: %(default)s)')
     ap.add_argument('--min-free-gb', type=int, default=100,
@@ -792,7 +868,7 @@ def main():
     a.gt_db = os.path.abspath(a.gt_db or os.path.join(a.repo, DEFAULT_GT_DB))
     a.benchmarks = set(x.strip() for x in a.benchmarks.split(',') if x.strip())
     if a.jobs is None:
-        a.jobs = 8 if a.mode == 'demo' else 16
+        a.jobs = 8 if a.mode == 'demo' else 32
     if a.timeout is None:
         a.timeout = 600 if a.mode == 'demo' else 3600
     sim = Simulator(a, a.mode)

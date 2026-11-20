@@ -1,0 +1,84 @@
+{
+  "benchmark": "shared_mem_bandwidth",
+  "tier": 1,
+  "suite": "microbench",
+  "description": "Times dependent shared-memory read/update/write traffic over a 48 KiB array with unique per-thread ownership. Patterns use consecutive words or stride-32 words within logical 32-lane groups; effective bank behavior depends on the target. Emits raw times and layout descriptors.",
+  "scaling_param": {
+    "name": "inner_iters",
+    "description": "Number of inner-loop iterations per kernel launch; controls total shared memory traffic",
+    "type": "int",
+    "values": [
+      64,
+      128,
+      256,
+      512,
+      1024,
+      2048
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Threads per block; a positive multiple of 32 within the device limit",
+      "type": "int",
+      "default": 256,
+      "values": [
+        256
+      ]
+    },
+    {
+      "name": "num_blocks",
+      "description": "Number of blocks; the declared sweep uses one block. Multiplication by SM/CU count is an extrapolation, not a measured device-wide rate.",
+      "type": "int",
+      "default": 1,
+      "values": [
+        1
+      ]
+    },
+    {
+      "name": "access_pattern",
+      "description": "Logical 32-lane address layout: consecutive four-byte words or distinct words with stride 32; qualify effective bank behavior on the target",
+      "type": "enum",
+      "default": "no_conflict",
+      "values": [
+        "no_conflict"
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "When true, run the untimed vector-add warmer to raise clocks and disturb cache state; qualify its effect on the target. False disables it without promising a particular cache state.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "smem_bw_no_conflict",
+    "smem_bw_conflict"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 1,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "declared_scaling_values": 11,
+    "non_scaling_combination": {
+      "access_pattern": "no_conflict",
+      "block_size": 256,
+      "num_blocks": 1
+    },
+    "usable_points_in_combination": 6,
+    "combinations_considered": 8,
+    "sim_version": "84aa6995707e"
+  }
+}

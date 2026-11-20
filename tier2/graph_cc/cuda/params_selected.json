@@ -1,0 +1,83 @@
+{
+  "benchmark": "graph_cc",
+  "tier": 2,
+  "suite": "graph",
+  "description": "Connected Components via label propagation on a random undirected sparse graph in CSR format. Each vertex starts with its own ID as label and iteratively updates to the minimum label among itself and its neighbors until convergence.",
+  "scaling_param": {
+    "name": "num_vertices",
+    "description": "Number of vertices in the graph",
+    "type": "int",
+    "values": [
+      1000,
+      5000,
+      15000,
+      40000,
+      100000,
+      250000
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "avg_degree",
+      "description": "Average degree per vertex",
+      "type": "int",
+      "default": 4,
+      "values": [
+        4
+      ]
+    },
+    {
+      "name": "max_iterations",
+      "description": "Safety cap on label-propagation iterations; the solve early-exits at convergence (a few iterations), so this only bounds the worst case. Fixed at a value comfortably above convergence for all declared graph sizes \u2014 sweeping it would just produce identical runs (or, if set below convergence, a wrong result).",
+      "type": "int",
+      "default": 100,
+      "values": [
+        100
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        256
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "cc_propagate_kernel"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 3,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      3,
+      6,
+      9,
+      12,
+      15
+    ],
+    "declared_scaling_values": 23,
+    "non_scaling_combination": {
+      "avg_degree": 4,
+      "block_size": 256,
+      "max_iterations": 100
+    },
+    "usable_points_in_combination": 16,
+    "combinations_considered": 3,
+    "sim_version": "84aa6995707e"
+  }
+}

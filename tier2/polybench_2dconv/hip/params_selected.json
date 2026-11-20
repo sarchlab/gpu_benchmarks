@@ -1,0 +1,52 @@
+{
+  "benchmark": "polybench_2dconv",
+  "tier": 2,
+  "suite": "polybench",
+  "description": "PolyBench/GPU 2D convolution with the pinned signed 3x3 operator on an NxN matrix. One thread computes each interior output; setup leaves output borders zero. One kernel event time is emitted; source arithmetic is 9 multiplications plus 8 additions per interior output. Every measured output is verified by a full CPU reference after timing (fixed policy full_cpu_v1).",
+  "scaling_param": {
+    "name": "size",
+    "description": "Matrix dimension N (NxN input matrix)",
+    "type": "int",
+    "values": [
+      64,
+      256,
+      512,
+      768,
+      1280,
+      2048
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "convolution2D_kernel"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 2,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      2,
+      4,
+      6,
+      8,
+      10
+    ],
+    "declared_scaling_values": 22,
+    "non_scaling_combination": {},
+    "usable_points_in_combination": 11,
+    "combinations_considered": 1,
+    "sim_version": "84aa6995707e"
+  }
+}

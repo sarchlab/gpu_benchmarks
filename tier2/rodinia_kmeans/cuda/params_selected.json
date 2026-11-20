@@ -1,0 +1,19 @@
+{
+  "benchmark": "rodinia_kmeans",
+  "tier": 2,
+  "suite": "rodinia",
+  "selection": {
+    "status": "excluded",
+    "reason": "no non-scaling combination has 6 evenly spaced usable configurations (at most 5 usable in one combination; traces: ok 5, skipped_after_timeout 13, timeout 1)",
+    "sim_version": "84aa6995707e"
+  },
+  "scaling_param": {
+    "name": "points",
+    "values": []
+  },
+  "non_scaling_params": [],
+  "kernels": [
+    "invert_mapping",
+    "kmeansPoint"
+  ]
+}

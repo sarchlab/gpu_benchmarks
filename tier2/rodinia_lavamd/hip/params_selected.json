@@ -1,0 +1,18 @@
+{
+  "benchmark": "rodinia_lavamd",
+  "tier": 2,
+  "suite": "rodinia",
+  "selection": {
+    "status": "excluded",
+    "reason": "no non-scaling combination has 6 evenly spaced usable configurations (at most 1 usable in one combination; traces: ok 1, skipped_after_timeout 15, timeout 1)",
+    "sim_version": "84aa6995707e"
+  },
+  "scaling_param": {
+    "name": "boxes1d",
+    "values": []
+  },
+  "non_scaling_params": [],
+  "kernels": [
+    "kernel_gpu_cuda"
+  ]
+}

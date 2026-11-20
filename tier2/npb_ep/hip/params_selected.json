@@ -1,0 +1,18 @@
+{
+  "benchmark": "npb_ep",
+  "tier": 2,
+  "suite": "npb",
+  "selection": {
+    "status": "excluded",
+    "reason": "no usable configuration (traces: skipped_after_timeout 12, timeout 3)",
+    "sim_version": "84aa6995707e"
+  },
+  "scaling_param": {
+    "name": "m",
+    "values": []
+  },
+  "non_scaling_params": [],
+  "kernels": [
+    "gpu_kernel"
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "benchmark": "polybench_jacobi2d",
+  "tier": 2,
+  "suite": "polybench",
+  "description": "PolyBench/GPU Jacobi-2D: one FP32 five-point stencil and one interior copy-back per timestep, fixed initialized boundaries, full measured A/B verification.",
+  "scaling_param": {
+    "name": "n",
+    "description": "Grid dimension (NxN grid)",
+    "type": "int",
+    "values": [
+      64,
+      128,
+      192,
+      256,
+      384,
+      512
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "tsteps",
+      "description": "Number of complete stencil-plus-copy timesteps per execution (suite-selected workload multiplier).",
+      "type": "int",
+      "default": 10,
+      "values": [
+        10
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Run one entry vector-add warmer after setup and before the complete algorithm; intended cache/clock preparation, not a residency or clock guarantee.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "jacobi2d_kernel",
+    "jacobi2d_copy_kernel"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 1,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "declared_scaling_values": 20,
+    "non_scaling_combination": {
+      "tsteps": 10
+    },
+    "usable_points_in_combination": 6,
+    "combinations_considered": 3,
+    "sim_version": "84aa6995707e"
+  }
+}

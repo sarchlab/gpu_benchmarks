@@ -1,0 +1,83 @@
+{
+  "benchmark": "polybench_syr2k",
+  "tier": 2,
+  "suite": "polybench",
+  "description": "Symmetric rank-2k update: C = alpha*A*B^T + alpha*B*A^T + beta*C. A,B are NxM, C is NxN. Emits per-iteration kernel times; GFLOPS is derived downstream. Checks every measured output against an independent double CPU reference after timing (verification=full_cpu_v1).",
+  "scaling_param": {
+    "name": "matrix_size",
+    "description": "Square output matrix dimension N (C is NxN, A and B are NxM)",
+    "type": "int",
+    "values": [
+      64,
+      96,
+      128,
+      192,
+      256,
+      320
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "inner_size",
+      "description": "Inner dimension M of input matrices A[NxM] and B[NxM]",
+      "type": "int",
+      "default": 256,
+      "values": [
+        256
+      ]
+    },
+    {
+      "name": "alpha",
+      "description": "Scaling factor for A*B^T + B*A^T terms",
+      "type": "float",
+      "default": 1.5,
+      "values": [
+        1.5
+      ]
+    },
+    {
+      "name": "beta",
+      "description": "Scaling factor for existing C values",
+      "type": "float",
+      "default": 1.2,
+      "values": [
+        1.2
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "syr2k_kernel"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 1,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "declared_scaling_values": 25,
+    "non_scaling_combination": {
+      "alpha": 1.5,
+      "beta": 1.2,
+      "inner_size": 256
+    },
+    "usable_points_in_combination": 6,
+    "combinations_considered": 4,
+    "sim_version": "84aa6995707e"
+  }
+}

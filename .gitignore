@@ -12,12 +12,14 @@ tier1/*/cuda/*
 !tier1/*/hip/*.hip
 !tier1/*/hip/*.h
 !tier1/*/hip/params.json
+!tier1/*/hip/params_selected.json
 !tier1/*/hip/.gitkeep
 !tier1/*/cuda/Makefile
 !tier1/*/cuda/README.md
 !tier1/*/cuda/*.cu
 !tier1/*/cuda/*.h
 !tier1/*/cuda/params.json
+!tier1/*/cuda/params_selected.json
 tier2/*/*
 !tier2/*/hip/
 !tier2/*/cuda/
@@ -28,6 +30,7 @@ tier2/*/cuda/*
 !tier2/*/hip/*.hip
 !tier2/*/hip/*.h
 !tier2/*/hip/params.json
+!tier2/*/hip/params_selected.json
 !tier2/*/hip/UPSTREAM_LICENSE
 !tier2/*/hip/h100_profile.json
 !tier2/*/hip/.gitignore
@@ -37,6 +40,7 @@ tier2/*/cuda/*
 !tier2/*/cuda/*.cu
 !tier2/*/cuda/*.h
 !tier2/*/cuda/params.json
+!tier2/*/cuda/params_selected.json
 !tier2/*/cuda/UPSTREAM_LICENSE
 !tier2/npb_is/cuda/test_npb_is.py
 tier3/*/*

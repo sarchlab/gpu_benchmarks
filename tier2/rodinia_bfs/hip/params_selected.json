@@ -1,0 +1,74 @@
+{
+  "benchmark": "rodinia_bfs",
+  "tier": 2,
+  "suite": "rodinia",
+  "description": "Breadth-First Search on a random CSR graph. Two kernels per BFS level: frontier expansion and node update. Measures throughput in edges/s.",
+  "scaling_param": {
+    "name": "num_nodes",
+    "description": "Number of graph nodes",
+    "type": "int",
+    "values": [
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "edges_per_node",
+      "description": "Average out-degree (edges per node)",
+      "type": "int",
+      "default": 20,
+      "values": [
+        20
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "GPU thread-block size",
+      "type": "int",
+      "default": 256,
+      "values": [
+        256
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "bfs_kernel",
+    "bfs_update"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 2,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      2,
+      4,
+      6,
+      8,
+      10
+    ],
+    "declared_scaling_values": 27,
+    "non_scaling_combination": {
+      "block_size": 256,
+      "edges_per_node": 20
+    },
+    "usable_points_in_combination": 15,
+    "combinations_considered": 3,
+    "sim_version": "84aa6995707e"
+  }
+}

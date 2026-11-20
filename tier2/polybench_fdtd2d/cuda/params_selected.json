@@ -1,0 +1,20 @@
+{
+  "benchmark": "polybench_fdtd2d",
+  "tier": 2,
+  "suite": "polybench",
+  "selection": {
+    "status": "excluded",
+    "reason": "no non-scaling combination has 6 evenly spaced usable configurations (at most 5 usable in one combination; traces: ok 10, skipped_after_timeout 47, timeout 3)",
+    "sim_version": "84aa6995707e"
+  },
+  "scaling_param": {
+    "name": "size",
+    "values": []
+  },
+  "non_scaling_params": [],
+  "kernels": [
+    "fdtd_update_ex",
+    "fdtd_update_ey",
+    "fdtd_update_hz"
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "benchmark": "heteromark_aes",
+  "tier": 2,
+  "suite": "heteromark",
+  "description": "AES-256 ECB encryption on GPU. Each thread encrypts one 16-byte block through 14 rounds. Throughput (GB/s) is derived downstream from the emitted per-iteration times.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Number of 16-byte blocks to encrypt",
+    "type": "int",
+    "values": [
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        256
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "aes256_encrypt_kernel"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 2,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      2,
+      4,
+      6,
+      8,
+      10
+    ],
+    "declared_scaling_values": 27,
+    "non_scaling_combination": {
+      "block_size": 256
+    },
+    "usable_points_in_combination": 11,
+    "combinations_considered": 1,
+    "sim_version": "84aa6995707e"
+  }
+}

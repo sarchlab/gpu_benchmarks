@@ -2,7 +2,11 @@
 """Simulate the collected Accel-Sim 2.0 traces with MGPUSim NVIDIA (H100).
 
 Reads the trace index written by trace_collect.py (index.db, status='ok' rows),
-and for every traced configuration:
+keeps the configurations listed in each benchmark's params_selected.json (one
+non-scaling combination x 6 scaling values, written by the `select` mode below;
+benchmarks whose file says "excluded", or that have
+none, are skipped; --all-params keeps every traced configuration instead), and
+for every one of them:
   1. symlinks its .tracez files into a scratch directory and expands each one
      to the .traceg text the simulator reads, with Accel-Sim's traceDsm (same
      pinned Accel-Sim checkout as the tracer);
@@ -48,8 +52,27 @@ Scratch space: <trace root>/sim_staging_<mode>/ (wiped at start).
 Usage (from the repo root on the server):
   python3 scripts/simulation_run.py setup   # build traceDsm and the simulator
   python3 scripts/simulation_run.py demo    # smallest trace of every benchmark
-  python3 scripts/simulation_run.py run     # everything (in tmux)
+  python3 scripts/simulation_run.py run     # the selected configurations (in tmux)
+  python3 scripts/simulation_run.py run --all-params   # every traced configuration
+  python3 scripts/simulation_run.py run --reuse-db OLD.db
+      # first copy matching results (same trace_id and sim_version, ok/timeout)
+      # from an earlier simulation.db or <stamp>.db instead of simulating them
   python3 scripts/simulation_run.py stats   # summary of simulation.db
+  python3 scripts/simulation_run.py select [--select-from <stamp>.db] [--dry-run]
+      # (re)write params_selected.json next to every tier 1/2 params.json
+
+select: a configuration is usable when it has hardware timing (--gt-db), an ok
+trace (index.db) and an ok simulation (--select-from, default the newest
+<stamp>.db). Every non-scaling combination is a trajectory over the params.json
+scaling values in declared order. It qualifies with stride k and start s when
+the 6 values at s, s+k, ..., s+5k are all usable (evenly spaced, no gaps).
+The widest stride wins (most of the range), then the smallest start (the first
+point is the anchor), then the combination closest to the params.json defaults,
+then the earliest in params.json order. A benchmark without such a trajectory
+(too few points, no kernels, timeouts, never traced) gets an "excluded" file:
+empty scaling values, no non-scaling parameters, and the reason. cuda/ and hip/
+get the same selection; non-scaling parameters that were not swept keep their
+default.
 run and demo rebuild the simulator first (go build is incremental).
 
 Python 3.6+, stdlib only. Needs Go, g++, libzstd-dev, c++filt, and the
@@ -58,6 +81,7 @@ Accel-Sim checkout that `trace_collect.py setup` made (scripts/.build/accel-sim)
 import argparse
 import csv
 import datetime as dt
+import glob
 import json
 import os
 import queue
@@ -373,8 +397,74 @@ class Simulator:
             if key not in ranks:
                 ranks[key] = tc.scaling_ranks(self.repo, r['tier'], r['benchmark'])
             jobs.append(Job(r, ranks[key].get(r['scaling_value'], 1 << 30)))
+        if not self.a.all_params:
+            jobs = self.select(jobs)
         jobs.sort(key=lambda j: (j.tier, j.bench, j.ns_json, j.rank, j.sp_value))
         return jobs
+
+    def select(self, jobs):
+        """Keep the jobs listed in params_selected.json (written by the select mode)."""
+        sel, notes = {}, []
+        for key in sorted(set((j.tier, j.bench) for j in jobs)):
+            path = os.path.join(self.repo, 'tier%d' % key[0], key[1], tc.PLATFORM, 'params_selected.json')
+            try:
+                with open(path) as f:
+                    doc = json.load(f)
+            except (OSError, ValueError):
+                sel[key] = None
+                notes.append('%s (no params_selected.json)' % key[1])
+                continue
+            if (doc.get('selection') or {}).get('status') != 'selected':
+                sel[key] = None
+                notes.append('%s (excluded)' % key[1])
+                continue
+            combo = {p['name']: tc.canon(p['values'][0]) for p in doc.get('non_scaling_params', [])}
+            sel[key] = (combo, set(tc.fmt_value(v) for v in doc['scaling_param']['values']))
+        kept = []
+        for j in jobs:
+            s = sel.get((j.tier, j.bench))
+            if s is None:
+                continue
+            ns = {k: tc.canon(v) for k, v in json.loads(j.ns_json).items()}
+            if all(s[0].get(k) == v for k, v in ns.items()) and tc.fmt_value(j.sp_value) in s[1]:
+                kept.append(j)
+        self.say('params_selected.json: %d of %d traced configurations selected, %d benchmarks kept'
+                 % (len(kept), len(jobs), sum(1 for v in sel.values() if v)))
+        if notes:
+            self.say('  skipped: ' + ', '.join(notes))
+        return kept
+
+    def reuse(self, jobs):
+        """Copy ok/timeout rows of this sim_version for these jobs from --reuse-db."""
+        src = os.path.abspath(os.path.expanduser(self.a.reuse_db))
+        if not os.path.isfile(src):
+            raise SystemExit('--reuse-db: no such file %s' % src)
+        if os.path.realpath(src) == os.path.realpath(self.db_path):
+            raise SystemExit('--reuse-db points at the working simulation.db itself')
+        con = sqlite3.connect('file:%s?mode=ro' % src, uri=True, timeout=60)
+        con.row_factory = sqlite3.Row
+        want = set(j.trace_id for j in jobs)
+        rows = [dict(r) for r in con.execute("SELECT * FROM sims WHERE status IN ('ok', 'timeout')")
+                if r['trace_id'] in want]
+        con.close()
+        same = [r for r in rows if r['sim_version'] == self.version]
+        other = sorted(set(r['sim_version'] for r in rows if r['sim_version'] != self.version))
+        status = self.done_status()
+        new = [r for r in same if status.get(r['trace_id']) != 'ok']
+        self.say('--reuse-db %s: %d of %d configurations found for sim_version %s, %d of them not '
+                 'yet ok here%s' % (src, len(same), len(want), self.version, len(new),
+                                    ('; ignored other sim_versions: ' + ', '.join(other)) if other else ''))
+        if not new or self.a.dry_run:
+            return
+        cols = [c[1] for c in self.db().execute('PRAGMA table_info(sims)')]
+        con = self.db()
+        for r in new:
+            keys = [c for c in cols if c in r]
+            con.execute('INSERT OR REPLACE INTO sims (%s) VALUES (%s)'
+                        % (','.join(keys), ','.join('?' * len(keys))), [r[c] for c in keys])
+        con.commit()
+        con.close()
+        self.say('--reuse-db: copied %d rows into %s' % (len(new), self.db_path))
 
     def done_status(self):
         if not os.path.isfile(self.db_path):
@@ -413,8 +503,8 @@ class Simulator:
         con.commit()
         con.close()
 
-    def snapshot(self):
-        """Export this sim_version's rows (and the runs that made them)."""
+    def snapshot(self, jobs=None):
+        """Export this sim_version's rows for `jobs` (all if None) and the runs that made them."""
         if os.path.exists(self.snapshot_path):
             os.remove(self.snapshot_path)
         con = self.db()
@@ -424,8 +514,14 @@ class Simulator:
                                    'CREATE INDEX IF NOT EXISTS snap.sims_version ON sims').split(';'):
             if stmt.strip():
                 con.execute(stmt)
-        con.execute('INSERT INTO snap.sims SELECT * FROM main.sims WHERE sim_version=?',
-                    (self.version,))
+        if jobs is None:
+            con.execute('INSERT INTO snap.sims SELECT * FROM main.sims WHERE sim_version=?',
+                        (self.version,))
+        else:
+            con.execute('CREATE TEMP TABLE want (trace_id TEXT PRIMARY KEY)')
+            con.executemany('INSERT OR IGNORE INTO want VALUES (?)', [(j.trace_id,) for j in jobs])
+            con.execute('INSERT INTO snap.sims SELECT * FROM main.sims WHERE sim_version=?'
+                        ' AND trace_id IN (SELECT trace_id FROM want)', (self.version,))
         con.execute('INSERT INTO snap.runs SELECT * FROM main.runs WHERE sim_version=?',
                     (self.version,))
         con.commit()
@@ -577,6 +673,8 @@ class Simulator:
                  % (self.trace_root, self.db_path, self.a.jobs, self.a.timeout, self.a.mem_budget_gb,
                     self.a.mem_per_s0, self.a.min_free_mem_gb, self.a.min_free_gb))
         self.say('csv: %s' % self.csv_path)
+        if self.a.reuse_db:
+            self.reuse(jobs)
         status = self.done_status()
         # skipped_after_timeout rows are decided again on every run
         skip = ('ok',) if self.a.retry_timeouts else ('ok', 'timeout')
@@ -750,7 +848,7 @@ class Simulator:
         return outcome == 'finished'
 
     # ── summary ───────────────────────────────────────────────────────────
-    def stats(self, version=None):
+    def stats(self, version=None, jobs=None):
         if not os.path.isfile(self.db_path):
             self.say('no %s yet' % self.db_path)
             return
@@ -761,10 +859,15 @@ class Simulator:
                 self.say('simulation.db is empty')
                 return
             version = r[0]
+        only = ''
+        if jobs is not None:  # just this run's configurations (e.g. the selected ones)
+            con.execute('CREATE TEMP TABLE want (trace_id TEXT PRIMARY KEY)')
+            con.executemany('INSERT OR IGNORE INTO want VALUES (?)', [(j.trace_id,) for j in jobs])
+            only = ' AND trace_id IN (SELECT trace_id FROM want)'
         rows = con.execute(
             "SELECT benchmark, MIN(tier), SUM(status='ok'), SUM(status='timeout'), SUM(status='error'),"
             " SUM(status='skipped_after_timeout'), SUM(CASE WHEN status='ok' THEN num_insts END),"
-            " SUM(sim_sec), MAX(peak_rss_mb) FROM sims WHERE sim_version=?"
+            " SUM(sim_sec), MAX(peak_rss_mb) FROM sims WHERE sim_version=?" + only +
             " GROUP BY benchmark ORDER BY MIN(tier), benchmark", (version,)).fetchall()
         con.close()
         head = ('benchmark', '#ok', '#timeout', '#error', '#skipped', 'insts(ok)', 'sim_time',
@@ -820,6 +923,179 @@ def gt_kernel_check(sim, gt_db, version):
     g.close()
 
 
+# ── select: write params_selected.json ───────────────────────────────────
+SELECT_POINTS = 6
+SELECT_TIERS = (1, 2)
+SELECT_FILE = 'params_selected.json'
+
+
+def ns_canon(d):
+    return json.dumps({k: tc.canon(v) for k, v in d.items()}, sort_keys=True, separators=(',', ':'))
+
+
+def select_usable(gt_db, index_path, sim_db):
+    """{(tier, bench): {ns_json: set(scaling value text)}}, trace status counts, sim_version."""
+    import report  # noqa: E402  (ground-truth loader shared with the report)
+    for path in (gt_db, index_path, sim_db):
+        if not os.path.isfile(path):
+            raise SystemExit('select: database not found: %s' % path)
+    gt = report.load_gt(gt_db)[0]
+    con = sqlite3.connect('file:%s?mode=ro' % sim_db, uri=True)
+    counts = {}
+    for (v,) in con.execute("SELECT sim_version FROM sims WHERE status='ok'"):
+        counts[v] = counts.get(v, 0) + 1
+    if not counts:
+        raise SystemExit('select: no ok simulations in %s' % sim_db)
+    version = max(counts, key=counts.get)
+    sim_ok = set(r[0] for r in con.execute(
+        "SELECT trace_id FROM sims WHERE status='ok' AND sim_version=?", (version,)))
+    con.close()
+    usable, statuses = {}, {}
+    con = sqlite3.connect('file:%s?mode=ro' % index_path, uri=True)
+    con.row_factory = sqlite3.Row
+    for r in con.execute('SELECT trace_id, tier, benchmark, scaling_value, non_scaling_params_json,'
+                         ' status FROM traces'):
+        key = (r['tier'], r['benchmark'])
+        st = statuses.setdefault(key, {})
+        st[r['status']] = st.get(r['status'], 0) + 1
+        pts = usable.setdefault(key, {}).setdefault(ns_canon(json.loads(r['non_scaling_params_json'])),
+                                                    set())
+        g = gt.get(r['trace_id'])
+        if r['status'] == 'ok' and r['trace_id'] in sim_ok and g and g['median_ms']:
+            pts.add(tc.fmt_value(r['scaling_value']))
+    con.close()
+    return usable, statuses, version
+
+
+def select_window(avail):
+    """(stride, start) of the widest evenly spaced window of usable points, or None."""
+    n = len(avail)
+    for k in range((n - 1) // (SELECT_POINTS - 1), 0, -1):
+        for s in range(n - (SELECT_POINTS - 1) * k):
+            if all(avail[s + i * k] for i in range(SELECT_POINTS)):
+                return k, s
+    return None
+
+
+def select_best(params, trajectories):
+    """Best (rank, ns_json, (stride, start), n_usable) over the trajectories, or None."""
+    values = [tc.fmt_value(v) for v in params['scaling_param']['values']]
+    best = None
+    for ns, pts in trajectories.items():
+        win = select_window([v in pts for v in values])
+        if not win:
+            continue
+        combo = json.loads(ns)
+        off_default, order = 0, []
+        for p in params.get('non_scaling_params', []):
+            if p['name'] not in combo:
+                continue
+            v = combo[p['name']]
+            if 'default' in p and tc.canon(p['default']) != v:
+                off_default += 1
+            vals = [tc.canon(x) for x in p.get('values', [])]
+            order.append(vals.index(v) if v in vals else len(vals))
+        rank = (-win[0], win[1], off_default, order)
+        if best is None or rank < best[0]:
+            best = (rank, ns, win, len(pts))
+    return best
+
+
+def select_doc(params, best, n_traj, version, reason):
+    """params_selected.json content: the reduced sweep, or the excluded form."""
+    if best is None:
+        return {
+            'benchmark': params.get('benchmark'), 'tier': params.get('tier'),
+            'suite': params.get('suite'),
+            'selection': {'status': 'excluded', 'reason': reason, 'sim_version': version},
+            'scaling_param': {'name': params['scaling_param']['name'], 'values': []},
+            'non_scaling_params': [],
+            'kernels': params.get('kernels', []),
+        }
+    _, ns, (k, s), n_usable = best
+    doc = json.loads(json.dumps(params))
+    combo = json.loads(ns)
+    idx = [s + i * k for i in range(SELECT_POINTS)]
+    raw = params['scaling_param']['values']
+    doc['scaling_param']['values'] = [raw[i] for i in idx]
+    for p in doc.get('non_scaling_params', []):
+        if p['name'] in combo:
+            v = next((x for x in p.get('values', []) if tc.canon(x) == combo[p['name']]),
+                     combo[p['name']])
+        else:  # not swept by the profile/trace runs: keep its default
+            v = p.get('default', (p.get('values') or [None])[0])
+        p['values'] = [v]
+        p['default'] = v
+    doc['selection'] = {
+        'status': 'selected', 'points': SELECT_POINTS, 'stride': k, 'start_index': s,
+        'scaling_indices': idx, 'declared_scaling_values': len(raw),
+        'non_scaling_combination': combo, 'usable_points_in_combination': n_usable,
+        'combinations_considered': n_traj, 'sim_version': version,
+    }
+    return doc
+
+
+def select_reason(trajectories, statuses):
+    if not statuses:
+        return 'never traced'
+    most = max((len(p) for p in trajectories.values()), default=0)
+    st = ', '.join('%s %d' % kv for kv in sorted(statuses.items()))
+    if most == 0:
+        return 'no usable configuration (traces: %s)' % st
+    return ('no non-scaling combination has %d evenly spaced usable configurations '
+            '(at most %d usable in one combination; traces: %s)' % (SELECT_POINTS, most, st))
+
+
+def select_params(a):
+    """The select mode: write params_selected.json for every tier 1/2 benchmark."""
+    sim_db = a.select_from
+    if sim_db is None:
+        cands = sorted(p for p in glob.glob(os.path.join(HERE, 'logs_simulation', '2*.db'))
+                       if not p.endswith('_demo.db'))
+        if not cands:
+            raise SystemExit('select: no snapshot under scripts/logs_simulation; pass --select-from')
+        sim_db = cands[-1]
+    index_path = os.path.join(os.path.abspath(a.trace_root), 'index.db')
+    usable, statuses, version = select_usable(a.gt_db, index_path, os.path.abspath(sim_db))
+    print('select: gt %s\n        traces %s\n        sims %s (sim_version %s)'
+          % (a.gt_db, index_path, sim_db, version))
+    kept = excluded = written = 0
+    for tier in SELECT_TIERS:
+        for bdir in sorted(glob.glob(os.path.join(a.repo, 'tier%d' % tier, '*', ''))):
+            bench = os.path.basename(os.path.dirname(bdir))
+            files = [os.path.join(bdir, pf, 'params.json') for pf in ('cuda', 'hip')]
+            files = [f for f in files if os.path.isfile(f)]
+            if not files:
+                continue
+            with open(files[0]) as f:
+                params = json.load(f)
+            values = [tc.fmt_value(v) for v in params['scaling_param']['values']]
+            trajs = usable.get((tier, bench), {})
+            best = select_best(params, trajs)
+            reason = None
+            if best:
+                kept += 1
+                k, s = best[2]
+                print('  keep    tier%d %-28s stride %d  %s  %s' % (
+                    tier, bench, k, best[1], ' '.join(values[s + i * k] for i in range(SELECT_POINTS))))
+            else:
+                excluded += 1
+                reason = select_reason(trajs, statuses.get((tier, bench)))
+                print('  exclude tier%d %-28s %s' % (tier, bench, reason))
+            for pf in files:
+                with open(pf) as f:
+                    p = json.load(f)
+                if best and [tc.fmt_value(v) for v in p['scaling_param']['values']] != values:
+                    raise SystemExit('select: %s has other scaling values than %s' % (pf, files[0]))
+                if not a.dry_run:
+                    with open(os.path.join(os.path.dirname(pf), SELECT_FILE), 'w') as f:
+                        json.dump(select_doc(p, best, len(trajs), version, reason), f, indent=2)
+                        f.write('\n')
+                    written += 1
+    print('select: %d benchmarks kept, %d excluded; %s' % (
+        kept, excluded, 'dry run, nothing written' if a.dry_run else '%d files written' % written))
+
+
 def demo_pick(jobs):
     """Smallest trace (S0) of every benchmark."""
     best = {}
@@ -834,7 +1110,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter,
                                  epilog=__doc__.split('\n', 2)[2])
-    ap.add_argument('mode', choices=['setup', 'demo', 'run', 'stats'])
+    ap.add_argument('mode', choices=['setup', 'demo', 'run', 'stats', 'select'])
     ap.add_argument('--trace-root', default=tc.DEFAULT_TRACE_ROOT,
                     help='holds index.db and data/ (default: %(default)s)')
     ap.add_argument('--mgpusim', default=DEFAULT_MGPUSIM, help='mgpusim checkout (default: %(default)s)')
@@ -861,7 +1137,15 @@ def main():
     ap.add_argument('--skip-build', action='store_true', help='use the existing simulator binary')
     ap.add_argument('--any-branch', action='store_true',
                     help='allow an mgpusim branch other than %s' % MGPUSIM_BRANCH)
-    ap.add_argument('--dry-run', action='store_true', help='print the plan only')
+    ap.add_argument('--select-from', default=None, metavar='PATH',
+                    help='select mode: simulation db whose ok results count as usable '
+                         '(default: newest scripts/logs_simulation/<stamp>.db)')
+    ap.add_argument('--all-params', action='store_true',
+                    help='simulate every traced configuration, not only those in params_selected.json')
+    ap.add_argument('--reuse-db', default=None, metavar='PATH',
+                    help='copy results of the same sim_version (ok/timeout) for the planned '
+                         'configurations from an earlier simulation db instead of simulating them')
+    ap.add_argument('--dry-run', action='store_true', help='print the plan only (select: write nothing)')
     a = ap.parse_args()
     a.repo = os.path.dirname(HERE)
     a.mgpusim = os.path.abspath(os.path.expanduser(a.mgpusim))
@@ -871,6 +1155,9 @@ def main():
         a.jobs = 8 if a.mode == 'demo' else 32
     if a.timeout is None:
         a.timeout = 600 if a.mode == 'demo' else 3600
+    if a.mode == 'select':
+        select_params(a)
+        return 0
     sim = Simulator(a, a.mode)
     if a.mode == 'stats':
         sim.stats()
@@ -888,7 +1175,7 @@ def main():
     finished = sim.run(jobs, force=a.force)
     if a.dry_run:
         return 0
-    sim.stats(sim.version)
+    sim.stats(sim.version, jobs)
     if a.mode == 'demo':
         gt_kernel_check(sim, a.gt_db, sim.version)
         con = sqlite3.connect(sim.db_path)
@@ -898,7 +1185,7 @@ def main():
         if r and r[0]:
             sim.say('demo: peak simulator memory %.0f MB, %.0f instructions/s per simulation'
                     % (r[0], r[1] or 0))
-    sim.snapshot()
+    sim.snapshot(jobs)
     sim.say('log: %s' % sim.log_path)
     return 0 if finished else 130
 

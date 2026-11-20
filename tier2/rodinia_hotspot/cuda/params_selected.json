@@ -1,0 +1,18 @@
+{
+  "benchmark": "rodinia_hotspot",
+  "tier": 2,
+  "suite": "rodinia",
+  "selection": {
+    "status": "excluded",
+    "reason": "no usable configuration (traces: skipped_after_timeout 57, timeout 3)",
+    "sim_version": "84aa6995707e"
+  },
+  "scaling_param": {
+    "name": "grid_size",
+    "values": []
+  },
+  "non_scaling_params": [],
+  "kernels": [
+    "calculate_temp"
+  ]
+}

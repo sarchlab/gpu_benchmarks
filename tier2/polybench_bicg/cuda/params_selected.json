@@ -1,0 +1,74 @@
+{
+  "benchmark": "polybench_bicg",
+  "tier": 2,
+  "suite": "polybench",
+  "description": "BiCG sub-kernel: computes s = A^T * r and q = A * p. Two matrix-vector products; per-pass kernel times are emitted and bandwidth is derived downstream.",
+  "scaling_param": {
+    "name": "m",
+    "description": "Number of rows of matrix A (also sets N if square)",
+    "type": "int",
+    "values": [
+      64,
+      768,
+      2560,
+      6144,
+      12288,
+      32768
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "n",
+      "description": "Number of columns of matrix A",
+      "type": "int",
+      "default": 1024,
+      "values": [
+        1024
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        256
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "bicg_kernel1",
+    "bicg_kernel2"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 4,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      4,
+      8,
+      12,
+      16,
+      20
+    ],
+    "declared_scaling_values": 21,
+    "non_scaling_combination": {
+      "block_size": 256,
+      "n": 1024
+    },
+    "usable_points_in_combination": 21,
+    "combinations_considered": 4,
+    "sim_version": "84aa6995707e"
+  }
+}

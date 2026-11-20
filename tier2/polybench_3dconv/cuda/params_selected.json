@@ -1,0 +1,63 @@
+{
+  "benchmark": "polybench_3dconv",
+  "tier": 2,
+  "suite": "polybench",
+  "description": "Fixed PolyBench/GPU 3D interior stencil: the pinned 15-term expression, including repeated offsets, with one independent 3D-grid launch. Preserves 25 volume sizes; output borders are initialized to zero before timing. Verifies every actual measured output afterward with a full CPU reference and emits raw timing plus fixed operator/verification identities.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Volume dimension N (NxNxN grid)",
+    "type": "int",
+    "values": [
+      16,
+      32,
+      48,
+      64,
+      96,
+      128
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Threads per block dimension (3D block of block_size^3)",
+      "type": "int",
+      "default": 8,
+      "values": [
+        8
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "When true, run the untimed vector-add warmer before the measured stencil to raise clocks and disturb cache state; qualify the resulting state on the target. False disables the warmer.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "conv3d_kernel"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 2,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      2,
+      4,
+      6,
+      8,
+      10
+    ],
+    "declared_scaling_values": 25,
+    "non_scaling_combination": {
+      "block_size": 8
+    },
+    "usable_points_in_combination": 11,
+    "combinations_considered": 1,
+    "sim_version": "84aa6995707e"
+  }
+}

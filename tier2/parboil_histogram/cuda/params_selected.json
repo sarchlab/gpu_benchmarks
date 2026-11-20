@@ -1,0 +1,21 @@
+{
+  "benchmark": "parboil_histogram",
+  "tier": 2,
+  "suite": "parboil",
+  "selection": {
+    "status": "excluded",
+    "reason": "no non-scaling combination has 6 evenly spaced usable configurations (at most 1 usable in one combination; traces: ok 1, skipped_after_timeout 6, timeout 1)",
+    "sim_version": "84aa6995707e"
+  },
+  "scaling_param": {
+    "name": "img_height",
+    "values": []
+  },
+  "non_scaling_params": [],
+  "kernels": [
+    "histo_prescan_kernel",
+    "histo_intermediates_kernel",
+    "histo_main_kernel",
+    "histo_final_kernel"
+  ]
+}

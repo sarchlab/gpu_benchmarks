@@ -1,0 +1,20 @@
+{
+  "benchmark": "pcie_bandwidth",
+  "tier": 1,
+  "suite": "microbench",
+  "selection": {
+    "status": "excluded",
+    "reason": "no usable configuration (traces: no_kernels 44)",
+    "sim_version": "84aa6995707e"
+  },
+  "scaling_param": {
+    "name": "buffer_size_mb",
+    "values": []
+  },
+  "non_scaling_params": [],
+  "kernels": [
+    "memcpy_h2d",
+    "memcpy_d2h",
+    "memcpy_bidir"
+  ]
+}

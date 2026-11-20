@@ -1,0 +1,67 @@
+{
+  "benchmark": "polybench_gramschmidt",
+  "tier": 2,
+  "suite": "polybench",
+  "description": "Gram-Schmidt QR factorization A = Q * R. Per-column GPU kernels reset the norm accumulator, accumulate and finalize the norm, normalize and project. All required resets and math stages contribute to the summed GPU time.",
+  "scaling_param": {
+    "name": "m",
+    "description": "Number of rows of matrix A",
+    "type": "int",
+    "values": [
+      64,
+      256,
+      640,
+      1024,
+      1792,
+      3072
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "n",
+      "description": "Number of columns of matrix A",
+      "type": "int",
+      "default": 64,
+      "values": [
+        64
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "gram_norm_zero",
+    "gram_norm",
+    "gram_norm_finish",
+    "gram_normalize",
+    "gram_project"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 3,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      3,
+      6,
+      9,
+      12,
+      15
+    ],
+    "declared_scaling_values": 20,
+    "non_scaling_combination": {
+      "n": 64
+    },
+    "usable_points_in_combination": 20,
+    "combinations_considered": 1,
+    "sim_version": "84aa6995707e"
+  }
+}

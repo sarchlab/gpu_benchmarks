@@ -1,0 +1,26 @@
+{
+  "benchmark": "npb_mg",
+  "tier": 2,
+  "suite": "npb",
+  "selection": {
+    "status": "excluded",
+    "reason": "no non-scaling combination has 6 evenly spaced usable configurations (at most 1 usable in one combination; traces: ok 1, skipped_after_timeout 3, timeout 1)",
+    "sim_version": "84aa6995707e"
+  },
+  "scaling_param": {
+    "name": "npb_class",
+    "values": []
+  },
+  "non_scaling_params": [],
+  "kernels": [
+    "comm3_gpu_kernel_1",
+    "comm3_gpu_kernel_2",
+    "comm3_gpu_kernel_3",
+    "interp_gpu_kernel",
+    "norm2u3_gpu_kernel",
+    "psinv_gpu_kernel",
+    "resid_gpu_kernel",
+    "rprj3_gpu_kernel",
+    "coarse_zero"
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "benchmark": "heteromark_fir",
+  "tier": 2,
+  "suite": "heteromark",
+  "description": "1D FIR (Finite Impulse Response) convolution: output[i] = sum(coeff[k] * input[i-k]). Filter coefficients loaded into shared memory. Emits per-iteration kernel times; throughput is derived downstream.",
+  "scaling_param": {
+    "name": "size",
+    "description": "Number of input samples",
+    "type": "int",
+    "values": [
+      1024,
+      3072,
+      8192,
+      24576,
+      65536,
+      196608
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "num_taps",
+      "description": "Number of FIR filter taps (coefficients)",
+      "type": "int",
+      "default": 64,
+      "values": [
+        64
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        256
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "fir_filter_kernel"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 3,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      3,
+      6,
+      9,
+      12,
+      15
+    ],
+    "declared_scaling_values": 27,
+    "non_scaling_combination": {
+      "block_size": 256,
+      "num_taps": 64
+    },
+    "usable_points_in_combination": 17,
+    "combinations_considered": 4,
+    "sim_version": "84aa6995707e"
+  }
+}

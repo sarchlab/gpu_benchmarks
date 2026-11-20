@@ -10,7 +10,10 @@ jobs:
   compile-cuda:
     name: Compile (CUDA)
     runs-on: ubuntu-latest
-    container: nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04
+    container:
+      image: nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04
+      # Privileged so the ASan workaround below can lower vm.mmap_rnd_bits.
+      options: --privileged
     env:
       # The shared runner has no GPU, so nvcc's `-arch=native` cannot detect a
       # card and falls back to a default arch below sm_53, where FP16 intrinsics
@@ -19,6 +22,16 @@ jobs:
       # the real target. Every benchmark Makefile honors CUDA_ARCH (?= native).
       CUDA_ARCH: sm_90
     steps:
+      # Runner images since late Oct 2026 ship kernel 7.0 with a high
+      # vm.mmap_rnd_bits; the gcc 11 AddressSanitizer in this Ubuntu 22.04
+      # container hangs at startup under it, stalling every -fsanitize=address
+      # test. The container shares the host kernel, so lower it here.
+      - name: Lower mmap randomization for AddressSanitizer
+        run: |
+          echo "vm.mmap_rnd_bits before: $(cat /proc/sys/vm/mmap_rnd_bits)"
+          echo 28 > /proc/sys/vm/mmap_rnd_bits
+          echo "vm.mmap_rnd_bits after:  $(cat /proc/sys/vm/mmap_rnd_bits)"
+
       - name: Install dependencies
         run: |
           install_ok=0
@@ -37,6 +50,12 @@ jobs:
             echo "Dependency installation failed after 3 attempts."
             exit 1
           fi
+
+      - name: AddressSanitizer smoke test
+        run: |
+          printf 'int main() { return 0; }\n' > /tmp/asan_smoke.cpp
+          g++ -fsanitize=address,undefined /tmp/asan_smoke.cpp -o /tmp/asan_smoke
+          timeout 20 /tmp/asan_smoke
 
       - name: Verify wget is available
         run: command -v wget >/dev/null 2>&1

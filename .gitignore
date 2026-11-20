@@ -109,3 +109,17 @@ compile_errors.log
 # Status dashboard dependencies/build output
 /status-dashboard/node_modules/
 /status-dashboard/dist/
+
+# scripts/trace_collect.py working files: only the scripts themselves are tracked
+scripts/logs/
+scripts/tmp/
+scripts/.build/
+
+ground_truth_h100/
+ground_truth_h100_all/
+gt_smoke/
+run_ground_truth*.py
+
+# scripts/simulation_run.py and scripts/report.py working files
+scripts/logs_simulation/
+scripts/logs_report/

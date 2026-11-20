@@ -28,6 +28,12 @@ const (
 	DefaultTraceTimeout = 3600
 )
 
+// Trace pipelines selectable with `gpubench run --tracer`.
+const (
+	TracerV1 = "v1"   // bb_triosim-style tracer: seekable .trace.zst per kernel
+	TracerV2 = "v2.0" // Accel-Sim 2.0 tracer: .trace.xz, post-processed to .tracez
+)
+
 // Global interrupt flag. Written by the signal-handler goroutine and read by
 // the execution loops, so it must be accessed atomically.
 var interrupted atomic.Bool
@@ -133,6 +139,8 @@ func main() {
 			cleanIncomplete, _ := cmd.Flags().GetBool("trace-clean-incomplete")
 			traceSample, _ := cmd.Flags().GetString("trace-sample")
 			traceSizes, _ := cmd.Flags().GetInt("trace-sizes")
+			tracer, _ := cmd.Flags().GetString("tracer")
+			params, _ := cmd.Flags().GetStringArray("param")
 
 			os.Exit(cmdRun(runArgs{
 				tier:            tier,
@@ -155,6 +163,8 @@ func main() {
 				cleanIncomplete: cleanIncomplete,
 				traceSample:     traceSample,
 				traceSizes:      traceSizes,
+				tracer:          tracer,
+				params:          params,
 			}))
 			return nil
 		},
@@ -168,6 +178,7 @@ func main() {
 	runCmd.Flags().Bool("sweep-non-scaling", true, "Sweep non-scaling params (use --sweep-non-scaling=false for defaults only)")
 	runCmd.Flags().String("timeout", "", "Timeout secs (default: 60)")
 	runCmd.Flags().String("scaling-values", "", "Override values (csv)")
+	runCmd.Flags().StringArray("param", nil, "Pin a non-scaling param to one of its declared values: name=value (repeatable; requires --benchmark)")
 	runCmd.Flags().String("vector-add-warmup", "", "Override cold-cache warmer for all benchmarks: true/false (default: per-benchmark, true)")
 	runCmd.Flags().Bool("dry-run", false, "Dry run")
 	runCmd.Flags().Bool("continue-on-error", false, "Continue on error")
@@ -179,6 +190,7 @@ func main() {
 	runCmd.Flags().Bool("trace-clean-incomplete", false, "When resuming traces, delete incomplete config trace directories before retrying")
 	runCmd.Flags().String("trace-sample", "", "PTRACE_SAMPLE spec for the live-sampling tracer (e.g. 'corner'); empty = full tracing")
 	runCmd.Flags().Int("trace-sizes", 0, "Trace only the N smallest scaling values per benchmark (0 = all configs)")
+	runCmd.Flags().String("tracer", TracerV1, "Trace pipeline: v1 (.trace.zst) or v2.0 (Accel-Sim 2.0 .tracez; needs --post-process)")
 
 	// --- info command ---
 	infoCmd := &cobra.Command{

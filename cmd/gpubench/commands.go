@@ -827,6 +827,77 @@ func traceComplete(cfgTraceDir string) (complete bool, exists bool, detail strin
 	return false, true, lastDetail
 }
 
+// traceCompleteFor applies the completeness rule of the selected tracer.
+func traceCompleteFor(tracer, cfgTraceDir string) (complete bool, exists bool, detail string) {
+	if tracer == TracerV2 {
+		return traceCompleteV2(cfgTraceDir)
+	}
+	return traceComplete(cfgTraceDir)
+}
+
+// traceCompleteV2 reports whether an Accel-Sim 2.0 config dir has been fully
+// post-processed: some kernelslist*.g lists at least one .tracez, and every
+// .tracez it lists exists. The raw .trace.xz files are intermediates and may
+// already have been removed.
+func traceCompleteV2(cfgTraceDir string) (complete bool, exists bool, detail string) {
+	tracesDir := filepath.Join(cfgTraceDir, "traces")
+	entries, err := os.ReadDir(tracesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, false, "missing traces directory"
+		}
+		return false, true, err.Error()
+	}
+
+	var lists []string
+	tracez := make(map[string]bool)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		switch {
+		case strings.HasPrefix(name, "kernelslist") && strings.HasSuffix(name, ".g"):
+			lists = append(lists, name)
+		case strings.HasSuffix(name, ".tracez"):
+			tracez[name] = true
+		}
+	}
+	if len(lists) == 0 {
+		return false, true, "missing kernelslist.g (not post-processed)"
+	}
+
+	sort.Strings(lists)
+	var lastDetail string
+	for _, list := range lists {
+		data, err := os.ReadFile(filepath.Join(tracesDir, list))
+		if err != nil {
+			lastDetail = fmt.Sprintf("cannot read %s: %v", list, err)
+			continue
+		}
+		refs, missing := 0, ""
+		for _, line := range strings.Split(string(data), "\n") {
+			ref := filepath.Base(strings.TrimSpace(line))
+			if !strings.HasSuffix(ref, ".tracez") {
+				continue
+			}
+			refs++
+			if !tracez[ref] && missing == "" {
+				missing = ref
+			}
+		}
+		switch {
+		case refs == 0:
+			lastDetail = fmt.Sprintf("%s has no .tracez references", list)
+		case missing != "":
+			lastDetail = fmt.Sprintf("%s references missing %s", list, missing)
+		default:
+			return true, true, "complete"
+		}
+	}
+	return false, true, lastDetail
+}
+
 func firstKernelsListPath(cfgTraceDir string) string {
 	tracesDir := filepath.Join(cfgTraceDir, "traces")
 	defaultPath := filepath.Join(tracesDir, "kernelslist")
@@ -874,6 +945,8 @@ type runArgs struct {
 	postProcess     string
 	resumeTrace     bool
 	cleanIncomplete bool
+	tracer          string   // trace pipeline: TracerV1 (default) or TracerV2
+	params          []string // --param name=value pins for non-scaling params
 }
 
 func cmdRun(args runArgs) int {
@@ -959,6 +1032,39 @@ func cmdRun(args runArgs) int {
 		}
 	}
 
+	// Non-scaling pins (--param name=value) narrow one benchmark's sweep, so
+	// like --scaling-values they require --benchmark.
+	pins, err := parseParamPins(args.params)
+	if err != nil {
+		eprintf("%v\n", err)
+		return ExitUsage
+	}
+	if len(pins) > 0 && args.benchmark == "" {
+		eprintf("--param requires --benchmark (it pins one benchmark's non-scaling params)\n")
+		return ExitUsage
+	}
+
+	if args.tracer == "" {
+		args.tracer = TracerV1
+	}
+	switch args.tracer {
+	case TracerV1:
+	case TracerV2:
+		// v2.0 output is only complete once post-processing has turned the
+		// .trace.xz files into .tracez, so the post-processor is mandatory.
+		if args.collectTrace == "" || args.postProcess == "" {
+			eprintf("--tracer %s requires --collect-trace and --post-process (Accel-Sim post-traces-processing)\n", TracerV2)
+			return ExitUsage
+		}
+		if args.traceSample != "" {
+			eprintf("--trace-sample is only supported by --tracer %s\n", TracerV1)
+			return ExitUsage
+		}
+	default:
+		eprintf("Invalid --tracer %q (want %s or %s)\n", args.tracer, TracerV1, TracerV2)
+		return ExitUsage
+	}
+
 	// NVBit instruction traces are deterministic per config, and every rep
 	// overwrites the same TRACES_FOLDER — so N reps cost N× the 100-1000×
 	// tracing overhead for identical output. Collect each config exactly once.
@@ -975,6 +1081,16 @@ func cmdRun(args runArgs) int {
 	if len(benchmarks) == 0 {
 		eprint("No benchmarks found matching filters.")
 		return ExitNoBench
+	}
+	if len(pins) > 0 {
+		for i, b := range benchmarks {
+			pinned, err := pinNonScaling(b, pins)
+			if err != nil {
+				eprintf("%s: %v\n", b.Benchmark, err)
+				return ExitUsage
+			}
+			benchmarks[i] = pinned
+		}
 	}
 
 	// Count total runs
@@ -1063,7 +1179,7 @@ func cmdRun(args runArgs) int {
 		}
 
 		eprint("=== Trace Collection Mode ===")
-		eprintf("Tracer:      %s\n", args.collectTrace)
+		eprintf("Tracer:      %s (%s)\n", args.collectTrace, args.tracer)
 		eprintf("Output dir:  %s\n", traceOutput)
 		eprintf("Timeout:     %ds\n", timeoutSecs)
 		if args.traceSample != "" {
@@ -1160,7 +1276,7 @@ func cmdRun(args runArgs) int {
 						bt++
 						continue
 					}
-					complete, exists, detail := traceComplete(cfgTraceDir)
+					complete, exists, detail := traceCompleteFor(args.tracer, cfgTraceDir)
 					if complete {
 						eprintf("    %s skip (trace complete)\n", cfgLabel)
 						bs++
@@ -1210,6 +1326,12 @@ func cmdRun(args runArgs) int {
 					if args.traceSample != "" {
 						env = append(env, fmt.Sprintf("PTRACE_SAMPLE=%s", args.traceSample))
 					}
+					if args.tracer == TracerV2 {
+						// Accel-Sim defaults, pinned so the output format cannot
+						// drift with the caller's environment: in-tracer address
+						// compression, and the raw trace streamed through xz.
+						env = append(env, "TOOL_COMPRESS=1", "TRACE_FILE_COMPRESS=1")
+					}
 					eprintf("    %s rep %d/%d  ", cfgLabel, rep, reps)
 
 					ec, _, stderrStr, timedOut := runBenchmarkProc(
@@ -1256,14 +1378,33 @@ func cmdRun(args runArgs) int {
 				}
 
 				if args.postProcess != "" && cfgCaptured && !cfgTimedOut {
-					kernelsList := firstKernelsListPath(cfgTraceDir)
-					eprintf("  Post-processing: %s %s\n", args.postProcess, kernelsList)
-					ppCtx, ppCancel := context.WithTimeout(context.Background(), 300*time.Second)
-					ppCmd := exec.CommandContext(ppCtx, args.postProcess, kernelsList)
+					// v1 post-processes the first kernel list within 300s. v2.0
+					// hands over the traces dir (every context's kernelslist) and
+					// allows the trace timeout: grouping a large .trace.xz into
+					// .tracez is slow, and without it the trace is incomplete.
+					ppTarget := firstKernelsListPath(cfgTraceDir)
+					ppTimeout := 300
+					if args.tracer == TracerV2 {
+						ppTarget = filepath.Join(cfgTraceDir, "traces")
+						ppTimeout = timeoutSecs
+					}
+					eprintf("  Post-processing: %s %s\n", args.postProcess, ppTarget)
+					ppCtx, ppCancel := context.WithTimeout(context.Background(), time.Duration(ppTimeout)*time.Second)
+					ppCmd := exec.CommandContext(ppCtx, args.postProcess, ppTarget)
 					ppCmd.Stdout = os.Stdout
 					ppCmd.Stderr = os.Stderr
 					if err := ppCmd.Run(); err != nil {
 						eprintf("  Post-process error: %v\n", err)
+						if args.tracer == TracerV2 {
+							bp--
+							bf++
+						}
+					} else if args.tracer == TracerV2 {
+						if complete, _, detail := traceCompleteV2(cfgTraceDir); !complete {
+							eprintf("  Post-process incomplete: %s\n", detail)
+							bp--
+							bf++
+						}
 					}
 					ppCancel()
 				}

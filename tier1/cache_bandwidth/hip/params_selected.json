@@ -1,0 +1,18 @@
+{
+  "benchmark": "cache_bandwidth",
+  "tier": 1,
+  "suite": "microbench",
+  "selection": {
+    "status": "excluded",
+    "reason": "no usable configuration (traces: skipped_after_timeout 40, timeout 2)",
+    "sim_version": "84aa6995707e"
+  },
+  "scaling_param": {
+    "name": "working_set_bytes",
+    "values": []
+  },
+  "non_scaling_params": [],
+  "kernels": [
+    "bw_read_kernel"
+  ]
+}

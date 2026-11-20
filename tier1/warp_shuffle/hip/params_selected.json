@@ -1,0 +1,86 @@
+{
+  "benchmark": "warp_shuffle",
+  "tier": 1,
+  "suite": "microbench",
+  "description": "Dependent native warp/wave shuffle chains for XOR, indexed, up, and down intrinsics. One final integer store per thread. Emits raw GPU event and host times; logical shuffle rate is derived downstream, not an isolated instruction latency or device peak.",
+  "scaling_param": {
+    "name": "ops_per_thread",
+    "description": "Number of shuffle operations each thread performs per kernel invocation",
+    "type": "int",
+    "values": [
+      4,
+      24,
+      128,
+      768,
+      4096,
+      24576
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "num_blocks",
+      "description": "Number of thread blocks; default one block measures its dependent chains, without establishing a device peak.",
+      "type": "int",
+      "default": 1,
+      "values": [
+        1
+      ]
+    },
+    {
+      "name": "threads_per_block",
+      "description": "Threads per block; must be a positive multiple of the selected device native warp/wave width and within its launch limits.",
+      "type": "int",
+      "default": 256,
+      "values": [
+        256
+      ]
+    },
+    {
+      "name": "shuffle_variant",
+      "description": "One shuffle variant per sweep entry. The binary also accepts all for a manual four-variant run.",
+      "type": "enum",
+      "default": "shfl_xor",
+      "values": [
+        "shfl_xor"
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Run the clock/cache warmer before each timed launch. Its achieved clock and cache effects require target qualification; false times the kernel as-is.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "shfl_xor_kernel",
+    "shfl_kernel",
+    "shfl_up_kernel",
+    "shfl_down_kernel"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 5,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      5,
+      10,
+      15,
+      20,
+      25
+    ],
+    "declared_scaling_values": 29,
+    "non_scaling_combination": {
+      "num_blocks": 1,
+      "shuffle_variant": "shfl_xor",
+      "threads_per_block": 256
+    },
+    "usable_points_in_combination": 29,
+    "combinations_considered": 16,
+    "sim_version": "84aa6995707e"
+  }
+}

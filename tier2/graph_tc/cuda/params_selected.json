@@ -1,0 +1,73 @@
+{
+  "benchmark": "graph_tc",
+  "tier": 2,
+  "suite": "graph",
+  "description": "Triangle counting in an undirected graph using sorted adjacency list intersection. Each thread processes one edge and counts common neighbors via merge-based intersection.",
+  "scaling_param": {
+    "name": "vertices",
+    "description": "Number of vertices in the graph (N= parameter)",
+    "type": "int",
+    "values": [
+      256,
+      768,
+      2048,
+      6144,
+      16384,
+      49152
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "avg_degree",
+      "description": "Average degree per vertex (D= parameter)",
+      "type": "int",
+      "default": 8,
+      "values": [
+        8
+      ]
+    },
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        256
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "triangle_count_kernel"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 3,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      3,
+      6,
+      9,
+      12,
+      15
+    ],
+    "declared_scaling_values": 25,
+    "non_scaling_combination": {
+      "avg_degree": 8,
+      "block_size": 256
+    },
+    "usable_points_in_combination": 16,
+    "combinations_considered": 3,
+    "sim_version": "84aa6995707e"
+  }
+}

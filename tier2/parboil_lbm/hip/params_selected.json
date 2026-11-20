@@ -1,0 +1,63 @@
+{
+  "benchmark": "parboil_lbm",
+  "tier": 2,
+  "suite": "parboil",
+  "description": "Pinned Parboil D3Q19 lid-driven cavity scatter simulation with full CPU trajectory verification on synthetic cubic grids.",
+  "scaling_param": {
+    "name": "grid_dim",
+    "description": "Grid dimension N for NxNxN lattice",
+    "type": "int",
+    "values": [
+      16,
+      20,
+      24,
+      28,
+      32,
+      36
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "num_timesteps",
+      "description": "Number of LBM timesteps per iteration",
+      "type": "int",
+      "default": 10,
+      "values": [
+        10
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "lbm_collide_stream_kernel"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 1,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "declared_scaling_values": 26,
+    "non_scaling_combination": {
+      "num_timesteps": 10
+    },
+    "usable_points_in_combination": 8,
+    "combinations_considered": 3,
+    "sim_version": "84aa6995707e"
+  }
+}

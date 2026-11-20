@@ -1,0 +1,63 @@
+{
+  "benchmark": "parboil_spmv",
+  "tier": 2,
+  "suite": "parboil",
+  "description": "Sparse matrix-vector multiplication y = A*x in JDS (Jagged Diagonal Storage) layout. The matrix is sorted by row length and stored column-major (padded/transposed) so one thread walks its JDS row at stride-1 offsets; per-warp-group column counts and column base offsets live in constant memory. Faithful port of the Parboil cuda kernel spmv_jds (x fetched via __ldg in place of the original texture); emits per-iteration kernel times. Direct-binary block-size and CLI seed controls are not swept; each kernel record identifies the resolved seed, requested block size, launch policy, and effective block/grid sizes.",
+  "scaling_param": {
+    "name": "num_rows",
+    "description": "Number of matrix rows (JDS tables cap this near 160000)",
+    "type": "int",
+    "values": [
+      2048,
+      8192,
+      16384,
+      32768,
+      65536,
+      131072
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "avg_nnz_per_row",
+      "description": "Average non-zeros per row (JDS column depth must stay < 5000)",
+      "type": "int",
+      "default": 80,
+      "values": [
+        80
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "spmv_jds"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 2,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      2,
+      4,
+      6,
+      8,
+      10
+    ],
+    "declared_scaling_values": 12,
+    "non_scaling_combination": {
+      "avg_nnz_per_row": 80
+    },
+    "usable_points_in_combination": 12,
+    "combinations_considered": 3,
+    "sim_version": "84aa6995707e"
+  }
+}

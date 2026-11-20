@@ -1,0 +1,63 @@
+{
+  "benchmark": "parboil_stencil",
+  "tier": 2,
+  "suite": "parboil",
+  "description": "Pinned Parboil subtractive-center 7-point operator with float c0=1/6 and c1=1/6/6 on an NxNxN grid with fixed input boundaries. One complete ping-pong sequence per process; emit accumulated raw kernel times.",
+  "scaling_param": {
+    "name": "grid_dim",
+    "description": "Grid dimension N (NxNxN 3D grid)",
+    "type": "int",
+    "values": [
+      16,
+      32,
+      48,
+      64,
+      80,
+      112
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "num_timesteps",
+      "description": "Number of dependent stencil kernel launches in the complete timed sequence",
+      "type": "int",
+      "default": 5,
+      "values": [
+        5
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "stencil3d"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 2,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      2,
+      4,
+      6,
+      8,
+      10
+    ],
+    "declared_scaling_values": 20,
+    "non_scaling_combination": {
+      "num_timesteps": 5
+    },
+    "usable_points_in_combination": 12,
+    "combinations_considered": 3,
+    "sim_version": "84aa6995707e"
+  }
+}

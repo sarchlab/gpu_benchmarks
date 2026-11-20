@@ -1,0 +1,84 @@
+{
+  "benchmark": "altis_gups",
+  "tier": 2,
+  "suite": "altis",
+  "description": "Altis RandomAccess: exactly 4*N LFSR XOR updates to a power-of-two table, using retrying 64-bit CAS or paired 32-bit XOR atomics; full measured-table CPU verification.",
+  "scaling_param": {
+    "name": "table_size",
+    "description": "Number of 64-bit table entries; must be a positive power of two. Logical update count is exactly four times this size.",
+    "type": "int",
+    "values": [
+      65536,
+      131072,
+      262144,
+      524288,
+      1048576,
+      2097152
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        256
+      ]
+    },
+    {
+      "name": "atomic_mode",
+      "description": "Pinned atomic implementation: retrying 64-bit CAS or paired 32-bit XOR operations.",
+      "type": "enum",
+      "default": "xor",
+      "values": [
+        "xor"
+      ]
+    },
+    {
+      "name": "num_threads",
+      "description": "Requested GPU thread count; rounds up to full blocks and partitions the same fixed 4*N logical update stream.",
+      "type": "int",
+      "default": 16384,
+      "values": [
+        16384
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "gups_cas_kernel",
+    "gups_xor_kernel"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 1,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "declared_scaling_values": 9,
+    "non_scaling_combination": {
+      "atomic_mode": "xor",
+      "block_size": 256,
+      "num_threads": 16384
+    },
+    "usable_points_in_combination": 7,
+    "combinations_considered": 6,
+    "sim_version": "84aa6995707e"
+  }
+}

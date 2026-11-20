@@ -1,0 +1,23 @@
+{
+  "benchmark": "npb_cg",
+  "tier": 2,
+  "suite": "npb",
+  "selection": {
+    "status": "excluded",
+    "reason": "no usable configuration (traces: skipped_after_timeout 4, timeout 1)",
+    "sim_version": "84aa6995707e"
+  },
+  "scaling_param": {
+    "name": "matrix_size",
+    "values": []
+  },
+  "non_scaling_params": [],
+  "kernels": [
+    "cg_init_kernel",
+    "spmv_kernel",
+    "dot_product_kernel",
+    "axpy_kernel",
+    "direction_kernel",
+    "normalize_kernel"
+  ]
+}

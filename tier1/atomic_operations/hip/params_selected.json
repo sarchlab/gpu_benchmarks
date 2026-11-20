@@ -1,0 +1,85 @@
+{
+  "benchmark": "atomic_operations",
+  "tier": 1,
+  "suite": "microbench",
+  "description": "Single shared uint32 counter with fixed atomicAdd, atomicCAS or atomicMin attempts. CAS includes a value-preserving atomic read per attempt and one success-count store per thread; min retains zero. Raw times and attempted-work counts are emitted; actual results are verified.",
+  "scaling_param": {
+    "name": "ops_per_thread",
+    "description": "Number of selected atomic attempts per thread; CAS additionally performs one atomic read per attempt.",
+    "type": "int",
+    "values": [
+      4,
+      6,
+      8,
+      12,
+      16,
+      24
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "num_blocks",
+      "description": "Number of thread blocks in the grid",
+      "type": "int",
+      "default": 2048,
+      "values": [
+        2048
+      ]
+    },
+    {
+      "name": "threads_per_block",
+      "description": "Number of threads per block",
+      "type": "int",
+      "default": 256,
+      "values": [
+        256
+      ]
+    },
+    {
+      "name": "atomic_op",
+      "description": "Type of atomic operation to benchmark",
+      "type": "enum",
+      "default": "atomicAdd",
+      "values": [
+        "atomicAdd"
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "atomicAdd_kernel",
+    "atomicCAS_kernel",
+    "atomicMin_kernel"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 1,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "declared_scaling_values": 29,
+    "non_scaling_combination": {
+      "atomic_op": "atomicAdd",
+      "num_blocks": 2048,
+      "threads_per_block": 256
+    },
+    "usable_points_in_combination": 10,
+    "combinations_considered": 3,
+    "sim_version": "84aa6995707e"
+  }
+}

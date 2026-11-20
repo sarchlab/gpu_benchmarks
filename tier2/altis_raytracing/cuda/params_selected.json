@@ -1,0 +1,73 @@
+{
+  "benchmark": "altis_raytracing",
+  "tier": 2,
+  "suite": "altis",
+  "description": "Simple ray tracing: casts rays through an image plane, intersects with N spheres, shades nearest hit with Phong lighting. Each thread handles one pixel.",
+  "scaling_param": {
+    "name": "width",
+    "description": "Image width in pixels (height is set independently via the height parameter)",
+    "type": "int",
+    "values": [
+      64,
+      128,
+      256,
+      384,
+      512,
+      640
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "height",
+      "description": "Image height in pixels",
+      "type": "int",
+      "default": 512,
+      "values": [
+        512
+      ]
+    },
+    {
+      "name": "spheres",
+      "description": "Number of spheres in the scene",
+      "type": "int",
+      "default": 8,
+      "values": [
+        8
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "raytrace_kernel"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 1,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "declared_scaling_values": 20,
+    "non_scaling_combination": {
+      "height": 512,
+      "spheres": 8
+    },
+    "usable_points_in_combination": 9,
+    "combinations_considered": 12,
+    "sim_version": "84aa6995707e"
+  }
+}

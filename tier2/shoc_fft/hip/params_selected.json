@@ -1,0 +1,19 @@
+{
+  "benchmark": "shoc_fft",
+  "tier": 2,
+  "suite": "shoc",
+  "selection": {
+    "status": "excluded",
+    "reason": "no non-scaling combination has 6 evenly spaced usable configurations (at most 3 usable in one combination; traces: ok 6, skipped_after_timeout 18, timeout 2)",
+    "sim_version": "84aa6995707e"
+  },
+  "scaling_param": {
+    "name": "n_ffts",
+    "values": []
+  },
+  "non_scaling_params": [],
+  "kernels": [
+    "FFT512_device",
+    "IFFT512_device"
+  ]
+}

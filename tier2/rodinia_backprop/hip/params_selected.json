@@ -1,0 +1,19 @@
+{
+  "benchmark": "rodinia_backprop",
+  "tier": 2,
+  "suite": "rodinia",
+  "selection": {
+    "status": "excluded",
+    "reason": "no non-scaling combination has 6 evenly spaced usable configurations (at most 3 usable in one combination; traces: ok 3, skipped_after_timeout 8, timeout 1)",
+    "sim_version": "84aa6995707e"
+  },
+  "scaling_param": {
+    "name": "input",
+    "values": []
+  },
+  "non_scaling_params": [],
+  "kernels": [
+    "bpnn_layerforward_CUDA",
+    "bpnn_adjust_weights_cuda"
+  ]
+}

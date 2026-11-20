@@ -1,0 +1,83 @@
+{
+  "benchmark": "rodinia_hotspot3d",
+  "tier": 2,
+  "suite": "rodinia",
+  "description": "Rodinia 3.1 HotSpot3D FP32 recurrence with one-cell mapping, fixed iteration counts, stability-limited timestep when required, and complete FP64 CPU verification.",
+  "scaling_param": {
+    "name": "grid_size",
+    "description": "Grid dimension per axis (NxNxN temperature grid)",
+    "type": "int",
+    "values": [
+      16,
+      32,
+      48,
+      64,
+      80,
+      112
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "block_size",
+      "description": "Thread-block dimension (BxBxB); each thread updates one cell.",
+      "type": "int",
+      "default": 8,
+      "values": [
+        8
+      ]
+    },
+    {
+      "name": "num_iterations",
+      "description": "Fixed number of time steps per process; one kernel launch per step. The timestep and resulting simulated duration are reported.",
+      "type": "int",
+      "default": 1,
+      "values": [
+        1
+      ]
+    },
+    {
+      "name": "amb_temp",
+      "description": "Ambient temperature (\u00b0C). Enters the stencil only as an additive term, so it shifts result values but has no effect on control flow, memory pattern, or timing. Fixed at one value \u2014 sweeping it would produce performance-identical runs.",
+      "type": "float",
+      "default": 80.0,
+      "values": [
+        80.0
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Run the vector-add warmer once before the timed trajectory. Subsequent dependent steps retain their natural cache state. False disables this entry warmer.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "hotspot3d_kernel"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 2,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      2,
+      4,
+      6,
+      8,
+      10
+    ],
+    "declared_scaling_values": 22,
+    "non_scaling_combination": {
+      "amb_temp": 80,
+      "block_size": 8,
+      "num_iterations": 1
+    },
+    "usable_points_in_combination": 11,
+    "combinations_considered": 3,
+    "sim_version": "84aa6995707e"
+  }
+}

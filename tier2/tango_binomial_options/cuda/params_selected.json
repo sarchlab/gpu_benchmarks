@@ -1,0 +1,18 @@
+{
+  "benchmark": "tango_binomial_options",
+  "tier": 2,
+  "suite": "tango",
+  "selection": {
+    "status": "excluded",
+    "reason": "no usable configuration (traces: skipped_after_timeout 32, timeout 1)",
+    "sim_version": "84aa6995707e"
+  },
+  "scaling_param": {
+    "name": "options",
+    "values": []
+  },
+  "non_scaling_params": [],
+  "kernels": [
+    "binomial_kernel"
+  ]
+}

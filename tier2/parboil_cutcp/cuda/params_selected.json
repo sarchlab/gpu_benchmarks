@@ -1,0 +1,18 @@
+{
+  "benchmark": "parboil_cutcp",
+  "tier": 2,
+  "suite": "parboil",
+  "selection": {
+    "status": "excluded",
+    "reason": "no usable configuration (traces: skipped_after_timeout 108, timeout 12)",
+    "sim_version": "84aa6995707e"
+  },
+  "scaling_param": {
+    "name": "num_atoms",
+    "values": []
+  },
+  "non_scaling_params": [],
+  "kernels": [
+    "cuda_cutoff_potential_lattice6overlap"
+  ]
+}

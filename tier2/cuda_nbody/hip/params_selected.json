@@ -1,0 +1,63 @@
+{
+  "benchmark": "cuda_nbody",
+  "tier": 2,
+  "suite": "cuda_sdk",
+  "description": "All-pairs N-body gravitational simulation with tile-based shared memory optimization. Each thread computes force on one body from all others. Emits per-iteration kernel times; GFLOPS is derived downstream.",
+  "scaling_param": {
+    "name": "bodies",
+    "description": "Number of bodies in the simulation",
+    "type": "int",
+    "values": [
+      256,
+      384,
+      512,
+      768,
+      1024,
+      1536
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "timesteps",
+      "description": "Number of simulation timesteps per run",
+      "type": "int",
+      "default": 1,
+      "values": [
+        1
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "Cold-cache calibration: when true, a vector-add warmer boosts the GPU clock and evicts the last-level cache before each timed iteration, so the kernel is measured cold-cache at a boosted clock (matching a cold-cache simulator). Set false for legacy warm-cache measurement.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true"
+      ]
+    }
+  ],
+  "kernels": [
+    "nbody_kernel"
+  ],
+  "selection": {
+    "status": "selected",
+    "points": 6,
+    "stride": 1,
+    "start_index": 0,
+    "scaling_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "declared_scaling_values": 25,
+    "non_scaling_combination": {
+      "timesteps": 1
+    },
+    "usable_points_in_combination": 10,
+    "combinations_considered": 2,
+    "sim_version": "84aa6995707e"
+  }
+}

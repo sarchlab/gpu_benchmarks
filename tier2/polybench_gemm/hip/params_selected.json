@@ -1,0 +1,18 @@
+{
+  "benchmark": "polybench_gemm",
+  "tier": 2,
+  "suite": "polybench",
+  "selection": {
+    "status": "excluded",
+    "reason": "no non-scaling combination has 6 evenly spaced usable configurations (at most 4 usable in one combination; traces: ok 4, skipped_after_timeout 17, timeout 1)",
+    "sim_version": "84aa6995707e"
+  },
+  "scaling_param": {
+    "name": "size",
+    "values": []
+  },
+  "non_scaling_params": [],
+  "kernels": [
+    "polybench_gemm_kernel"
+  ]
+}

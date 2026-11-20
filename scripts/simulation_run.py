@@ -848,7 +848,7 @@ class Simulator:
         return outcome == 'finished'
 
     # ── summary ───────────────────────────────────────────────────────────
-    def stats(self, version=None):
+    def stats(self, version=None, jobs=None):
         if not os.path.isfile(self.db_path):
             self.say('no %s yet' % self.db_path)
             return
@@ -859,10 +859,15 @@ class Simulator:
                 self.say('simulation.db is empty')
                 return
             version = r[0]
+        only = ''
+        if jobs is not None:  # just this run's configurations (e.g. the selected ones)
+            con.execute('CREATE TEMP TABLE want (trace_id TEXT PRIMARY KEY)')
+            con.executemany('INSERT OR IGNORE INTO want VALUES (?)', [(j.trace_id,) for j in jobs])
+            only = ' AND trace_id IN (SELECT trace_id FROM want)'
         rows = con.execute(
             "SELECT benchmark, MIN(tier), SUM(status='ok'), SUM(status='timeout'), SUM(status='error'),"
             " SUM(status='skipped_after_timeout'), SUM(CASE WHEN status='ok' THEN num_insts END),"
-            " SUM(sim_sec), MAX(peak_rss_mb) FROM sims WHERE sim_version=?"
+            " SUM(sim_sec), MAX(peak_rss_mb) FROM sims WHERE sim_version=?" + only +
             " GROUP BY benchmark ORDER BY MIN(tier), benchmark", (version,)).fetchall()
         con.close()
         head = ('benchmark', '#ok', '#timeout', '#error', '#skipped', 'insts(ok)', 'sim_time',
@@ -1170,7 +1175,7 @@ def main():
     finished = sim.run(jobs, force=a.force)
     if a.dry_run:
         return 0
-    sim.stats(sim.version)
+    sim.stats(sim.version, jobs)
     if a.mode == 'demo':
         gt_kernel_check(sim, a.gt_db, sim.version)
         con = sqlite3.connect(sim.db_path)

@@ -11,10 +11,12 @@
  *   Every thread runs one dependent chain of total_ops fused multiply-adds,
  *   x = fmaf(x, a, b), on register values. The chain is laid out as a
  *   straight-line body of body_ops FMAs inside a loop of
- *   reps = total_ops / body_ops iterations. Executed work is therefore the
- *   same for every body_ops; only the static code footprint changes. One
- *   kernel exists per supported body size, so a launch fetches only the code
- *   of the size under test.
+ *   reps = total_ops / body_ops iterations. The number of dependent FMAs
+ *   executed is therefore the same for every body_ops while the static code
+ *   footprint changes; loop-control work is not the same (smaller bodies run
+ *   more iterations), so cold and primed times are paired within one body
+ *   size. One kernel exists per supported body size, so a launch fetches only
+ *   the code of the size under test.
  *
  *   Entry policy: optional vector-add clock/cache warmer, then
  *   prime_launches untimed launches of the same kernel, then one timed
@@ -32,12 +34,15 @@
  *
  * Environment variables (override argv):
  *   BENCH_PARAM_body_ops           (16, 64, 256, 1024 or 4096; default 256)
- *   BENCH_PARAM_total_ops          (default 16384; positive multiple of body_ops)
+ *   BENCH_PARAM_total_ops          (default 16384; positive multiple of
+ *                                   body_ops, at most 1048576)
  *   BENCH_PARAM_prime_launches     (0 or 1; default 0)
  *   BENCH_PARAM_num_blocks         (default 1)
  *   BENCH_PARAM_threads_per_block  (default 64)
  *   BENCH_PARAM_vector_add_warmup  (default true; clock-boost + LLC-evict
  *                                   warmer before the primer/timed launch)
+ * Integer parameters must be whole decimal numbers in range; anything else
+ * is rejected before device access.
  *
  * Output: one {"type":"kernel",...} JSON line for the single timed launch,
  * carrying the GPU event time and host wall-clock time, then a summary whose
@@ -45,6 +50,8 @@
  * derived downstream from pairs of runs.
  */
 
+#include <cerrno>
+#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -65,19 +72,17 @@
 
 static const int DEFAULT_BODY_OPS          = 256;    // FMAs in the straight-line loop body
 static const int DEFAULT_TOTAL_OPS         = 16384;  // FMAs executed per thread, any body size
+static const int MAX_TOTAL_OPS             = 1 << 20; // keeps the chain finite and the host reference cheap
 static const int DEFAULT_PRIME_LAUNCHES    = 0;      // cold entry
 static const int DEFAULT_NUM_BLOCKS        = 1;      // one block: single SM/CU
 static const int DEFAULT_THREADS_PER_BLOCK = 64;     // one AMD wavefront
 static const int MAX_THREADS_PER_BLOCK     = 1024;   // launch limit on supported targets
 
 /* Chain coefficients. They reach the kernels as runtime arguments so the
- * compiler cannot fold the chain; values keep x finite and changing. */
+ * compiler cannot fold the chain. Every FMA strictly increases x, and x stays
+ * finite for any admitted total_ops (at most MAX_TOTAL_OPS). */
 static const float FETCH_MUL = 1.0000001f;
 static const float FETCH_ADD = 0.0000001f;
-
-/* Relative tolerance against the host chain: covers contraction/rounding of
- * the per-thread seed, which the dependent FMA chain then carries along. */
-static const double VERIFY_TOLERANCE = 5e-6;
 
 // ---------------------------------------------------------------------------
 // Code-fetch kernels
@@ -92,8 +97,11 @@ static const double VERIFY_TOLERANCE = 5e-6;
 #define FETCH_OPS_1024 FETCH_OPS_256 FETCH_OPS_256 FETCH_OPS_256 FETCH_OPS_256
 #define FETCH_OPS_4096 FETCH_OPS_1024 FETCH_OPS_1024 FETCH_OPS_1024 FETCH_OPS_1024
 
-/* Per-thread chain seed, and the single store that makes the chain observable. */
-#define FETCH_SEED() (1.0f + static_cast<float>(threadIdx.x) * 0.001f)
+/* Chain seed of a block's thread: 1 + thread/1024, exact in float for every
+ * launchable thread index, so device and host start from identical bits
+ * whether or not a compiler contracts the multiply-add. */
+#define FETCH_SEED(thread) (1.0f + static_cast<float>(thread) * 0.0009765625f)
+/* The single store that makes the chain observable. */
 #define FETCH_STORE(value) \
     out[static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x] = (value)
 
@@ -110,7 +118,7 @@ static const double VERIFY_TOLERANCE = 5e-6;
  */
 __global__ void fetch_kernel_16(float *out, float a, float b, int reps)
 {
-    float x = FETCH_SEED();
+    float x = FETCH_SEED(threadIdx.x);
 #pragma unroll 1
     for (int r = 0; r < reps; ++r) { FETCH_OPS_16 }
     FETCH_STORE(x);
@@ -118,7 +126,7 @@ __global__ void fetch_kernel_16(float *out, float a, float b, int reps)
 
 __global__ void fetch_kernel_64(float *out, float a, float b, int reps)
 {
-    float x = FETCH_SEED();
+    float x = FETCH_SEED(threadIdx.x);
 #pragma unroll 1
     for (int r = 0; r < reps; ++r) { FETCH_OPS_64 }
     FETCH_STORE(x);
@@ -126,7 +134,7 @@ __global__ void fetch_kernel_64(float *out, float a, float b, int reps)
 
 __global__ void fetch_kernel_256(float *out, float a, float b, int reps)
 {
-    float x = FETCH_SEED();
+    float x = FETCH_SEED(threadIdx.x);
 #pragma unroll 1
     for (int r = 0; r < reps; ++r) { FETCH_OPS_256 }
     FETCH_STORE(x);
@@ -134,7 +142,7 @@ __global__ void fetch_kernel_256(float *out, float a, float b, int reps)
 
 __global__ void fetch_kernel_1024(float *out, float a, float b, int reps)
 {
-    float x = FETCH_SEED();
+    float x = FETCH_SEED(threadIdx.x);
 #pragma unroll 1
     for (int r = 0; r < reps; ++r) { FETCH_OPS_1024 }
     FETCH_STORE(x);
@@ -142,7 +150,7 @@ __global__ void fetch_kernel_1024(float *out, float a, float b, int reps)
 
 __global__ void fetch_kernel_4096(float *out, float a, float b, int reps)
 {
-    float x = FETCH_SEED();
+    float x = FETCH_SEED(threadIdx.x);
 #pragma unroll 1
     for (int r = 0; r < reps; ++r) { FETCH_OPS_4096 }
     FETCH_STORE(x);
@@ -166,12 +174,37 @@ static void launch_fetch_kernel(int body_ops, int num_blocks,
     }
 }
 
+/**
+ * Parse a whole decimal integer in [min_value, max_value]. False for empty,
+ * malformed, trailing-junk or out-of-range text; *value is then unchanged.
+ */
+static bool parse_int(const char *text, int min_value, int max_value, int *value)
+{
+    if (!text || !*text) return false;
+    char *end = nullptr;
+    errno = 0;
+    const long parsed = strtol(text, &end, 10);
+    if (errno || *end || parsed < min_value || parsed > max_value) return false;
+    *value = static_cast<int>(parsed);
+    return true;
+}
+
 /** Host chain for one thread of a block: the value its kernel must store. */
 static float reference_chain(int thread_in_block, int total_ops)
 {
-    float x = 1.0f + static_cast<float>(thread_in_block) * 0.001f;
+    float x = FETCH_SEED(thread_in_block);
     for (int i = 0; i < total_ops; ++i) x = fmaf(x, FETCH_MUL, FETCH_ADD);
     return x;
+}
+
+/**
+ * A stored value is right only when it is finite and exactly the host chain's
+ * value. Seed and FMAs are exact on both sides and every FMA changes x, so a
+ * chain with a missing or extra loop iteration never matches.
+ */
+static bool chain_value_matches(float got, float want)
+{
+    return std::isfinite(got) && got == want;
 }
 
 /**
@@ -187,10 +220,9 @@ static size_t count_mismatches(const float *d_out, size_t total_threads,
                         cudaMemcpyDeviceToHost));
     size_t errors = 0;
     for (size_t i = 0; i < total_threads; ++i) {
-        const double want = expected[i % expected.size()];
-        const double got = h_out[i];
-        if (!std::isfinite(got) || !std::isfinite(want) ||
-            std::fabs(got - want) > VERIFY_TOLERANCE * std::fabs(want)) {
+        const float want = expected[i % expected.size()];
+        const float got = h_out[i];
+        if (!chain_value_matches(got, want)) {
             if (errors < 10) {
                 fprintf(stderr, "Mismatch in %s launch at thread %zu: GPU=%.9g CPU=%.9g\n",
                         launch, i, got, want);
@@ -212,53 +244,55 @@ int main(int argc, char *argv[])
 
     const char* env_val;
 
-    /* Read parameters: env vars take priority, then argv, then defaults. */
+    /* Read parameters: env vars take priority, then argv, then defaults.
+     * Present values must parse completely and lie in range. */
     int body_ops = DEFAULT_BODY_OPS;
     env_val = getenv("BENCH_PARAM_body_ops");
-    if (env_val) {
-        body_ops = atoi(env_val);
-    } else if (argc >= 2) {
-        body_ops = atoi(argv[1]);
-    }
+    if (!env_val && argc >= 2) env_val = argv[1];
     /* One kernel exists per supported body size. */
-    if (body_ops != 16 && body_ops != 64 && body_ops != 256 &&
-        body_ops != 1024 && body_ops != 4096) {
+    if ((env_val && !parse_int(env_val, 16, 4096, &body_ops)) ||
+        (body_ops != 16 && body_ops != 64 && body_ops != 256 &&
+         body_ops != 1024 && body_ops != 4096)) {
         fprintf(stderr, "Invalid body_ops: need 16, 64, 256, 1024 or 4096\n");
         return EXIT_FAILURE;
     }
 
     int total_ops = DEFAULT_TOTAL_OPS;
     env_val = getenv("BENCH_PARAM_total_ops");
-    if (env_val) total_ops = atoi(env_val);
-    if (total_ops <= 0 || total_ops % body_ops != 0) {
-        fprintf(stderr, "Invalid total_ops: need a positive multiple of body_ops\n");
+    if ((env_val && !parse_int(env_val, 1, MAX_TOTAL_OPS, &total_ops)) ||
+        total_ops % body_ops != 0) {
+        fprintf(stderr, "Invalid total_ops: need a positive multiple of body_ops, at most %d\n",
+                MAX_TOTAL_OPS);
         return EXIT_FAILURE;
     }
     const int reps = total_ops / body_ops;
 
     int prime_launches = DEFAULT_PRIME_LAUNCHES;
     env_val = getenv("BENCH_PARAM_prime_launches");
-    if (env_val) prime_launches = atoi(env_val);
-    if (prime_launches != 0 && prime_launches != 1) {
+    if (env_val && !parse_int(env_val, 0, 1, &prime_launches)) {
         fprintf(stderr, "Invalid prime_launches: need 0 or 1\n");
         return EXIT_FAILURE;
     }
 
     int num_blocks = DEFAULT_NUM_BLOCKS;
     env_val = getenv("BENCH_PARAM_num_blocks");
-    if (env_val) num_blocks = atoi(env_val);
+    if (env_val && !parse_int(env_val, 1, INT_MAX, &num_blocks)) {
+        fprintf(stderr, "Invalid num_blocks: need a positive integer\n");
+        return EXIT_FAILURE;
+    }
 
     int threads_per_block = DEFAULT_THREADS_PER_BLOCK;
     env_val = getenv("BENCH_PARAM_threads_per_block");
-    if (env_val) threads_per_block = atoi(env_val);
+    if (env_val && !parse_int(env_val, 1, MAX_THREADS_PER_BLOCK, &threads_per_block)) {
+        fprintf(stderr, "Invalid threads_per_block: need 1 to %d\n", MAX_THREADS_PER_BLOCK);
+        return EXIT_FAILURE;
+    }
 
-    // Validate before multiplying: the output owns one element per thread.
-    if (num_blocks <= 0 || threads_per_block <= 0 ||
-        threads_per_block > MAX_THREADS_PER_BLOCK ||
-        static_cast<size_t>(num_blocks) >
+    // Validate before multiplying: each output buffer owns one element per thread.
+    if (static_cast<size_t>(num_blocks) >
             std::numeric_limits<size_t>::max() / sizeof(float) /
                 static_cast<size_t>(threads_per_block)) {
-        fprintf(stderr, "Invalid or overflowing launch dimensions\n");
+        fprintf(stderr, "Launch dimensions overflow the output size\n");
         return EXIT_FAILURE;
     }
     const size_t total_threads =

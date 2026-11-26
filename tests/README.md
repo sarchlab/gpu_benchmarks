@@ -362,13 +362,19 @@ not performance or a physical cache hit rate. See
 [the benchmark documentation](../tier1/cache_latency/hip/README.md) for interpretation
 and trace-replay requirements.
 
-`python3 tests/code_fetch_latency_input_ranges.py --compiler clang++` runs the
-actual `code_fetch_latency` parameter prefix under host sanitizers without GPU
-access. Its 43 cases cover the supported body sizes with both entries, the
-`total_ops` multiple rule, `prime_launches` and launch-dimension bounds, and
-argv/environment precedence; it also requires the manifest's `body_ops` sweep
-to equal the compiled kernel sizes. `--source` selects the native CUDA source.
-CI runs it with g++ for both sources.
+`python3 tests/code_fetch_latency_host.py --compiler clang++` runs the actual
+`code_fetch_latency` parameter prefix and host reference chain under host
+sanitizers without GPU access. Its 85 admission cases cover the supported body
+sizes with both entries, the `total_ops` multiple rule and upper bound,
+`prime_launches` and launch-dimension bounds, empty, non-numeric, trailing-junk
+and overflowing values for every integer parameter, and argv/environment
+precedence; it also requires the manifest's `body_ops` sweep to equal the
+compiled kernel sizes. The reference-chain checks show that, for every thread
+of the default block, a chain missing or repeating one 16-FMA loop iteration is
+rejected by the production comparison, that non-finite values are rejected,
+that the chain is finite at the `total_ops` limit, and that every thread seed
+is exact. `--source` selects the native CUDA source. CI runs it with g++ for
+both sources.
 
 `code_fetch_latency_code_size.py` reads the AMD code objects embedded in a ROCm
 build of `code_fetch_latency` and prints each fetch kernel's code bytes. It

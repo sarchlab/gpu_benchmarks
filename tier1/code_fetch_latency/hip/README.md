@@ -3,14 +3,16 @@
 Every thread runs one dependent chain of `total_ops` fused multiply-adds,
 `x = fmaf(x, a, b)`, on register values and stores the result once. The chain is
 laid out as a straight-line body of `body_ops` FMAs inside a loop of
-`reps = total_ops / body_ops` iterations. Executed work is the same for every
-`body_ops`; only the static code footprint changes. One kernel,
-`fetch_kernel_<body_ops>`, exists per supported body size (16, 64, 256, 1024,
-4096), so a launch fetches only the code of the size under test.
+`reps = total_ops / body_ops` iterations. The number of dependent FMAs executed
+is the same for every `body_ops` while the static code footprint changes.
+Loop-control work is not the same: smaller bodies run more iterations. One
+kernel, `fetch_kernel_<body_ops>`, exists per supported body size (16, 64, 256,
+1024, 4096), so a launch fetches only the code of the size under test.
 
-Each execution times one launch. Two entry states of the same configuration
-differ in whether that kernel's code was fetched before the timed launch; their
-time difference is the cost of fetching the code under this protocol.
+Each execution times one launch. Cold and primed times are paired within one
+body size: the two entries differ in whether that kernel's code was fetched
+before the timed launch, and their time difference is the cost of fetching the
+code under this protocol.
 
 ## Entry policy
 
@@ -107,18 +109,21 @@ with `cuobjdump -sass`) before using CUDA results.
   them: both output buffers are set up before the warmer in either entry and a
   primer stores to its own buffer, so the timed launch's output is equally
   untouched in both entries and its cost cancels in the difference.
-- **Work is identical, loop overhead is not.** Smaller bodies run more loop
-  iterations. Loop overhead is present in both entries and cancels in the
-  difference; it does not cancel when comparing absolute times across
-  `body_ops`.
+- **FMA count is constant, loop-control work is not.** Smaller bodies run more
+  loop iterations. Loop overhead is present in both entries of one body size
+  and cancels in their difference; it does not cancel when comparing absolute
+  times across `body_ops`.
 
 ## Verification
 
 After timing, every thread's value stored by the timed launch is compared with
-the same chain computed on the host (relative tolerance 5e-6, covering rounding
-of the per-thread seed). The output buffer starts as NaN, so a thread that never
-stores fails. A mismatch exits nonzero. With `prime_launches=1` the primer's own
-buffer is checked the same way, separately from the timed launch's.
+the same chain computed on the host. The comparison is exact: the per-thread
+seed `1 + thread/1024` is exactly representable, each step is one correctly
+rounded `fmaf` on both sides, and every FMA changes the value, so a chain with a
+missing or extra loop iteration does not match. Non-finite values are rejected.
+The output buffer starts as NaN, so a thread that never stores fails. A mismatch
+exits nonzero. With `prime_launches=1` the primer's own buffer is checked the
+same way, separately from the timed launch's.
 
 ## Timing and trace replay
 
@@ -136,6 +141,13 @@ result; it must not reset caches between the two launches. With
 `prime_launches=0` the simulator must start the timed launch without that
 kernel's code in its instruction cache.
 
+The suite's whole-trace simulation report aggregates every launch of a trace.
+With `prime_launches=1` it would compare primer plus timed simulated work with
+the timed-only hardware record, so a primed comparison needs per-launch
+simulator output. General trace-region identification and artifact/replay
+qualification remain R-23/R-24; this benchmark's ordering alone does not qualify
+a simulator.
+
 ## Build and run
 
 ```sh
@@ -150,17 +162,20 @@ Environment values take priority over the positional body size:
 | Parameter | Default | Meaning |
 |---|---:|---|
 | `BENCH_PARAM_body_ops` | 256 | FMAs in the loop body: 16, 64, 256, 1024 or 4096 |
-| `BENCH_PARAM_total_ops` | 16384 | FMAs executed per thread; positive multiple of `body_ops` |
+| `BENCH_PARAM_total_ops` | 16384 | FMAs executed per thread; positive multiple of `body_ops`, at most 1048576 |
 | `BENCH_PARAM_prime_launches` | 0 | Untimed launches of the same kernel before timing: 0 or 1 |
 | `BENCH_PARAM_num_blocks` | 1 | Thread blocks |
 | `BENCH_PARAM_threads_per_block` | 64 | Threads per block, at most 1024 |
 | `BENCH_PARAM_vector_add_warmup` | true | Clock/cache warmer before any primer |
 
-Unsupported body sizes, a `total_ops` that is not a positive multiple of
-`body_ops`, a `prime_launches` other than 0 or 1, and nonpositive or oversized
-launch dimensions fail before any device access.
-`python3 ../../../tests/code_fetch_latency_input_ranges.py` checks those rules
-on the host.
+Integer parameters must be whole decimal numbers: empty, non-numeric and
+trailing-junk values are rejected, not read as zero. Unsupported body sizes, a
+`total_ops` that is not a positive multiple of `body_ops` or exceeds 1048576, a
+`prime_launches` other than 0 or 1, and nonpositive or oversized launch
+dimensions fail before any device access. The `total_ops` limit keeps the chain
+finite for every thread seed and the host reference cheap.
+`python3 ../../../tests/code_fetch_latency_host.py` checks those rules and the
+reference chain on the host.
 
 Illustrative JSON for the primed 1024-FMA body (times are not performance claims):
 

@@ -76,7 +76,10 @@ def main():
     failed = False
     with tempfile.TemporaryDirectory(prefix='code-fetch-size-') as temp:
         fatbin, code = Path(temp) / 'fatbin', Path(temp) / 'code.co'
-        run(tool('llvm-objcopy'), '--dump-section', '.hip_fatbin=%s' % fatbin, args.binary)
+        # With no output operand objcopy rewrites its input: send the copy to
+        # the temporary directory so the inspected binary is only read.
+        run(tool('llvm-objcopy'), '--dump-section', '.hip_fatbin=%s' % fatbin, args.binary,
+            Path(temp) / 'discarded-copy')
         targets = [t for t in run(tool('clang-offload-bundler'), '--list', '--type=o',
                                   '--input=%s' % fatbin).split() if 'amdgcn' in t]
         if not targets:

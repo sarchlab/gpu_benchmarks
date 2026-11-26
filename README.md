@@ -269,7 +269,7 @@ The metric column names downstream quantities. See [measurement interpretation](
 | `fp16_throughput` | GFLOPS | Half-precision FP16 FMA throughput (declared grid: one block) |
 | `int32_throughput` | GIOPS | Integer INT32 multiply-add throughput (declared grid: one block) |
 | `cache_latency` | ns | L1/L2/global cache latency via pointer-chasing |
-| `code_fetch_latency` | ns | [Cold launch time versus loop-body code size and loop count](tier1/code_fetch_latency/hip/README.md); derive the fixed dispatch cost, the repeat-pass cost per operation and the first-pass extra downstream |
+| `code_fetch_latency` | ns | [Cold launch time versus loop-body code size and loop count](tier1/code_fetch_latency/hip/README.md); derive the fixed dispatch cost, the repeat-pass cost per FMA and the first-pass extra downstream |
 | `pcie_bandwidth` | GB/s | PCIe/Thunderbolt host-device transfer bandwidth |
 | `mixbench` | GFLOPS/GB/s | Nominal compute/logical-byte intensity sweep |
 | `shared_mem_bandwidth` | GB/s | Shared/threadgroup memory bandwidth (single SM/CU) |

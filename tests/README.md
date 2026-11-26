@@ -364,33 +364,31 @@ and trace-replay requirements.
 
 `python3 tests/code_fetch_latency_host.py --compiler clang++` runs the actual
 `code_fetch_latency` parameter prefix and host reference chains under host
-sanitizers without GPU access. Its 174 admission cases cover the twelve
-supported body sizes with every declared `loops` value and both `op` kinds, the
-`body_ops * loops` bound at its edges, unknown `op` values, launch-dimension
+sanitizers without GPU access. Its 123 admission cases cover the thirteen
+supported body sizes with every declared `loops` value (65536 × 16 is exactly
+the `body_ops * loops` bound), that bound at its edges, launch-dimension
 bounds, empty, non-numeric, trailing-junk and overflowing values for every
 integer parameter, and argv/environment precedence; it also requires the
-manifest's `body_ops` sweep, `op` values and kernel names to equal the compiled
-ones. The reference-chain checks show that, for every thread of the default
-block, an FMA chain missing or repeating one 16-operation loop pass is rejected
-by the production comparison and an integer chain of that length differs, that
-non-finite values are rejected, that the FMA chain is finite at the chain
-limit, that every FMA seed is exact, and that the integer chain equals an
-independent recomputation. `--source` selects the native CUDA source. CI runs
-it with g++ for both sources.
+manifest's `body_ops` sweep and kernel names to equal the compiled ones. The
+reference-chain checks show that, for every thread of the default block, a
+chain missing or repeating one 16-FMA loop pass is rejected by the production
+comparison, that non-finite values are rejected, that the chain is finite at
+the chain limit, and that every seed is exact. `--source` selects the native
+CUDA source. CI runs it with g++ for both sources.
 
 `code_fetch_latency_code_size.py` reads the AMD code objects embedded in a ROCm
 build of `code_fetch_latency` and prints each fetch kernel's code bytes. It
 fails unless, in every kernel, the only backward jump closes one loop whose
-body holds exactly `body_ops` operations of the kernel's kind (`v_fma_f32`, or
-one `v_xor_b32` and one `v_add_u32` each), the loop control of a supported
+body holds exactly `body_ops` `v_fma_f32`, the loop control of a supported
 layout and at most one register move (`v_mov_b32_e32`, which AMD clang 24
 leaves at the head of the loop). Two loop-control layouts are supported: a
 backward conditional branch, and, for bodies beyond its range, a conditional
 branch out of the loop followed by a PC-relative jump back (`s_getpc_b64`,
 `s_add_u32`, `s_addc_u32`, `s_setpc_b64`). Any other instruction inside the
 loop is rejected, and the decoded instructions must cover every byte of the
-loop. It needs the LLVM tools shipped with ROCm (`--llvm-bin`, default
-`/opt/rocm/llvm/bin`) but no GPU:
+loop. `--body-ops` restricts the check to a list of body sizes, for a binary
+built with fewer kernels. It needs the LLVM tools shipped with ROCm
+(`--llvm-bin`, default `/opt/rocm/llvm/bin`) but no GPU:
 
 ```sh
 make -C tier1/code_fetch_latency/hip PLATFORM=rocm
@@ -400,12 +398,12 @@ python3 tests/code_fetch_latency_code_size.py
 CI has no ROCm toolchain and does not run it on a build. CI does run
 `python3 tests/code_fetch_latency_code_size.py --self-test`, which needs no
 ROCm tools: it feeds the layout checker synthetic disassembly and requires
-both layouts of both operation kinds to pass, with or without that one move,
-and requires a rejection for a second such move, a move of another kind, an
-extra memory load, extra arithmetic, repeated loop control, an extra or
-unpaired body instruction, a kernel without a loop, an incomplete PC-relative
-jump, and an instruction line removed while later addresses stay (a byte gap in
-the loop). The script reports compiled layout and size only; it does not
+both layouts to pass, with or without that one move, and requires a rejection
+for a second such move, a move of another kind, an extra memory load, extra
+arithmetic, repeated loop control, an extra FMA, a kernel without a loop, an
+incomplete PC-relative jump, and an instruction line removed while later
+addresses stay (a byte gap in the loop). The script reports compiled layout
+and size only; it does not
 qualify cache behavior, and no NVIDIA equivalent exists.
 See [the benchmark documentation](../tier1/code_fetch_latency/hip/README.md).
 

@@ -37,9 +37,9 @@ else ifeq ($(PLATFORM),rocm)
   CC      := hipcc
   SRC     := code_fetch_latency.hip
   CFLAGS  := -O3 -std=c++14
-  # Clang's loop passes recurse once per chained operation, so the largest
-  # kernels overflow the default 8 MB compiler stack: raise it (4 GB, else the
-  # hard limit) for this compile. nvcc compiles them within the default.
+  # Clang's loop passes recurse once per chained FMA, and AMD clang 24
+  # (ROCm 10.2) segfaults on fetch_kernel_65536 under the default 8 MB compiler
+  # stack: raise it (4 GB, else the hard limit) for this compile.
   RAISE_STACK := ulimit -s 4194304 2>/dev/null || ulimit -s `ulimit -H -s` 2>/dev/null || true;
 
 else

@@ -12,8 +12,8 @@ laid out as a straight-line body of `body_ops` FMAs inside a loop of
 `reps = total_ops / body_ops` iterations. The number of dependent FMAs executed
 is the same for every `body_ops` while the static code footprint changes.
 Loop-control work is not the same: smaller bodies run more iterations. One
-kernel, `fetch_kernel_<body_ops>`, exists per supported body size (16, 64, 256,
-1024, 4096), so a launch fetches only the code of the size under test.
+kernel, `fetch_kernel_<body_ops>`, exists per supported body size (every power of two
+from 16 to 8192), so a launch fetches only the code of the size under test.
 
 Each execution times one launch. Cold and primed times are paired within one
 body size. The raw result is first-dispatch time minus primed-dispatch time at
@@ -96,13 +96,16 @@ of each `fetch_kernel_<body_ops>` (for example with `cuobjdump -sass
 code_fetch_latency`) and record its code bytes before using CUDA results. The
 [HIP README](../hip/README.md#compiled-code-size-and-layout) reports the AMD
 `gfx942` sizes and the script that measures them; those numbers do not transfer
-to NVIDIA targets.
+to NVIDIA targets. The sweep's upper bound of 8192 comes from the `gfx942`
+loop layout described there.
 
 ## Limits
 
 - **Instruction-cache capacity.** When a kernel's code exceeds the instruction
   cache and `reps > 1`, later loop iterations refetch code even in the primed
-  run, so the difference no longer contains one fetch of the code. Exclude such
+  run, so the difference no longer contains one fetch of the code. Every
+  declared size runs at least two iterations (`reps` is 2 at `body_ops=8192`),
+  so this applies to every size whose code exceeds that cache. Exclude such
   sizes from the slope. Where the primed time rises with `body_ops` is evidence
   about that capacity, to be qualified separately.
 - **One block.** The declared sweep launches one block of 64 threads. With
@@ -160,12 +163,17 @@ simulator output. General trace-region identification and artifact/replay
 qualification remain R-23/R-24; this benchmark's ordering alone does not qualify
 a simulator.
 
-The benchmark is not part of the selected-configuration simulation workflow.
-`scripts/simulation_run.py select` selects a benchmark only when one
-non-scaling combination has six evenly spaced usable scaling values, and this
-benchmark declares five body sizes, so select mode cannot write a selected
-`params_selected.json` for it even once traces and simulations exist. Simulate
-it explicitly with
+No `params_selected.json` is committed for this benchmark, so the
+selected-configuration simulation workflow skips it until one is written.
+`scripts/simulation_run.py select` keeps one non-scaling combination and six
+scaling values: the values at positions `s, s+k, ..., s+5k` of the declared
+`body_ops` list must all be usable (hardware timing, an ok trace and an ok
+simulation). With ten declared sizes only stride `k=1` fits, so a selection is
+six consecutive body sizes of a single `prime_launches` value. The widest
+stride wins, then the smallest start, then the combination closest to the
+defaults, so `prime_launches=0` is preferred when both entries qualify. A
+selection therefore never holds both entries of one body size and cannot give
+the cold-minus-primed difference. Simulate the full sweep explicitly with
 `python3 scripts/simulation_run.py run --benchmarks code_fetch_latency --all-params`.
 Primed comparisons still need per-launch simulator output.
 
@@ -184,7 +192,7 @@ Environment values take priority over the positional body size:
 
 | Parameter | Default | Meaning |
 |---|---:|---|
-| `BENCH_PARAM_body_ops` | 256 | FMAs in the loop body: 16, 64, 256, 1024 or 4096 |
+| `BENCH_PARAM_body_ops` | 256 | FMAs in the loop body: a power of two from 16 to 8192 |
 | `BENCH_PARAM_total_ops` | 16384 | FMAs executed per thread; positive multiple of `body_ops`, at most 1048576 |
 | `BENCH_PARAM_prime_launches` | 0 | Untimed launches of the same kernel before timing: 0 or 1 |
 | `BENCH_PARAM_num_blocks` | 1 | Thread blocks |

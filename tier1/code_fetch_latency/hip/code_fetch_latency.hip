@@ -37,7 +37,8 @@
  *   ./code_fetch_latency [body_ops]
  *
  * Environment variables (override argv):
- *   BENCH_PARAM_body_ops           (16, 64, 256, 1024 or 4096; default 256)
+ *   BENCH_PARAM_body_ops           (a power of two from 16 to 8192;
+ *                                   default 256)
  *   BENCH_PARAM_total_ops          (default 16384; positive multiple of
  *                                   body_ops, at most 1048576)
  *   BENCH_PARAM_prime_launches     (0 or 1; default 0)
@@ -76,6 +77,8 @@
 // ---------------------------------------------------------------------------
 
 static const int DEFAULT_BODY_OPS          = 256;    // FMAs in the straight-line loop body
+static const int MIN_BODY_OPS              = 16;     // smallest compiled body
+static const int MAX_BODY_OPS              = 8192;   // largest compiled body
 static const int DEFAULT_TOTAL_OPS         = 16384;  // FMAs executed per thread, any body size
 static const int MAX_TOTAL_OPS             = 1 << 20; // keeps the chain finite and the host reference cheap
 static const int DEFAULT_PRIME_LAUNCHES    = 0;      // cold entry
@@ -93,14 +96,21 @@ static const float FETCH_ADD = 0.0000001f;
 // Code-fetch kernels
 // ---------------------------------------------------------------------------
 
-/* Straight-line bodies of exactly N dependent FMAs. */
+/* Straight-line bodies of exactly N dependent FMAs, by doubling. */
 #define FETCH_OPS_1    x = fmaf(x, a, b);
-#define FETCH_OPS_4    FETCH_OPS_1 FETCH_OPS_1 FETCH_OPS_1 FETCH_OPS_1
-#define FETCH_OPS_16   FETCH_OPS_4 FETCH_OPS_4 FETCH_OPS_4 FETCH_OPS_4
-#define FETCH_OPS_64   FETCH_OPS_16 FETCH_OPS_16 FETCH_OPS_16 FETCH_OPS_16
-#define FETCH_OPS_256  FETCH_OPS_64 FETCH_OPS_64 FETCH_OPS_64 FETCH_OPS_64
-#define FETCH_OPS_1024 FETCH_OPS_256 FETCH_OPS_256 FETCH_OPS_256 FETCH_OPS_256
-#define FETCH_OPS_4096 FETCH_OPS_1024 FETCH_OPS_1024 FETCH_OPS_1024 FETCH_OPS_1024
+#define FETCH_OPS_2    FETCH_OPS_1 FETCH_OPS_1
+#define FETCH_OPS_4    FETCH_OPS_2 FETCH_OPS_2
+#define FETCH_OPS_8    FETCH_OPS_4 FETCH_OPS_4
+#define FETCH_OPS_16   FETCH_OPS_8 FETCH_OPS_8
+#define FETCH_OPS_32   FETCH_OPS_16 FETCH_OPS_16
+#define FETCH_OPS_64   FETCH_OPS_32 FETCH_OPS_32
+#define FETCH_OPS_128  FETCH_OPS_64 FETCH_OPS_64
+#define FETCH_OPS_256  FETCH_OPS_128 FETCH_OPS_128
+#define FETCH_OPS_512  FETCH_OPS_256 FETCH_OPS_256
+#define FETCH_OPS_1024 FETCH_OPS_512 FETCH_OPS_512
+#define FETCH_OPS_2048 FETCH_OPS_1024 FETCH_OPS_1024
+#define FETCH_OPS_4096 FETCH_OPS_2048 FETCH_OPS_2048
+#define FETCH_OPS_8192 FETCH_OPS_4096 FETCH_OPS_4096
 
 /* Chain seed of a block's thread: 1 + thread/1024, exact in float for every
  * launchable thread index, so device and host start from identical bits
@@ -129,11 +139,27 @@ __global__ void fetch_kernel_16(float *out, float a, float b, int reps)
     FETCH_STORE(x);
 }
 
+__global__ void fetch_kernel_32(float *out, float a, float b, int reps)
+{
+    float x = FETCH_SEED(threadIdx.x);
+#pragma unroll 1
+    for (int r = 0; r < reps; ++r) { FETCH_OPS_32 }
+    FETCH_STORE(x);
+}
+
 __global__ void fetch_kernel_64(float *out, float a, float b, int reps)
 {
     float x = FETCH_SEED(threadIdx.x);
 #pragma unroll 1
     for (int r = 0; r < reps; ++r) { FETCH_OPS_64 }
+    FETCH_STORE(x);
+}
+
+__global__ void fetch_kernel_128(float *out, float a, float b, int reps)
+{
+    float x = FETCH_SEED(threadIdx.x);
+#pragma unroll 1
+    for (int r = 0; r < reps; ++r) { FETCH_OPS_128 }
     FETCH_STORE(x);
 }
 
@@ -145,6 +171,14 @@ __global__ void fetch_kernel_256(float *out, float a, float b, int reps)
     FETCH_STORE(x);
 }
 
+__global__ void fetch_kernel_512(float *out, float a, float b, int reps)
+{
+    float x = FETCH_SEED(threadIdx.x);
+#pragma unroll 1
+    for (int r = 0; r < reps; ++r) { FETCH_OPS_512 }
+    FETCH_STORE(x);
+}
+
 __global__ void fetch_kernel_1024(float *out, float a, float b, int reps)
 {
     float x = FETCH_SEED(threadIdx.x);
@@ -153,11 +187,27 @@ __global__ void fetch_kernel_1024(float *out, float a, float b, int reps)
     FETCH_STORE(x);
 }
 
+__global__ void fetch_kernel_2048(float *out, float a, float b, int reps)
+{
+    float x = FETCH_SEED(threadIdx.x);
+#pragma unroll 1
+    for (int r = 0; r < reps; ++r) { FETCH_OPS_2048 }
+    FETCH_STORE(x);
+}
+
 __global__ void fetch_kernel_4096(float *out, float a, float b, int reps)
 {
     float x = FETCH_SEED(threadIdx.x);
 #pragma unroll 1
     for (int r = 0; r < reps; ++r) { FETCH_OPS_4096 }
+    FETCH_STORE(x);
+}
+
+__global__ void fetch_kernel_8192(float *out, float a, float b, int reps)
+{
+    float x = FETCH_SEED(threadIdx.x);
+#pragma unroll 1
+    for (int r = 0; r < reps; ++r) { FETCH_OPS_8192 }
     FETCH_STORE(x);
 }
 
@@ -177,10 +227,15 @@ static void load_fetch_kernel(int body_ops)
     const void *kernel = nullptr;
     switch (body_ops) {
     case 16:   kernel = reinterpret_cast<const void *>(fetch_kernel_16);   break;
+    case 32:   kernel = reinterpret_cast<const void *>(fetch_kernel_32);   break;
     case 64:   kernel = reinterpret_cast<const void *>(fetch_kernel_64);   break;
+    case 128:  kernel = reinterpret_cast<const void *>(fetch_kernel_128);  break;
     case 256:  kernel = reinterpret_cast<const void *>(fetch_kernel_256);  break;
+    case 512:  kernel = reinterpret_cast<const void *>(fetch_kernel_512);  break;
     case 1024: kernel = reinterpret_cast<const void *>(fetch_kernel_1024); break;
+    case 2048: kernel = reinterpret_cast<const void *>(fetch_kernel_2048); break;
     case 4096: kernel = reinterpret_cast<const void *>(fetch_kernel_4096); break;
+    case 8192: kernel = reinterpret_cast<const void *>(fetch_kernel_8192); break;
     }
     hipFuncAttributes attributes;
     HIP_CHECK(hipFuncGetAttributes(&attributes, kernel));
@@ -193,10 +248,15 @@ static void launch_fetch_kernel(int body_ops, int num_blocks,
     const dim3 grid(num_blocks), block(threads_per_block);
     switch (body_ops) {
     case 16:   fetch_kernel_16<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps);   break;
+    case 32:   fetch_kernel_32<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps);   break;
     case 64:   fetch_kernel_64<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps);   break;
+    case 128:  fetch_kernel_128<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps);  break;
     case 256:  fetch_kernel_256<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps);  break;
+    case 512:  fetch_kernel_512<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps);  break;
     case 1024: fetch_kernel_1024<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps); break;
+    case 2048: fetch_kernel_2048<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps); break;
     case 4096: fetch_kernel_4096<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps); break;
+    case 8192: fetch_kernel_8192<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps); break;
     }
 }
 
@@ -275,11 +335,12 @@ int main(int argc, char *argv[])
     int body_ops = DEFAULT_BODY_OPS;
     env_val = getenv("BENCH_PARAM_body_ops");
     if (!env_val && argc >= 2) env_val = argv[1];
-    /* One kernel exists per supported body size. */
-    if ((env_val && !parse_int(env_val, 16, 4096, &body_ops)) ||
-        (body_ops != 16 && body_ops != 64 && body_ops != 256 &&
-         body_ops != 1024 && body_ops != 4096)) {
-        fprintf(stderr, "Invalid body_ops: need 16, 64, 256, 1024 or 4096\n");
+    /* One kernel exists per supported body size: every power of two from
+     * MIN_BODY_OPS to MAX_BODY_OPS. */
+    if ((env_val && !parse_int(env_val, MIN_BODY_OPS, MAX_BODY_OPS, &body_ops)) ||
+        (body_ops & (body_ops - 1)) != 0) {
+        fprintf(stderr, "Invalid body_ops: need a power of two from %d to %d\n",
+                MIN_BODY_OPS, MAX_BODY_OPS);
         return EXIT_FAILURE;
     }
 

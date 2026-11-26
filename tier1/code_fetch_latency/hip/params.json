@@ -9,10 +9,15 @@
     "type": "int",
     "values": [
       16,
+      32,
       64,
+      128,
       256,
+      512,
       1024,
-      4096
+      2048,
+      4096,
+      8192
     ]
   },
   "non_scaling_params": [
@@ -66,9 +71,14 @@
   ],
   "kernels": [
     "fetch_kernel_16",
+    "fetch_kernel_32",
     "fetch_kernel_64",
+    "fetch_kernel_128",
     "fetch_kernel_256",
+    "fetch_kernel_512",
     "fetch_kernel_1024",
-    "fetch_kernel_4096"
+    "fetch_kernel_2048",
+    "fetch_kernel_4096",
+    "fetch_kernel_8192"
   ]
 }

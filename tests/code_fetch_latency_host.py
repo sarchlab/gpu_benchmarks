@@ -8,7 +8,7 @@ import re
 import subprocess
 import tempfile
 
-BODY_OPS = (16, 64, 256, 1024, 4096)
+BODY_OPS = tuple(16 << i for i in range(10))  # powers of two, 16 to 8192
 MAX_TOTAL_OPS = 1 << 20
 INT_MAX = (1 << 31) - 1
 INCLUDES = '''#include <cerrno>
@@ -95,9 +95,9 @@ def parse(text, low, high):
 def expected(body_ops=None, total_ops=None, prime_launches=None, num_blocks=None,
              threads_per_block=None):
     """Expected JSON for the given parameter texts (None = not provided), or the error."""
-    body = 256 if body_ops is None else parse(body_ops, 16, 4096)
+    body = 256 if body_ops is None else parse(body_ops, BODY_OPS[0], BODY_OPS[-1])
     if body not in BODY_OPS:
-        return 'Invalid body_ops: need 16, 64, 256, 1024 or 4096\n'
+        return f'Invalid body_ops: need a power of two from {BODY_OPS[0]} to {BODY_OPS[-1]}\n'
     total = 16384 if total_ops is None else parse(total_ops, 1, MAX_TOTAL_OPS)
     if total is None or total % body:
         return f'Invalid total_ops: need a positive multiple of body_ops, at most {MAX_TOTAL_OPS}\n'
@@ -127,10 +127,11 @@ def main():
     malformed = ['', 'true', 'nonsense', '1junk', '1 ', '1.0', '0x10', '99999999999999999999']
     settings = [dict(body_ops=str(size), prime_launches=prime)
                 for size in declared for prime in ('0', '1')]
-    settings += [dict(body_ops=text) for text in ['0', '-16', '8', '17', '32', '8192'] + malformed]
+    settings += [dict(body_ops=text) for text in ['0', '-16', '8', '15', '17', '24', '48', '6144', '8191', '8193', '16384'] + malformed]
     settings += [dict(total_ops=text) for text in
                  ['0', '-16384', '100', '256', '1048576', '1048832', '2147483392'] + malformed]
     settings += [dict(body_ops='4096', total_ops=text) for text in ('2048', '4096', '6144', '8192')]
+    settings += [dict(body_ops='8192', total_ops=text) for text in ('4096', '8192', '12288', '16384')]
     settings += [dict(prime_launches=text) for text in ['-1', '2'] + malformed]
     settings += [dict(num_blocks=text) for text in
                  ['0', '-1', '2', '2147483647', '2147483648'] + malformed]

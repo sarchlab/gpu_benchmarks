@@ -13,7 +13,7 @@ import re
 import subprocess
 import tempfile
 
-BODY_OPS = (16, 64, 256, 1024, 4096)
+BODY_OPS = tuple(16 << i for i in range(10))  # powers of two, 16 to 8192
 LINE_BYTES = 64
 FMA = 'v_fma_f32'
 # The only other instructions the measured loop may hold, once each: counter

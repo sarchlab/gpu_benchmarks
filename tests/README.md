@@ -364,8 +364,8 @@ and trace-replay requirements.
 
 `python3 tests/code_fetch_latency_host.py --compiler clang++` runs the actual
 `code_fetch_latency` parameter prefix and host reference chain under host
-sanitizers without GPU access. Its 85 admission cases cover the supported body
-sizes with both entries, the `total_ops` multiple rule and upper bound,
+sanitizers without GPU access. Its 104 admission cases cover the ten supported
+body sizes with both entries, the `total_ops` multiple rule and upper bound,
 `prime_launches` and launch-dimension bounds, empty, non-numeric, trailing-junk
 and overflowing values for every integer parameter, and argv/environment
 precedence; it also requires the manifest's `body_ops` sweep to equal the

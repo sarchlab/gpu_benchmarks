@@ -380,7 +380,8 @@ both sources.
 build of `code_fetch_latency` and prints each fetch kernel's code bytes. It
 fails unless every kernel is one loop whose body holds exactly `body_ops` FMA
 instructions plus the three loop-control instructions of the supported layout;
-any other instruction inside the loop is rejected. It needs the LLVM tools
+any other instruction inside the loop is rejected, and the decoded instructions
+must cover every byte of the loop. It needs the LLVM tools
 shipped with ROCm (`--llvm-bin`, default `/opt/rocm/llvm/bin`) but no GPU:
 
 ```sh
@@ -392,7 +393,8 @@ CI has no ROCm toolchain and does not run it on a build. CI does run
 `python3 tests/code_fetch_latency_code_size.py --self-test`, which needs no
 ROCm tools: it feeds the layout checker synthetic disassembly and requires the
 supported loop to pass and loops with an extra memory load, extra arithmetic,
-repeated loop control or an extra FMA to be rejected. The script reports
+repeated loop control, an extra FMA, or an instruction line removed while later
+addresses stay (a byte gap in the loop) to be rejected. The script reports
 compiled layout and size only; it does not qualify cache behavior, and no
 NVIDIA equivalent exists.
 See [the benchmark documentation](../tier1/code_fetch_latency/hip/README.md).

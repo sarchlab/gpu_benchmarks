@@ -46,15 +46,15 @@ def kernel_layout(disassembly, sizes):
         match = INSTRUCTION.match(line) if row else None
         if not match:
             continue
-        address = int(match[2], 16)
+        address, width = int(match[2], 16), 4 * len(match[3].split())
         if address >= row['start'] + row['bytes']:
             continue  # alignment padding after the kernel
-        row['instructions'].append((address, match[1]))
+        row['instructions'].append((address, match[1], width))
         if 'branch' in match[1] and match[4]:
             row['branches'] += 1
             target = row['start'] + int(match[4], 16)
             if target <= address:  # backward branch closes a loop
-                row['loops'].append((target, address + 4 * len(match[3].split())))
+                row['loops'].append((target, address + width))
     return rows
 
 
@@ -63,10 +63,23 @@ def check(body_ops, row):
     if len(row['loops']) != 1:
         return ['%d loops (want 1)' % len(row['loops'])]
     begin, end = row['loops'][0]
-    inside = collections.Counter(name for address, name in row['instructions']
-                                 if begin <= address < end)
-    fma = sum(name == FMA for address, name in row['instructions'])
+    loop = sorted(i for i in row['instructions'] if begin <= i[0] < end)
+    inside = collections.Counter(name for address, name, width in loop)
+    fma = sum(name == FMA for address, name, width in row['instructions'])
     problems = []
+    # Every byte of the loop must belong to exactly one decoded instruction, so
+    # nothing the parser skipped or the disassembly elided can hide in it.
+    expected = begin
+    for address, name, width in loop:
+        if address != expected:
+            problems.append('decoded instructions %s at 0x%x in the loop (0x%x..0x%x)' % (
+                'leave a gap' if address > expected else 'overlap', expected, begin, end))
+            break
+        expected = address + width
+    else:
+        if expected != end:
+            problems.append('decoded instructions leave a gap at 0x%x in the loop (0x%x..0x%x)'
+                            % (expected, begin, end))
     if fma != body_ops:
         problems.append('%d FMA instructions (want %d)' % (fma, body_ops))
     if inside[FMA] != fma:
@@ -81,8 +94,12 @@ def check(body_ops, row):
     return problems
 
 
-def synthetic_kernel(body_ops, in_loop=()):
-    """(disassembly, sizes) shaped like the gfx942 build, with extra in-loop instructions."""
+def synthetic_kernel(body_ops, in_loop=(), hidden=()):
+    """(disassembly, sizes) shaped like the gfx942 build, with extra in-loop instructions.
+
+    Instructions whose text is in `hidden` keep their bytes but get no
+    disassembly line, as when a line is elided or cannot be parsed.
+    """
     symbol, start = '_Z15fetch_kernel_%dPfffi' % body_ops, 0x3600
     fma = (FMA + ' v1, s4, v1, v2', 2)
     loop = [fma] * (body_ops - 1) + list(in_loop) + [
@@ -96,6 +113,8 @@ def synthetic_kernel(body_ops, in_loop=()):
     loop_begin, loop_end = offsets[3], offsets[3 + len(loop)]
     lines = ['%016x <%s>:' % (start, symbol)]
     for (text, words), offset in zip(program, offsets):
+        if text in hidden:
+            continue
         target = {'s_cbranch_scc1 36': loop_end, 's_cbranch_scc0 65501': loop_begin}.get(text)
         lines.append('\t%-40s // %012X:%s%s' % (
             text, start + offset, ' BF800000' * words,
@@ -104,16 +123,24 @@ def synthetic_kernel(body_ops, in_loop=()):
 
 
 def self_test():
-    """The checker accepts the supported loop and rejects extra work inside it."""
+    """The checker accepts the supported loop and rejects extra or undecoded work inside it."""
     def problems(body_ops, **changes):
         return check(body_ops, kernel_layout(*synthetic_kernel(body_ops, **changes))[body_ops])
+    load = 'global_load_dword v3, v0, s[0:1]'
     cases = [
         ('supported layout', problems(16), False),
-        ('in-loop memory load', problems(16, in_loop=[('global_load_dword v3, v0, s[0:1]', 2)]), True),
+        ('in-loop memory load', problems(16, in_loop=[(load, 2)]), True),
         ('in-loop arithmetic', problems(16, in_loop=[('v_add_f32_e32 v1, v1, v2', 1)]), True),
         ('repeated loop control', problems(16, in_loop=[('s_add_i32 s6, s6, -1', 1)]), True),
         ('extra FMA', problems(16, in_loop=[(FMA + ' v1, s4, v1, v2', 2)]), True),
+        # Lines removed while later addresses stay: only byte coverage sees the
+        # hidden load, whose removal leaves 16 FMAs and the right loop control.
+        ('undecoded in-loop instruction', problems(16, in_loop=[(load, 2)], hidden=[load]), True),
+        ('missing loop-control line', problems(16, hidden=['s_cmp_eq_u32 s6, 0']), True),
     ]
+    gap = problems(16, in_loop=[(load, 2)], hidden=[load])
+    if len(gap) != 1 or 'leave a gap' not in gap[0]:
+        raise SystemExit('self-test failed: undecoded instruction not reported as a gap: %s' % gap)
     wrong = [name for name, found, want in cases if bool(found) != want]
     if wrong:
         raise SystemExit('self-test failed: ' + ', '.join(wrong))

@@ -396,6 +396,11 @@ jobs:
       - name: Check cache-latency input ranges (no GPU required)
         run: python3 tests/cache_latency_input_ranges.py --compiler g++
 
+      - name: Check code-fetch-latency input ranges (no GPU required)
+        run: |
+          python3 tests/code_fetch_latency_input_ranges.py --compiler g++
+          python3 tests/code_fetch_latency_input_ranges.py --compiler g++ --source tier1/code_fetch_latency/cuda/code_fetch_latency.cu
+
       - name: Check BFS instrumentation anchors (no GPU required)
         run: python3 tests/bfs_work_counts_test.py
 

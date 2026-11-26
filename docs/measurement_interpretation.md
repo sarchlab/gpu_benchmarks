@@ -48,6 +48,22 @@ array size alone. A timed launch can still incur an initial L1 fill. See the
 [benchmark methodology](../tier1/cache_latency/hip/README.md) for target limits and
 trace replay: preserve the primer's state, exclude its work from measured latency.
 
+## Cold and primed code-fetch entry
+
+`code_fetch_latency` times the same kernel from two entries. `prime_launches=0`
+is default cold entry: the timed launch is the kernel's first in the process.
+`prime_launches=1` adds one untimed launch of that kernel after the optional
+warmer, the resident-code exception to cold entry. The primer stores to its own
+buffer, so the timed launch's output is untouched in both entries. Pair the two
+results of one `body_ops` (minimum over repetitions of each) and subtract; fit
+the difference against code bytes measured from the compiled kernels, not
+against `body_ops`.
+Keep `code_entry`, `prime_launches`, `reps` and `total_ops` with the result.
+Neither entry certifies which cache level holds the code, and code larger than
+the instruction cache makes the primed run refetch. See the
+[benchmark methodology](../tier1/code_fetch_latency/hip/README.md) for the
+compiled-code check, limits and trace replay.
+
 ## Empty dispatch and timing resolution
 
 `empty_kernel.time_ms` is the GPU event interval around one empty dispatch.

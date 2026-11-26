@@ -362,6 +362,29 @@ not performance or a physical cache hit rate. See
 [the benchmark documentation](../tier1/cache_latency/hip/README.md) for interpretation
 and trace-replay requirements.
 
+`python3 tests/code_fetch_latency_input_ranges.py --compiler clang++` runs the
+actual `code_fetch_latency` parameter prefix under host sanitizers without GPU
+access. Its 43 cases cover the supported body sizes with both entries, the
+`total_ops` multiple rule, `prime_launches` and launch-dimension bounds, and
+argv/environment precedence; it also requires the manifest's `body_ops` sweep
+to equal the compiled kernel sizes. `--source` selects the native CUDA source.
+CI runs it with g++ for both sources.
+
+`code_fetch_latency_code_size.py` reads the AMD code objects embedded in a ROCm
+build of `code_fetch_latency` and prints each fetch kernel's code bytes. It
+fails unless every kernel is one loop whose body holds exactly `body_ops` FMA
+instructions. It needs the LLVM tools shipped with ROCm (`--llvm-bin`, default
+`/opt/rocm/llvm/bin`) but no GPU:
+
+```sh
+make -C tier1/code_fetch_latency/hip PLATFORM=rocm
+python3 tests/code_fetch_latency_code_size.py
+```
+
+CI has no ROCm toolchain and does not run it. It reports compiled layout and
+size only; it does not qualify cache behavior, and no NVIDIA equivalent exists.
+See [the benchmark documentation](../tier1/code_fetch_latency/hip/README.md).
+
 `shuffle_output_test.hip` checks every output lane of the production Tier 1
 shuffle kernels against closed-form lane origins, including odd/even operation
 counts, both wave boundaries, multiple blocks and guarded output allocations.

@@ -40,14 +40,14 @@ The rules split cleanly by implementation language: everything that matters when
 
 **Measurement:**
 
-4. **One measurement per execution.** A benchmark binary executes its operation **exactly once** and times it — no in-program warmup or iteration loop. The single run is the **full algorithm**: an iterative benchmark still runs its complete algorithm (BFS its whole traversal, k-means its whole `max_iter` refinement, a stencil all its timesteps) — "once" means the algorithm is not *repeated*, not that it is truncated. The untimed `cache_latency` primer is an explicit entry-policy exception described below.
+4. **One measurement per execution.** A benchmark binary executes its operation **exactly once** and times it — no in-program warmup or iteration loop. The single run is the **full algorithm**: an iterative benchmark still runs its complete algorithm (BFS its whole traversal, k-means its whole `max_iter` refinement, a stencil all its timesteps) — "once" means the algorithm is not *repeated*, not that it is truncated. The untimed primers of `cache_latency` and `code_fetch_latency` are explicit entry-policy exceptions described below.
 
 5. **Cold cache, warm clock is the default entry policy.** Immediately before the timed operation, run the **vector-add warmer**: a grid-stride read-modify-write kernel over a 768 MiB scratch buffer, repeated toward a target of **~100 ms of sustained load**.
 
    - Sustained ALU and memory traffic is intended to raise clocks from idle.
    - Touching the separate scratch buffer is intended to evict the benchmark's working set from the last-level cache without priming its own buffers.
 
-   Verify that the scratch footprint exceeds the relevant cache capacity and qualify clock/cache effects on the target GPU. Benchmarks whose subject requires resident data must document their entry-policy exception. [`cache_latency`](tier1/cache_latency/hip/README.md) runs the warmer first, then an untimed pointer-chase primer, then the timed chase. The primer remains when the warmer is disabled and must be replayed without counting its time in a simulator; actual cache residency still requires target qualification. The warmer is controlled by one measurement parameter read from the environment:
+   Verify that the scratch footprint exceeds the relevant cache capacity and qualify clock/cache effects on the target GPU. Benchmarks whose subject requires resident data must document their entry-policy exception. [`cache_latency`](tier1/cache_latency/hip/README.md) runs the warmer first, then an untimed pointer-chase primer, then the timed chase. The primer remains when the warmer is disabled and must be replayed without counting its time in a simulator; actual cache residency still requires target qualification. [`code_fetch_latency`](tier1/code_fetch_latency/hip/README.md) measures both entries: its `prime_launches` parameter adds an untimed launch of the same kernel (storing to its own buffer) between the warmer and the timed launch, so the kernel's code has been fetched once; with `prime_launches=0` it uses the default cold entry. The warmer is controlled by one measurement parameter read from the environment:
 
    | Parameter | Env var | Default | Meaning |
    |-----------|---------|---------|---------|
@@ -89,7 +89,7 @@ Each benchmark declares its parameters in `params.json`; the sweep is structured
 
 4. **Store raw, derive downstream.** Every run's parameters, per-kernel times, and summary land in SQLite exactly as emitted; GFLOPS/GB/s/latency are computed later by analysis scripts, never at collection time.
 
-5. **Traces omit the warmer.** During NVBit trace collection the harness forces `vector_add_warmup=false`. The raw capture retains benchmark-launched kernels, including `cache_latency`'s untimed primer. Replay must preserve its primed state while excluding primer work from measured latency; see the [cache-latency replay requirements](tier1/cache_latency/hip/README.md).
+5. **Traces omit the warmer.** During NVBit trace collection the harness forces `vector_add_warmup=false`. The raw capture retains benchmark-launched kernels, including the untimed primers of `cache_latency` and `code_fetch_latency`. Replay must preserve the primed state while excluding primer work from the measured time; see the [cache-latency](tier1/cache_latency/hip/README.md) and [code-fetch-latency](tier1/code_fetch_latency/hip/README.md) replay requirements.
 
 ---
 
@@ -97,7 +97,7 @@ Each benchmark declares its parameters in `params.json`; the sweep is structured
 
 | Tier | Name | Description |
 |------|------|-------------|
-| **Tier 1** | Microbenchmarks | Low-level hardware characterization: memory bandwidth, compute throughput (FP32/FP64/FP16/INT32), cache latency, PCIe transfer rates, atomic ops, warp shuffles |
+| **Tier 1** | Microbenchmarks | Low-level hardware characterization: memory bandwidth, compute throughput (FP32/FP64/FP16/INT32), cache latency, code-fetch latency, PCIe transfer rates, atomic ops, warp shuffles |
 | **Tier 2** | Application Benchmarks | Classic GPU benchmark suites: SHOC, PolyBench-GPU, Rodinia, Parboil, HeteroMark, CUDA SDK Extended, NPB-GPU, Altis, Lonestar GPU, Graph Analytics, Chai; financial workloads with unresolved upstream attribution |
 | **Tier 3** | Library Benchmarks | Vendor and third-party library kernels: cuBLAS, CUTLASS, cuFFT, cuSPARSE, cuDNN |
 | **Tier 4** | Alternative Languages | Non-CUDA implementations: Triton, BabelStream |
@@ -111,7 +111,7 @@ Each benchmark declares its parameters in `params.json`; the sweep is structured
 gpu_benchmarks/
 ├── Makefile                        # Root build file
 ├── README.md                       # This file
-├── tier1/                          # Microbenchmarks (13)
+├── tier1/                          # Microbenchmarks (14)
 │   ├── Makefile
 │   ├── memory_bandwidth/
 │   ├── fp32_throughput/
@@ -119,6 +119,7 @@ gpu_benchmarks/
 │   ├── fp16_throughput/
 │   ├── int32_throughput/
 │   ├── cache_latency/
+│   ├── code_fetch_latency/
 │   ├── cache_bandwidth/
 │   ├── pcie_bandwidth/
 │   ├── mixbench/
@@ -268,6 +269,7 @@ The metric column names downstream quantities. See [measurement interpretation](
 | `fp16_throughput` | GFLOPS | Half-precision FP16 FMA throughput (declared grid: one block) |
 | `int32_throughput` | GIOPS | Integer INT32 multiply-add throughput (declared grid: one block) |
 | `cache_latency` | ns | L1/L2/global cache latency via pointer-chasing |
+| `code_fetch_latency` | ns | [Cost of fetching kernel code](tier1/code_fetch_latency/hip/README.md): cold minus primed launch time versus code size |
 | `pcie_bandwidth` | GB/s | PCIe/Thunderbolt host-device transfer bandwidth |
 | `mixbench` | GFLOPS/GB/s | Nominal compute/logical-byte intensity sweep |
 | `shared_mem_bandwidth` | GB/s | Shared/threadgroup memory bandwidth (single SM/CU) |

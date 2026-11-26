@@ -2,10 +2,10 @@
   "benchmark": "code_fetch_latency",
   "tier": 1,
   "suite": "microbench",
-  "description": "Dependent FMA chain of fixed length laid out as a straight-line loop body of body_ops FMAs, one kernel per body size, so the number of dependent FMAs executed stays constant while the code footprint changes; loop-control work does not (smaller bodies run more iterations), so cold and primed times are paired within one body size. Entry is: query the selected kernel's attributes to request that the runtime load it without running it (whether that fully pre-loads it requires target qualification), optional clock/cache warmer, prime_launches untimed launches of the same kernel, then one timed launch. prime_launches=0 is the default cold entry (first dispatch of the kernel in the process), prime_launches=1 is an explicit primed exception. A primer stores to its own output buffer. The primer remains when the warmer is disabled, including trace capture. Derive the first-dispatch minus primed-dispatch GPU event time downstream and fit it against the measured code bytes of each compiled kernel; reading its slope as instruction-fetch cost, and any cache-level attribution, requires target qualification.",
+  "description": "One cold launch per process of a kernel whose loop body is body_ops straight-line dependent operations, executed loops times by a loop that is not unrolled; one kernel per body size and operation kind. Entry is: query the selected kernel's attributes to request that the runtime load it without running it (whether that fully pre-loads it is runtime-specific), optional clock/cache warmer, then the single timed launch, which is the kernel's first dispatch in the process. From times at several body_ops and loops, derive downstream the fixed dispatch cost, the repeat-pass cost per operation (time difference between two loops values divided by the extra operations; it rises when the body no longer fits an instruction-cache level) and the first-pass extra cost (what bringing the code in costs the first time), against the measured code bytes of each compiled kernel. The body's own execution time hides any refetch faster than the body consumes code, which is why the cheap xor_add body exists. The differences do not separate instruction fetch from address translation.",
   "scaling_param": {
     "name": "body_ops",
-    "description": "FMAs in the straight-line loop body; selects the kernel fetch_kernel_<body_ops> and with it the static code footprint",
+    "description": "Operations in the straight-line loop body; selects the kernel fetch_kernel_<body_ops> or fetch_xor_add_kernel_<body_ops> and with it the static code footprint",
     "type": "int",
     "values": [
       16,
@@ -17,27 +17,32 @@
       1024,
       2048,
       4096,
-      8192
+      8192,
+      16384,
+      32768
     ]
   },
   "non_scaling_params": [
     {
-      "name": "total_ops",
-      "description": "FMAs executed per thread (loop iterations = total_ops / body_ops); must be a positive multiple of body_ops, at most 1048576. Held constant so the number of FMAs executed does not change with body_ops",
+      "name": "loops",
+      "description": "Times the loop body is executed in the one timed launch; operations per thread = body_ops * loops, at most 1048576. 1 runs every operation once, on code not executed before; larger values add repeat passes over the same code",
       "type": "int",
-      "default": 16384,
+      "default": 1,
       "values": [
-        16384
+        1,
+        4,
+        8,
+        16
       ]
     },
     {
-      "name": "prime_launches",
-      "description": "Untimed launches of the same kernel between the warmer and the timed launch: 0 = cold entry (timed launch is the first dispatch), 1 = kernel dispatched once before timing",
-      "type": "int",
-      "default": 0,
+      "name": "op",
+      "description": "Body operation. fma: x = fmaf(x, a, b) on float, one instruction per operation. xor_add: x = (x ^ a) + b on unsigned, two cheap instructions per operation, so the body consumes code faster",
+      "type": "enum",
+      "default": "fma",
       "values": [
-        0,
-        1
+        "fma",
+        "xor_add"
       ]
     },
     {
@@ -60,7 +65,7 @@
     },
     {
       "name": "vector_add_warmup",
-      "description": "When true, run the clock/cache warmer BEFORE any untimed primer launch. False skips only the warmer; a requested primer still runs. It does not promise a particular cache or clock state.",
+      "description": "When true, run the clock/cache warmer before the timed launch. It does not promise a particular cache or clock state.",
       "type": "enum",
       "default": "true",
       "values": [
@@ -79,6 +84,20 @@
     "fetch_kernel_1024",
     "fetch_kernel_2048",
     "fetch_kernel_4096",
-    "fetch_kernel_8192"
+    "fetch_kernel_8192",
+    "fetch_kernel_16384",
+    "fetch_kernel_32768",
+    "fetch_xor_add_kernel_16",
+    "fetch_xor_add_kernel_32",
+    "fetch_xor_add_kernel_64",
+    "fetch_xor_add_kernel_128",
+    "fetch_xor_add_kernel_256",
+    "fetch_xor_add_kernel_512",
+    "fetch_xor_add_kernel_1024",
+    "fetch_xor_add_kernel_2048",
+    "fetch_xor_add_kernel_4096",
+    "fetch_xor_add_kernel_8192",
+    "fetch_xor_add_kernel_16384",
+    "fetch_xor_add_kernel_32768"
   ]
 }

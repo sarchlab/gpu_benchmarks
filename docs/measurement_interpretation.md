@@ -48,31 +48,35 @@ array size alone. A timed launch can still incur an initial L1 fill. See the
 [benchmark methodology](../tier1/cache_latency/hip/README.md) for target limits and
 trace replay: preserve the primer's state, exclude its work from measured latency.
 
-## Cold and primed code-fetch entry
+## Code-fetch loop series
 
-`code_fetch_latency` times the same kernel from two entries. Both query the
-selected kernel's attributes before timing to request that the runtime load it
-without running it; whether this fully pre-loads the kernel is established by
-target qualification (it is the documented mechanism for CUDA lazy loading;
-one ROCm 10.2 observation on MI300X is in the benchmark README).
-`prime_launches=0` is default cold
-entry: the timed launch is the kernel's first dispatch in the process.
-`prime_launches=1` adds one untimed launch of that kernel after the optional
-warmer, the primed exception to cold entry. The primer stores to its own
-buffer, so the timed launch does not reuse a primer's output. Pair the two
-results of one `body_ops` (minimum over
-repetitions of each, or the median where event times are bimodal, as observed
-on MI300X) and subtract; fit the difference against code bytes
-measured from the compiled kernels, not against `body_ops`. The difference is
-first-dispatch minus primed-dispatch time. Reading it or its slope as
-instruction-fetch cost requires target qualification: the primer may have run
-on a different SM/CU, address translation and other first-use state also
-differ.
-Keep `code_entry`, `prime_launches`, `reps` and `total_ops` with the result.
-Neither entry certifies which cache level holds the code, and code larger than
-the instruction cache makes the primed run refetch. See the
-[benchmark methodology](../tier1/code_fetch_latency/hip/README.md) for the
-compiled-code check, limits and trace replay.
+`code_fetch_latency` launches one kernel once per process, cold: the timed
+launch is the kernel's first dispatch. The kernel runs a straight-line body of
+`body_ops` operations `loops` times. Before timing it queries the kernel's
+attributes to request that the runtime load it without running it; whether
+this fully pre-loads the kernel is runtime-specific (it is the documented
+mechanism for CUDA lazy loading).
+
+For one `op`, with `T(N, R)` the time at `body_ops = N` and `loops = R`
+(median over repetitions; on MI300X prefer the profiler's dispatch durations,
+since event times were bimodal there):
+
+- repeat-pass cost per operation = `(T(N, R2) − T(N, R1)) / ((R2 − R1) · N)`,
+  the cost of an operation whose code was already fetched once. It rises when
+  the body no longer fits an instruction-cache level;
+- fixed dispatch cost = what `T(N, 1)` tends to as `N` gets small;
+- first-pass extra = `T(N, 1) − fixed cost − N · (repeat-pass cost)`. Fit it
+  against code bytes measured from the compiled kernels, not against
+  `body_ops`.
+
+The body's own execution time hides any refetch faster than the body consumes
+code, so a flat repeat-pass cost bounds the refetch cost without proving that
+an instruction cache holds the body; the cheap `xor_add` body consumes code
+faster than the `fma` body. The first-pass extra does not separate instruction
+fetch from address translation or other first-use work. Keep `body_ops`,
+`loops` and `op` with every result, and compare cells of similar duration.
+See the [benchmark methodology](../tier1/code_fetch_latency/hip/README.md) for
+the compiled-code check, limits and target notes.
 
 ## Empty dispatch and timing resolution
 

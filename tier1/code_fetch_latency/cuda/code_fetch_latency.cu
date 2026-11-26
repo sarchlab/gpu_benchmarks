@@ -4,56 +4,50 @@
  * Native CUDA version of the code_fetch_latency microbenchmark (rename-only port of ../hip/).
  * Compiles with nvcc for NVIDIA GPUs.
  *
- * Microbenchmark for the first-dispatch cost of a kernel as a function of its
- * code size; built to expose the cost of fetching code that has not been
- * executed yet.
+ * Microbenchmark for what a kernel's code costs as a function of its size:
+ * the first pass over code that has not been executed yet, and repeat passes
+ * over code that has.
  *
  * Methodology:
- *   Every thread runs one dependent chain of total_ops fused multiply-adds,
- *   x = fmaf(x, a, b), on register values. The chain is laid out as a
- *   straight-line body of body_ops FMAs inside a loop of
- *   reps = total_ops / body_ops iterations. The number of dependent FMAs
- *   executed is therefore the same for every body_ops while the static code
- *   footprint changes; loop-control work is not the same (smaller bodies run
- *   more iterations), so cold and primed times are paired within one body
- *   size. One kernel exists per supported body size, so a launch fetches only
- *   the code of the size under test.
+ *   Each process launches one kernel once. Every thread runs a straight-line
+ *   body of body_ops dependent operations on register values, `loops` times,
+ *   in a loop that is not unrolled, and stores the result once. One kernel
+ *   exists per body size and operation kind, so a launch fetches only the
+ *   code of the size under test.
  *
- *   Entry policy: query the selected kernel's attributes, which requests
- *   that the runtime load it without running it, then the optional vector-add
- *   clock/cache warmer, then prime_launches untimed launches of the same
- *   kernel, then one timed launch. Whether the query fully pre-loads the
- *   kernel is established by target qualification. With
- *   prime_launches=0 the timed launch is the first dispatch of that kernel in
- *   the process (the suite's default cold entry). With prime_launches=1 the
- *   kernel was dispatched once already: an explicit primed exception to cold
- *   entry. Keep the primer during tracing. A primer runs the same kernel
- *   with the same reps but stores to its own buffer, so the timed launch does
- *   not reuse a primer's output. The raw result is first-dispatch minus
- *   primed-dispatch time at one body size; reading its growth with code size
- *   as instruction-fetch cost requires target qualification (see README).
+ *   `op` selects the body operation:
+ *     fma      x = fmaf(x, a, b) on float: one instruction per operation.
+ *     xor_add  x = (x ^ a) + b on unsigned: two cheap instructions per
+ *              operation, so the body consumes code faster than the FMA body.
+ *
+ *   Entry: query the selected kernel's attributes, which requests that the
+ *   runtime load it without running it, then the optional vector-add
+ *   clock/cache warmer, then the single timed launch. The timed launch is the
+ *   first dispatch of that kernel in the process.
+ *
+ *   With T(N, R) the time for body_ops N and loops R, the fixed dispatch cost,
+ *   the repeat-pass cost per operation and the first-pass extra cost are
+ *   derived downstream from several runs (see README).
  *
  * Usage:
  *   ./code_fetch_latency [body_ops]
  *
  * Environment variables (override argv):
- *   BENCH_PARAM_body_ops           (a power of two from 16 to 8192;
+ *   BENCH_PARAM_body_ops           (a power of two from 16 to 32768;
  *                                   default 256)
- *   BENCH_PARAM_total_ops          (default 16384; positive multiple of
- *                                   body_ops, at most 1048576)
- *   BENCH_PARAM_prime_launches     (0 or 1; default 0)
+ *   BENCH_PARAM_loops              (default 1; at least 1, with
+ *                                   body_ops * loops at most 1048576)
+ *   BENCH_PARAM_op                 (fma or xor_add; default fma)
  *   BENCH_PARAM_num_blocks         (default 1)
  *   BENCH_PARAM_threads_per_block  (default 64)
  *   BENCH_PARAM_vector_add_warmup  (default true; clock-boost + LLC-evict
- *                                   warmer before the primer/timed launch)
+ *                                   warmer before the timed launch)
  * Integer parameters must be whole decimal numbers in range; anything else
  * is rejected before device access.
  *
  * Output: one {"type":"kernel",...} JSON line for the single timed launch,
  * carrying the GPU event time and host wall-clock time, then a summary whose
- * total_time_ms equals it. The primer has no timing record. The
- * first-dispatch minus primed-dispatch difference is derived downstream from
- * pairs of runs.
+ * total_time_ms equals it.
  */
 
 #include <cerrno>
@@ -61,6 +55,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <vector>
 
@@ -76,187 +71,145 @@
 // Constants (defaults)
 // ---------------------------------------------------------------------------
 
-static const int DEFAULT_BODY_OPS          = 256;    // FMAs in the straight-line loop body
+static const int DEFAULT_BODY_OPS          = 256;    // operations in the straight-line loop body
 static const int MIN_BODY_OPS              = 16;     // smallest compiled body
-static const int MAX_BODY_OPS              = 8192;   // largest compiled body
-static const int DEFAULT_TOTAL_OPS         = 16384;  // FMAs executed per thread, any body size
-static const int MAX_TOTAL_OPS             = 1 << 20; // keeps the chain finite and the host reference cheap
-static const int DEFAULT_PRIME_LAUNCHES    = 0;      // cold entry
+static const int MAX_BODY_OPS              = 32768;  // largest compiled body
+static const int DEFAULT_LOOPS             = 1;      // one pass: every operation runs once, cold
+static const int MAX_CHAIN_OPS             = 1 << 20; // body_ops * loops; keeps the FMA chain finite and the host reference cheap
 static const int DEFAULT_NUM_BLOCKS        = 1;      // one block: single SM/CU
 static const int DEFAULT_THREADS_PER_BLOCK = 64;     // one AMD wavefront
 static const int MAX_THREADS_PER_BLOCK     = 1024;   // launch limit on supported targets
 
 /* Chain coefficients. They reach the kernels as runtime arguments so the
- * compiler cannot fold the chain. Every FMA strictly increases x, and x stays
- * finite for any admitted total_ops (at most MAX_TOTAL_OPS). */
+ * compiler cannot fold a chain. Every FMA strictly increases x, and x stays
+ * finite for any admitted chain (at most MAX_CHAIN_OPS operations). */
 static const float FETCH_MUL = 1.0000001f;
 static const float FETCH_ADD = 0.0000001f;
+/* Integer chain: x -> (x ^ FETCH_XOR) + FETCH_INC, exact with uint32 wraparound. */
+static const unsigned FETCH_XOR = 0x9E3779B9u;
+static const unsigned FETCH_INC = 0x7F4A7C15u;
 
 // ---------------------------------------------------------------------------
 // Code-fetch kernels
 // ---------------------------------------------------------------------------
 
-/* Straight-line bodies of exactly N dependent FMAs, by doubling. */
-#define FETCH_OPS_1    x = fmaf(x, a, b);
-#define FETCH_OPS_2    FETCH_OPS_1 FETCH_OPS_1
-#define FETCH_OPS_4    FETCH_OPS_2 FETCH_OPS_2
-#define FETCH_OPS_8    FETCH_OPS_4 FETCH_OPS_4
-#define FETCH_OPS_16   FETCH_OPS_8 FETCH_OPS_8
-#define FETCH_OPS_32   FETCH_OPS_16 FETCH_OPS_16
-#define FETCH_OPS_64   FETCH_OPS_32 FETCH_OPS_32
-#define FETCH_OPS_128  FETCH_OPS_64 FETCH_OPS_64
-#define FETCH_OPS_256  FETCH_OPS_128 FETCH_OPS_128
-#define FETCH_OPS_512  FETCH_OPS_256 FETCH_OPS_256
-#define FETCH_OPS_1024 FETCH_OPS_512 FETCH_OPS_512
-#define FETCH_OPS_2048 FETCH_OPS_1024 FETCH_OPS_1024
-#define FETCH_OPS_4096 FETCH_OPS_2048 FETCH_OPS_2048
-#define FETCH_OPS_8192 FETCH_OPS_4096 FETCH_OPS_4096
+/* One body operation of each kind. */
+#define FETCH_FMA      x = fmaf(x, a, b);
+#define FETCH_XOR_ADD  x = (x ^ a) + b;
 
-/* Chain seed of a block's thread: 1 + thread/1024, exact in float for every
- * launchable thread index, so device and host start from identical bits
+/* Straight-line bodies of exactly N copies of one operation, by doubling. */
+#define FETCH_OPS_1(OP)     OP
+#define FETCH_OPS_2(OP)     FETCH_OPS_1(OP) FETCH_OPS_1(OP)
+#define FETCH_OPS_4(OP)     FETCH_OPS_2(OP) FETCH_OPS_2(OP)
+#define FETCH_OPS_8(OP)     FETCH_OPS_4(OP) FETCH_OPS_4(OP)
+#define FETCH_OPS_16(OP)    FETCH_OPS_8(OP) FETCH_OPS_8(OP)
+#define FETCH_OPS_32(OP)    FETCH_OPS_16(OP) FETCH_OPS_16(OP)
+#define FETCH_OPS_64(OP)    FETCH_OPS_32(OP) FETCH_OPS_32(OP)
+#define FETCH_OPS_128(OP)   FETCH_OPS_64(OP) FETCH_OPS_64(OP)
+#define FETCH_OPS_256(OP)   FETCH_OPS_128(OP) FETCH_OPS_128(OP)
+#define FETCH_OPS_512(OP)   FETCH_OPS_256(OP) FETCH_OPS_256(OP)
+#define FETCH_OPS_1024(OP)  FETCH_OPS_512(OP) FETCH_OPS_512(OP)
+#define FETCH_OPS_2048(OP)  FETCH_OPS_1024(OP) FETCH_OPS_1024(OP)
+#define FETCH_OPS_4096(OP)  FETCH_OPS_2048(OP) FETCH_OPS_2048(OP)
+#define FETCH_OPS_8192(OP)  FETCH_OPS_4096(OP) FETCH_OPS_4096(OP)
+#define FETCH_OPS_16384(OP) FETCH_OPS_8192(OP) FETCH_OPS_8192(OP)
+#define FETCH_OPS_32768(OP) FETCH_OPS_16384(OP) FETCH_OPS_16384(OP)
+
+/* Every compiled body size: each power of two from MIN_BODY_OPS to
+ * MAX_BODY_OPS. Kernels and their dispatch are generated from this one list. */
+#define FETCH_FOR_EACH_SIZE(X) \
+    X(16) X(32) X(64) X(128) X(256) X(512) X(1024) X(2048) X(4096) X(8192) \
+    X(16384) X(32768)
+
+/* FMA chain seed of a block's thread: 1 + thread/1024, exact in float for
+ * every launchable thread index, so device and host start from identical bits
  * whether or not a compiler contracts the multiply-add. */
 #define FETCH_SEED(thread) (1.0f + static_cast<float>(thread) * 0.0009765625f)
-/* The single store that makes the chain observable. */
+/* Integer chain seed of a block's thread. */
+#define FETCH_INT_SEED(thread) (static_cast<unsigned>(thread) * 2654435761u + 1u)
+/* The single store that makes a chain observable. */
 #define FETCH_STORE(value) \
     out[static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x] = (value)
 
 /**
  * fetch_kernel_<body_ops> — each thread runs reps * body_ops dependent FMAs.
+ * fetch_xor_add_kernel_<body_ops> — the same with the integer operation.
  *
- * The loop body is body_ops straight-line FMAs; `#pragma unroll 1` keeps the
+ * The loop body is body_ops straight-line operations; `unroll 1` keeps the
  * compiler from unrolling the loop, which would change the code footprint.
  * Check the compiled code before using a result (see README).
  *
- * @param out   Device array with one float per launched thread.
+ * @param out   Device array with one element per launched thread.
  * @param a, b  Chain coefficients (runtime values).
- * @param reps  Loop iterations; total FMAs per thread = reps * body_ops.
+ * @param reps  Loop iterations (`loops`); operations per thread = reps * body_ops.
  */
-__global__ void fetch_kernel_16(float *out, float a, float b, int reps)
-{
-    float x = FETCH_SEED(threadIdx.x);
-#pragma unroll 1
-    for (int r = 0; r < reps; ++r) { FETCH_OPS_16 }
-    FETCH_STORE(x);
-}
+#define FETCH_DEFINE_FMA_KERNEL(N)                                             \
+    __global__ void fetch_kernel_##N(float *out, float a, float b, int reps)   \
+    {                                                                          \
+        float x = FETCH_SEED(threadIdx.x);                                     \
+        _Pragma("unroll 1")                                                    \
+        for (int r = 0; r < reps; ++r) { FETCH_OPS_##N(FETCH_FMA) }            \
+        FETCH_STORE(x);                                                        \
+    }
 
-__global__ void fetch_kernel_32(float *out, float a, float b, int reps)
-{
-    float x = FETCH_SEED(threadIdx.x);
-#pragma unroll 1
-    for (int r = 0; r < reps; ++r) { FETCH_OPS_32 }
-    FETCH_STORE(x);
-}
+#define FETCH_DEFINE_XOR_ADD_KERNEL(N)                                         \
+    __global__ void fetch_xor_add_kernel_##N(unsigned *out, unsigned a,        \
+                                             unsigned b, int reps)             \
+    {                                                                          \
+        unsigned x = FETCH_INT_SEED(threadIdx.x);                              \
+        _Pragma("unroll 1")                                                    \
+        for (int r = 0; r < reps; ++r) { FETCH_OPS_##N(FETCH_XOR_ADD) }        \
+        FETCH_STORE(x);                                                        \
+    }
 
-__global__ void fetch_kernel_64(float *out, float a, float b, int reps)
-{
-    float x = FETCH_SEED(threadIdx.x);
-#pragma unroll 1
-    for (int r = 0; r < reps; ++r) { FETCH_OPS_64 }
-    FETCH_STORE(x);
-}
-
-__global__ void fetch_kernel_128(float *out, float a, float b, int reps)
-{
-    float x = FETCH_SEED(threadIdx.x);
-#pragma unroll 1
-    for (int r = 0; r < reps; ++r) { FETCH_OPS_128 }
-    FETCH_STORE(x);
-}
-
-__global__ void fetch_kernel_256(float *out, float a, float b, int reps)
-{
-    float x = FETCH_SEED(threadIdx.x);
-#pragma unroll 1
-    for (int r = 0; r < reps; ++r) { FETCH_OPS_256 }
-    FETCH_STORE(x);
-}
-
-__global__ void fetch_kernel_512(float *out, float a, float b, int reps)
-{
-    float x = FETCH_SEED(threadIdx.x);
-#pragma unroll 1
-    for (int r = 0; r < reps; ++r) { FETCH_OPS_512 }
-    FETCH_STORE(x);
-}
-
-__global__ void fetch_kernel_1024(float *out, float a, float b, int reps)
-{
-    float x = FETCH_SEED(threadIdx.x);
-#pragma unroll 1
-    for (int r = 0; r < reps; ++r) { FETCH_OPS_1024 }
-    FETCH_STORE(x);
-}
-
-__global__ void fetch_kernel_2048(float *out, float a, float b, int reps)
-{
-    float x = FETCH_SEED(threadIdx.x);
-#pragma unroll 1
-    for (int r = 0; r < reps; ++r) { FETCH_OPS_2048 }
-    FETCH_STORE(x);
-}
-
-__global__ void fetch_kernel_4096(float *out, float a, float b, int reps)
-{
-    float x = FETCH_SEED(threadIdx.x);
-#pragma unroll 1
-    for (int r = 0; r < reps; ++r) { FETCH_OPS_4096 }
-    FETCH_STORE(x);
-}
-
-__global__ void fetch_kernel_8192(float *out, float a, float b, int reps)
-{
-    float x = FETCH_SEED(threadIdx.x);
-#pragma unroll 1
-    for (int r = 0; r < reps; ++r) { FETCH_OPS_8192 }
-    FETCH_STORE(x);
-}
+FETCH_FOR_EACH_SIZE(FETCH_DEFINE_FMA_KERNEL)
+FETCH_FOR_EACH_SIZE(FETCH_DEFINE_XOR_ADD_KERNEL)
 
 // ---------------------------------------------------------------------------
 // Host helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Request that the runtime load the kernel whose loop body holds body_ops
- * FMAs, without dispatching it, by querying its attributes. Runtimes may defer
- * loading a kernel's code to its first launch; the query is made before timing
- * in both entries so that work need not fall inside the timed bracket. Whether
- * it fully pre-loads a kernel is runtime-specific (see README).
+ * Request that the runtime load the selected kernel, without dispatching it,
+ * by querying its attributes. Runtimes may defer loading a kernel's code to
+ * its first launch; the query is made before timing so that work need not
+ * fall inside the timed bracket. Whether it fully pre-loads a kernel is
+ * runtime-specific (see README).
  */
-static void load_fetch_kernel(int body_ops)
+static void load_fetch_kernel(bool xor_add, int body_ops)
 {
     const void *kernel = nullptr;
     switch (body_ops) {
-    case 16:   kernel = reinterpret_cast<const void *>(fetch_kernel_16);   break;
-    case 32:   kernel = reinterpret_cast<const void *>(fetch_kernel_32);   break;
-    case 64:   kernel = reinterpret_cast<const void *>(fetch_kernel_64);   break;
-    case 128:  kernel = reinterpret_cast<const void *>(fetch_kernel_128);  break;
-    case 256:  kernel = reinterpret_cast<const void *>(fetch_kernel_256);  break;
-    case 512:  kernel = reinterpret_cast<const void *>(fetch_kernel_512);  break;
-    case 1024: kernel = reinterpret_cast<const void *>(fetch_kernel_1024); break;
-    case 2048: kernel = reinterpret_cast<const void *>(fetch_kernel_2048); break;
-    case 4096: kernel = reinterpret_cast<const void *>(fetch_kernel_4096); break;
-    case 8192: kernel = reinterpret_cast<const void *>(fetch_kernel_8192); break;
+#define FETCH_CASE(N)                                                          \
+    case N:                                                                    \
+        kernel = xor_add ? reinterpret_cast<const void *>(fetch_xor_add_kernel_##N) \
+                         : reinterpret_cast<const void *>(fetch_kernel_##N);   \
+        break;
+    FETCH_FOR_EACH_SIZE(FETCH_CASE)
+#undef FETCH_CASE
     }
     cudaFuncAttributes attributes;
     CUDA_CHECK(cudaFuncGetAttributes(&attributes, kernel));
 }
 
-/** Launch the kernel whose loop body holds body_ops FMAs. */
-static void launch_fetch_kernel(int body_ops, int num_blocks,
-                                int threads_per_block, float *out, int reps)
+/** Launch the selected kernel; `out` holds one 4-byte element per thread. */
+static void launch_fetch_kernel(bool xor_add, int body_ops, int num_blocks,
+                                int threads_per_block, void *out, int reps)
 {
     const dim3 grid(num_blocks), block(threads_per_block);
     switch (body_ops) {
-    case 16:   fetch_kernel_16<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps);   break;
-    case 32:   fetch_kernel_32<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps);   break;
-    case 64:   fetch_kernel_64<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps);   break;
-    case 128:  fetch_kernel_128<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps);  break;
-    case 256:  fetch_kernel_256<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps);  break;
-    case 512:  fetch_kernel_512<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps);  break;
-    case 1024: fetch_kernel_1024<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps); break;
-    case 2048: fetch_kernel_2048<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps); break;
-    case 4096: fetch_kernel_4096<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps); break;
-    case 8192: fetch_kernel_8192<<<grid, block>>>(out, FETCH_MUL, FETCH_ADD, reps); break;
+#define FETCH_CASE(N)                                                          \
+    case N:                                                                    \
+        if (xor_add) {                                                         \
+            fetch_xor_add_kernel_##N<<<grid, block>>>(                         \
+                static_cast<unsigned *>(out), FETCH_XOR, FETCH_INC, reps);     \
+        } else {                                                               \
+            fetch_kernel_##N<<<grid, block>>>(                                 \
+                static_cast<float *>(out), FETCH_MUL, FETCH_ADD, reps);        \
+        }                                                                      \
+        break;
+    FETCH_FOR_EACH_SIZE(FETCH_CASE)
+#undef FETCH_CASE
     }
 }
 
@@ -275,18 +228,26 @@ static bool parse_int(const char *text, int min_value, int max_value, int *value
     return true;
 }
 
-/** Host chain for one thread of a block: the value its kernel must store. */
-static float reference_chain(int thread_in_block, int total_ops)
+/** Host FMA chain for one thread of a block: the value its kernel must store. */
+static float reference_chain(int thread_in_block, int chain_ops)
 {
     float x = FETCH_SEED(thread_in_block);
-    for (int i = 0; i < total_ops; ++i) x = fmaf(x, FETCH_MUL, FETCH_ADD);
+    for (int i = 0; i < chain_ops; ++i) x = fmaf(x, FETCH_MUL, FETCH_ADD);
+    return x;
+}
+
+/** Host integer chain for one thread of a block. */
+static unsigned reference_int_chain(int thread_in_block, int chain_ops)
+{
+    unsigned x = FETCH_INT_SEED(thread_in_block);
+    for (int i = 0; i < chain_ops; ++i) x = (x ^ FETCH_XOR) + FETCH_INC;
     return x;
 }
 
 /**
- * A stored value is right only when it is finite and exactly the host chain's
- * value. Seed and FMAs are exact on both sides and every FMA changes x, so a
- * chain with a missing or extra loop iteration never matches.
+ * A stored FMA value is right only when it is finite and exactly the host
+ * chain's value. Seed and FMAs are exact on both sides and every FMA changes
+ * x, so a chain with a missing or extra loop iteration never matches.
  */
 static bool chain_value_matches(float got, float want)
 {
@@ -294,24 +255,39 @@ static bool chain_value_matches(float got, float want)
 }
 
 /**
- * Compare one launch's device output with the host chain; returns the number
- * of threads that differ. `expected` holds one value per thread of a block.
+ * Compare the launch's device output with the host chain; returns the number
+ * of threads that differ.
  */
-static size_t count_mismatches(const float *d_out, size_t total_threads,
-                               const std::vector<float> &expected,
-                               const char *launch)
+static size_t count_mismatches(bool xor_add, const void *d_out, size_t total_threads,
+                               int threads_per_block, int chain_ops)
 {
-    std::vector<float> h_out(total_threads);
-    CUDA_CHECK(cudaMemcpy(h_out.data(), d_out, total_threads * sizeof(float),
+    std::vector<unsigned> h_bits(total_threads);
+    CUDA_CHECK(cudaMemcpy(h_bits.data(), d_out, total_threads * sizeof(unsigned),
                         cudaMemcpyDeviceToHost));
     size_t errors = 0;
+    std::vector<float> want_fma(xor_add ? 0 : threads_per_block);
+    std::vector<unsigned> want_int(xor_add ? threads_per_block : 0);
+    for (int t = 0; t < threads_per_block; ++t) {
+        if (xor_add) want_int[t] = reference_int_chain(t, chain_ops);
+        else want_fma[t] = reference_chain(t, chain_ops);
+    }
     for (size_t i = 0; i < total_threads; ++i) {
-        const float want = expected[i % expected.size()];
-        const float got = h_out[i];
-        if (!chain_value_matches(got, want)) {
-            if (errors < 10) {
-                fprintf(stderr, "Mismatch in %s launch at thread %zu: GPU=%.9g CPU=%.9g\n",
-                        launch, i, got, want);
+        const size_t t = i % static_cast<size_t>(threads_per_block);
+        bool match;
+        float got_fma = 0.0f;
+        if (xor_add) {
+            match = h_bits[i] == want_int[t];
+        } else {
+            memcpy(&got_fma, &h_bits[i], sizeof(got_fma));
+            match = chain_value_matches(got_fma, want_fma[t]);
+        }
+        if (!match) {
+            if (errors < 10 && xor_add) {
+                fprintf(stderr, "Mismatch at thread %zu: GPU=0x%08x CPU=0x%08x\n",
+                        i, h_bits[i], want_int[t]);
+            } else if (errors < 10) {
+                fprintf(stderr, "Mismatch at thread %zu: GPU=%.9g CPU=%.9g\n",
+                        i, got_fma, want_fma[t]);
             }
             ++errors;
         }
@@ -344,20 +320,21 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    int total_ops = DEFAULT_TOTAL_OPS;
-    env_val = getenv("BENCH_PARAM_total_ops");
-    if ((env_val && !parse_int(env_val, 1, MAX_TOTAL_OPS, &total_ops)) ||
-        total_ops % body_ops != 0) {
-        fprintf(stderr, "Invalid total_ops: need a positive multiple of body_ops, at most %d\n",
-                MAX_TOTAL_OPS);
+    int loops = DEFAULT_LOOPS;
+    env_val = getenv("BENCH_PARAM_loops");
+    if (env_val && !parse_int(env_val, 1, MAX_CHAIN_OPS / body_ops, &loops)) {
+        fprintf(stderr, "Invalid loops: need a positive integer with body_ops * loops at most %d\n",
+                MAX_CHAIN_OPS);
         return EXIT_FAILURE;
     }
-    const int reps = total_ops / body_ops;
+    const int chain_ops = body_ops * loops;
 
-    int prime_launches = DEFAULT_PRIME_LAUNCHES;
-    env_val = getenv("BENCH_PARAM_prime_launches");
-    if (env_val && !parse_int(env_val, 0, 1, &prime_launches)) {
-        fprintf(stderr, "Invalid prime_launches: need 0 or 1\n");
+    const char *op = "fma";
+    env_val = getenv("BENCH_PARAM_op");
+    if (env_val) op = env_val;
+    const bool xor_add = strcmp(op, "xor_add") == 0;
+    if (!xor_add && strcmp(op, "fma") != 0) {
+        fprintf(stderr, "Invalid op: need fma or xor_add\n");
         return EXIT_FAILURE;
     }
 
@@ -375,9 +352,9 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    // Validate before multiplying: each output buffer owns one element per thread.
+    // Validate before multiplying: the output buffer owns one 4-byte element per thread.
     if (static_cast<size_t>(num_blocks) >
-            std::numeric_limits<size_t>::max() / sizeof(float) /
+            std::numeric_limits<size_t>::max() / sizeof(unsigned) /
                 static_cast<size_t>(threads_per_block)) {
         fprintf(stderr, "Launch dimensions overflow the output size\n");
         return EXIT_FAILURE;
@@ -391,93 +368,57 @@ int main(int argc, char *argv[])
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id));
 
-    char kernel_name[32];
-    snprintf(kernel_name, sizeof(kernel_name), "fetch_kernel_%d", body_ops);
+    char kernel_name[40];
+    snprintf(kernel_name, sizeof(kernel_name), "%s_%d",
+             xor_add ? "fetch_xor_add_kernel" : "fetch_kernel", body_ops);
 
     fprintf(stderr, "=== code_fetch_latency microbenchmark ===\n");
     fprintf(stderr, "Device         : %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Kernel         : %s\n", kernel_name);
-    fprintf(stderr, "Chain          : %d FMAs/thread = %d reps x %d body FMAs\n",
-            total_ops, reps, body_ops);
+    fprintf(stderr, "Chain          : %d %s ops/thread = %d loops x %d body ops\n",
+            chain_ops, op, loops, body_ops);
     fprintf(stderr, "Grid           : %d blocks x %d threads = %zu total threads\n",
             num_blocks, threads_per_block, total_threads);
-    fprintf(stderr, "Entry policy   : kernel attribute query -> optional warmer -> %d untimed primer launch(es) -> timed launch\n\n",
-            prime_launches);
+    fprintf(stderr, "Entry policy   : kernel attribute query -> optional warmer -> timed launch\n\n");
 
-    /* Query the selected kernel's attributes before timing, in either entry,
-     * to request that the runtime load it without running it. Whether that
-     * fully pre-loads the kernel is established by target qualification. The
-     * cold timed launch is still the kernel's first dispatch. */
-    load_fetch_kernel(body_ops);
+    /* Query the selected kernel's attributes before timing to request that
+     * the runtime load it without running it. Whether that fully pre-loads
+     * the kernel is runtime-specific. The timed launch is still the kernel's
+     * first dispatch. */
+    load_fetch_kernel(xor_add, body_ops);
 
-    /* The timed launch and the primer each own an output buffer, so a primer
-     * never touches the memory the timed launch stores to. Both are set up in
-     * either entry, keeping everything before the warmer identical. Every
-     * element starts as NaN (all-ones bytes), so a thread that never stores
-     * is caught by verification. */
-    const size_t out_bytes = total_threads * sizeof(float);
-    float *d_out = nullptr;
-    float *d_primer_out = nullptr;
+    /* One 4-byte element per thread, float or unsigned by operation kind.
+     * Every byte starts as 0xFF: a float thread that never stores leaves a
+     * NaN, which verification rejects. */
+    const size_t out_bytes = total_threads * sizeof(unsigned);
+    void *d_out = nullptr;
     CUDA_CHECK(cudaMalloc(&d_out, out_bytes));
-    CUDA_CHECK(cudaMalloc(&d_primer_out, out_bytes));
     CUDA_CHECK(cudaMemset(d_out, 0xFF, out_bytes));
-    CUDA_CHECK(cudaMemset(d_primer_out, 0xFF, out_bytes));
-
-    /* Condition clocks/cache first. Nothing but the optional primer may run
-     * between here and the timed launch. */
-    bench_pass_warm();
-
-    /* Primed entry exception: dispatch this kernel once, untimed, storing to
-     * the primer's own buffer. Retained when the clock warmer is disabled
-     * (including trace collection). */
-    for (int i = 0; i < prime_launches; ++i) {
-        launch_fetch_kernel(body_ops, num_blocks, threads_per_block, d_primer_out, reps);
-        CUDA_CHECK(cudaGetLastError());
-        CUDA_CHECK(cudaDeviceSynchronize());
-    }
 
     char params[256];
     snprintf(params, sizeof(params),
-             "\"body_ops\":%d,\"total_ops\":%d,\"reps\":%d,"
-             "\"prime_launches\":%d,\"num_blocks\":%d,\"threads_per_block\":%d,"
-             "\"code_entry\":\"%s\"",
-             body_ops, total_ops, reps, prime_launches, num_blocks,
-             threads_per_block, prime_launches ? "primed" : "cold");
+             "\"body_ops\":%d,\"loops\":%d,\"op\":\"%s\","
+             "\"num_blocks\":%d,\"threads_per_block\":%d",
+             body_ops, loops, op, num_blocks, threads_per_block);
 
-    /* Use the event timer directly so bench_run_once cannot insert another
-     * warmer between the primer and the measured launch. */
-    bench_timer_t timer;
-    bench_timer_create(&timer);
-    bench_lap_t lap = bench_time_op(&timer, [&]() {
-        launch_fetch_kernel(body_ops, num_blocks, threads_per_block, d_out, reps);
+    /* Optional warmer, then the single timed launch: the kernel's first
+     * dispatch in this process. */
+    const double total_gpu_ms = bench_run_once(kernel_name, params, [&]() {
+        launch_fetch_kernel(xor_add, body_ops, num_blocks, threads_per_block, d_out, loops);
     });
-    bench_timer_destroy(&timer);
-    bench_emit_iter(kernel_name, 0, &lap, params);
-    double total_gpu_ms = lap.gpu_ms;
-    fprintf(stderr, "%s: gpu = %.3f ms, host = %.3f ms\n",
-            kernel_name, lap.gpu_ms, lap.host_ms);
 
     bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
-    /* Verify every thread's stored chain value against the host chain: the
-     * timed launch on its own, and the primer when one ran. */
-    std::vector<float> expected(threads_per_block);
-    for (int t = 0; t < threads_per_block; ++t) {
-        expected[t] = reference_chain(t, total_ops);
-    }
-    size_t errors = count_mismatches(d_out, total_threads, expected, "timed");
-    if (prime_launches > 0) {
-        errors += count_mismatches(d_primer_out, total_threads, expected, "primer");
-    }
+    /* Verify every thread's stored chain value against the host chain. */
+    const size_t errors =
+        count_mismatches(xor_add, d_out, total_threads, threads_per_block, chain_ops);
     CUDA_CHECK(cudaFree(d_out));
-    CUDA_CHECK(cudaFree(d_primer_out));
     if (errors > 0) {
         fprintf(stderr, "FAIL: %zu stored values differ from the host chain\n", errors);
         return EXIT_FAILURE;
     }
-    fprintf(stderr, "PASS: %zu threads match the host chain%s\n", total_threads,
-            prime_launches > 0 ? " in the timed and primer launches" : "");
+    fprintf(stderr, "PASS: %zu threads match the host chain\n", total_threads);
 
     fprintf(stderr, "\nDone.\n");
     return EXIT_SUCCESS;

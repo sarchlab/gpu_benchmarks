@@ -8,6 +8,9 @@
 
 BENCHMARKS := memory_bandwidth fp32_throughput fp64_throughput fp16_throughput int32_throughput cache_latency cache_bandwidth pcie_bandwidth mixbench shared_mem_bandwidth atomic_operations warp_shuffle empty_kernel
 
+# ROCm-only benchmarks. Their hip/ Makefile builds nothing for PLATFORM=cuda.
+BENCHMARKS += instruction_cost
+
 PLATFORM ?= auto
 ifeq ($(PLATFORM),auto)
   ifneq ($(wildcard /opt/rocm),)

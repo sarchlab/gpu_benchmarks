@@ -13,6 +13,7 @@ Every benchmark directory contains a `params.json` file that fully describes the
   "suite": "<string>",
   "description": "<string>",
   "language": "<string>",
+  "platforms": [ "<string>", ... ],
   "scaling_param": { ... },
   "non_scaling_params": [ ... ],
   "kernels": [ "<string>", ... ],
@@ -31,6 +32,7 @@ Every benchmark directory contains a `params.json` file that fully describes the
 | `suite` | string | **yes** | Suite name within the tier (e.g., `"microbench"`, `"rodinia"`, `"shoc"`, `"vendor_library"`, `"triton"`, `"ml_inference"`) |
 | `description` | string | **yes** | Human-readable description of what the benchmark measures |
 | `language` | string | no | `"cpp"` (default) or `"python"`. Determines compile/run strategy. Tier 1–3 default to `"cpp"`, Tier 4–5 default to `"python"` |
+| `platforms` | array | no | Platforms the benchmark exists for: `"cuda"`, `"rocm"`, or both. Omit it for a benchmark that builds on every platform. `gpubench` skips the benchmark on a platform that is not listed (see [Platform-specific benchmarks](#platform-specific-benchmarks)) |
 | `scaling_param` | object | **yes** | The single scaling parameter (see below) |
 | `non_scaling_params` | array | **yes** | Zero or more non-scaling parameters (see below) |
 | `kernels` | array | **yes** | List of kernel names emitted by this benchmark. An empty `[]` disables output name checking for compatibility, but a successful run still needs at least one timed `kernel` event |
@@ -102,6 +104,20 @@ Describes metrics emitted by legacy or higher-tier producers. Tier 1/Tier 2 repo
 |-------|------|----------|-------------|
 | `name` | string | **yes** | Metric name, matches the metric object’s `name` in the output protocol |
 | `description` | string | **yes** | Human-readable description |
+
+## Platform-specific benchmarks
+
+A benchmark normally builds for both platforms from `hip/` (and its `cuda/`
+port). One that cannot, such as `instruction_cost`, whose kernels are
+hand-written gfx942 assembly, declares where it exists:
+
+```json
+{ "platforms": ["rocm"] }
+```
+
+`gpubench list`, `compile`, and `run` then leave it out on every other
+platform. The benchmark's own Makefile must also build nothing for an unlisted
+`PLATFORM`, because the tier Makefile still enters its directory.
 
 ## Type Rules
 

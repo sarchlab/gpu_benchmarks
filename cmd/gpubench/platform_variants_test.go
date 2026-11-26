@@ -74,6 +74,51 @@ func TestDiscoverBenchmarksSkipsCudaOnlyOnRocm(t *testing.T) {
 	}
 }
 
+func TestDiscoverBenchmarksHonorsPlatformsList(t *testing.T) {
+	root := t.TempDir()
+	p := baseValidParams("rocmonly")
+	p["platforms"] = []interface{}{"rocm"}
+	data, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// hip/ is the tree cuda falls back to, so only the list keeps cuda away.
+	writeTestFile(t, filepath.Join(root, "tier1", "rocmonly", "hip", "params.json"), string(data))
+	if got := discoverBenchmarks(root, nil, "", "", "cuda"); len(got) != 0 {
+		t.Fatalf("cuda discovered a rocm-only benchmark: %d", len(got))
+	}
+	if got := discoverBenchmarks(root, nil, "", "rocmonly", "rocm"); len(got) != 1 {
+		t.Fatalf("rocm discovered %d benchmarks, want 1", len(got))
+	}
+}
+
+func TestValidateParamsChecksPlatformsList(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		platforms interface{}
+		wantErr   string
+	}{
+		{"one platform", []interface{}{"rocm"}, ""},
+		{"both platforms", []interface{}{"cuda", "rocm"}, ""},
+		{"unknown platform", []interface{}{"hip"}, "platforms[0] must be cuda or rocm"},
+		{"non-string entry", []interface{}{float64(1)}, "platforms[0] must be cuda or rocm"},
+		{"empty list", []interface{}{}, "platforms must be a nonempty array"},
+		{"not a list", "rocm", "platforms must be a nonempty array"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := baseValidParams("mybench")
+			p["platforms"] = tc.platforms
+			errs, _ := validateParamsJSON(t, "mybench", p)
+			if tc.wantErr == "" && len(errs) != 0 {
+				t.Fatalf("unexpected errors: %v", errs)
+			}
+			if tc.wantErr != "" && !hasErrContaining(errs, tc.wantErr) {
+				t.Fatalf("expected %q, got: %v", tc.wantErr, errs)
+			}
+		})
+	}
+}
+
 func TestValidateManifestFilesChecksBothVariants(t *testing.T) {
 	root := writeVariantTree(t)
 	if got := validateManifestFiles(root, nil, "", ""); got != ExitOK {

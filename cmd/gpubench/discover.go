@@ -37,6 +37,9 @@ type BenchmarkParams struct {
 	NonScalingParams []NonScalingParam `json:"non_scaling_params"`
 	Kernels         []string          `json:"kernels"`
 	Language        string            `json:"language,omitempty"`
+	// Platforms lists the platforms ("cuda", "rocm") the benchmark exists
+	// for. Empty means every platform.
+	Platforms       []string          `json:"platforms,omitempty"`
 
 	// Internal fields (not from JSON)
 	Dir        string `json:"-"`
@@ -52,6 +55,20 @@ func getLanguage(params *BenchmarkParams) string {
 		return "python"
 	}
 	return "cpp"
+}
+
+// supportsPlatform reports whether the benchmark exists for platform. A
+// manifest without a platforms list supports every platform.
+func (p *BenchmarkParams) supportsPlatform(platform string) bool {
+	if len(p.Platforms) == 0 {
+		return true
+	}
+	for _, supported := range p.Platforms {
+		if supported == platform {
+			return true
+		}
+	}
+	return false
 }
 
 // findRepoRoot walks up from executable location to find directory containing tier1/.
@@ -165,7 +182,8 @@ func selectPlatformManifests(paths []string, platform string) []string {
 }
 
 // discoverBenchmarks finds all benchmarks matching the given filters, using
-// the source variant that matches platform ("cuda" or "rocm").
+// the source variant that matches platform ("cuda" or "rocm") and skipping
+// benchmarks whose manifest does not list that platform.
 func discoverBenchmarks(repoRoot string, tier *int, suite, benchmark, platform string) []*BenchmarkParams {
 	paths, err := manifestPaths(repoRoot)
 	if err != nil {
@@ -192,6 +210,9 @@ func discoverBenchmarks(repoRoot string, tier *int, suite, benchmark, platform s
 			continue
 		}
 		if benchmark != "" && params.Benchmark != benchmark {
+			continue
+		}
+		if !params.supportsPlatform(platform) {
 			continue
 		}
 

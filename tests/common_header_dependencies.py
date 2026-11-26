@@ -34,7 +34,7 @@ def check(repo):
         for directory in ('tier1', 'tier2', 'tests', 'common_hip'):
             for source in (repo / directory).rglob('*'):
                 if source.is_file() and (source.name == 'Makefile' or
-                                        source.suffix in ('.hip', '.h', '.cpp')):
+                                        source.suffix in ('.hip', '.h', '.cpp', '.S')):
                     dest = tree / source.relative_to(repo)
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(source, dest)

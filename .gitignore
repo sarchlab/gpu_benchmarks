@@ -11,6 +11,7 @@ tier1/*/cuda/*
 !tier1/*/hip/README.md
 !tier1/*/hip/*.hip
 !tier1/*/hip/*.h
+!tier1/*/hip/*.S
 !tier1/*/hip/params.json
 !tier1/*/hip/params_selected.json
 !tier1/*/hip/.gitkeep

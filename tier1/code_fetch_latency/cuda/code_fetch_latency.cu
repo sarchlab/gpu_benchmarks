@@ -19,9 +19,11 @@
  *   size. One kernel exists per supported body size, so a launch fetches only
  *   the code of the size under test.
  *
- *   Entry policy: have the runtime load the selected kernel without running
- *   it, then the optional vector-add clock/cache warmer, then prime_launches
- *   untimed launches of the same kernel, then one timed launch. With
+ *   Entry policy: query the selected kernel's attributes, which requests
+ *   that the runtime load it without running it, then the optional vector-add
+ *   clock/cache warmer, then prime_launches untimed launches of the same
+ *   kernel, then one timed launch. Whether the query fully pre-loads the
+ *   kernel is established by target qualification. With
  *   prime_launches=0 the timed launch is the first dispatch of that kernel in
  *   the process (the suite's default cold entry). With prime_launches=1 the
  *   kernel was dispatched once already: an explicit primed exception to cold
@@ -164,10 +166,11 @@ __global__ void fetch_kernel_4096(float *out, float a, float b, int reps)
 // ---------------------------------------------------------------------------
 
 /**
- * Have the runtime load the kernel whose loop body holds body_ops FMAs,
- * without dispatching it. Runtimes may defer loading a kernel's code to its
- * first launch; querying its attributes first keeps that work out of the timed
- * bracket in both entries.
+ * Request that the runtime load the kernel whose loop body holds body_ops
+ * FMAs, without dispatching it, by querying its attributes. Runtimes may defer
+ * loading a kernel's code to its first launch; the query is made before timing
+ * in both entries so that work need not fall inside the timed bracket. Whether
+ * it fully pre-loads a kernel is runtime-specific (see README).
  */
 static void load_fetch_kernel(int body_ops)
 {
@@ -337,12 +340,13 @@ int main(int argc, char *argv[])
             total_ops, reps, body_ops);
     fprintf(stderr, "Grid           : %d blocks x %d threads = %zu total threads\n",
             num_blocks, threads_per_block, total_threads);
-    fprintf(stderr, "Entry policy   : kernel load -> optional warmer -> %d untimed primer launch(es) -> timed launch\n\n",
+    fprintf(stderr, "Entry policy   : kernel attribute query -> optional warmer -> %d untimed primer launch(es) -> timed launch\n\n",
             prime_launches);
 
-    /* Load the selected kernel without running it, in either entry, so the
-     * timed launch never includes runtime code loading. The cold timed launch
-     * is still the kernel's first dispatch. */
+    /* Query the selected kernel's attributes before timing, in either entry,
+     * to request that the runtime load it without running it. Whether that
+     * fully pre-loads the kernel is established by target qualification. The
+     * cold timed launch is still the kernel's first dispatch. */
     load_fetch_kernel(body_ops);
 
     /* The timed launch and the primer each own an output buffer, so a primer

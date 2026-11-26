@@ -23,8 +23,9 @@ target qualification (see [Deriving the difference](#deriving-the-difference)).
 
 ## Entry policy
 
-0. Have the runtime load the selected kernel without running it, by querying
-   its attributes (`cudaFuncGetAttributes`) and checking the result.
+0. Query the selected kernel's attributes (`cudaFuncGetAttributes`) and check
+   the result. This requests that the runtime load the kernel without running
+   it.
 1. Run the optional vector-add clock/cache warmer.
 2. Run `prime_launches` untimed launches of the same kernel with the same
    `reps` and coefficients, and wait for them to finish. A primer stores to its
@@ -43,9 +44,9 @@ pre-loads a kernel is runtime-specific and part of target qualification.
 first dispatch of that kernel in the process. `prime_launches=1` is an explicit
 primed exception to cold entry, declared as a swept parameter so both states
 are collected. Setting `BENCH_PARAM_vector_add_warmup=false` disables only
-step 1; the kernel load and a requested primer still run. Each repetition is a
-fresh process. The load, warmer and primer are outside the GPU and host timing
-brackets.
+step 1; the attribute query and a requested primer still run. Each repetition
+is a fresh process. The attribute query, warmer and primer are outside the GPU
+and host timing brackets.
 
 `code_entry` in the output is `"cold"` or `"primed"` and repeats what
 `prime_launches` requested. Neither label certifies a hardware state:
@@ -106,11 +107,13 @@ to NVIDIA targets.
 - **One block.** The declared sweep launches one block of 64 threads. With
   more blocks, several SMs fetch the same code and can share lower cache
   levels. That is a different experiment and is not declared.
-- **What "cold" contains.** Runtime code loading is done before timing in both
-  entries (entry step 0), to the extent the runtime's attribute query loads the
-  kernel. What remains in the cold time is first-dispatch hardware and driver
-  effects inside the GPU event bracket: the fetch itself, address translation
-  of the code, and any other first-use state of the kernel. Costs that do not
+- **What "cold" contains.** Both entries query the kernel's attributes before
+  timing (entry step 0) to request that the runtime load it. Whether that fully
+  pre-loads the kernel is established by target qualification; any loading it
+  leaves undone falls inside the cold timed launch. Otherwise the cold time
+  holds first-dispatch hardware and driver effects inside the GPU event
+  bracket: the fetch itself, address translation of the code, and any other
+  first-use state of the kernel. Costs that do not
   grow with code size land in the intercept; they are part of the measurement
   and are not separated here. The output store is not one of them: both output
   buffers are set up before the warmer in either entry and a primer stores to
@@ -154,6 +157,15 @@ the timed-only hardware record, so a primed comparison needs per-launch
 simulator output. General trace-region identification and artifact/replay
 qualification remain R-23/R-24; this benchmark's ordering alone does not qualify
 a simulator.
+
+The benchmark is not part of the selected-configuration simulation workflow.
+`scripts/simulation_run.py select` selects a benchmark only when one
+non-scaling combination has six evenly spaced usable scaling values, and this
+benchmark declares five body sizes, so select mode cannot write a selected
+`params_selected.json` for it even once traces and simulations exist. Simulate
+it explicitly with
+`python3 scripts/simulation_run.py run --benchmarks code_fetch_latency --all-params`.
+Primed comparisons still need per-launch simulator output.
 
 ## Build and run
 

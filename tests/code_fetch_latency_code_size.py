@@ -4,8 +4,10 @@
 Reads the code objects embedded in a ROCm build of the benchmark, reports each
 fetch kernel's code bytes, and checks the layout the benchmark depends on: one
 loop whose body holds exactly body_ops FMA instructions and nothing else.
+--self-test checks the layout checker itself and needs no ROCm tools.
 """
 import argparse
+import collections
 from pathlib import Path
 import re
 import subprocess
@@ -13,6 +15,12 @@ import tempfile
 
 BODY_OPS = (16, 64, 256, 1024, 4096)
 LINE_BYTES = 64
+FMA = 'v_fma_f32'
+# The only other instructions the measured loop may hold, once each: counter
+# decrement, compare and backward branch, as the gfx942 build emits them. A
+# compiler that emits another loop-control sequence fails the check until its
+# disassembly has been inspected and this list updated.
+LOOP_CONTROL = ('s_add_i32', 's_cmp_eq_u32', 's_cbranch_scc0')
 FUNCTION = re.compile(r'^([0-9a-f]+) <(\w+)>:$')
 # "\tmnemonic operands   // 000000003628: D1CB0001 040A0204 <symbol+0x28>"
 INSTRUCTION = re.compile(r'^\s+(\S+)[^/]*// ([0-9A-F]+):((?: [0-9A-F]{8})+)(?: <\w+\+0x([0-9a-f]+)>)?')
@@ -33,7 +41,7 @@ def kernel_layout(disassembly, sizes):
             row = None
             if kernel:
                 row = rows[int(kernel[1])] = dict(start=int(match[1], 16), bytes=sizes[match[2]],
-                                                  fma=[], loops=[], branches=0)
+                                                  instructions=[], loops=[], branches=0)
             continue
         match = INSTRUCTION.match(line) if row else None
         if not match:
@@ -41,9 +49,8 @@ def kernel_layout(disassembly, sizes):
         address = int(match[2], 16)
         if address >= row['start'] + row['bytes']:
             continue  # alignment padding after the kernel
-        if match[1].startswith('v_fma_f32'):
-            row['fma'].append(address)
-        elif 'branch' in match[1] and match[4]:
+        row['instructions'].append((address, match[1]))
+        if 'branch' in match[1] and match[4]:
             row['branches'] += 1
             target = row['start'] + int(match[4], 16)
             if target <= address:  # backward branch closes a loop
@@ -53,17 +60,64 @@ def kernel_layout(disassembly, sizes):
 
 def check(body_ops, row):
     """Problems that make this kernel's timing unusable for code-fetch analysis."""
-    problems = []
     if len(row['loops']) != 1:
         return ['%d loops (want 1)' % len(row['loops'])]
     begin, end = row['loops'][0]
-    if len(row['fma']) != body_ops:
-        problems.append('%d FMA instructions (want %d)' % (len(row['fma']), body_ops))
-    if any(not begin <= address < end for address in row['fma']):
+    inside = collections.Counter(name for address, name in row['instructions']
+                                 if begin <= address < end)
+    fma = sum(name == FMA for address, name in row['instructions'])
+    problems = []
+    if fma != body_ops:
+        problems.append('%d FMA instructions (want %d)' % (fma, body_ops))
+    if inside[FMA] != fma:
         problems.append('FMA instructions outside the loop body')
+    other = inside - collections.Counter({FMA: inside[FMA]})
+    if other != collections.Counter(LOOP_CONTROL):
+        problems.append('loop body holds %s besides FMAs (want one each of %s)' % (
+            ', '.join('%d %s' % (n, name) for name, n in sorted(other.items())) or 'nothing',
+            ', '.join(LOOP_CONTROL)))
     if row['branches'] != 2:  # zero-trip guard plus the loop's backward branch
         problems.append('%d branches (want 2)' % row['branches'])
     return problems
+
+
+def synthetic_kernel(body_ops, in_loop=()):
+    """(disassembly, sizes) shaped like the gfx942 build, with extra in-loop instructions."""
+    symbol, start = '_Z15fetch_kernel_%dPfffi' % body_ops, 0x3600
+    fma = (FMA + ' v1, s4, v1, v2', 2)
+    loop = [fma] * (body_ops - 1) + list(in_loop) + [
+        ('s_add_i32 s6, s6, -1', 1), ('s_cmp_eq_u32 s6, 0', 1), fma, ('s_cbranch_scc0 65501', 1)]
+    program = [('s_load_dwordx4 s[4:7], s[0:1], 0x8', 2), ('s_cmp_lt_i32 s6, 1', 1),
+               ('s_cbranch_scc1 36', 1)] + loop + [
+               ('global_store_dword v0, v1, s[0:1]', 2), ('s_endpgm', 1)]
+    offsets = [0]
+    for _, words in program:
+        offsets.append(offsets[-1] + 4 * words)
+    loop_begin, loop_end = offsets[3], offsets[3 + len(loop)]
+    lines = ['%016x <%s>:' % (start, symbol)]
+    for (text, words), offset in zip(program, offsets):
+        target = {'s_cbranch_scc1 36': loop_end, 's_cbranch_scc0 65501': loop_begin}.get(text)
+        lines.append('\t%-40s // %012X:%s%s' % (
+            text, start + offset, ' BF800000' * words,
+            '' if target is None else ' <%s+0x%x>' % (symbol, target)))
+    return '\n'.join(lines), {symbol: offsets[-1]}
+
+
+def self_test():
+    """The checker accepts the supported loop and rejects extra work inside it."""
+    def problems(body_ops, **changes):
+        return check(body_ops, kernel_layout(*synthetic_kernel(body_ops, **changes))[body_ops])
+    cases = [
+        ('supported layout', problems(16), False),
+        ('in-loop memory load', problems(16, in_loop=[('global_load_dword v3, v0, s[0:1]', 2)]), True),
+        ('in-loop arithmetic', problems(16, in_loop=[('v_add_f32_e32 v1, v1, v2', 1)]), True),
+        ('repeated loop control', problems(16, in_loop=[('s_add_i32 s6, s6, -1', 1)]), True),
+        ('extra FMA', problems(16, in_loop=[(FMA + ' v1, s4, v1, v2', 2)]), True),
+    ]
+    wrong = [name for name, found, want in cases if bool(found) != want]
+    if wrong:
+        raise SystemExit('self-test failed: ' + ', '.join(wrong))
+    print('PASS: layout checker self-test, %d cases' % len(cases))
 
 
 def main():
@@ -71,7 +125,11 @@ def main():
     parser.add_argument('--binary', type=Path, default=Path(__file__).resolve().parents[1] /
                         'tier1/code_fetch_latency/hip/code_fetch_latency')
     parser.add_argument('--llvm-bin', type=Path, default=Path('/opt/rocm/llvm/bin'))
+    parser.add_argument('--self-test', action='store_true',
+                        help='check the layout checker on synthetic disassembly; needs no ROCm tools')
     args = parser.parse_args()
+    if args.self_test:
+        return self_test()
     tool = lambda name: args.llvm_bin / name
     failed = False
     with tempfile.TemporaryDirectory(prefix='code-fetch-size-') as temp:
@@ -101,13 +159,13 @@ def main():
                     begin, end = row['loops'][0]
                     first, last = row['start'] // LINE_BYTES, (row['start'] + row['bytes'] - 1) // LINE_BYTES
                     print('| `fetch_kernel_%d` | %d | %d | %d | %d |' % (
-                        body_ops, row['bytes'], last - first + 1, len(row['fma']), end - begin))
+                        body_ops, row['bytes'], last - first + 1, body_ops, end - begin))
                 else:
                     failed = True
                     print('FAIL: fetch_kernel_%d: %s' % (body_ops, '; '.join(problems)))
     if failed:
         raise SystemExit('compiled kernels do not have the layout this benchmark measures')
-    print('PASS: one loop with exactly body_ops FMA instructions in every fetch kernel')
+    print('PASS: one loop holding exactly body_ops FMA instructions and its loop control in every fetch kernel')
 
 
 if __name__ == '__main__':

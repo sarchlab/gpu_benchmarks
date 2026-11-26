@@ -50,20 +50,22 @@ trace replay: preserve the primer's state, exclude its work from measured latenc
 
 ## Cold and primed code-fetch entry
 
-`code_fetch_latency` times the same kernel from two entries. Both first load
-the selected kernel without running it, so runtime code loading is outside the
-timed bracket. `prime_launches=0` is default cold entry: the timed launch is
-the kernel's first dispatch in the process. `prime_launches=1` adds one untimed
-launch of that kernel after the optional warmer, the primed exception to cold
-entry. The primer stores to its own buffer, so the timed launch does not reuse
-a primer's output. Pair the two results of one `body_ops` (minimum over
+`code_fetch_latency` times the same kernel from two entries. Both query the
+selected kernel's attributes before timing to request that the runtime load it
+without running it; whether this fully pre-loads the kernel is established by
+target qualification (it is the documented mechanism for CUDA lazy loading;
+ROCm behaviour is to be recorded on MI300X). `prime_launches=0` is default cold
+entry: the timed launch is the kernel's first dispatch in the process.
+`prime_launches=1` adds one untimed launch of that kernel after the optional
+warmer, the primed exception to cold entry. The primer stores to its own
+buffer, so the timed launch does not reuse a primer's output. Pair the two
+results of one `body_ops` (minimum over
 repetitions of each) and subtract; fit the difference against code bytes
 measured from the compiled kernels, not against `body_ops`. The difference is
 first-dispatch minus primed-dispatch time. Reading it or its slope as
 instruction-fetch cost requires target qualification: the primer may have run
 on a different SM/CU, address translation and other first-use state also
-differ, and whether the attribute query fully pre-loads a kernel is
-runtime-specific.
+differ.
 Keep `code_entry`, `prime_launches`, `reps` and `total_ops` with the result.
 Neither entry certifies which cache level holds the code, and code larger than
 the instruction cache makes the primed run refetch. See the

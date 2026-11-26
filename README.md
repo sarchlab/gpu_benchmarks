@@ -91,6 +91,15 @@ Each benchmark declares its parameters in `params.json`; the sweep is structured
 
 5. **Traces omit the warmer.** During NVBit trace collection the harness forces `vector_add_warmup=false`. The raw capture retains benchmark-launched kernels, including `cache_latency`'s untimed primer. Replay must preserve its primed state while excluding primer work from measured latency; see the [cache-latency replay requirements](tier1/cache_latency/hip/README.md).
 
+### Notes for MI300X data collection
+
+Observed on AMD Developer Cloud "AMD Instinct MI300X VF" instances (ROCm 10.2.0) on 2026-11-26:
+
+- **Cap and record the GPU core clock.** The v1.1 reference timings were taken at about 1680 MHz, while these instances run at 2100 MHz by default; compute-bound kernels are 1.25 times faster at 2100 MHz and memory-bound kernels about the same. Before collecting, run `amd-smi set -L sclk max 1680` and check that every `GFX_n` in `amd-smi metric --clock` shows that limit. Afterwards run `amd-smi set -L sclk max 2100` and write `auto` back to `/sys/class/drm/card*/device/power_dpm_force_performance_level`. Keep the cap value and a clock log (`amd-smi metric --clock`, or `freq1_input` under the card's `hwmon` directory) with the data.
+- **Without a cap the clock depends on load:** about 130 MHz idle, 2100 MHz with one wavefront, about 1930 MHz with the whole GPU busy at its 750 W power cap, and the kernel that follows the warmer is slower for roughly its first millisecond.
+- **Not every dispatch is the measurement.** Time kernels with `rocprofv3 --kernel-trace`. `cache_latency` launches `pointer_chase_kernel` twice with the same launch shape, an untimed primer and then the timed chase; take the last one. `bench_warmer_kernel` and `__amd_rocclr_fillBufferUnAligned` are never the measurement.
+- **Clear stray `BENCH_PARAM_*` variables** from the shell first; a benchmark reads all of them, including parameters the sweep does not set.
+
 ---
 
 ## 5-Tier Structure

@@ -3,7 +3,8 @@
 
 Reads the code objects embedded in a ROCm build of the benchmark, reports each
 fetch kernel's code bytes, and checks the layout the benchmark depends on: one
-loop whose body holds exactly body_ops FMA instructions and nothing else.
+loop whose body holds exactly body_ops FMA instructions, its loop control and at
+most one loop-invariant register move.
 --self-test checks the layout checker itself and needs no ROCm tools.
 """
 import argparse
@@ -16,11 +17,15 @@ import tempfile
 BODY_OPS = tuple(16 << i for i in range(10))  # powers of two, 16 to 8192
 LINE_BYTES = 64
 FMA = 'v_fma_f32'
-# The only other instructions the measured loop may hold, once each: counter
-# decrement, compare and backward branch, as the gfx942 build emits them. A
-# compiler that emits another loop-control sequence fails the check until its
-# disassembly has been inspected and this list updated.
+# The loop control the measured loop must hold, once each: counter decrement,
+# compare and backward branch, as the gfx942 build emits them. A compiler that
+# emits another loop-control sequence fails the check until its disassembly has
+# been inspected and this list updated.
 LOOP_CONTROL = ('s_add_i32', 's_cmp_eq_u32', 's_cbranch_scc0')
+# AMD clang 24 (ROCm 10.2) leaves the move of the addend into a vector register
+# at the head of the loop instead of hoisting it (clang 22 hoists it). At most
+# one such move is accepted; it adds 4 bytes to the loop and no FMA.
+LOOP_MOVE = 'v_mov_b32_e32'
 FUNCTION = re.compile(r'^([0-9a-f]+) <(\w+)>:$')
 # "\tmnemonic operands   // 000000003628: D1CB0001 040A0204 <symbol+0x28>"
 INSTRUCTION = re.compile(r'^\s+(\S+)[^/]*// ([0-9A-F]+):((?: [0-9A-F]{8})+)(?: <\w+\+0x([0-9a-f]+)>)?')
@@ -85,24 +90,27 @@ def check(body_ops, row):
     if inside[FMA] != fma:
         problems.append('FMA instructions outside the loop body')
     other = inside - collections.Counter({FMA: inside[FMA]})
-    if other != collections.Counter(LOOP_CONTROL):
-        problems.append('loop body holds %s besides FMAs (want one each of %s)' % (
+    control = other - collections.Counter({LOOP_MOVE: other[LOOP_MOVE]})
+    if control != collections.Counter(LOOP_CONTROL) or other[LOOP_MOVE] > 1:
+        problems.append('loop body holds %s besides FMAs (want one each of %s, and at most one %s)' % (
             ', '.join('%d %s' % (n, name) for name, n in sorted(other.items())) or 'nothing',
-            ', '.join(LOOP_CONTROL)))
+            ', '.join(LOOP_CONTROL), LOOP_MOVE))
     if row['branches'] != 2:  # zero-trip guard plus the loop's backward branch
         problems.append('%d branches (want 2)' % row['branches'])
     return problems
 
 
-def synthetic_kernel(body_ops, in_loop=(), hidden=()):
+def synthetic_kernel(body_ops, in_loop=(), hidden=(), loop_head=()):
     """(disassembly, sizes) shaped like the gfx942 build, with extra in-loop instructions.
 
-    Instructions whose text is in `hidden` keep their bytes but get no
-    disassembly line, as when a line is elided or cannot be parsed.
+    `loop_head` instructions are the first of the loop (the backward branch
+    targets them); `in_loop` ones sit before the loop control. Instructions
+    whose text is in `hidden` keep their bytes but get no disassembly line, as
+    when a line is elided or cannot be parsed.
     """
     symbol, start = '_Z15fetch_kernel_%dPfffi' % body_ops, 0x3600
     fma = (FMA + ' v1, s4, v1, v2', 2)
-    loop = [fma] * (body_ops - 1) + list(in_loop) + [
+    loop = list(loop_head) + [fma] * (body_ops - 1) + list(in_loop) + [
         ('s_add_i32 s6, s6, -1', 1), ('s_cmp_eq_u32 s6, 0', 1), fma, ('s_cbranch_scc0 65501', 1)]
     program = [('s_load_dwordx4 s[4:7], s[0:1], 0x8', 2), ('s_cmp_lt_i32 s6, 1', 1),
                ('s_cbranch_scc1 36', 1)] + loop + [
@@ -127,8 +135,13 @@ def self_test():
     def problems(body_ops, **changes):
         return check(body_ops, kernel_layout(*synthetic_kernel(body_ops, **changes))[body_ops])
     load = 'global_load_dword v3, v0, s[0:1]'
+    move = (LOOP_MOVE + ' v2, s5', 1)
     cases = [
         ('supported layout', problems(16), False),
+        # AMD clang 24: the addend's register move stays at the head of the loop.
+        ('one register move at the loop head', problems(16, loop_head=[move]), False),
+        ('two register moves in the loop', problems(16, loop_head=[move], in_loop=[move]), True),
+        ('in-loop move of another kind', problems(16, loop_head=[('s_mov_b32 s7, s5', 1)]), True),
         ('in-loop memory load', problems(16, in_loop=[(load, 2)]), True),
         ('in-loop arithmetic', problems(16, in_loop=[('v_add_f32_e32 v1, v1, v2', 1)]), True),
         ('repeated loop control', problems(16, in_loop=[('s_add_i32 s6, s6, -1', 1)]), True),
@@ -192,7 +205,8 @@ def main():
                     print('FAIL: fetch_kernel_%d: %s' % (body_ops, '; '.join(problems)))
     if failed:
         raise SystemExit('compiled kernels do not have the layout this benchmark measures')
-    print('PASS: one loop holding exactly body_ops FMA instructions and its loop control in every fetch kernel')
+    print('PASS: one loop holding exactly body_ops FMA instructions, its loop control and at most one '
+          '%s in every fetch kernel' % LOOP_MOVE)
 
 
 if __name__ == '__main__':

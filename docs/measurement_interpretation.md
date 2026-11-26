@@ -54,13 +54,15 @@ trace replay: preserve the primer's state, exclude its work from measured latenc
 selected kernel's attributes before timing to request that the runtime load it
 without running it; whether this fully pre-loads the kernel is established by
 target qualification (it is the documented mechanism for CUDA lazy loading;
-ROCm behaviour is to be recorded on MI300X). `prime_launches=0` is default cold
+one ROCm 10.2 observation on MI300X is in the benchmark README).
+`prime_launches=0` is default cold
 entry: the timed launch is the kernel's first dispatch in the process.
 `prime_launches=1` adds one untimed launch of that kernel after the optional
 warmer, the primed exception to cold entry. The primer stores to its own
 buffer, so the timed launch does not reuse a primer's output. Pair the two
 results of one `body_ops` (minimum over
-repetitions of each) and subtract; fit the difference against code bytes
+repetitions of each, or the median where event times are bimodal, as observed
+on MI300X) and subtract; fit the difference against code bytes
 measured from the compiled kernels, not against `body_ops`. The difference is
 first-dispatch minus primed-dispatch time. Reading it or its slope as
 instruction-fetch cost requires target qualification: the primer may have run

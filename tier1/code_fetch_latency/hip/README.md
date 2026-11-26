@@ -32,8 +32,9 @@ first launch (CUDA lazy loading does); without step 0 the cold run would pay
 that load inside the timed bracket and the primed run in its untimed primer,
 and the load can grow with code size. Querying the kernel's attributes is the
 documented way to load it under CUDA lazy loading. Whether the call fully
-pre-loads a kernel is runtime-specific and part of target qualification; ROCm
-behaviour is to be recorded when qualifying on MI300X.
+pre-loads a kernel is runtime-specific and part of target qualification; one
+ROCm 10.2 observation is under
+[Observed on MI300X](#observed-on-mi300x-rocm-102).
 
 `prime_launches=0` is the suite's default cold entry: the timed launch is the
 first dispatch of that kernel in the process. `prime_launches=1` is an explicit
@@ -73,11 +74,37 @@ intercept is the part that does not depend on code size. A slope that is not
 constant is itself a result (for example prefetching or overlapped fetches),
 not a defect of the fit.
 
-Use the minimum GPU time across repetitions for each of the two entries before
-subtracting, as for any other benchmark in the suite. Qualify the event timer's
-resolution and the run-to-run variation on the target against the
-cold-minus-primed difference being estimated, which can be much smaller than
-the launch time (see [measurement interpretation](../../../docs/measurement_interpretation.md#empty-dispatch-and-timing-resolution)).
+Reduce the repetitions of each entry to one value before subtracting. The
+suite's usual choice is the minimum GPU time; it is valid only where the event
+times of one configuration form a single mode. Where they do not (see
+[Observed on MI300X](#observed-on-mi300x-rocm-102)), use the median, or the
+profiler's dispatch durations. Qualify the event timer's resolution and the
+run-to-run variation on the target against the cold-minus-primed difference
+being estimated, which can be much smaller than the launch time (see
+[measurement interpretation](../../../docs/measurement_interpretation.md#empty-dispatch-and-timing-resolution)).
+
+## Observed on MI300X (ROCm 10.2)
+
+Qualification notes from one collection on 2026-11-26, on an AMD Developer
+Cloud "MI300X VF" instance with ROCm 10.2.0 (HIP 7.17.26434). They say how to
+read this target's output; they are not performance claims.
+
+- **GPU event times were bimodal.** Roughly 8 % of primed runs and about 1 % of
+  cold runs reported about 9 µs regardless of body size; the rest reported
+  about 45 µs. `rocprofv3 --kernel-trace` dispatch durations for launches of
+  the same configurations were about 43 µs. On this target do not take the
+  minimum across repetitions: it selects the short mode. Use the median, or
+  better the profiler's dispatch durations.
+- **One profiled process gives both entries.** A `prime_launches=1` process
+  under `rocprofv3 --kernel-trace --output-format csv` records both dispatches
+  of the kernel: the first is the cold one, the second the primed one. Their
+  paired difference had a much tighter spread than differences of event times
+  across processes. Order the two rows by start timestamp; the CSV is not
+  always chronological.
+- **Attribute query.** With `hipFuncGetAttributes` (entry step 0) the paired
+  cold-minus-primed dispatch difference was smaller than without it: about
+  12 µs versus about 14 µs at the 8192-FMA body. Runtime first-use work is
+  therefore small on this target compared with CUDA lazy loading.
 
 ## Compiled code: size and layout
 
@@ -94,9 +121,10 @@ python3 ../../../tests/code_fetch_latency_code_size.py   # needs /opt/rocm/llvm/
 The script extracts the code objects embedded in the binary, prints one table
 per target and fails when a kernel does not have the expected layout: besides
 the FMAs, the loop may hold only its counter decrement, compare and backward
-branch. Measured
-for `gfx942` with HIP 7.2.53211 (AMD clang 22.0.0git, roc-7.2.4), `-O3
--std=c++14 --offload-arch=gfx942`:
+branch, and at most one register move (`v_mov_b32_e32`). Measured for `gfx942`
+at `-O3 -std=c++14` with two toolchains, ROCm 7.2.4 (HIP 7.2.53211, AMD clang
+22.0.0git) and ROCm 10.2.0 (HIP 7.17.26434, AMD clang 24.0.0git). Code bytes
+and lines are identical for both; the loop-body column is the clang 22 one:
 
 | kernel | code bytes | 64-byte lines | FMA instructions | loop body bytes |
 |---|---:|---:|---:|---:|
@@ -112,13 +140,18 @@ for `gfx942` with HIP 7.2.53211 (AMD clang 22.0.0git, roc-7.2.4), `-O3
 | `fetch_kernel_8192` | 65652 | 1026 | 8192 | 65548 |
 
 Each FMA is one 8-byte `v_fma_f32`, so code bytes are `8 * body_ops + 116` with
-that compiler. Rerun the script for the toolchain that built the measured
-binary; another compiler version or target can change sizes and layout. The
-"64-byte lines" column counts the lines the kernel's address range spans in the
-code object. The line size is an assumption to qualify on the target.
+both compilers. Clang 22 hoists the move of the addend into a vector register
+out of the loop (loop body `8 * body_ops + 12` bytes). Clang 24 keeps that one
+4-byte loop-invariant move as the first instruction of the loop (loop body
+`8 * body_ops + 16` bytes), so it executes once per iteration and belongs to
+the loop-control work that cancels within one body size. Rerun the script for
+the toolchain that built the measured binary; another compiler version or
+target can change sizes and layout. The "64-byte lines" column counts the lines
+the kernel's address range spans in the code object. The line size is an
+assumption to qualify on the target.
 
 The sweep stops at 8192 because a 16384-FMA body exceeds the range of the short
-conditional branch on `gfx942`: with the compiler above it is built with a
+conditional branch on `gfx942`: with clang 22 it is built with a
 long-branch sequence (`s_getpc_b64` ... `s_setpc_b64`) around the loop, a
 different loop shape from the other sizes.
 

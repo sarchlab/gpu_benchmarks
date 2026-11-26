@@ -78,11 +78,14 @@ intercept is the part that does not depend on code size. A slope that is not
 constant is itself a result (for example prefetching or overlapped fetches),
 not a defect of the fit.
 
-Use the minimum GPU time across repetitions for each of the two entries before
-subtracting, as for any other benchmark in the suite. Qualify the event timer's
-resolution and the run-to-run variation on the target against the
-cold-minus-primed difference being estimated, which can be much smaller than
-the launch time (see [measurement interpretation](../../../docs/measurement_interpretation.md#empty-dispatch-and-timing-resolution)).
+Reduce the repetitions of each entry to one value before subtracting. The
+suite's usual choice is the minimum GPU time; it is valid only where the event
+times of one configuration form a single mode. Where they do not (see
+[Observed on MI300X](../hip/README.md#observed-on-mi300x-rocm-102)), use the median, or the
+profiler's dispatch durations. Qualify the event timer's resolution and the
+run-to-run variation on the target against the cold-minus-primed difference
+being estimated, which can be much smaller than the launch time (see
+[measurement interpretation](../../../docs/measurement_interpretation.md#empty-dispatch-and-timing-resolution)).
 
 ## Compiled code: size and layout
 

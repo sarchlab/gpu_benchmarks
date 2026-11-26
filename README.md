@@ -252,6 +252,7 @@ gpu_benchmarks/
 └── docs/                          # Detailed specifications
     ├── cli_design.md
     ├── output_protocol.md
+    ├── mi300x_collection_checklist.md
     ├── params_format.md
     └── result_sharing.md
 ```
@@ -613,6 +614,7 @@ BENCH_PARAM_matrix_size=1024 BENCH_PARAM_block_size=16 ./benchmark
 - [`docs/output_protocol.md`](docs/output_protocol.md) — JSON-lines output protocol specification
 - [`docs/params_format.md`](docs/params_format.md) — `params.json` format specification
 - [`docs/result_sharing.md`](docs/result_sharing.md) — Result export guide (JSON format spec)
+- [`docs/mi300x_collection_checklist.md`](docs/mi300x_collection_checklist.md) — What to set and record when collecting MI300X reference timings
 - [`benchmark_report.md`](benchmark_report.md) — Research report: benchmark selection and rationale
 
 ---

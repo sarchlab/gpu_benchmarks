@@ -79,9 +79,10 @@ constant is itself a result (for example prefetching or overlapped fetches),
 not a defect of the fit.
 
 Use the minimum GPU time across repetitions for each of the two entries before
-subtracting, as for any other benchmark in the suite. Small bodies produce
-intervals of a few microseconds; qualify the event timer's resolution on the
-target first (see [measurement interpretation](../../../docs/measurement_interpretation.md#empty-dispatch-and-timing-resolution)).
+subtracting, as for any other benchmark in the suite. Qualify the event timer's
+resolution and the run-to-run variation on the target against the
+cold-minus-primed difference being estimated, which can be much smaller than
+the launch time (see [measurement interpretation](../../../docs/measurement_interpretation.md#empty-dispatch-and-timing-resolution)).
 
 ## Compiled code: size and layout
 
@@ -113,12 +114,13 @@ to NVIDIA targets.
   leaves undone falls inside the cold timed launch. Otherwise the cold time
   holds first-dispatch hardware and driver effects inside the GPU event
   bracket: the fetch itself, address translation of the code, and any other
-  first-use state of the kernel. Costs that do not
-  grow with code size land in the intercept; they are part of the measurement
-  and are not separated here. The output store is not one of them: both output
-  buffers are set up before the warmer in either entry and a primer stores to
-  its own buffer, so the timed launch's output is equally untouched in both
-  entries and its cost cancels in the difference.
+  first-use state of the kernel. Costs that do not grow with code size land in
+  the intercept; they are part of the measurement and are not separated here.
+  Both output buffers are set up before the warmer in either entry and a primer
+  stores to its own buffer, which removes direct reuse of the timed launch's
+  destination. It does not make the output store's cost equal in the two
+  entries: only the primed entry executes a store after the warmer, which can
+  affect shared translation or memory-system state.
 - **FMA count is constant, loop-control work is not.** Smaller bodies run more
   loop iterations. Loop overhead is present in both entries of one body size
   and cancels in their difference; it does not cancel when comparing absolute

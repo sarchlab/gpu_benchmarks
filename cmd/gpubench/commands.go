@@ -239,6 +239,10 @@ var validParamTypes = map[string]bool{
 	"int": true, "float": true, "string": true, "enum": true,
 }
 
+// validPlatforms are the platform names a manifest's optional "platforms"
+// list may contain: the values detectPlatform and --platform use.
+var validPlatforms = map[string]bool{"cuda": true, "rocm": true}
+
 // valueMatchesType reports whether a JSON-decoded value is compatible with a
 // declared params.json type. JSON numbers decode to float64, so "int" requires
 // an integral float64.
@@ -316,6 +320,17 @@ func validateParams(params map[string]interface{}, paramsPath string) (errs, war
 	}
 	if language, present := params["language"]; present && language != "cpp" && language != "python" {
 		errs = append(errs, "language must be cpp or python")
+	}
+	if platforms, present := params["platforms"]; present {
+		list, ok := platforms.([]interface{})
+		if !ok || len(list) == 0 {
+			errs = append(errs, "platforms must be a nonempty array")
+		}
+		for i, raw := range list {
+			if name, ok := raw.(string); !ok || !validPlatforms[name] {
+				errs = append(errs, fmt.Sprintf("platforms[%d] must be cuda or rocm", i))
+			}
+		}
 	}
 
 	// benchmark vs directory name

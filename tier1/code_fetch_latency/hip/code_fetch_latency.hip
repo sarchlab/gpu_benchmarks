@@ -18,11 +18,13 @@
  *   Entry: query the selected kernel's attributes, which requests that the
  *   runtime load it without running it, then the optional vector-add
  *   clock/cache warmer, then the single timed launch. The timed launch is the
- *   first dispatch of that kernel in the process.
+ *   first dispatch of that kernel in the process; any loading the query
+ *   leaves undone falls inside it.
  *
  *   With T(N, R) the time for body_ops N and loops R, the fixed dispatch cost,
- *   the repeat-pass cost per FMA and the first-pass extra cost are
- *   derived downstream from several runs (see README).
+ *   the repeat-pass cost per FMA (which includes loop overhead) and the
+ *   first-pass extra, a residual relative to that baseline, are derived
+ *   downstream from several runs (see README).
  *
  * Usage:
  *   ./code_fetch_latency [body_ops]
@@ -40,8 +42,10 @@
  * is rejected before device access.
  *
  * Output: one {"type":"kernel",...} JSON line for the single timed launch,
- * carrying the GPU event time and host wall-clock time, then a summary whose
- * total_time_ms equals it.
+ * carrying the GPU event time and host wall-clock time, then, once every
+ * stored value has been verified, a summary whose total_time_ms equals it.
+ * A verification mismatch emits a fatal {"type":"error",...} line instead of
+ * the summary and exits nonzero.
  */
 
 #include <cerrno>
@@ -147,7 +151,8 @@ FETCH_FOR_EACH_SIZE(FETCH_DEFINE_KERNEL)
  * by querying its attributes. Runtimes may defer loading a kernel's code to
  * its first launch; the query is made before timing so that work need not
  * fall inside the timed bracket. Whether it fully pre-loads a kernel is
- * runtime-specific (see README).
+ * runtime-specific; any loading it leaves undone falls inside the timed
+ * launch (see README).
  */
 static void load_fetch_kernel(int body_ops)
 {
@@ -312,8 +317,8 @@ int main(int argc, char *argv[])
 
     /* Query the selected kernel's attributes before timing to request that
      * the runtime load it without running it. Whether that fully pre-loads
-     * the kernel is runtime-specific. The timed launch is still the kernel's
-     * first dispatch. */
+     * the kernel is runtime-specific; loading left undone falls inside the
+     * timed launch, which is still the kernel's first dispatch. */
     load_fetch_kernel(body_ops);
 
     /* One float per thread. Every byte starts as 0xFF: a thread that never
@@ -335,17 +340,23 @@ int main(int argc, char *argv[])
         launch_fetch_kernel(body_ops, num_blocks, threads_per_block, d_out, loops);
     });
 
-    bench_emit_summary(total_gpu_ms);
     fprintf(stderr, "Total GPU time: %.3f ms\n", total_gpu_ms);
 
-    /* Verify every thread's stored chain value against the host chain. */
+    /* Verify every thread's stored chain value against the host chain before
+     * the summary. A mismatch is reported in-band as a fatal error record and
+     * no summary follows (docs/output_protocol.md); the kernel record is
+     * already out, because the shared timing helper emits it. */
     const size_t errors = count_mismatches(d_out, total_threads, threads_per_block, chain_ops);
     HIP_CHECK(hipFree(d_out));
     if (errors > 0) {
+        printf("{\"type\":\"error\",\"severity\":\"fatal\","
+               "\"message\":\"stored values differ from the host chain\","
+               "\"params\":{%s}}\n", params);
         fprintf(stderr, "FAIL: %zu stored values differ from the host chain\n", errors);
         return EXIT_FAILURE;
     }
     fprintf(stderr, "PASS: %zu threads match the host chain\n", total_threads);
+    bench_emit_summary(total_gpu_ms);
 
     fprintf(stderr, "\nDone.\n");
     return EXIT_SUCCESS;

@@ -5,7 +5,8 @@ Reads the code objects embedded in a ROCm build of the benchmark, reports each
 fetch kernel's code bytes, and checks the layout the benchmark depends on: one
 loop, closed by the kernel's only backward jump, whose body holds exactly
 body_ops FMA instructions, its loop control and at most one loop-invariant
-register move.
+register move, with the guard and closing branches landing where the supported
+layouts put them.
 --self-test checks the layout checker itself and needs no ROCm tools.
 """
 import argparse
@@ -23,6 +24,9 @@ FMA = 'v_fma_f32'
 # Long form, when the body exceeds the conditional branch's range (16384 FMAs
 # and up): the conditional branch leaves the loop and a PC-relative
 # jump (s_getpc_b64, 64-bit add of the offset, s_setpc_b64) goes back.
+# Counting these instructions is not enough: where each branch and jump lands
+# is checked too (jump_target_problems), so a conditional branch cannot land
+# inside a PC-relative sequence and reach its s_setpc_b64 with no target set.
 # A compiler that emits another sequence fails the check until its disassembly
 # has been inspected and these lists updated.
 SHORT_CONTROL = ('s_add_i32', 's_cmp_eq_u32', 's_cbranch_scc0')
@@ -131,18 +135,79 @@ def check(body_ops, row):
     if jumps != ((2, 0) if form == 'short' else (2, 2)):
         problems.append('%d conditional branches and %d PC-relative jumps (want %s)' % (
             jumps + ('2 and 0' if form == 'short' else '2 and 2',)))
+    return problems + jump_target_problems(row, begin, end, form)
+
+
+def jump_target_problems(row, begin, end, form):
+    """Problems with where the guard and the loop close land, per supported layout.
+
+    Short form: the closing conditional branch is the loop's backward jump
+    (that is what defines the loop); the zero-trip guard before the loop is
+    the other conditional branch and must target the loop exit `end`.
+    Long form, as AMD clang 22 and 24 emit it:
+      guard:  s_cbranch_scc0 over a forward PC-relative jump. The branch lands
+              right after that jump's s_setpc_b64, which is the loop head or
+              one hoisted v_mov_b32_e32 before it; the jump goes to the loop
+              exit.
+      close:  s_cbranch_scc1 directly before the backward PC-relative jump. It
+              lands right after that jump's s_setpc_b64, the loop exit.
+    """
+    problems = []
+    names = {address: name for address, name, _, _ in row['instructions']}
+    ends = {address + width: address for address, _, width, _ in row['instructions']}
+    targets = {address: target for address, _, target in row['branches']}
+
+    def branch_before(address):
+        """(mnemonic, target) of the conditional branch ending at `address`, or None."""
+        branch = ends.get(address)
+        return (names[branch], targets[branch]) if branch in targets else None
+
+    if form == 'short':
+        guards = [target for address, _, target in row['branches'] if target > address]
+        if len(guards) == 1 and guards[0] != end:
+            problems.append('guard branch targets 0x%x (want the loop exit 0x%x)' % (guards[0], end))
+        return problems
+    back = [jump for jump in row['long_jumps'] if jump[1] == end]
+    forward = [jump for jump in row['long_jumps'] if jump[2] > jump[0]]
+    if len(back) != 1 or len(forward) != 1:
+        return problems  # the jump counts are reported by the caller
+    close = branch_before(back[0][0])
+    if not close or close[0] != 's_cbranch_scc1':
+        problems.append('no s_cbranch_scc1 directly before the backward PC-relative jump')
+    elif close[1] != end:
+        problems.append('closing branch targets 0x%x (want the loop exit 0x%x, right after the '
+                        'backward jump)' % (close[1], end))
+    guard_address, guard_end, guard_target = forward[0]
+    if guard_target != end:
+        problems.append('guard jump targets 0x%x (want the loop exit 0x%x)' % (guard_target, end))
+    guard = branch_before(guard_address)
+    if not guard or guard[0] != 's_cbranch_scc0':
+        problems.append('no s_cbranch_scc0 directly before the guard PC-relative jump')
+    elif guard[1] != guard_end:
+        problems.append('guard branch targets 0x%x (want 0x%x, right after the guard jump)'
+                        % (guard[1], guard_end))
+    # Between the guard and the loop head: nothing, or the one hoisted move.
+    preheader = sorted((address, name) for address, name, _, _ in row['instructions']
+                       if guard_end <= address < begin)
+    if [name for _, name in preheader] not in ([], [LOOP_MOVE]) or (
+            preheader and preheader[0][0] != guard_end) or guard_end > begin:
+        problems.append('loop head 0x%x does not follow the guard jump (0x%x) directly or after one %s'
+                        % (begin, guard_end, LOOP_MOVE))
     return problems
 
 
 def synthetic_kernel(body_ops, long_form=False, in_loop=(), hidden=(), loop_head=(),
-                     straight_line=False):
+                     straight_line=False, preheader=(), retarget=None):
     """(disassembly, sizes) shaped like the gfx942 build, with extra in-loop instructions.
 
     `loop_head` instructions are the first of the loop (the backward jump
     targets them); `in_loop` ones sit before the loop control. Instructions
     whose text is in `hidden` keep their bytes but get no disassembly line, as
     when a line is elided or cannot be parsed. `straight_line` drops the jump
-    that closes the loop.
+    that closes the loop. `preheader` instructions sit between the guard and
+    the loop head (AMD clang 22 hoists the addend's move there). `retarget`
+    maps a jump ('guard_branch', 'guard_jump' or 'close_branch') to another
+    label, to model a branch that lands in the wrong place.
     """
     name = 'fetch_kernel_%d' % body_ops
     symbol, start = '_Z%d%sPfffi' % (len(name), name), 0x3600
@@ -157,20 +222,29 @@ def synthetic_kernel(body_ops, long_form=False, in_loop=(), hidden=(), loop_head
     loop = plain(list(loop_head) + body[:-1] + list(in_loop) + [
         ('s_add_i32 s6, s6, -1', 1), ('s_cmp_eq_u32 s6, 0', 1)] + body[-1:])
     head = plain([('s_load_dwordx4 s[4:7], s[0:1], 0x8', 2), ('s_cmp_lt_i32 s6, 1', 1)])
+    to = dict(guard_branch='after_guard' if long_form else 'loop_end', guard_jump='loop_end',
+              close_branch='loop_end' if long_form else 'loop_begin')
+    to.update(retarget or {})
     if long_form:
-        head += [('s_cbranch_scc0 6', 1, ('branch', 'loop_begin'))] + long_jump('loop_end')
-        close = [('s_cbranch_scc1 6', 1, ('branch', 'loop_end'))] + long_jump('loop_begin')
+        head += [('s_cbranch_scc0 6', 1, ('branch', to['guard_branch']))] + long_jump(to['guard_jump'])
+        close = [('s_cbranch_scc1 6', 1, ('branch', to['close_branch']))] + long_jump('loop_begin')
     else:
-        head += [('s_cbranch_scc1 36', 1, ('branch', 'loop_end'))]
-        close = [('s_cbranch_scc0 65501', 1, ('branch', 'loop_begin'))]
+        head += [('s_cbranch_scc1 36', 1, ('branch', to['guard_branch']))]
+        close = [('s_cbranch_scc0 65501', 1, ('branch', to['close_branch']))]
     if straight_line:
         close = []
+    before = plain(list(preheader))
     tail = plain([('global_store_dword v0, v1, s[0:1]', 2), ('s_endpgm', 1)])
-    program = head + loop + close + tail
+    program = head + before + loop + close + tail
     offsets = [0]
     for _, words, _ in program:
         offsets.append(offsets[-1] + 4 * words)
-    labels = dict(loop_begin=offsets[len(head)], loop_end=offsets[len(head) + len(loop) + len(close)])
+    loop_begin, loop_end = len(head) + len(before), len(head) + len(before) + len(loop) + len(close)
+    labels = dict(after_guard=offsets[len(head)], loop_begin=offsets[loop_begin],
+                  loop_end=offsets[loop_end],
+                  # Inside the PC-relative sequences: their s_setpc_b64.
+                  guard_setpc=offsets[len(head) - 1], close_setpc=offsets[loop_end - 1],
+                  past_exit=offsets[loop_end] + 8)
     lines = ['%016x <%s>:' % (start, symbol)]
     for index, ((text, words, jump), offset) in enumerate(zip(program, offsets)):
         if text in hidden:
@@ -215,7 +289,28 @@ def self_test():
         ('undecoded in-loop instruction', problems(16, in_loop=[(load, 2)], hidden=[load]), True),
         ('missing loop-control line', problems(16, hidden=['s_cmp_eq_u32 s6, 0']), True),
         ('incomplete PC-relative jump', problems(16, long_form=True, hidden=['s_addc_u32 s9, s9, 0']), True),
+        # AMD clang 22: the addend's move is hoisted to just before the loop head.
+        ('hoisted move before a long-jump loop', problems(16, long_form=True, preheader=[move]), False),
+        ('two instructions before a long-jump loop',
+         problems(16, long_form=True, preheader=[move, move]), True),
+        ('another instruction before a long-jump loop',
+         problems(16, long_form=True, preheader=[('s_mov_b32 s7, s5', 1)]), True),
+        # A conditional branch that lands inside a PC-relative sequence reaches
+        # its s_setpc_b64 without the instructions that compute the target.
+        ('closing branch lands on the backward jump\'s s_setpc_b64',
+         problems(16, long_form=True, retarget=dict(close_branch='close_setpc')), True),
+        ('closing branch lands past the loop exit',
+         problems(16, long_form=True, retarget=dict(close_branch='past_exit')), True),
+        ('guard branch lands on the guard jump\'s s_setpc_b64',
+         problems(16, long_form=True, retarget=dict(guard_branch='guard_setpc')), True),
+        ('guard jump lands past the loop exit',
+         problems(16, long_form=True, retarget=dict(guard_jump='past_exit')), True),
+        ('short-loop guard lands past the loop exit',
+         problems(16, retarget=dict(guard_branch='past_exit')), True),
     ]
+    setpc = problems(16, long_form=True, retarget=dict(close_branch='close_setpc'))
+    if len(setpc) != 1 or 'closing branch targets' not in setpc[0]:
+        raise SystemExit('self-test failed: closing branch into the jump not reported as such: %s' % setpc)
     gap = problems(16, in_loop=[(load, 2)], hidden=[load])
     if len(gap) != 1 or 'leave a gap' not in gap[0]:
         raise SystemExit('self-test failed: undecoded instruction not reported as a gap: %s' % gap)

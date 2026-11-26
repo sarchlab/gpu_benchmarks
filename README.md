@@ -111,7 +111,7 @@ Each benchmark declares its parameters in `params.json`; the sweep is structured
 gpu_benchmarks/
 ├── Makefile                        # Root build file
 ├── README.md                       # This file
-├── tier1/                          # Microbenchmarks (14)
+├── tier1/                          # Microbenchmarks (15)
 │   ├── Makefile
 │   ├── memory_bandwidth/
 │   ├── fp32_throughput/

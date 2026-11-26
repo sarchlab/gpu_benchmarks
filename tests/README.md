@@ -386,7 +386,12 @@ backward conditional branch, and, for bodies beyond its range, a conditional
 branch out of the loop followed by a PC-relative jump back (`s_getpc_b64`,
 `s_add_u32`, `s_addc_u32`, `s_setpc_b64`). Any other instruction inside the
 loop is rejected, and the decoded instructions must cover every byte of the
-loop. `--body-ops` restricts the check to a list of body sizes, for a binary
+loop. Where the branches and jumps land is checked as well: the zero-trip
+guard must skip to the loop exit, and in the long layout each conditional
+branch must sit directly before its PC-relative jump and land right after
+that jump's `s_setpc_b64` (the loop exit for the closing branch; the loop
+head, or one hoisted `v_mov_b32_e32` before it, for the guard). `--body-ops`
+restricts the check to a list of body sizes, for a binary
 built with fewer kernels. It needs the LLVM tools shipped with ROCm
 (`--llvm-bin`, default `/opt/rocm/llvm/bin`) but no GPU:
 
@@ -401,9 +406,11 @@ ROCm tools: it feeds the layout checker synthetic disassembly and requires
 both layouts to pass, with or without that one move, and requires a rejection
 for a second such move, a move of another kind, an extra memory load, extra
 arithmetic, repeated loop control, an extra FMA, a kernel without a loop, an
-incomplete PC-relative jump, and an instruction line removed while later
-addresses stay (a byte gap in the loop). The script reports compiled layout
-and size only; it does not
+incomplete PC-relative jump, an instruction line removed while later
+addresses stay (a byte gap in the loop), a closing or guard branch that lands
+on a PC-relative jump's `s_setpc_b64`, a guard or closing branch that lands
+past the loop exit, and anything but one hoisted move between the guard and
+the loop head. The script reports compiled layout and size only; it does not
 qualify cache behavior, and no NVIDIA equivalent exists.
 See [the benchmark documentation](../tier1/code_fetch_latency/hip/README.md).
 

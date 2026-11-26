@@ -55,19 +55,26 @@ launch is the kernel's first dispatch. The kernel runs a straight-line body of
 `body_ops` dependent FMAs `loops` times. Before timing it queries the kernel's
 attributes to request that the runtime load it without running it; whether
 this fully pre-loads the kernel is runtime-specific (it is the documented
-mechanism for CUDA lazy loading).
+mechanism for CUDA lazy loading), and any loading it leaves undone falls
+inside the timed launch.
 
 With `T(N, R)` the time at `body_ops = N` and `loops = R` (median over
 repetitions; on MI300X prefer the profiler's dispatch durations, since event
 times were bimodal there):
 
 - repeat-pass cost per FMA = `(T(N, R2) − T(N, R1)) / ((R2 − R1) · N)`, the
-  cost of an FMA whose code was already fetched once. It rises when the body
-  no longer fits an instruction-cache level;
+  incremental time per FMA of a repeat pass over code that was already fetched
+  once. It includes the loop overhead of the extra passes, divided by `N`. It
+  rises when the body no longer fits an instruction-cache level;
 - fixed dispatch cost = what `T(N, 1)` tends to as `N` gets small;
-- first-pass extra = `T(N, 1) − fixed cost − N · (repeat-pass cost)`. Fit it
-  against code bytes measured from the compiled kernels, not against
-  `body_ops`.
+- first-pass extra = `T(N, 1) − fixed cost − N · (repeat-pass cost)`, a
+  residual relative to that estimated baseline. Fit it against code bytes
+  measured from the compiled kernels, not against `body_ops`.
+
+A compiler closes the loop differently once the body exceeds its short branch
+range, and the per-pass loop overhead changes with that layout (the
+benchmark's code-size table shows which sizes use which). A change of
+loop-close layout between two sizes is a confound when comparing them.
 
 The body's own execution time hides any refetch faster than the body consumes
 code, so a flat repeat-pass cost bounds the refetch cost without proving that

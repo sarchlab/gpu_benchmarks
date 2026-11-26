@@ -37,33 +37,43 @@ extra cost of the first pass over code that has not been executed yet.
 
 CUDA lazy loading defers loading a kernel's code to its first launch; without
 step 1 that load would sit inside the timed bracket and grow with code size.
-Whether the query fully pre-loads a kernel is runtime-specific.
-`CUDA_MODULE_LOADING=EAGER` is an environment-level alternative. Each
-repetition is a fresh process.
+Whether the query fully pre-loads a kernel is runtime-specific; any loading it
+leaves undone falls inside the timed launch. `CUDA_MODULE_LOADING=EAGER` is an
+environment-level alternative. Each repetition is a fresh process.
 
 ## Deriving the costs
 
 With `T(N, R)` the time for `body_ops = N` and `loops = R`:
 
 ```
-T(N, R) ≈ fixed dispatch cost + R · (loop control)
+T(N, R) ≈ fixed dispatch cost + R · (loop control of one pass, for that N)
           + N · (first-pass cost per FMA)
           + (R − 1) · N · (repeat-pass cost per FMA)
 ```
 
 - **Repeat-pass cost per FMA** =
-  `(T(N, R2) − T(N, R1)) / ((R2 − R1) · N)`: the cost of an FMA whose code was
-  already fetched once. The fixed cost and the first pass cancel. It rises
-  when the body no longer fits an instruction-cache level.
-- **Fixed dispatch cost**: what `T(N, 1)` tends to as `N` gets small.
+  `(T(N, R2) − T(N, R1)) / ((R2 − R1) · N)`: the incremental time per FMA of a
+  repeat pass, over code that was already fetched once. The fixed cost and the
+  first pass cancel; the loop control of the extra passes does not, so the
+  quotient includes loop overhead, divided by `N`. It rises when the body no
+  longer fits an instruction-cache level.
+- **Fixed dispatch cost**: what `T(N, 1)` tends to as `N` gets small. It
+  includes one pass of loop control.
 - **First-pass extra** =
-  `T(N, 1) − fixed cost − N · (repeat-pass cost)`: what bringing the code in
-  costs the first time. Fit it against the measured code bytes of each kernel
-  (below), not against `body_ops`.
+  `T(N, 1) − fixed cost − N · (repeat-pass cost)`: a residual relative to that
+  estimated baseline, in which what bringing the code in costs the first time
+  shows. Fit it against the measured code bytes of each kernel, not
+  against `body_ops`.
 
-The loop-control cost depends only on `loops`, so within one `loops` series it
-does not distort the shape versus `N`. Differences of small bodies are small
-against timer noise; judge each cell's signal before using it.
+Loop control is not the same for every body size. Within one `loops` series
+the number of passes is fixed, but a compiler closes the loop differently once
+the body exceeds its short branch range (inspect the SASS; on gfx942 the
+[HIP README](../hip/README.md#compiled-code-size-and-layout) shows it from 16384
+FMAs), and the per-pass overhead changes with that layout. A change of
+loop-close layout between two sizes is a confound when comparing them: do not
+read a step at that boundary as a code-fetch effect without accounting for it.
+Differences of small bodies are small against timer noise; judge each cell's
+signal before using it.
 
 ## Limits
 
@@ -107,14 +117,14 @@ computed on the host. The comparison is exact: the per-thread seed
 `1 + thread/1024` is exactly representable, each step is one correctly rounded
 `fmaf` on both sides and every FMA changes the value, so a chain with a missing
 or extra loop pass does not match. Non-finite values are rejected, and the
-buffer starts as NaN, so a thread that never stores fails. A mismatch exits
-nonzero.
+buffer starts as NaN, so a thread that never stores fails. A mismatch emits a
+fatal `error` record instead of the summary and exits nonzero.
 
 ## Timing, traces and simulation
 
-Stdout contains one record named after the launched kernel and one summary
-equal to it. `host_time_ms` spans event submission, launch, checking and
-synchronization.
+Stdout contains one record named after the launched kernel and, once
+verification has passed, one summary equal to it. `host_time_ms` spans event
+submission, launch, checking and synchronization.
 
 A process launches the benchmark kernel once, so a trace (collected with the
 warmer off) holds that one launch and the suite's whole-trace simulation

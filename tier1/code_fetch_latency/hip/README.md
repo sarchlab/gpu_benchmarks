@@ -33,7 +33,8 @@ extra cost of the first pass over code that has not been executed yet.
 A runtime may defer loading a kernel's code to its first launch (CUDA lazy
 loading does); without step 1 that load would sit inside the timed bracket and
 grow with code size. Whether the query fully pre-loads a kernel is
-runtime-specific. `CUDA_MODULE_LOADING=EAGER` and
+runtime-specific; any loading it leaves undone falls inside the timed launch.
+`CUDA_MODULE_LOADING=EAGER` and
 `HIP_ENABLE_DEFERRED_LOADING=0` are environment-level alternatives; the HIP
 variable was read from the ROCm/clr source, not measured. Each repetition is a
 fresh process.
@@ -43,24 +44,33 @@ fresh process.
 With `T(N, R)` the time for `body_ops = N` and `loops = R`:
 
 ```
-T(N, R) ≈ fixed dispatch cost + R · (loop control)
+T(N, R) ≈ fixed dispatch cost + R · (loop control of one pass, for that N)
           + N · (first-pass cost per FMA)
           + (R − 1) · N · (repeat-pass cost per FMA)
 ```
 
 - **Repeat-pass cost per FMA** =
-  `(T(N, R2) − T(N, R1)) / ((R2 − R1) · N)`: the cost of an FMA whose code was
-  already fetched once. The fixed cost and the first pass cancel. It rises
-  when the body no longer fits an instruction-cache level.
-- **Fixed dispatch cost**: what `T(N, 1)` tends to as `N` gets small.
+  `(T(N, R2) − T(N, R1)) / ((R2 − R1) · N)`: the incremental time per FMA of a
+  repeat pass, over code that was already fetched once. The fixed cost and the
+  first pass cancel; the loop control of the extra passes does not, so the
+  quotient includes loop overhead, divided by `N`. It rises when the body no
+  longer fits an instruction-cache level.
+- **Fixed dispatch cost**: what `T(N, 1)` tends to as `N` gets small. It
+  includes one pass of loop control.
 - **First-pass extra** =
-  `T(N, 1) − fixed cost − N · (repeat-pass cost)`: what bringing the code in
-  costs the first time. Fit it against the measured code bytes of each kernel
-  (below), not against `body_ops`.
+  `T(N, 1) − fixed cost − N · (repeat-pass cost)`: a residual relative to that
+  estimated baseline, in which what bringing the code in costs the first time
+  shows. Fit it against the measured code bytes of each kernel (below), not
+  against `body_ops`.
 
-The loop-control cost depends only on `loops`, so within one `loops` series it
-does not distort the shape versus `N`. Differences of small bodies are small
-against timer noise; judge each cell's signal before using it.
+Loop control is not the same for every body size. Within one `loops` series
+the number of passes is fixed, but a compiler closes the loop differently once
+the body exceeds its short branch range (the short and long loop jumps in the
+code-size table below; on gfx942 from 16384 FMAs), and the per-pass overhead
+changes with that layout. A change of loop-close layout between two sizes is a
+confound when comparing them: do not read a step at that boundary as a
+code-fetch effect without accounting for it. Differences of small bodies are
+small against timer noise; judge each cell's signal before using it.
 
 ## Limits
 
@@ -110,7 +120,8 @@ The script extracts the code objects embedded in the binary, prints one table
 per target and fails when a kernel does not have the expected layout: the
 kernel's only backward jump closes one loop that holds exactly `body_ops`
 `v_fma_f32`, the loop control, and at most one register move
-(`v_mov_b32_e32`). Measured for `gfx942` at `-O3 -std=c++14` with ROCm 7.2.4
+(`v_mov_b32_e32`), and the guard and closing branches land where the supported
+layouts put them. Measured for `gfx942` at `-O3 -std=c++14` with ROCm 7.2.4
 (HIP 7.2.53211, AMD clang 22.0.0git):
 
 | kernel | code bytes | 64-byte lines | FMA instructions | loop bytes | loop jump |
@@ -136,7 +147,9 @@ kernel's only backward jump closes one loop that holds exactly `body_ops`
   leaves the loop and a PC-relative jump goes back ("long": `s_cbranch_scc1`
   over `s_getpc_b64`, `s_add_u32`, `s_addc_u32`, `s_setpc_b64`); the zero-trip
   guard before the loop takes the same form. This adds 24 bytes and four
-  scalar instructions per loop pass, part of the loop control.
+  scalar instructions per loop pass, part of the loop control, so the per-pass
+  loop overhead differs between the two layouts (see
+  [Deriving the costs](#deriving-the-costs)).
 - **Other toolchains.** With ROCm 10.2.0 (AMD clang 24.0.0git) the kernels up
   to 32768 were checked on a build of the previous revision: same code bytes,
   one 4-byte register move kept inside the loop (loop bytes 4 larger), and the
@@ -164,14 +177,14 @@ computed on the host. The comparison is exact: the per-thread seed
 `1 + thread/1024` is exactly representable, each step is one correctly rounded
 `fmaf` on both sides and every FMA changes the value, so a chain with a missing
 or extra loop pass does not match. Non-finite values are rejected, and the
-buffer starts as NaN, so a thread that never stores fails. A mismatch exits
-nonzero.
+buffer starts as NaN, so a thread that never stores fails. A mismatch emits a
+fatal `error` record instead of the summary and exits nonzero.
 
 ## Timing, traces and simulation
 
-Stdout contains one record named after the launched kernel and one summary
-equal to it. `host_time_ms` spans event submission, launch, checking and
-synchronization.
+Stdout contains one record named after the launched kernel and, once
+verification has passed, one summary equal to it. `host_time_ms` spans event
+submission, launch, checking and synchronization.
 
 A process launches the benchmark kernel once, so a trace (collected with the
 warmer off) holds that one launch and the suite's whole-trace simulation

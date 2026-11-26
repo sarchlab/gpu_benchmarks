@@ -23,9 +23,13 @@ def check(repo):
         if not match:
             raise RuntimeError('Missing production target: ' + str(makefile))
         directory = makefile.parent.relative_to(repo)
-        targets.append((directory, match[1]))
+        # A manifest may restrict the benchmark to some platforms; elsewhere
+        # its Makefile builds nothing, so nothing there is ever out of date.
+        manifest = json.loads((makefile.parent / 'params.json').read_text())
+        supported = manifest.get('platforms', ['cuda', 'rocm'])
+        targets.append((directory, match[1], supported))
         if re.search(r'^bench_output_test:', text, re.M):
-            targets.append((directory, 'bench_output_test'))
+            targets.append((directory, 'bench_output_test', supported))
     results = []
     with tempfile.TemporaryDirectory(prefix='gpubench-header-deps-') as tmp:
         tree = Path(tmp)
@@ -34,19 +38,20 @@ def check(repo):
         for directory in ('tier1', 'tier2', 'tests', 'common_hip'):
             for source in (repo / directory).rglob('*'):
                 if source.is_file() and (source.name == 'Makefile' or
-                                        source.suffix in ('.hip', '.h', '.cpp')):
+                                        source.suffix in ('.hip', '.h', '.cpp', '.S')):
                     dest = tree / source.relative_to(repo)
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(source, dest)
                     os.utime(dest, (1600000000, 1600000000))
-        for directory, target in targets:
+        for directory, target, _ in targets:
             artifact = tree / directory / target
             artifact.write_text('Timestamp fixture, not a compiled executable.\n')
             os.utime(artifact, (1600000010, 1600000010))
 
         def query(phase, changed, expected):
-            for directory, target in targets:
+            for directory, target, supported in targets:
                 for platform in ('cuda', 'rocm'):
+                    wanted = expected if platform in supported else 0
                     command = ['make', '-q', '-C', str(tree / directory),
                                'PLATFORM=' + platform, target]
                     proc = subprocess.run(command, capture_output=True, text=True)
@@ -55,8 +60,8 @@ def check(repo):
                                            '\n' + proc.stdout + proc.stderr)
                     results.append(dict(phase=phase, header=str(changed or ''),
                                         directory=str(directory), target=target,
-                                        platform=platform, expected=expected,
-                                        actual=proc.returncode, passed=proc.returncode == expected))
+                                        platform=platform, expected=wanted,
+                                        actual=proc.returncode, passed=proc.returncode == wanted))
         query('unchanged', None, 0)
         for header in headers:
             if not (tree / header).is_file():

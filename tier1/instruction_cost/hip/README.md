@@ -136,11 +136,13 @@ Every thread stores one 64-bit result after the loop, and after the timed
 bracket the host compares every thread's value with a CPU reference; a mismatch
 is a fatal error. The store is part of the measured kernel, outside the loop.
 
-- **Chained** kernels store X. The reference applies the instruction
-  `ops_per_iter × iterations` times, so a passing run executed exactly that
-  many. GPU and CPU both round to nearest and fuse the FMAs, so the comparison
-  is bit-exact. For `v_mov_b64` X does not change, so its count is not
-  observable.
+- **Chained** kernels store X. The host compares it with a CPU reference
+  evaluated for `ops_per_iter × iterations` applications of the instruction.
+  GPU and CPU both round to nearest and fuse the FMAs, so the values match bit
+  for bit. A match does not prove the count: rounding or integer wraparound
+  can make different counts indistinguishable. Chained `v_add_f32`, for
+  example, reaches 2.0 after 2^23 applications and stays there, and
+  `v_mov_b64` never changes X.
 - **Independent** kernels store `v[8:9]`, one application of the instruction
   to the initial operands. This checks the instruction and the kernel, not the
   iteration count; the loop control is the same code as in the chained kernels.

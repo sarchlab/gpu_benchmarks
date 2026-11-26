@@ -41,10 +41,6 @@ ROCM_LLVM ?= $(ROCM_PATH)/lib/llvm/bin
 
 ifeq ($(PLATFORM),rocm)
 all: $(TARGET)
-else
-all:
-	@echo "instruction_cost: gfx942 assembly kernels, ROCm only; nothing to build for PLATFORM=$(PLATFORM)"
-endif
 
 # One rule: assemble the kernels into a code object ($(KERNELS).hsaco), wrap
 # it in a host object, and link it into the host program, which loads it with
@@ -55,6 +51,10 @@ $(TARGET): $(SRC) $(KERNELS).S $(KERNELS).h ../../../common_hip/bench_timing.h .
 	$(ROCM_LLVM)/ld.lld -shared $(KERNELS).o -o $(KERNELS).hsaco
 	ld -r -b binary -z noexecstack $(KERNELS).hsaco -o $(KERNELS)_blob.o
 	$(CC) $(CFLAGS) $(SRC) -Wl,$(KERNELS)_blob.o -o $@
+else
+all $(TARGET):
+	@echo "instruction_cost: gfx942 assembly kernels, ROCm only; nothing to build for PLATFORM=$(PLATFORM)"
+endif
 
 clean:
 	rm -f $(TARGET) $(KERNELS).o $(KERNELS).hsaco $(KERNELS)_blob.o

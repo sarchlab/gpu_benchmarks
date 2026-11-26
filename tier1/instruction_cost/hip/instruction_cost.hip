@@ -28,6 +28,8 @@
  * summary.
  */
 
+#include <cctype>
+#include <cerrno>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -167,23 +169,41 @@ static uint64_t reference_result(Instruction instruction, uint64_t applications)
 // Parameters
 // ---------------------------------------------------------------------------
 
+static void fail(const char *message)
+{
+    printf("{\"type\":\"error\",\"severity\":\"fatal\",\"message\":\"%s\"}\n", message);
+    fprintf(stderr, "FAIL: %s\n", message);
+    exit(EXIT_FAILURE);
+}
+
+/**
+ * An absent variable takes the fallback. A present one must be, in full, a
+ * decimal integer that fits an int: "oops", "4096.5" and "" are fatal rather
+ * than read as some other number.
+ */
 static int int_param(const char *name, int fallback)
 {
     const char *value = getenv(name);
-    return value ? atoi(value) : fallback;
+    if (!value) return fallback;
+
+    errno = 0;
+    char *end = nullptr;
+    const long parsed = strtol(value, &end, 10);
+    if (isspace(static_cast<unsigned char>(value[0])) || end == value || *end != '\0' ||
+        errno == ERANGE || parsed < std::numeric_limits<int>::min() ||
+        parsed > std::numeric_limits<int>::max()) {
+        fprintf(stderr, "%s=\"%s\"\n", name, value);
+        char message[96];
+        snprintf(message, sizeof(message), "%s must be an integer", name);
+        fail(message);
+    }
+    return static_cast<int>(parsed);
 }
 
 static const char *string_param(const char *name, const char *fallback)
 {
     const char *value = getenv(name);
     return value ? value : fallback;
-}
-
-static void fail(const char *message)
-{
-    printf("{\"type\":\"error\",\"severity\":\"fatal\",\"message\":\"%s\"}\n", message);
-    fprintf(stderr, "FAIL: %s\n", message);
-    exit(EXIT_FAILURE);
 }
 
 // ---------------------------------------------------------------------------

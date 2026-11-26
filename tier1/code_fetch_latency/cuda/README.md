@@ -1,4 +1,4 @@
-# code_fetch_latency — cost of fetching kernel code (native CUDA)
+# code_fetch_latency — first-dispatch cost versus kernel code size (native CUDA)
 
 Native CUDA version of this benchmark. Kernels, driver, verification and
 output are identical to [`../hip/`](../hip/); only runtime API names differ.
@@ -16,12 +16,15 @@ kernel, `fetch_kernel_<body_ops>`, exists per supported body size (16, 64, 256,
 1024, 4096), so a launch fetches only the code of the size under test.
 
 Each execution times one launch. Cold and primed times are paired within one
-body size: the two entries differ in whether that kernel's code was fetched
-before the timed launch, and their time difference is the cost of fetching the
-code under this protocol.
+body size. The raw result is first-dispatch time minus primed-dispatch time at
+that body size. The benchmark is built so that this difference exposes the cost
+of fetching code that has not been executed yet; reading it that way requires
+target qualification (see [Deriving the difference](#deriving-the-difference)).
 
 ## Entry policy
 
+0. Have the runtime load the selected kernel without running it, by querying
+   its attributes (`cudaFuncGetAttributes`) and checking the result.
 1. Run the optional vector-add clock/cache warmer.
 2. Run `prime_launches` untimed launches of the same kernel with the same
    `reps` and coefficients, and wait for them to finish. A primer stores to its
@@ -29,34 +32,50 @@ code under this protocol.
 3. Time one launch with GPU events. No warmer runs between the primer and this
    launch.
 
+Step 0 runs in both entries. A runtime may defer loading a kernel's code to its
+first launch (CUDA lazy loading does); without step 0 the cold run would pay
+that load inside the timed bracket and the primed run in its untimed primer,
+and the load can grow with code size. Querying the kernel's attributes is the
+documented way to load it under CUDA lazy loading. Whether the call fully
+pre-loads a kernel is runtime-specific and part of target qualification.
+
 `prime_launches=0` is the suite's default cold entry: the timed launch is the
-first launch of that kernel in the process. `prime_launches=1` is an explicit
-resident-code exception to cold entry, declared as a swept parameter so both
-states are collected. Setting `BENCH_PARAM_vector_add_warmup=false` disables
-only step 1; a requested primer still runs. Each repetition is a fresh process.
-The warmer and primer are outside the GPU and host timing brackets.
+first dispatch of that kernel in the process. `prime_launches=1` is an explicit
+primed exception to cold entry, declared as a swept parameter so both states
+are collected. Setting `BENCH_PARAM_vector_add_warmup=false` disables only
+step 1; the kernel load and a requested primer still run. Each repetition is a
+fresh process. The load, warmer and primer are outside the GPU and host timing
+brackets.
 
 `code_entry` in the output is `"cold"` or `"primed"` and repeats what
 `prime_launches` requested. Neither label certifies a hardware state:
 
-- **Cold** means the kernel has not run in this process. Where the uploaded
-  code resides after the warmer (which cache level, if any) is not established
-  for any target.
-- **Primed** means one launch fetched the code. A separate launch is not
+- **Cold** means the kernel has not been dispatched in this process. Where its
+  loaded code resides after the warmer (which cache level, if any) is not
+  established for any target.
+- **Primed** means the kernel was dispatched once. A separate launch is not
   guaranteed to run on the same SM/CU or to find its instruction cache intact.
 
-## Deriving fetch cost
+## Deriving the difference
 
 For one `body_ops`, with all other parameters equal:
 
 ```
-fetch_cost(body_ops) = time_ms(prime_launches=0) − time_ms(prime_launches=1)
+first_dispatch_cost(body_ops) = time_ms(prime_launches=0) − time_ms(prime_launches=1)
 ```
 
-Fit `fetch_cost` against the measured code size of each kernel. The slope per
-64-byte line is the per-line fetch cost; the intercept is the cost that does not
-depend on code size. A slope that is not constant is itself a result (for
-example prefetching or overlapped fetches), not a defect of the fit.
+This is first-dispatch time minus primed-dispatch time at a fixed body size.
+The separate primer buffer removes direct reuse of the timed launch's output.
+The two entries can still differ in more than instruction fetch: the primer may
+have run on a different SM/CU, and address translation and other first-use
+state of the kernel differ too. Interpreting the difference, or its slope, as
+instruction-fetch cost therefore requires target qualification.
+
+Fit the difference against the measured code size of each kernel. The slope per
+64-byte line is the size-dependent part, the candidate per-line fetch cost; the
+intercept is the part that does not depend on code size. A slope that is not
+constant is itself a result (for example prefetching or overlapped fetches),
+not a defect of the fit.
 
 Use the minimum GPU time across repetitions for each of the two entries before
 subtracting, as for any other benchmark in the suite. Small bodies produce
@@ -81,20 +100,22 @@ to NVIDIA targets.
 
 - **Instruction-cache capacity.** When a kernel's code exceeds the instruction
   cache and `reps > 1`, later loop iterations refetch code even in the primed
-  run, so the difference no longer isolates one fetch of the code. Exclude such
+  run, so the difference no longer contains one fetch of the code. Exclude such
   sizes from the slope. Where the primed time rises with `body_ops` is evidence
   about that capacity, to be qualified separately.
 - **One block.** The declared sweep launches one block of 64 threads. With
   more blocks, several SMs fetch the same code and can share lower cache
   levels. That is a different experiment and is not declared.
-- **What "cold" contains.** Any first-use cost of the kernel that falls inside
-  the GPU event bracket is in the cold time: runtime-side first-launch work for
-  that kernel and address translation of its code, as well as the fetch itself.
-  Costs that do not grow with code size land in the intercept; they are part of
-  the measurement and are not separated here. The output store is not one of
-  them: both output buffers are set up before the warmer in either entry and a
-  primer stores to its own buffer, so the timed launch's output is equally
-  untouched in both entries and its cost cancels in the difference.
+- **What "cold" contains.** Runtime code loading is done before timing in both
+  entries (entry step 0), to the extent the runtime's attribute query loads the
+  kernel. What remains in the cold time is first-dispatch hardware and driver
+  effects inside the GPU event bracket: the fetch itself, address translation
+  of the code, and any other first-use state of the kernel. Costs that do not
+  grow with code size land in the intercept; they are part of the measurement
+  and are not separated here. The output store is not one of them: both output
+  buffers are set up before the warmer in either entry and a primer stores to
+  its own buffer, so the timed launch's output is equally untouched in both
+  entries and its cost cancels in the difference.
 - **FMA count is constant, loop-control work is not.** Smaller bodies run more
   loop iterations. Loop overhead is present in both entries of one body size
   and cancels in their difference; it does not cancel when comparing absolute

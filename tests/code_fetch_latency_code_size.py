@@ -90,8 +90,8 @@ def main():
             sizes = {f[7]: int(f[2]) for f in (line.split() for line in run(
                 tool('llvm-readelf'), '--symbols', '--wide', code).splitlines())
                 if len(f) == 8 and f[3] == 'FUNC'}
-            rows = kernel_layout(run(tool('llvm-objdump'), '-d',
-                                     '--mcpu=' + target.rsplit('-', 1)[1], code), sizes)
+            # llvm-objdump takes the processor from the code object itself.
+            rows = kernel_layout(run(tool('llvm-objdump'), '-d', code), sizes)
             print('%s\n| kernel | code bytes | %d-byte lines | FMA instructions | loop body bytes |'
                   '\n|---|---:|---:|---:|---:|' % (target, LINE_BYTES))
             for body_ops in BODY_OPS:

@@ -4,8 +4,9 @@
  * HIP version of the code_fetch_latency microbenchmark.
  * Compiles for both AMD (ROCm) and NVIDIA (HIP-on-CUDA) targets.
  *
- * Microbenchmark for the cost of fetching kernel code that is not yet
- * resident in the instruction cache.
+ * Microbenchmark for the first-dispatch cost of a kernel as a function of its
+ * code size; built to expose the cost of fetching code that has not been
+ * executed yet.
  *
  * Methodology:
  *   Every thread runs one dependent chain of total_ops fused multiply-adds,
@@ -18,16 +19,17 @@
  *   size. One kernel exists per supported body size, so a launch fetches only
  *   the code of the size under test.
  *
- *   Entry policy: optional vector-add clock/cache warmer, then
- *   prime_launches untimed launches of the same kernel, then one timed
- *   launch. With prime_launches=0 the timed launch is the first launch of
- *   that kernel in the process (the suite's default cold entry). With
- *   prime_launches=1 its code was fetched once already: an explicit
- *   resident-code exception to cold entry. Keep the primer during tracing.
- *   A primer runs the same kernel with the same reps but stores to its own
- *   buffer, so the timed launch's output is untouched in both entries. The
- *   difference between the two entries at one body size is the cost of
- *   fetching that kernel's code under this protocol (see README).
+ *   Entry policy: have the runtime load the selected kernel without running
+ *   it, then the optional vector-add clock/cache warmer, then prime_launches
+ *   untimed launches of the same kernel, then one timed launch. With
+ *   prime_launches=0 the timed launch is the first dispatch of that kernel in
+ *   the process (the suite's default cold entry). With prime_launches=1 the
+ *   kernel was dispatched once already: an explicit primed exception to cold
+ *   entry. Keep the primer during tracing. A primer runs the same kernel
+ *   with the same reps but stores to its own buffer, so the timed launch does
+ *   not reuse a primer's output. The raw result is first-dispatch minus
+ *   primed-dispatch time at one body size; reading its growth with code size
+ *   as instruction-fetch cost requires target qualification (see README).
  *
  * Usage:
  *   ./code_fetch_latency [body_ops]
@@ -46,8 +48,9 @@
  *
  * Output: one {"type":"kernel",...} JSON line for the single timed launch,
  * carrying the GPU event time and host wall-clock time, then a summary whose
- * total_time_ms equals it. The primer has no timing record. Fetch cost is
- * derived downstream from pairs of runs.
+ * total_time_ms equals it. The primer has no timing record. The
+ * first-dispatch minus primed-dispatch difference is derived downstream from
+ * pairs of runs.
  */
 
 #include <cerrno>
@@ -159,6 +162,26 @@ __global__ void fetch_kernel_4096(float *out, float a, float b, int reps)
 // ---------------------------------------------------------------------------
 // Host helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Have the runtime load the kernel whose loop body holds body_ops FMAs,
+ * without dispatching it. Runtimes may defer loading a kernel's code to its
+ * first launch; querying its attributes first keeps that work out of the timed
+ * bracket in both entries.
+ */
+static void load_fetch_kernel(int body_ops)
+{
+    const void *kernel = nullptr;
+    switch (body_ops) {
+    case 16:   kernel = reinterpret_cast<const void *>(fetch_kernel_16);   break;
+    case 64:   kernel = reinterpret_cast<const void *>(fetch_kernel_64);   break;
+    case 256:  kernel = reinterpret_cast<const void *>(fetch_kernel_256);  break;
+    case 1024: kernel = reinterpret_cast<const void *>(fetch_kernel_1024); break;
+    case 4096: kernel = reinterpret_cast<const void *>(fetch_kernel_4096); break;
+    }
+    hipFuncAttributes attributes;
+    HIP_CHECK(hipFuncGetAttributes(&attributes, kernel));
+}
 
 /** Launch the kernel whose loop body holds body_ops FMAs. */
 static void launch_fetch_kernel(int body_ops, int num_blocks,
@@ -314,8 +337,13 @@ int main(int argc, char *argv[])
             total_ops, reps, body_ops);
     fprintf(stderr, "Grid           : %d blocks x %d threads = %zu total threads\n",
             num_blocks, threads_per_block, total_threads);
-    fprintf(stderr, "Entry policy   : optional warmer -> %d untimed primer launch(es) -> timed launch\n\n",
+    fprintf(stderr, "Entry policy   : kernel load -> optional warmer -> %d untimed primer launch(es) -> timed launch\n\n",
             prime_launches);
+
+    /* Load the selected kernel without running it, in either entry, so the
+     * timed launch never includes runtime code loading. The cold timed launch
+     * is still the kernel's first dispatch. */
+    load_fetch_kernel(body_ops);
 
     /* The timed launch and the primer each own an output buffer, so a primer
      * never touches the memory the timed launch stores to. Both are set up in
@@ -334,9 +362,9 @@ int main(int argc, char *argv[])
      * between here and the timed launch. */
     bench_pass_warm();
 
-    /* Resident-code entry exception: fetch this kernel's code once, untimed,
-     * storing to the primer's own buffer. Retained when the clock warmer is
-     * disabled (including trace collection). */
+    /* Primed entry exception: dispatch this kernel once, untimed, storing to
+     * the primer's own buffer. Retained when the clock warmer is disabled
+     * (including trace collection). */
     for (int i = 0; i < prime_launches; ++i) {
         launch_fetch_kernel(body_ops, num_blocks, threads_per_block, d_primer_out, reps);
         HIP_CHECK(hipGetLastError());

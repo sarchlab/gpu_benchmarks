@@ -45,6 +45,8 @@
 #define hipGetDeviceProperties  cudaGetDeviceProperties
 #define hipGetLastError         cudaGetLastError
 #define hipGetErrorString       cudaGetErrorString
+#define hipFuncGetAttributes    cudaFuncGetAttributes
+#define hipFuncAttributes       cudaFuncAttributes
 
 /* Events and streams */
 #define hipEvent_t              cudaEvent_t

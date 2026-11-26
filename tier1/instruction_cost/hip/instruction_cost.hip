@@ -63,6 +63,9 @@ static const char *const INSTRUCTION_NAMES[INSTRUCTION_COUNT] = {
 static const int OPS_PER_ITER_VALUES[] = {
     0 IC_FOR_EACH_OPS_PER_ITER(IC_OPS_PER_ITER_VALUE, , )};
 
+/* The processor the kernels are assembled for (-mcpu in the Makefile). */
+static const char KERNEL_ARCH[] = "gfx942";
+
 static const int DEFAULT_ITERATIONS = 65536;
 static const int DEFAULT_OPS_PER_ITER = 4;
 /** One wavefront: the per-instruction cost of a wavefront running alone. */
@@ -206,6 +209,18 @@ static const char *string_param(const char *name, const char *fallback)
     return value ? value : fallback;
 }
 
+/**
+ * Whether a device can run the kernels. `arch_name` is the architecture HIP
+ * reports: the processor name, optionally followed by features, as in
+ * "gfx942:sramecc+:xnack-". Only the processor name is compared.
+ */
+static bool is_kernel_arch(const char *arch_name)
+{
+    const size_t length = strlen(KERNEL_ARCH);
+    return strncmp(arch_name, KERNEL_ARCH, length) == 0 &&
+           (arch_name[length] == '\0' || arch_name[length] == ':');
+}
+
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
@@ -263,6 +278,13 @@ int main()
     HIP_CHECK(hipGetDevice(&device_id));
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
+    if (!is_kernel_arch(prop.gcnArchName)) {
+        char message[384];
+        snprintf(message, sizeof(message),
+                 "The kernels are %s assembly; this device reports architecture %s",
+                 KERNEL_ARCH, prop.gcnArchName);
+        fail(message);
+    }
     fprintf(stderr, "Device          : %s (id=%d)\n", prop.name, device_id);
     fprintf(stderr, "Kernel          : %s\n", kernel_name);
     fprintf(stderr, "Grid            : %d blocks × %d threads = %zu total threads\n",

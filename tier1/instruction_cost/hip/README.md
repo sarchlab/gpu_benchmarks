@@ -28,7 +28,11 @@ its intercept is the cost of the loop control. The binary emits raw times only.
 
 There is no CUDA version. The manifest declares `"platforms": ["rocm"]`, so
 `gpubench` leaves the benchmark out on CUDA, and `make PLATFORM=cuda` builds
-nothing here. The code object targets gfx942 only.
+nothing here.
+
+The kernels are assembled for gfx942 only. On any other AMD device the
+benchmark stops before loading them, with a fatal error that names gfx942 and
+the architecture the device reports.
 
 ## The kernels
 

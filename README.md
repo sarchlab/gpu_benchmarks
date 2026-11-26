@@ -97,7 +97,7 @@ Each benchmark declares its parameters in `params.json`; the sweep is structured
 
 | Tier | Name | Description |
 |------|------|-------------|
-| **Tier 1** | Microbenchmarks | Low-level hardware characterization: memory bandwidth, compute throughput (FP32/FP64/FP16/INT32), cache latency, PCIe transfer rates, atomic ops, warp shuffles |
+| **Tier 1** | Microbenchmarks | Low-level hardware characterization: memory bandwidth, compute throughput (FP32/FP64/FP16/INT32), cache latency, code-fetch latency, PCIe transfer rates, atomic ops, warp shuffles |
 | **Tier 2** | Application Benchmarks | Classic GPU benchmark suites: SHOC, PolyBench-GPU, Rodinia, Parboil, HeteroMark, CUDA SDK Extended, NPB-GPU, Altis, Lonestar GPU, Graph Analytics, Chai; financial workloads with unresolved upstream attribution |
 | **Tier 3** | Library Benchmarks | Vendor and third-party library kernels: cuBLAS, CUTLASS, cuFFT, cuSPARSE, cuDNN |
 | **Tier 4** | Alternative Languages | Non-CUDA implementations: Triton, BabelStream |
@@ -111,7 +111,7 @@ Each benchmark declares its parameters in `params.json`; the sweep is structured
 gpu_benchmarks/
 ├── Makefile                        # Root build file
 ├── README.md                       # This file
-├── tier1/                          # Microbenchmarks (14)
+├── tier1/                          # Microbenchmarks (15)
 │   ├── Makefile
 │   ├── memory_bandwidth/
 │   ├── fp32_throughput/
@@ -119,6 +119,7 @@ gpu_benchmarks/
 │   ├── fp16_throughput/
 │   ├── int32_throughput/
 │   ├── cache_latency/
+│   ├── code_fetch_latency/
 │   ├── cache_bandwidth/
 │   ├── pcie_bandwidth/
 │   ├── mixbench/
@@ -269,6 +270,7 @@ The metric column names downstream quantities. See [measurement interpretation](
 | `fp16_throughput` | GFLOPS | Half-precision FP16 FMA throughput (declared grid: one block) |
 | `int32_throughput` | GIOPS | Integer INT32 multiply-add throughput (declared grid: one block) |
 | `cache_latency` | ns | L1/L2/global cache latency via pointer-chasing |
+| `code_fetch_latency` | ns | [Cold launch time versus loop-body code size and loop count](tier1/code_fetch_latency/hip/README.md); derive the fixed dispatch cost, the repeat-pass cost per FMA and the first-pass extra downstream |
 | `pcie_bandwidth` | GB/s | PCIe/Thunderbolt host-device transfer bandwidth |
 | `mixbench` | GFLOPS/GB/s | Nominal compute/logical-byte intensity sweep |
 | `shared_mem_bandwidth` | GB/s | Shared/threadgroup memory bandwidth (single SM/CU) |

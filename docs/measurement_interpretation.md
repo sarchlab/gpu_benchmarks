@@ -48,6 +48,46 @@ array size alone. A timed launch can still incur an initial L1 fill. See the
 [benchmark methodology](../tier1/cache_latency/hip/README.md) for target limits and
 trace replay: preserve the primer's state, exclude its work from measured latency.
 
+## Code-fetch loop series
+
+`code_fetch_latency` launches one kernel once per process, cold: the timed
+launch is the kernel's first dispatch. The kernel runs a straight-line body of
+`body_ops` dependent FMAs `loops` times. Before timing it queries the kernel's
+attributes to request that the runtime load it without running it; whether
+this fully pre-loads the kernel is runtime-specific (it is the documented
+mechanism for CUDA lazy loading), and any loading it leaves undone falls
+inside the timed launch.
+
+With `T(N, R)` the time at `body_ops = N` and `loops = R` (median over
+repetitions; on MI300X prefer the profiler's dispatch durations, since event
+times were bimodal there):
+
+- repeat-pass cost per FMA = `(T(N, R2) − T(N, R1)) / ((R2 − R1) · N)`, the
+  incremental time per FMA of a repeat pass over code that was already fetched
+  once. It includes the loop overhead of the extra passes, divided by `N`. It
+  rises when the body no longer fits an instruction-cache level;
+- fixed dispatch cost = what `T(N, 1)` tends to as `N` gets small;
+- first-pass extra = `T(N, 1) − fixed cost − N · (repeat-pass cost)`, a
+  residual relative to that estimated baseline. Fit it against code bytes
+  measured from the compiled kernels, not against `body_ops`.
+
+A compiler closes the loop differently once the body exceeds its short branch
+range, and the per-pass loop overhead changes with that layout (the
+benchmark's code-size table shows which sizes use which). A change of
+loop-close layout between two sizes is a confound when comparing them.
+
+The body's own execution time hides any refetch faster than the body consumes
+code, so a flat repeat-pass cost bounds the refetch cost without proving that
+an instruction cache holds the body. On the two targets measured (MI300X and
+H100), a lone wavefront/warp issued one instruction every 2–3 ns regardless of
+the instruction, so a different instruction does not expose more; a body with
+more code bytes per instruction would. The first-pass extra does not separate
+instruction fetch from address translation or other first-use work. Keep
+`body_ops` and `loops` with every result, and compare cells of similar
+duration.
+See the [benchmark methodology](../tier1/code_fetch_latency/hip/README.md) for
+the compiled-code check, limits and target notes.
+
 ## Empty dispatch and timing resolution
 
 `empty_kernel.time_ms` is the GPU event interval around one empty dispatch.

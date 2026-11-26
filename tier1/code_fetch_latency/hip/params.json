@@ -1,0 +1,83 @@
+{
+  "benchmark": "code_fetch_latency",
+  "tier": 1,
+  "suite": "microbench",
+  "description": "One cold launch per process of a kernel whose loop body is body_ops straight-line dependent FMAs, executed loops times by a loop that is not unrolled; one kernel per body size. Entry is: query the selected kernel's attributes to request that the runtime load it without running it (whether that fully pre-loads it is runtime-specific; any loading it leaves undone falls inside the timed launch), optional clock/cache warmer, then the single timed launch, which is the kernel's first dispatch in the process. From times at several body_ops and loops, derive downstream the fixed dispatch cost, the repeat-pass cost per FMA (time difference between two loops values divided by the extra FMAs: the incremental time per FMA including the loop overhead of the extra passes; it rises when the body no longer fits an instruction-cache level) and the first-pass extra (a residual of the one-pass time relative to that estimated baseline, in which what bringing the code in costs the first time shows), against the measured code bytes of each compiled kernel. A change of loop-close layout between body sizes (short versus long branch, visible in the compiled code) is a confound when comparing sizes. The body's own execution time hides any refetch faster than the body consumes code. The differences do not separate instruction fetch from address translation.",
+  "scaling_param": {
+    "name": "body_ops",
+    "description": "FMAs in the straight-line loop body; selects the kernel fetch_kernel_<body_ops> and with it the static code footprint",
+    "type": "int",
+    "values": [
+      16,
+      32,
+      64,
+      128,
+      256,
+      512,
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768,
+      65536
+    ]
+  },
+  "non_scaling_params": [
+    {
+      "name": "loops",
+      "description": "Times the loop body is executed in the one timed launch; FMAs per thread = body_ops * loops, at most 1048576. 1 runs every FMA once, on code not executed before; larger values add repeat passes over the same code",
+      "type": "int",
+      "default": 1,
+      "values": [
+        1,
+        4,
+        8,
+        16
+      ]
+    },
+    {
+      "name": "num_blocks",
+      "description": "Number of thread blocks in the grid; the declared sweep uses one block so a single SM/CU fetches the code",
+      "type": "int",
+      "default": 1,
+      "values": [
+        1
+      ]
+    },
+    {
+      "name": "threads_per_block",
+      "description": "Number of threads per block; the declared value is one AMD wavefront",
+      "type": "int",
+      "default": 64,
+      "values": [
+        64
+      ]
+    },
+    {
+      "name": "vector_add_warmup",
+      "description": "When true, run the clock/cache warmer before the timed launch. It does not promise a particular cache or clock state.",
+      "type": "enum",
+      "default": "true",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "kernels": [
+    "fetch_kernel_16",
+    "fetch_kernel_32",
+    "fetch_kernel_64",
+    "fetch_kernel_128",
+    "fetch_kernel_256",
+    "fetch_kernel_512",
+    "fetch_kernel_1024",
+    "fetch_kernel_2048",
+    "fetch_kernel_4096",
+    "fetch_kernel_8192",
+    "fetch_kernel_16384",
+    "fetch_kernel_32768",
+    "fetch_kernel_65536"
+  ]
+}

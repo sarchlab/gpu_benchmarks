@@ -31,9 +31,10 @@ change alone and keeps everything else: the same `ops_per_iter` VALU
 instructions and the same three loop-control instructions per iteration,
 computing the same result. The exception is `compiled`, which makes both
 changes of instruction order, the decrement after the first VALU instruction
-and one VALU instruction before the branch, to show whether they add up.
-`add_at_head` and `valu_before_branch` make one each; `add_at_head` puts the
-decrement at the loop head, so `compiled` is not those two layouts combined.
+and one VALU instruction before the branch, to measure the cost of the
+combined layout relative to the reference. `add_at_head` and
+`valu_before_branch` make one each; `add_at_head` puts the decrement at the
+loop head, so `compiled` is not those two layouts combined.
 
 The time per iteration of a layout, less that of the reference kernel with the
 same instruction and `ops_per_iter`, is what the change costs, or for

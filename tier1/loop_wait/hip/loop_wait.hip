@@ -8,8 +8,7 @@
  * runs `ops_per_iter` copies of one VALU instruction and the three
  * loop-control instructions per iteration; `layout` says how the loop is laid
  * out. Comparing a layout with the instruction_cost loop of the same
- * instruction and `ops_per_iter` shows what that one change costs per
- * iteration.
+ * instruction and `ops_per_iter` shows what the layout costs per iteration.
  *
  * Environment variables:
  *   BENCH_PARAM_iterations         loop iterations per thread (>= 1)

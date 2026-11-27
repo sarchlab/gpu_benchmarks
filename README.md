@@ -289,7 +289,7 @@ The metric column names downstream quantities. See [measurement interpretation](
 | `cache_bandwidth` | GB/s | Cache-hierarchy bandwidth vs working-set size (shared/private modes) |
 | `empty_kernel` | µs | Empty-dispatch GPU event interval and host bracket time |
 | `instruction_cost` | ns/instruction | [Hand-written gfx942 assembly loop](tier1/instruction_cost/hip/README.md) of one repeated instruction; AMD ROCm only |
-| `loop_wait` | ns/iteration | [The `instruction_cost` loop with one change of layout](tier1/loop_wait/hip/README.md): loop-head alignment, loop-control position or a scalar-register operand; AMD ROCm only |
+| `loop_wait` | ns/iteration | [The `instruction_cost` loop in other layouts](tier1/loop_wait/hip/README.md), one change each and one combination: loop-head alignment, loop-control position or a scalar-register operand; AMD ROCm only |
 
 ---
 

@@ -14,9 +14,10 @@
  *         s_cmp_lg_u32   s3, 0                         S
  *         s_cbranch_scc1 loop                          B
  *
- * Each layout below changes one thing about it and keeps the rest: the same
- * K VALU instructions and the same three loop-control instructions per
- * iteration. One kernel exists per (layout, instruction, ops_per_iter):
+ * Each layout below changes one thing about it, or two in the case of
+ * `compiled`, and keeps the rest: the same K VALU instructions and the same
+ * three loop-control instructions per iteration. One kernel exists per
+ * (layout, instruction, ops_per_iter):
  *
  *     lw_<layout>_<instruction>_k<ops_per_iter>(uint64_t *out, int iterations)
  *
@@ -168,8 +169,9 @@
 	s_cbranch_scc1	.Lloop_\name
 .endm
 
-/* V, S, V x (K-2), S, V, B: both of the above, as compilers lay a loop out.
-   The decrement follows the first VALU instruction. */
+/* V, S, V x (K-2), S, V, B: two changes at once, as compilers lay a loop out.
+   The decrement follows the first VALU instruction (not the loop head, as in
+   add_at_head), and one VALU instruction precedes the branch. */
 .macro lw_loop_compiled name, instruction, k
 	.p2alignl	6, 0xbf800000
 .Lloop_\name:

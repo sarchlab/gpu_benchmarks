@@ -2,8 +2,9 @@
 
 ## Overview
 
-`loop_wait` times loops that each differ in one respect from the loop of
-[`instruction_cost`](../../instruction_cost/hip/README.md). Like that
+`loop_wait` times loops that differ from the loop of
+[`instruction_cost`](../../instruction_cost/hip/README.md) in one respect, or
+for the `compiled` layout in two. Like that
 benchmark's, its kernels are hand-written gfx942 assembly
 ([`loop_wait_kernels.S`](loop_wait_kernels.S)), so every loop is what the
 source says.
@@ -28,12 +29,17 @@ instruction between the compare and the branch. A compiler may also give a
 VALU instruction a scalar-register operand. Each `layout` here makes one such
 change alone and keeps everything else: the same `ops_per_iter` VALU
 instructions and the same three loop-control instructions per iteration,
-computing the same result.
+computing the same result. The exception is `compiled`, which makes both
+changes of instruction order, the decrement after the first VALU instruction
+and one VALU instruction before the branch, to show whether they add up.
+`add_at_head` and `valu_before_branch` make one each; `add_at_head` puts the
+decrement at the loop head, so `compiled` is not those two layouts combined.
 
 The time per iteration of a layout, less that of the reference kernel with the
-same instruction and `ops_per_iter`, is what the change costs. The exception
-is `v_mov_b64` in the two `sgpr` layouts, which changes two things at once
-(see [The kernels](#the-kernels)). The binary emits raw times only.
+same instruction and `ops_per_iter`, is what the change costs, or for
+`compiled` what its two changes cost together. The other exception is
+`v_mov_b64` in the two `sgpr` layouts, which changes two things at once (see
+[The kernels](#the-kernels)). The binary emits raw times only.
 
 ## Platform Support
 

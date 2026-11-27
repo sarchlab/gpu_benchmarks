@@ -2,7 +2,7 @@
   "benchmark": "loop_wait",
   "tier": 1,
   "suite": "microbench",
-  "description": "Times hand-written gfx942 assembly loops that each differ in one respect from the chained instruction_cost loop of the same instruction and ops_per_iter: the byte offset of the loop head in its 64-byte line, the position of the loop-control instructions, or a scalar-register operand. AMD ROCm only. Emits raw GPU time; compare the time per iteration with that instruction_cost kernel.",
+  "description": "Times hand-written gfx942 assembly loops that differ in one respect (two for the compiled layout) from the chained instruction_cost loop of the same instruction and ops_per_iter: the byte offset of the loop head in its 64-byte line, the position of the loop-control instructions, or a scalar-register operand. AMD ROCm only. Emits raw GPU time; compare the time per iteration with that instruction_cost kernel.",
   "platforms": [
     "rocm"
   ],

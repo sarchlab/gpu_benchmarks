@@ -2,13 +2,13 @@
   "benchmark": "instruction_cost",
   "tier": 1,
   "suite": "microbench",
-  "description": "Times a hand-written gfx942 assembly loop whose body is exactly ops_per_iter copies of one instruction plus three loop-control instructions. AMD ROCm only. Emits raw GPU time; derive the per-instruction cost from the slope over ops_per_iter and the loop-control cost from the intercept.",
+  "description": "Times a hand-written gfx942 assembly loop whose body is exactly ops_per_iter instructions of one kind plus three loop-control instructions. AMD ROCm only. Emits raw GPU time; derive the per-instruction cost from the slope over ops_per_iter and the loop-control cost from the intercept.",
   "platforms": [
     "rocm"
   ],
   "scaling_param": {
     "name": "iterations",
-    "description": "Loop iterations per thread; every iteration executes ops_per_iter copies of the instruction and the loop control",
+    "description": "Loop iterations per thread; every iteration executes the ops_per_iter instructions of the body and the loop control",
     "type": "int",
     "values": [
       4096,
@@ -20,7 +20,7 @@
   "non_scaling_params": [
     {
       "name": "instruction",
-      "description": "The instruction repeated in the loop body",
+      "description": "What the loop body is made of: one VALU instruction repeated; two VALU instructions alternating (v_mul_lo_u32_v_add_u32, v_mov_b64_v_fma_f64); a scalar add repeated (s_add_u32); a conditional branch that is never taken, repeated (s_cbranch_scc0); or an unconditional branch to the next instruction, repeated (s_branch)",
       "type": "enum",
       "default": "v_fma_f32",
       "values": [
@@ -31,12 +31,17 @@
         "v_add_u32",
         "v_fma_f64",
         "v_pk_fma_f32",
-        "v_mov_b64"
+        "v_mov_b64",
+        "v_mul_lo_u32_v_add_u32",
+        "v_mov_b64_v_fma_f64",
+        "s_add_u32",
+        "s_cbranch_scc0",
+        "s_branch"
       ]
     },
     {
       "name": "dependency",
-      "description": "chained: each copy reads the register the previous copy wrote. independent: copies read loop-invariant registers and write distinct ones",
+      "description": "chained: each VALU copy reads the register the previous copy wrote. independent: copies read loop-invariant registers and write distinct ones. A scalar or branch body has one kernel, which either value selects",
       "type": "enum",
       "default": "chained",
       "values": [
@@ -46,7 +51,7 @@
     },
     {
       "name": "ops_per_iter",
-      "description": "Copies of the instruction per loop iteration; 0 runs the loop control alone (the same kernel for every instruction and dependency)",
+      "description": "Instructions in the loop body per iteration; 0 runs the loop control alone (the same kernel for every instruction and dependency)",
       "type": "int",
       "default": 4,
       "values": [
@@ -69,12 +74,14 @@
     },
     {
       "name": "threads_per_block",
-      "description": "Threads per block; 64 is one wavefront, 256 is four wavefronts on one compute unit",
+      "description": "Threads per block; 64 is one wavefront, and 256, 512 and 1024 are 4, 8 and 16 wavefronts on one compute unit",
       "type": "int",
       "default": 64,
       "values": [
         64,
-        256
+        256,
+        512,
+        1024
       ]
     },
     {
@@ -169,6 +176,41 @@
     "ic_v_mov_b64_independent_k2",
     "ic_v_mov_b64_independent_k4",
     "ic_v_mov_b64_independent_k8",
-    "ic_v_mov_b64_independent_k16"
+    "ic_v_mov_b64_independent_k16",
+    "ic_v_mul_lo_u32_v_add_u32_chained_k1",
+    "ic_v_mul_lo_u32_v_add_u32_chained_k2",
+    "ic_v_mul_lo_u32_v_add_u32_chained_k4",
+    "ic_v_mul_lo_u32_v_add_u32_chained_k8",
+    "ic_v_mul_lo_u32_v_add_u32_chained_k16",
+    "ic_v_mul_lo_u32_v_add_u32_independent_k1",
+    "ic_v_mul_lo_u32_v_add_u32_independent_k2",
+    "ic_v_mul_lo_u32_v_add_u32_independent_k4",
+    "ic_v_mul_lo_u32_v_add_u32_independent_k8",
+    "ic_v_mul_lo_u32_v_add_u32_independent_k16",
+    "ic_v_mov_b64_v_fma_f64_chained_k1",
+    "ic_v_mov_b64_v_fma_f64_chained_k2",
+    "ic_v_mov_b64_v_fma_f64_chained_k4",
+    "ic_v_mov_b64_v_fma_f64_chained_k8",
+    "ic_v_mov_b64_v_fma_f64_chained_k16",
+    "ic_v_mov_b64_v_fma_f64_independent_k1",
+    "ic_v_mov_b64_v_fma_f64_independent_k2",
+    "ic_v_mov_b64_v_fma_f64_independent_k4",
+    "ic_v_mov_b64_v_fma_f64_independent_k8",
+    "ic_v_mov_b64_v_fma_f64_independent_k16",
+    "ic_s_add_u32_k1",
+    "ic_s_add_u32_k2",
+    "ic_s_add_u32_k4",
+    "ic_s_add_u32_k8",
+    "ic_s_add_u32_k16",
+    "ic_s_cbranch_scc0_k1",
+    "ic_s_cbranch_scc0_k2",
+    "ic_s_cbranch_scc0_k4",
+    "ic_s_cbranch_scc0_k8",
+    "ic_s_cbranch_scc0_k16",
+    "ic_s_branch_k1",
+    "ic_s_branch_k2",
+    "ic_s_branch_k4",
+    "ic_s_branch_k8",
+    "ic_s_branch_k16"
   ]
 }

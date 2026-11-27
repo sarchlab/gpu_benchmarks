@@ -31,8 +31,9 @@ instructions and the same three loop-control instructions per iteration,
 computing the same result.
 
 The time per iteration of a layout, less that of the reference kernel with the
-same instruction and `ops_per_iter`, is what the change costs. The binary
-emits raw times only.
+same instruction and `ops_per_iter`, is what the change costs. The exception
+is `v_mov_b64` in the two `sgpr` layouts, which changes two things at once
+(see [The kernels](#the-kernels)). The binary emits raw times only.
 
 ## Platform Support
 
@@ -98,9 +99,17 @@ Notes on the layouts:
 The scalar register stands for a loop-invariant operand: M for a multiply or
 an FMA, A for an add. A two-operand instruction (`v_mul_f32`, `v_add_f32`,
 `v_add_u32`) accepts a scalar register as its first source only, so there X
-moves to the second source. `v_mov_b64` has one source, X, which a move never
-changes; its `V'` therefore does not read the register the previous copy
-wrote.
+moves to the second source.
+
+`v_mov_b64` is the exception among the eight. Its one source is X, which a
+move never changes, so its `V'` reads `s[6:7]` in place of X and no longer
+reads the register the previous copy wrote: one read-after-write dependency
+per iteration is gone, and in `sgpr_at_head` it is the one that crosses the
+loop branch. For the eight `lw_sgpr_*_v_mov_b64_k*` kernels the difference
+from the reference is therefore the combined effect of the scalar operand and
+of the missing dependency, not the cost of the scalar operand alone. The seven
+arithmetic instructions keep X as an operand of `V'`, so their accumulator
+dependency is intact and the scalar operand is the only change.
 
 To see a loop as assembled, with the address of its head:
 

@@ -104,7 +104,9 @@
 .endm
 
 /* A move's only source is X, which a move never changes: s[6:7] holds the
-   initial X. */
+   initial X. Unlike the other instructions' scalar-operand copies, this one
+   therefore does not read what the previous copy wrote, so the sgpr layouts
+   of v_mov_b64 also remove one read-after-write dependency per iteration. */
 .macro lw_sgpr_init_v_mov_b64
 	s_mov_b32	s6, LK_B64_LO
 	s_mov_b32	s7, LK_B64_HI

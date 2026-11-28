@@ -38,8 +38,10 @@ loop head, so `compiled` is not those two layouts combined.
 
 The time per iteration of a layout, less that of the reference kernel with the
 same instruction and `ops_per_iter`, is what the change costs, or for
-`compiled` what its two changes cost together. The other exception is
-`v_mov_b64` in the two `sgpr` layouts, which changes two things at once (see
+`compiled` what its two changes cost together. The other exceptions are in the
+two `sgpr` layouts, which change two things at once for four instructions:
+`v_mov_b64` also drops a dependency, and `v_mul_f32`, `v_add_f32` and
+`v_add_u32` also move X to the second source (see
 [The kernels](#the-kernels)). The binary emits raw times only.
 
 ## Platform Support
@@ -116,7 +118,10 @@ loop branch. For the eight `lw_sgpr_*_v_mov_b64_k*` kernels the difference
 from the reference is therefore the combined effect of the scalar operand and
 of the missing dependency, not the cost of the scalar operand alone. The seven
 arithmetic instructions keep X as an operand of `V'`, so their accumulator
-dependency is intact and the scalar operand is the only change.
+dependency is intact. For `v_fma_f32`, `v_mul_lo_u32`, `v_fma_f64` and
+`v_pk_fma_f32` X also stays in the same source, so the scalar operand is the
+only change. `v_mul_f32`, `v_add_f32` and `v_add_u32` also move X to the second
+source, so their difference from the reference includes that move.
 
 To see a loop as assembled, with the address of its head:
 

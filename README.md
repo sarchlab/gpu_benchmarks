@@ -34,9 +34,9 @@ The rules split cleanly by implementation language: everything that matters when
 
 1. **Preserve the upstream algorithm; source-level identity is not required.** A Tier 2 benchmark may be an independent HIP/CUDA reimplementation rather than a copy of the upstream source. It is faithful when it preserves the upstream workload's problem definition, mathematical operations or recurrence, algorithmic stages and data dependencies, boundary and termination rules, and asymptotic work and parameter scaling. Exact source text, host scaffolding, memory layout, tiling, thread/block mapping, and kernel decomposition may differ, and portability or correctness fixes are allowed, provided they do not change those algorithmic semantics. Material implementation differences must be documented. Omitting a defining stage, substituting a different algorithm or numerical problem, changing update or convergence semantics, moving defining GPU work out of the measured workload, or changing how work scales is not faithful; such a variant must be brought into alignment or identified as a different benchmark rather than presented as the upstream workload.
 
-2. **HIP and CUDA share one source.** Each benchmark is a single `.hip` file that compiles under both `hipcc` (AMD) and `nvcc` (NVIDIA) via `common_hip/hip_cuda_compat.h`. There are no per-vendor copies that could diverge or acquire vendor-specific overhead. Tier 1 and Tier 2 additionally keep a native CUDA port of each benchmark in `<bench>/cuda/` (next to the original `<bench>/hip/`); it is a rename-only translation of the HIP source and is what `gpubench --platform cuda` runs. The one exception is `instruction_cost`: its kernels are hand-written gfx942 assembly, so it exists for ROCm only and declares `"platforms": ["rocm"]` in its manifest.
+2. **HIP and CUDA share one source.** Each benchmark is a single `.hip` file that compiles under both `hipcc` (AMD) and `nvcc` (NVIDIA) via `common_hip/hip_cuda_compat.h`. There are no per-vendor copies that could diverge or acquire vendor-specific overhead. Tier 1 and Tier 2 additionally keep a native CUDA port of each benchmark in `<bench>/cuda/` (next to the original `<bench>/hip/`); it is a rename-only translation of the HIP source and is what `gpubench --platform cuda` runs. The exceptions are `instruction_cost` and `loop_wait`: their kernels are hand-written gfx942 assembly, so they exist for ROCm only and declare `"platforms": ["rocm"]` in their manifests.
 
-3. **Minimize common code; keep it header-only.** The shared infrastructure is three headers (`common_hip/hip_cuda_compat.h`, `common_hip/bench_timing.h`, `common_hip/bench_warmup.h`) — nothing to build or link separately, so every benchmark compiles standalone with one compiler invocation.
+3. **Minimize common code; keep it header-only.** The shared infrastructure is three headers (`common_hip/hip_cuda_compat.h`, `common_hip/bench_timing.h`, `common_hip/bench_warmup.h`) — nothing to build or link separately, so every benchmark compiles standalone with one compiler invocation. The two gfx942 assembly benchmarks additionally share their kernel scaffolding and host code through `common_hip/gfx942_loop_kernels.h` and `common_hip/gfx942_loop_host.h`, which no other benchmark includes.
 
 **Measurement:**
 
@@ -120,7 +120,7 @@ Observed on AMD Developer Cloud "AMD Instinct MI300X VF" instances (ROCm 10.2.0)
 gpu_benchmarks/
 ├── Makefile                        # Root build file
 ├── README.md                       # This file
-├── tier1/                          # Microbenchmarks (15)
+├── tier1/                          # Microbenchmarks (16)
 │   ├── Makefile
 │   ├── memory_bandwidth/
 │   ├── fp32_throughput/
@@ -136,7 +136,8 @@ gpu_benchmarks/
 │   ├── atomic_operations/
 │   ├── warp_shuffle/
 │   ├── empty_kernel/
-│   └── instruction_cost/           # ROCm only: hand-written gfx942 assembly kernels
+│   ├── instruction_cost/           # ROCm only: hand-written gfx942 assembly kernels
+│   └── loop_wait/                  # ROCm only: hand-written gfx942 assembly kernels
 ├── tier2/                          # Application benchmarks (61)
 │   ├── Makefile                    # builds <bench>/cuda (NVIDIA) or <bench>/hip (ROCm)
 │   │                               # each <bench>/ holds hip/ (HIP source) and cuda/ (native CUDA port)
@@ -288,6 +289,7 @@ The metric column names downstream quantities. See [measurement interpretation](
 | `cache_bandwidth` | GB/s | Cache-hierarchy bandwidth vs working-set size (shared/private modes) |
 | `empty_kernel` | µs | Empty-dispatch GPU event interval and host bracket time |
 | `instruction_cost` | ns/instruction | [Hand-written gfx942 assembly loop](tier1/instruction_cost/hip/README.md) of one repeated instruction; AMD ROCm only |
+| `loop_wait` | ns/iteration | [The `instruction_cost` loop in other layouts](tier1/loop_wait/hip/README.md), one change each and one combination: loop-head alignment, loop-control position or a scalar-register operand; AMD ROCm only |
 
 ---
 
